@@ -5,10 +5,12 @@ defmodule Philomena.Comments do
 
   import Ecto.Query, warn: false
 
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
+  alias Philomena.Attribution.Actor
 
   alias PhilomenaQuery.Search
   alias Philomena.IntegerId
@@ -213,18 +215,142 @@ defmodule Philomena.Comments do
     ]
 
   @doc """
-  Creates a comment.
+  Loads the image named by the raw request `image_id` for the comment `action`
+  (`:index`, `:show`, `:create`, `:edit`, or `:update`), on behalf of `user` (a
+  user, or `nil` for an anonymous visitor).
+
+  The image is loaded with the `:sources` and `tags: :aliases` preloads the
+  comment pages and the forced-filter check consume, and authorized for the
+  action's semantic ability: `:index` for the listing, `:show` for a single
+  comment (resolving a duplicate image to its target and authorizing `:show` on
+  it), and `:create_comment` for posting, editing, or updating. A non-castable
+  id is `{:error, :not_found}`; a well-formed id that names no row authorizes
+  `nil`, which no rule permits, so it is `{:error, :unauthorized}`.
 
   ## Examples
 
-      iex> create_comment(%{field: value})
-      {:ok, %Comment{}}
+      iex> load_commentable_image(user, "1", :index)
+      {:ok, %Image{}}
 
-      iex> create_comment(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
+      iex> load_commentable_image(user, "1", :create)
+      {:error, :unauthorized}
 
   """
-  def create_comment(image, attribution, params \\ %{}) do
+  @spec load_commentable_image(User.t() | nil, any(), atom()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def load_commentable_image(user, image_id, action) do
+    case IntegerId.parse(image_id) do
+      {:ok, id} ->
+        image =
+          Image
+          |> preload([:sources, tags: :aliases])
+          |> Repo.get(id)
+
+        authorize_commentable_image(user, image, action)
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp authorize_commentable_image(user, image, :index) do
+    with :ok <- authorize(user, :index, image), do: {:ok, image}
+  end
+
+  defp authorize_commentable_image(user, image, :show) do
+    with :ok <- authorize(user, :show, image) do
+      target = resolve_duplicate(image)
+
+      with :ok <- authorize(user, :show, target), do: {:ok, target}
+    end
+  end
+
+  defp authorize_commentable_image(user, image, action)
+       when action in [:create, :edit, :update] do
+    with :ok <- authorize(user, :create_comment, image), do: {:ok, image}
+  end
+
+  defp resolve_duplicate(%Image{duplicate_id: nil} = image), do: image
+
+  defp resolve_duplicate(%Image{duplicate_id: duplicate_id}) do
+    Image
+    |> preload([:sources, tags: :aliases])
+    |> Repo.get(duplicate_id)
+  end
+
+  @doc """
+  Creates a comment on `image` from `params`, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
+
+  This is a write, so `actor`'s write access is verified first (banned actor
+  `{:error, :ban}`, no fingerprint `{:error, :unauthorized}`); `image` is
+  expected to have been authorized for `:create_comment` by the caller. On a
+  successful insert the comment and image are reindexed and post-insert
+  bookkeeping runs: an approved comment increments its author's comment count (a
+  no-op for an anonymous author), an unapproved one is reported for external
+  links.
+
+  Returns `{:ok, comment}` on success, `{:error, :creation_failed}` when the
+  insert is rejected, or `{:error, :ban}` / `{:error, :unauthorized}` from the
+  write-access check.
+
+  ## Examples
+
+      iex> create_comment(actor, image, %{"body" => "Hi"})
+      {:ok, %Comment{}}
+
+      iex> create_comment(actor, image, %{"body" => ""})
+      {:error, :creation_failed}
+
+  """
+  @spec create_comment(Actor.t(), Image.t(), map()) ::
+          {:ok, Comment.t()}
+          | {:error, :creation_failed | :ban | :unauthorized}
+  def create_comment(%Actor{} = actor, %Image{} = image, params) do
+    with :ok <- verify_write_access(actor) do
+      case create_loaded_comment(image, actor_attributes(actor), params) do
+        {:ok, %{comment: comment}} ->
+          reindex_comment(comment)
+          Images.reindex_image(image)
+          record_comment_creation(actor, comment)
+          {:ok, comment}
+
+        _error ->
+          {:error, :creation_failed}
+      end
+    end
+  end
+
+  # The IP/fingerprint/user attribution `create_loaded_comment/3` records,
+  # rebuilt from the actor into the keyword list it expects.
+  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
+    do: [ip: ip, fingerprint: fingerprint, user: user]
+
+  # Post-insert bookkeeping: an approved comment counts toward its author's
+  # comment total (a no-op for an anonymous author, whose user is nil), an
+  # unapproved one is reported for external links.
+  defp record_comment_creation(%Actor{user: user}, %Comment{approved: true}),
+    do: UserStatistics.inc_stat(user, :comments_count)
+
+  defp record_comment_creation(_actor, comment),
+    do: report_non_approved(comment)
+
+  @doc """
+  Inserts a comment built on `image` from `params` with the `attribution`
+  keyword list (`:user`, `:ip`, `:fingerprint`), incrementing the image's comment
+  count, notifying subscribers, and subscribing the author on reply.
+
+  This is the internal insertion engine shared with `create_comment/3`; it
+  performs no authorization and no post-insert reindex or bookkeeping.
+
+  ## Examples
+
+      iex> create_loaded_comment(image, [user: user], %{"body" => "Hi"})
+      {:ok, %{comment: %Comment{}}}
+
+  """
+  def create_loaded_comment(image, attribution, params \\ %{}) do
     comment =
       Ecto.build_assoc(image, :comments)
       |> Comment.creation_changeset(params, attribution)
@@ -247,6 +373,124 @@ defmodule Philomena.Comments do
 
   defp notify_comment(_repo, %{image: image, comment: comment}) do
     Notifications.create_image_comment_notification(comment.user, image, comment)
+  end
+
+  @doc """
+  Loads the comment named by the raw request `comment_id` on `image` for display
+  on the single-comment page. A missing comment is `{:error, :not_found}`;
+  hidden comments are returned so staff moderation views can render them.
+
+  ## Examples
+
+      iex> load_comment_for_show(image, "1")
+      {:ok, %Comment{}}
+
+      iex> load_comment_for_show(image, "999999999")
+      {:error, :not_found}
+
+  """
+  @spec load_comment_for_show(Image.t(), any()) ::
+          {:ok, Comment.t()} | {:error, :not_found}
+  def load_comment_for_show(%Image{} = image, comment_id) do
+    case load_scoped_comment(image, comment_id, [:image, :deleted_by, user: [awards: :badge]]) do
+      nil -> {:error, :not_found}
+      comment -> {:ok, comment}
+    end
+  end
+
+  @doc """
+  Loads the comment named by the raw request `comment_id` on `image` for editing,
+  on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+
+  This backs the edit form, a GET-guarded action, so a banned actor is rejected
+  with `{:error, :ban}` first; the fingerprint requirement the write path
+  enforces is skipped here. The comment is then loaded and authorized for
+  `:edit`.
+
+  Returns `{:ok, {comment, changeset}}` - the comment builds the form action, the
+  changeset drives the form - `{:error, :ban}` for a banned actor,
+  `{:error, :not_found}` when the comment does not exist, or
+  `{:error, :unauthorized}` when it may not be edited.
+
+  ## Examples
+
+      iex> load_comment_for_edit(actor, image, "1")
+      {:ok, {%Comment{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_comment_for_edit(Actor.t(), Image.t(), any()) ::
+          {:ok, {Comment.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_comment_for_edit(%Actor{} = actor, %Image{} = image, comment_id) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, comment} <- load_editable_comment(actor.user, image, comment_id) do
+      {:ok, {comment, change_comment(comment)}}
+    end
+  end
+
+  # Load-and-authorize chain shared by the edit and update actions: the comment
+  # is loaded within the image (a missing row is `{:error, :not_found}`) and
+  # authorized for `:edit`.
+  defp load_editable_comment(user, image, comment_id) do
+    case load_scoped_comment(image, comment_id, [:image, user: [awards: :badge]]) do
+      nil ->
+        {:error, :not_found}
+
+      comment ->
+        with :ok <- authorize(user, :edit, comment), do: {:ok, comment}
+    end
+  end
+
+  defp load_scoped_comment(image, comment_id, preloads) do
+    Comment
+    |> where(image_id: ^image.id, id: ^to_string(comment_id))
+    |> preload(^preloads)
+    |> Repo.one()
+  end
+
+  @doc """
+  Updates the comment named by the raw request `comment_id` on `image` from
+  `params`, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may
+  be `nil`).
+
+  This is a write, so `actor`'s write access is verified first (banned actor
+  `{:error, :ban}`, no fingerprint `{:error, :unauthorized}`), before the comment
+  is loaded within the image and authorized for `:edit`. The edit is then applied,
+  recording a version attributed to `actor`'s user; an unapproved result is
+  reported for containing external links, and the comment is reindexed.
+
+  Returns `{:ok, comment}` on success, `{:error, {comment, changeset}}` when the
+  edit is rejected (both re-render the edit form), `{:error, :ban}` or
+  `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
+  when the comment may not be edited, or `{:error, :not_found}` when it does not
+  exist.
+
+  ## Examples
+
+      iex> update_comment(actor, image, "1", %{"body" => "Edited"})
+      {:ok, %Comment{}}
+
+      iex> update_comment(actor, image, "1", %{"body" => ""})
+      {:error, {%Comment{}, %Ecto.Changeset{}}}
+
+  """
+  @spec update_comment(Actor.t(), Image.t(), any(), map() | nil) ::
+          {:ok, Comment.t()}
+          | {:error, {Comment.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def update_comment(%Actor{} = actor, %Image{} = image, comment_id, params) do
+    with :ok <- verify_write_access(actor),
+         {:ok, comment} <- load_editable_comment(actor.user, image, comment_id) do
+      case update_comment(comment, actor.user, params || %{}) do
+        {:ok, %{comment: updated_comment}} ->
+          report_non_approved(updated_comment)
+          reindex_comment(updated_comment)
+          {:ok, updated_comment}
+
+        {:error, :comment, changeset, _changes} ->
+          {:error, {comment, changeset}}
+      end
+    end
   end
 
   @doc """

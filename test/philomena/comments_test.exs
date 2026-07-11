@@ -14,6 +14,7 @@ defmodule Philomena.CommentsTest do
 
   @moduletag :search
 
+  import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
   import Philomena.ReportsFixtures
@@ -23,12 +24,23 @@ defmodule Philomena.CommentsTest do
   alias Philomena.Filters.Filter
   alias Philomena.Repo
   alias Philomena.Comments.Comment
+  alias Philomena.Images.Image
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Reports.Report
   alias Philomena.Users.User
   alias Philomena.Versions.Version
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
+
+  # A truthy ban value in the shape production passes (the result of
+  # Philomena.Bans.find/3); only its presence matters to the write-access and
+  # not-banned checks the actor-first writes run first.
+  @ban %{
+    reason: "Rule #0",
+    valid_until: ~U[3000-01-01 00:00:00Z],
+    generated_ban_id: "U123456",
+    type: "User"
+  }
 
   setup do
     Search.clear_index!(Comment)
@@ -646,6 +658,303 @@ defmodule Philomena.CommentsTest do
                Comments.comment_history(nil, "#{image.id}", "#{comment.id}")
 
       assert length(versions) == 25
+    end
+  end
+
+  describe "load_commentable_image/3" do
+    # Loads and per-action authorizes the image a comment listing or write hangs
+    # off. It takes the current user (not an actor) and runs no ban check.
+
+    test ":index on a visible image succeeds for an anonymous actor" do
+      image = image_fixture()
+
+      assert {:ok, %Image{} = loaded} =
+               Comments.load_commentable_image(nil, "#{image.id}", :index)
+
+      assert loaded.id == image.id
+
+      # The listing preloads are loaded on the returned image.
+      assert is_list(loaded.tags)
+      assert is_list(loaded.sources)
+    end
+
+    test ":show on a visible image succeeds for an anonymous actor" do
+      image = image_fixture()
+
+      assert {:ok, %Image{} = loaded} = Comments.load_commentable_image(nil, "#{image.id}", :show)
+      assert loaded.id == image.id
+    end
+
+    test ":show on a hidden image is unauthorized for a regular user" do
+      image = image_fixture(%{hidden_from_users: true})
+
+      assert Comments.load_commentable_image(
+               confirmed_user_fixture(),
+               "#{image.id}",
+               :show
+             ) ==
+               {:error, :unauthorized}
+    end
+
+    test ":create/:edit/:update require create_comment, rejecting a commenting-disabled image" do
+      image = image_fixture(%{commenting_allowed: false})
+      user = confirmed_user_fixture()
+
+      for action <- [:create, :edit, :update] do
+        assert Comments.load_commentable_image(user, "#{image.id}", action) ==
+                 {:error, :unauthorized}
+      end
+    end
+
+    test ":create on a comment-enabled image succeeds for a regular user" do
+      image = image_fixture()
+
+      assert {:ok, %Image{} = loaded} =
+               Comments.load_commentable_image(confirmed_user_fixture(), "#{image.id}", :create)
+
+      assert loaded.id == image.id
+    end
+
+    # A well-formed id naming no row loads nil, which no rule permits; the
+    # context returns unauthorized rather than not-found.
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Comments.load_commentable_image(confirmed_user_fixture(), "999999999", :index) ==
+               {:error, :unauthorized}
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Comments.load_commentable_image(confirmed_user_fixture(), "abc", :index) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "create_comment/3" do
+    # A write taking an actor. It verifies write access first (ban -> :ban,
+    # missing fingerprint -> :unauthorized); it does not itself authorize the
+    # image, which the caller has already loaded and authorized.
+
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "a banned actor is rejected", %{image: image} do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Comments.create_comment(actor, image, %{"body" => "Hi"}) == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized, signed in or not", %{image: image} do
+      signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
+      anonymous = actor(nil, fingerprint: nil)
+
+      assert Comments.create_comment(signed_in, image, %{"body" => "Hi"}) ==
+               {:error, :unauthorized}
+
+      assert Comments.create_comment(anonymous, image, %{"body" => "Hi"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "a valid anonymous fingerprinted actor creates a comment with no author",
+         %{image: image} do
+      assert {:ok, %Comment{} = comment} =
+               Comments.create_comment(actor(nil), image, %{"body" => "An anonymous comment"})
+
+      assert comment.user_id == nil
+      assert comment.body == "An anonymous comment"
+      no_moderation_logs!()
+    end
+
+    test "a signed-in actor creates a comment attributed to the user", %{image: image} do
+      user = confirmed_user_fixture()
+
+      assert {:ok, %Comment{} = comment} =
+               Comments.create_comment(actor(user), image, %{"body" => "A logged-in comment"})
+
+      assert comment.user_id == user.id
+      assert comment.body == "A logged-in comment"
+      no_moderation_logs!()
+    end
+
+    test "an empty body is a creation failure, inserting nothing", %{image: image} do
+      assert Comments.create_comment(actor(confirmed_user_fixture()), image, %{"body" => ""}) ==
+               {:error, :creation_failed}
+
+      # The insert and its image comment-count bump are rolled back together.
+      assert Repo.get!(Image, image.id).comments_count == 0
+    end
+
+    test "an approved comment increments the author's comments_count by one", %{image: image} do
+      author = confirmed_user_fixture()
+      before = Repo.get!(User, author.id).comments_count
+
+      assert {:ok, %Comment{} = comment} =
+               Comments.create_comment(actor(author), image, %{"body" => "A trustworthy comment"})
+
+      assert comment.approved
+      assert Repo.get!(User, author.id).comments_count == before + 1
+    end
+  end
+
+  describe "load_comment_for_show/2" do
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "returns a visible comment with display preloads", %{image: image} do
+      comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "A visible comment"})
+
+      assert {:ok, %Comment{} = loaded} = Comments.load_comment_for_show(image, "#{comment.id}")
+      assert loaded.id == comment.id
+      assert %User{} = loaded.user
+    end
+
+    test "returns a hidden comment too", %{image: image} do
+      comment = already_hidden_comment(image)
+
+      assert {:ok, %Comment{} = loaded} = Comments.load_comment_for_show(image, "#{comment.id}")
+      assert loaded.id == comment.id
+      assert loaded.hidden_from_users
+    end
+
+    test "an unknown comment id is not found", %{image: image} do
+      assert Comments.load_comment_for_show(image, "999999999") == {:error, :not_found}
+    end
+  end
+
+  describe "load_comment_for_edit/3" do
+    # Backs the edit form (a GET-guarded action), so it runs the not-banned
+    # check first (no fingerprint requirement) and then loads and authorizes the
+    # comment for :edit.
+
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "a banned actor is rejected", %{image: image} do
+      comment = comment_fixture(image, confirmed_user_fixture())
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Comments.load_comment_for_edit(actor, image, "#{comment.id}") == {:error, :ban}
+    end
+
+    test "the author loads the form", %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "My comment"})
+
+      assert {:ok, {%Comment{} = loaded, %Ecto.Changeset{} = changeset}} =
+               Comments.load_comment_for_edit(actor(author), image, "#{comment.id}")
+
+      assert loaded.id == comment.id
+
+      # The changeset is over the loaded comment, driving the edit form.
+      assert %Comment{} = changeset.data
+      assert changeset.data.id == comment.id
+    end
+
+    test "another regular user cannot load the form", %{image: image} do
+      comment = comment_fixture(image, confirmed_user_fixture())
+
+      assert Comments.load_comment_for_edit(
+               actor(confirmed_user_fixture()),
+               image,
+               "#{comment.id}"
+             ) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator loads the form", %{image: image} do
+      comment = comment_fixture(image, confirmed_user_fixture())
+
+      assert {:ok, {%Comment{} = loaded, %Ecto.Changeset{}}} =
+               Comments.load_comment_for_edit(
+                 actor(moderator_user_fixture()),
+                 image,
+                 "#{comment.id}"
+               )
+
+      assert loaded.id == comment.id
+    end
+
+    test "an unknown comment id is not found", %{image: image} do
+      assert Comments.load_comment_for_edit(
+               actor(confirmed_user_fixture()),
+               image,
+               "999999999"
+             ) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "update_comment/4" do
+    # A write, so it runs the write-access check first (ban -> :ban), then the
+    # same load-and-authorize chain as the edit form, then the edit engine which
+    # records a version.
+
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "a banned actor is rejected", %{image: image} do
+      comment = comment_fixture(image, confirmed_user_fixture())
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Comments.update_comment(actor, image, "#{comment.id}", %{"body" => "Edited"}) ==
+               {:error, :ban}
+    end
+
+    test "the author edits the body and the comment is marked edited", %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "Original comment body"})
+
+      assert {:ok, %Comment{} = updated} =
+               Comments.update_comment(actor(author), image, "#{comment.id}", %{
+                 "body" => "Original comment body plus an edit",
+                 "edit_reason" => "typo"
+               })
+
+      assert updated.body == "Original comment body plus an edit"
+      assert updated.edited_at != nil
+
+      reloaded = Repo.reload!(comment)
+      assert reloaded.body == "Original comment body plus an edit"
+      assert reloaded.edited_at != nil
+      no_moderation_logs!()
+    end
+
+    test "another regular user cannot edit, leaving the body unchanged", %{image: image} do
+      comment =
+        comment_fixture(image, confirmed_user_fixture(), %{"body" => "Original comment body"})
+
+      assert Comments.update_comment(
+               actor(confirmed_user_fixture()),
+               image,
+               "#{comment.id}",
+               %{"body" => "Hijacked"}
+             ) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(comment).body == "Original comment body"
+    end
+
+    test "a blank body is a rejected changeset carrying the loaded comment", %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "Original comment body"})
+
+      assert {:error, {%Comment{} = returned, %Ecto.Changeset{}}} =
+               Comments.update_comment(actor(author), image, "#{comment.id}", %{"body" => ""})
+
+      assert returned.id == comment.id
+      assert Repo.reload!(comment).body == "Original comment body"
+    end
+
+    test "an unknown comment id is not found", %{image: image} do
+      assert Comments.update_comment(
+               actor(confirmed_user_fixture()),
+               image,
+               "999999999",
+               %{"body" => "Edited"}
+             ) ==
+               {:error, :not_found}
     end
   end
 end

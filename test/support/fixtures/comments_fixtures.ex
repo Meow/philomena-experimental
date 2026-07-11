@@ -15,7 +15,7 @@ defmodule Philomena.CommentsFixtures do
   def comment_fixture(image, user \\ nil, attrs \\ %{}) do
     attrs = Enum.into(attrs, %{"body" => "Test comment body"})
 
-    {:ok, %{comment: comment}} = Comments.create_comment(image, attribution(user), attrs)
+    {:ok, %{comment: comment}} = Comments.create_loaded_comment(image, attribution(user), attrs)
 
     comment
   end

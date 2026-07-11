@@ -3,41 +3,19 @@ defmodule PhilomenaWeb.Image.CommentController do
 
   alias PhilomenaWeb.CommentLoader
   alias PhilomenaWeb.MarkdownRenderer
-  alias Philomena.{Images.Image, Comments.Comment}
-  alias Philomena.UserStatistics
   alias Philomena.Comments
-  alias Philomena.Images
+
+  action_fallback PhilomenaWeb.FallbackController
 
   plug PhilomenaWeb.LimitPlug,
        [time: 15, error: "You may only create a comment once every 15 seconds."]
        when action in [:create]
 
-  plug PhilomenaWeb.FilterBannedUsersPlug when action in [:create, :edit, :update]
-  plug PhilomenaWeb.UserAttributionPlug when action in [:create]
+  plug PhilomenaWeb.UserAttributionPlug when action in [:create, :edit, :update]
 
-  plug PhilomenaWeb.CanaryMapPlug,
-    create: :create_comment,
-    edit: :create_comment,
-    update: :create_comment
+  plug :load_commentable_image when action in [:index, :show, :create, :edit, :update]
 
-  plug :load_and_authorize_resource,
-    model: Image,
-    id_name: "image_id",
-    persisted: true,
-    preload: [:sources, tags: :aliases]
-
-  plug :verify_authorized when action in [:show]
   plug PhilomenaWeb.FilterForcedUsersPlug when action in [:create, :edit, :update]
-
-  # Undo the previous private parameter screwery
-  plug PhilomenaWeb.LoadCommentPlug, [param: "id", show_hidden: true] when action in [:show]
-  plug PhilomenaWeb.LoadCommentPlug, [param: "id"] when action in [:edit, :update]
-  plug PhilomenaWeb.CanaryMapPlug, create: :create, edit: :edit, update: :edit
-
-  plug :authorize_resource,
-    model: Comment,
-    only: [:edit, :update],
-    preload: [:image, user: [awards: :badge]]
 
   def index(conn, %{"comment_id" => comment_id}) do
     page = CommentLoader.find_page(conn, conn.assigns.image, comment_id)
@@ -55,99 +33,93 @@ defmodule PhilomenaWeb.Image.CommentController do
     render(conn, "index.html", layout: false, image: conn.assigns.image, comments: comments)
   end
 
-  def show(conn, _params) do
-    rendered = MarkdownRenderer.render_one(conn.assigns.comment, conn)
+  def show(conn, %{"id" => comment_id}) do
+    with {:ok, comment} <- Comments.load_comment_for_show(conn.assigns.image, comment_id) do
+      rendered = MarkdownRenderer.render_one(comment, conn)
 
-    render(conn, "show.html",
-      layout: false,
-      image: conn.assigns.image,
-      comment: conn.assigns.comment,
-      body: rendered
-    )
+      render(conn, "show.html",
+        layout: false,
+        image: conn.assigns.image,
+        comment: comment,
+        body: rendered
+      )
+    end
   end
 
   def create(conn, %{"comment" => comment_params}) do
-    attributes = conn.assigns.attributes
-    image = conn.assigns.image
-
-    case Comments.create_comment(image, attributes, comment_params) do
-      {:ok, %{comment: comment}} ->
+    case Comments.create_comment(conn.assigns.actor, conn.assigns.image, comment_params) do
+      {:ok, comment} ->
         PhilomenaWeb.Endpoint.broadcast!(
           "firehose",
           "comment:create",
           PhilomenaWeb.Api.Json.CommentView.render("show.json", %{comment: comment})
         )
 
-        Comments.reindex_comment(comment)
-        Images.reindex_image(conn.assigns.image)
-
-        if comment.approved do
-          UserStatistics.inc_stat(conn.assigns.current_user, :comments_count)
-        else
-          Comments.report_non_approved(comment)
-        end
-
         index(conn, %{"comment_id" => comment.id})
 
-      _error ->
+      {:error, :creation_failed} ->
         conn
         |> put_flash(:error, "There was an error posting your comment")
-        |> redirect(to: ~p"/images/#{image}")
+        |> redirect(to: ~p"/images/#{conn.assigns.image}")
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  def edit(conn, _params) do
-    changeset =
-      conn.assigns.comment
-      |> Comments.change_comment()
-
-    render(conn, "edit.html",
-      title: "Editing Comment",
-      comment: conn.assigns.comment,
-      changeset: changeset
-    )
+  def edit(conn, %{"id" => comment_id}) do
+    with {:ok, {comment, changeset}} <-
+           Comments.load_comment_for_edit(conn.assigns.actor, conn.assigns.image, comment_id) do
+      render(conn, "edit.html",
+        title: "Editing Comment",
+        comment: comment,
+        changeset: changeset
+      )
+    end
   end
 
-  def update(conn, %{"comment" => comment_params}) do
-    case Comments.update_comment(conn.assigns.comment, conn.assigns.current_user, comment_params) do
-      {:ok, %{comment: comment}} ->
-        if not comment.approved do
-          Comments.report_non_approved(comment)
-        end
-
+  def update(conn, %{"id" => comment_id, "comment" => comment_params}) do
+    case Comments.update_comment(
+           conn.assigns.actor,
+           conn.assigns.image,
+           comment_id,
+           comment_params
+         ) do
+      {:ok, comment} ->
         PhilomenaWeb.Endpoint.broadcast!(
           "firehose",
           "comment:update",
           PhilomenaWeb.Api.Json.CommentView.render("show.json", %{comment: comment})
         )
 
-        Comments.reindex_comment(comment)
-
         conn
         |> put_flash(:info, "Comment updated successfully.")
         |> redirect(to: ~p"/images/#{conn.assigns.image}" <> "#comment_#{comment.id}")
 
-      {:error, :comment, changeset, _changes} ->
-        render(conn, "edit.html", comment: conn.assigns.comment, changeset: changeset)
+      {:error, {comment, changeset}} ->
+        render(conn, "edit.html", comment: comment, changeset: changeset)
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  defp verify_authorized(conn, _params) do
-    image = conn.assigns.image
+  # Loads and authorizes the commented-on image into `:image` for the action's
+  # ability, so the forced-filter check and the comment pages have it available.
+  # A load or authorization failure renders the global error and halts.
+  defp load_commentable_image(conn, _opts) do
+    case Comments.load_commentable_image(
+           conn.assigns.current_user,
+           conn.params["image_id"],
+           action_name(conn)
+         ) do
+      {:ok, image} ->
+        assign(conn, :image, image)
 
-    image =
-      if is_nil(image.duplicate_id) do
-        image
-      else
-        Images.get_image!(image.duplicate_id)
-      end
-
-    conn = assign(conn, :image, image)
-
-    if Canada.Can.can?(conn.assigns.current_user, :show, image) do
-      conn
-    else
-      PhilomenaWeb.NotAuthorizedPlug.call(conn)
+      error ->
+        conn
+        |> PhilomenaWeb.FallbackController.call(error)
+        |> halt()
     end
   end
 end
