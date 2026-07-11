@@ -8,11 +8,21 @@ defmodule Philomena.Reports do
 
   alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
+  alias Philomena.Attribution.Actor
   alias Philomena.Reports.Report
   alias Philomena.Reports
   alias Philomena.IndexWorker
   alias Philomena.Polymorphic
   alias Philomena.Rules
+
+  @max_open_reports 5
+
+  @doc """
+  The maximum number of simultaneously open reports a regular user (or an
+  anonymous visitor's IP) may hold before further submissions are refused.
+  """
+  @spec max_open_reports() :: pos_integer()
+  def max_open_reports, do: @max_open_reports
 
   @reason_regex ~r/^(Rule|Other|Takedown|Verification|Approval|Review|System)([^:]*): (.*)$/
 
@@ -69,6 +79,66 @@ defmodule Philomena.Reports do
 
   """
   def get_report!(id), do: Repo.get!(Report, id)
+
+  @doc """
+  Submits a report against the reportable named by `reportable_type` and
+  `reportable_id` from `params`, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
+
+  A regular user or an anonymous IP holding `max_open_reports/0` open reports is
+  refused with `{:error, :too_many_reports}`; staff are exempt. Otherwise the
+  report is inserted with the IP, fingerprint, and user carried by `actor`, and
+  reindexed.
+
+  Returns `{:ok, report}` on success, `{:error, :too_many_reports}` when the open
+  report limit is reached, or `{:error, %Ecto.Changeset{}}` when the insert is
+  rejected.
+
+  ## Examples
+
+      iex> create_report(actor, "Comment", 1, %{"reason" => "Spam"})
+      {:ok, %Report{}}
+
+      iex> create_report(actor, "Comment", 1, %{"reason" => ""})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  @spec create_report(Actor.t(), String.t(), integer(), map() | nil) ::
+          {:ok, Report.t()} | {:error, :too_many_reports} | {:error, Ecto.Changeset.t()}
+  def create_report(%Actor{} = actor, reportable_type, reportable_id, params) do
+    if too_many_reports?(actor) do
+      {:error, :too_many_reports}
+    else
+      create_report({reportable_type, reportable_id}, actor_attributes(actor), params || %{})
+    end
+  end
+
+  # The IP/fingerprint/user attribution the report changeset records, rebuilt
+  # from the actor into the keyword list it expects.
+  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
+    do: [ip: ip, fingerprint: fingerprint, user: user]
+
+  # Staff are never rate-limited; a regular user or an anonymous IP is refused
+  # once it holds the maximum number of open reports.
+  defp too_many_reports?(%Actor{user: %{role: role}}) when role != "user", do: false
+
+  defp too_many_reports?(%Actor{user: user, ip: ip}),
+    do: open_reports_for_user?(user) or open_reports_for_ip?(ip)
+
+  defp open_reports_for_user?(nil), do: false
+
+  defp open_reports_for_user?(user),
+    do: open_report_count(where(Report, user_id: ^user.id)) >= @max_open_reports
+
+  defp open_reports_for_ip?(ip),
+    do: open_report_count(where(Report, ip: ^ip)) >= @max_open_reports
+
+  defp open_report_count(query) do
+    query
+    |> where([r], r.state in ["open", "in_progress"])
+    |> Repo.aggregate(:count, :id)
+  end
 
   @doc """
   Creates a report.

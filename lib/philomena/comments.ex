@@ -30,6 +30,7 @@ defmodule Philomena.Comments do
   alias Philomena.Versions
   alias Philomena.Versions.Version
   alias Philomena.Reports
+  alias Philomena.Reports.Report
 
   @doc """
   Gets a single comment.
@@ -446,6 +447,107 @@ defmodule Philomena.Comments do
     |> where(image_id: ^image.id, id: ^to_string(comment_id))
     |> preload(^preloads)
     |> Repo.one()
+  end
+
+  @doc """
+  Loads the comment named by the raw request `comment_id` on the image named by
+  `image_id` for the report form, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
+
+  This backs the report form (`new`), a GET-guarded action, so a banned actor is
+  rejected with `{:error, :ban}` first; the fingerprint requirement the write
+  path enforces is skipped here. The image is authorized for `:show` and the
+  comment loaded within it (a hidden comment visible only to actors who may
+  `:show` it).
+
+  Returns `{:ok, {comment, changeset}}` - the comment (with its image preloaded)
+  builds the form action and reportable link, and the changeset drives the report
+  form - `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the
+  image or hidden comment is not visible, or `{:error, :not_found}` when the
+  comment does not exist.
+
+  ## Examples
+
+      iex> load_comment_for_report(actor, "1", "1")
+      {:ok, {%Comment{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_comment_for_report(Actor.t(), any(), any()) ::
+          {:ok, {Comment.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_comment_for_report(%Actor{} = actor, image_id, comment_id) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, comment} <- load_reportable_comment(actor.user, image_id, comment_id) do
+      changeset =
+        Reports.change_report(%Report{reportable_type: "Comment", reportable_id: comment.id})
+
+      {:ok, {comment, changeset}}
+    end
+  end
+
+  @doc """
+  Loads the comment named by the raw request `comment_id` on the image named by
+  `image_id` for report submission, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil`).
+
+  This backs the report submission (`create`), a write, so `actor`'s write access
+  is verified first: a banned actor is `{:error, :ban}` and an actor with no
+  fingerprint is `{:error, :unauthorized}`. The image is then authorized for
+  `:show` and the comment loaded within it, as `load_comment_for_report/3` does.
+
+  Returns `{:ok, comment}` - the comment (with its image preloaded) builds the
+  redirect action and the report - `{:error, :ban}` or `{:error, :unauthorized}`
+  from the write-access check, `{:error, :unauthorized}` when the image or hidden
+  comment is not visible, or `{:error, :not_found}` when the comment does not
+  exist.
+
+  ## Examples
+
+      iex> load_comment_for_report_creation(actor, "1", "1")
+      {:ok, %Comment{}}
+
+  """
+  @spec load_comment_for_report_creation(Actor.t(), any(), any()) ::
+          {:ok, Comment.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_comment_for_report_creation(%Actor{} = actor, image_id, comment_id) do
+    with :ok <- verify_write_access(actor) do
+      load_reportable_comment(actor.user, image_id, comment_id)
+    end
+  end
+
+  # Shared image-and-comment load-and-authorize chain for the report actions: the
+  # image is authorized for `:show`, the comment is loaded within it (a missing
+  # row is `{:error, :not_found}`), and a comment hidden from users is visible
+  # only to a user who may `:show` it.
+  defp load_reportable_comment(user, image_id, comment_id) do
+    with {:ok, image} <- load_reportable_image(user, image_id) do
+      image
+      |> load_scoped_comment(comment_id, [:image, :deleted_by, user: [awards: :badge]])
+      |> authorize_reportable_comment(user)
+    end
+  end
+
+  defp authorize_reportable_comment(nil, _user),
+    do: {:error, :not_found}
+
+  defp authorize_reportable_comment(%Comment{hidden_from_users: false} = comment, _user),
+    do: {:ok, comment}
+
+  defp authorize_reportable_comment(%Comment{} = comment, user) do
+    with :ok <- authorize(user, :show, comment), do: {:ok, comment}
+  end
+
+  defp load_reportable_image(user, image_id) do
+    case IntegerId.parse(image_id) do
+      {:ok, id} ->
+        image = Repo.get(Image, id)
+
+        with :ok <- authorize(user, :show, image), do: {:ok, image}
+
+      :error ->
+        {:error, :not_found}
+    end
   end
 
   @doc """
