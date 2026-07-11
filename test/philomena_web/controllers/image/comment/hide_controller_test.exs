@@ -12,7 +12,11 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
     comment = comment_fixture(image)
 
     {:ok, comment} =
-      Comments.hide_comment(comment, %{"deletion_reason" => "Spam"}, moderator_user_fixture())
+      Comments.hide_loaded_comment(
+        comment,
+        %{"deletion_reason" => "Spam"},
+        moderator_user_fixture()
+      )
 
     comment
   end

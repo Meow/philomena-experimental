@@ -62,7 +62,7 @@ defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
       image = image_fixture()
       comment = comment_fixture(image, user, %{"body" => "Rule-breaking comment"})
 
-      {:ok, _} = Comments.hide_comment(comment, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} = Comments.hide_loaded_comment(comment, %{"deletion_reason" => "spam"}, moderator)
 
       conn = get(conn, ~p"/api/v1/json/comments/#{comment.id}")
 

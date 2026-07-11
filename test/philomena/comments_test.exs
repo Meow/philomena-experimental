@@ -255,7 +255,7 @@ defmodule Philomena.CommentsTest do
   # moderation log exists before the destroy under test runs.
   defp already_hidden_comment(image) do
     {:ok, hidden} =
-      Comments.hide_comment(
+      Comments.hide_loaded_comment(
         visible_comment(image),
         %{"deletion_reason" => "Spam"},
         moderator_user_fixture()
@@ -364,6 +364,183 @@ defmodule Philomena.CommentsTest do
 
     test "an id that cannot name a row is not found" do
       assert Comments.destroy_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
+      no_moderation_logs!()
+    end
+  end
+
+  describe "hide_comment/3" do
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "denies an anonymous actor, leaving the comment visible", %{image: image} do
+      comment = visible_comment(image)
+
+      assert Comments.hide_comment(nil, "#{comment.id}", %{"deletion_reason" => "Spam"}) ==
+               {:error, :unauthorized}
+
+      refute Repo.reload!(comment).hidden_from_users
+      no_moderation_logs!()
+    end
+
+    test "denies a regular user, leaving the comment visible", %{image: image} do
+      comment = visible_comment(image)
+
+      assert Comments.hide_comment(confirmed_user_fixture(), "#{comment.id}", %{
+               "deletion_reason" => "Spam"
+             }) ==
+               {:error, :unauthorized}
+
+      reloaded = Repo.reload!(comment)
+      refute reloaded.hidden_from_users
+      assert reloaded.deletion_reason == ""
+      no_moderation_logs!()
+    end
+
+    test "a moderator hides the comment with the given reason", %{image: image} do
+      comment = visible_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, %Comment{} = hidden} =
+               Comments.hide_comment(moderator, "#{comment.id}", %{"deletion_reason" => "Spam"})
+
+      assert hidden.id == comment.id
+      assert hidden.hidden_from_users
+      assert hidden.deletion_reason == "Spam"
+
+      reloaded = Repo.reload!(comment)
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Spam"
+    end
+
+    test "the moderation log names the image, comment, and reason exactly", %{image: image} do
+      comment = visible_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, _} =
+               Comments.hide_comment(moderator, "#{comment.id}", %{"deletion_reason" => "Spam"})
+
+      log = Repo.one!(ModerationLog)
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Comment.Hide:create"
+      assert log.body == "Deleted comment on image #{image.id} (Spam)"
+      assert log.subject_path == "/images/#{image.id}#comment_#{comment.id}"
+    end
+
+    test "a blank deletion reason is a rejected changeset carrying the loaded comment",
+         %{image: image} do
+      comment = visible_comment(image)
+
+      assert {:error, %Comment{} = returned} =
+               Comments.hide_comment(moderator_user_fixture(), "#{comment.id}", %{
+                 "deletion_reason" => ""
+               })
+
+      assert returned.id == comment.id
+      refute Repo.reload!(comment).hidden_from_users
+      no_moderation_logs!()
+    end
+
+    # A well-formed id naming no row loads nil, which no :hide rule permits; the
+    # context returns unauthorized rather than not-found.
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Comments.hide_comment(moderator_user_fixture(), "999999999", %{
+               "deletion_reason" => "Spam"
+             }) ==
+               {:error, :unauthorized}
+
+      no_moderation_logs!()
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Comments.hide_comment(moderator_user_fixture(), "abc", %{"deletion_reason" => "Spam"}) ==
+               {:error, :not_found}
+
+      no_moderation_logs!()
+    end
+  end
+
+  describe "unhide_comment/2" do
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "denies an anonymous actor, leaving the comment hidden", %{image: image} do
+      comment = already_hidden_comment(image)
+
+      assert Comments.unhide_comment(nil, "#{comment.id}") == {:error, :unauthorized}
+      assert Repo.reload!(comment).hidden_from_users
+      no_moderation_logs!()
+    end
+
+    test "denies a regular user, leaving the comment hidden", %{image: image} do
+      comment = already_hidden_comment(image)
+
+      assert Comments.unhide_comment(confirmed_user_fixture(), "#{comment.id}") ==
+               {:error, :unauthorized}
+
+      reloaded = Repo.reload!(comment)
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Spam"
+      no_moderation_logs!()
+    end
+
+    test "a moderator restores the comment, clearing its hidden flag and reason",
+         %{image: image} do
+      comment = already_hidden_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, %Comment{} = restored} = Comments.unhide_comment(moderator, "#{comment.id}")
+
+      assert restored.id == comment.id
+      refute restored.hidden_from_users
+      assert restored.deletion_reason == ""
+
+      reloaded = Repo.reload!(comment)
+      refute reloaded.hidden_from_users
+      assert reloaded.deletion_reason == ""
+    end
+
+    test "the moderation log names the image and comment exactly", %{image: image} do
+      comment = already_hidden_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, _} = Comments.unhide_comment(moderator, "#{comment.id}")
+
+      log = Repo.one!(ModerationLog)
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Comment.Hide:delete"
+      assert log.body == "Restored comment on image #{image.id}"
+      assert log.subject_path == "/images/#{image.id}#comment_#{comment.id}"
+    end
+
+    # The restore is an unconditional column write, so restoring a comment that
+    # is not hidden succeeds and still writes a log.
+    test "restoring a non-hidden comment succeeds and logs", %{image: image} do
+      comment = visible_comment(image)
+      refute comment.hidden_from_users
+
+      assert {:ok, %Comment{} = restored} =
+               Comments.unhide_comment(moderator_user_fixture(), "#{comment.id}")
+
+      refute restored.hidden_from_users
+
+      log = Repo.one!(ModerationLog)
+      assert log.type == "Image.Comment.Hide:delete"
+      assert log.body == "Restored comment on image #{image.id}"
+    end
+
+    # A well-formed id naming no row loads nil, which no :hide rule permits; the
+    # context returns unauthorized rather than not-found.
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Comments.unhide_comment(moderator_user_fixture(), "999999999") ==
+               {:error, :unauthorized}
+
+      no_moderation_logs!()
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Comments.unhide_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
       no_moderation_logs!()
     end
   end

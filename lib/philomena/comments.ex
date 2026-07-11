@@ -224,6 +224,72 @@ defmodule Philomena.Comments do
   end
 
   @doc """
+  Hides the comment named by the raw request `comment_id` with `params`
+  (carrying the deletion reason), on behalf of `actor` (a user, or `nil` for an
+  anonymous visitor).
+
+  Authorization (`:hide` on the loaded comment) happens here; on success the
+  comment is hidden, its associated reports are closed, it is reindexed, and a
+  moderation log is written attributing the hide to `actor`. An id that cannot
+  name a row is `{:error, :not_found}`, while a well-formed id that names no row
+  authorizes `nil` - which no rule permits - and is therefore
+  `{:error, :unauthorized}`.
+
+  A blank deletion reason fails the hide changeset and returns
+  `{:error, %Comment{}}` carrying the loaded comment so the caller can still
+  redirect to the comment anchor.
+
+  ## Examples
+
+      iex> hide_comment(moderator, "1", %{"deletion_reason" => "Spam"})
+      {:ok, %Comment{}}
+
+      iex> hide_comment(user, "1", %{"deletion_reason" => "Spam"})
+      {:error, :unauthorized}
+
+      iex> hide_comment(moderator, "not-an-integer", %{})
+      {:error, :not_found}
+
+  """
+  @spec hide_comment(User.t() | nil, any(), map()) ::
+          {:ok, Comment.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Comment.t()}
+  def hide_comment(actor, comment_id, params) do
+    case IntegerId.parse(comment_id) do
+      {:ok, id} ->
+        comment = Repo.get(Comment, id)
+
+        with :ok <- authorize(actor, :hide, comment) do
+          hide_authorized_comment(actor, comment, params)
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp hide_authorized_comment(actor, %Comment{} = comment, params) do
+    case hide_loaded_comment(comment, params, actor) do
+      {:ok, hidden_comment} ->
+        log_comment_hide(actor, hidden_comment)
+        {:ok, hidden_comment}
+
+      _error ->
+        {:error, comment}
+    end
+  end
+
+  defp log_comment_hide(actor, %Comment{} = comment) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Image.Comment.Hide:create",
+      Paths.image_comment_path(comment.image_id, comment.id),
+      "Deleted comment on image #{comment.image_id} (#{comment.deletion_reason})"
+    )
+  end
+
+  @doc """
   Hides a comment and handles associated reports.
 
   ## Parameters
@@ -233,11 +299,11 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> hide_comment(comment, %{staff_note: "Rule violation"}, user)
+      iex> hide_loaded_comment(comment, %{staff_note: "Rule violation"}, user)
       {:ok, %Comment{}}
 
   """
-  def hide_comment(%Comment{} = comment, attrs, user) do
+  def hide_loaded_comment(%Comment{} = comment, attrs, user) do
     report_query = Reports.close_report_query({"Comment", comment.id}, user)
     comment = Comment.hide_changeset(comment, attrs, user)
 
@@ -255,6 +321,71 @@ defmodule Philomena.Comments do
       error ->
         error
     end
+  end
+
+  @doc """
+  Restores the comment named by the raw request `comment_id`, on behalf of
+  `actor` (a user, or `nil` for an anonymous visitor).
+
+  Authorization (`:hide` on the loaded comment) happens here; on success the
+  comment is unhidden, reindexed, and a moderation log is written attributing
+  the restore to `actor`. An id that cannot name a row is `{:error, :not_found}`,
+  while a well-formed id that names no row authorizes `nil` - which no rule
+  permits - and is therefore `{:error, :unauthorized}`.
+
+  Restoring an already-visible comment succeeds and re-logs, matching the
+  action's idempotent behavior. A failed restore returns `{:error, %Comment{}}`
+  carrying the loaded comment so the caller can still redirect to the comment
+  anchor.
+
+  ## Examples
+
+      iex> unhide_comment(moderator, "1")
+      {:ok, %Comment{}}
+
+      iex> unhide_comment(user, "1")
+      {:error, :unauthorized}
+
+      iex> unhide_comment(moderator, "not-an-integer")
+      {:error, :not_found}
+
+  """
+  @spec unhide_comment(User.t() | nil, any()) ::
+          {:ok, Comment.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Comment.t()}
+  def unhide_comment(actor, comment_id) do
+    case IntegerId.parse(comment_id) do
+      {:ok, id} ->
+        comment = Repo.get(Comment, id)
+
+        with :ok <- authorize(actor, :hide, comment) do
+          unhide_authorized_comment(actor, comment)
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp unhide_authorized_comment(actor, %Comment{} = comment) do
+    case unhide_comment(comment) do
+      {:ok, restored_comment} ->
+        log_comment_unhide(actor, restored_comment)
+        {:ok, restored_comment}
+
+      _error ->
+        {:error, comment}
+    end
+  end
+
+  defp log_comment_unhide(actor, %Comment{} = comment) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Image.Comment.Hide:delete",
+      Paths.image_comment_path(comment.image_id, comment.id),
+      "Restored comment on image #{comment.image_id}"
+    )
   end
 
   @doc """

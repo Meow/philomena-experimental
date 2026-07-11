@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentControllerTest do
       _visible = comment_fixture(image, nil, %{"body" => "chartreuse llama"})
       _on_hidden = comment_fixture(hidden_image, nil, %{"body" => "chartreuse vicuna"})
       hidden = comment_fixture(image, nil, %{"body" => "chartreuse guanaco"})
-      {:ok, _} = Comments.hide_comment(hidden, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} = Comments.hide_loaded_comment(hidden, %{"deletion_reason" => "spam"}, moderator)
 
       SearchHelpers.reindex_all!(Comment)
 

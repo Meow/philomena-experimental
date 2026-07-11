@@ -41,7 +41,9 @@ defmodule Philomena.Users.Eraser do
     |> where(user_id: ^user.id)
     |> Repo.all()
     |> Enum.each(fn comment ->
-      {:ok, comment} = Comments.hide_comment(comment, %{deletion_reason: @reason}, moderator)
+      {:ok, comment} =
+        Comments.hide_loaded_comment(comment, %{deletion_reason: @reason}, moderator)
+
       {:ok, _comment} = Comments.destroy_comment(comment)
     end)
 
