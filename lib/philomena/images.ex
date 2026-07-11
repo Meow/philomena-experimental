@@ -27,6 +27,7 @@ defmodule Philomena.Images do
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.ImageFeatures.ImageFeature
+  alias Philomena.ImageVotes
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
@@ -2036,6 +2037,77 @@ defmodule Philomena.Images do
     data = Images.SearchIndex.user_name_update_by_query(old_name, new_name)
 
     Search.update_by_query(Image, data.query, data.set_replacements, data.replacements)
+  end
+
+  @doc """
+  Removes the vote cast by the user named by `user_id` on the image named by
+  `image_id`, on behalf of `actor`.
+
+  The image is loaded by id and authorized for `:tamper`; the target user is then
+  loaded by id. A non-castable or out-of-range image id is `{:error, :not_found}`,
+  and a well-formed but unknown image id is authorized as a `nil` load (an actor
+  who may not `:tamper` gets `{:error, :unauthorized}`, one permitted to act on
+  the `nil` load gets `{:error, :not_found}`). A non-castable or unknown user id
+  is `{:error, :not_found}`, checked after image authorization. Removing a vote
+  the user never cast still succeeds. On success the image is reindexed and a
+  moderation log recording the removed vote type and target user is written.
+
+  Returns `{:ok, image}` with the image.
+
+  ## Examples
+
+      iex> delete_user_vote(moderator, "42", "7")
+      {:ok, %Image{}}
+
+      iex> delete_user_vote(user, "42", "7")
+      {:error, :unauthorized}
+
+  """
+  @spec delete_user_vote(User.t(), String.t() | integer(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def delete_user_vote(actor, image_id, user_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :tamper, image),
+         %Image{} <- image,
+         {:ok, user} <- load_vote_user(user_id) do
+      {:ok, result} = Repo.transaction(ImageVotes.delete_vote_transaction(image, user))
+
+      reindex_image(image)
+
+      vote_type =
+        case result do
+          %{undownvote: {1, _}} -> "downvote"
+          %{unupvote: {1, _}} -> "upvote"
+          _ -> "vote"
+        end
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Tamper:create",
+        Paths.image_path(image),
+        "Deleted #{vote_type} by #{user.name} on image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable image id, an unknown image `nil` load the actor could act
+      # on, or an unknown/non-castable user id.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :not_found} -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  # The target user is loaded with no authorization: an unknown or non-castable
+  # id is a plain not-found, matching a `required: true` id-guarded load.
+  defp load_vote_user(user_id) do
+    with {:ok, id} <- IntegerId.parse(user_id),
+         %User{} = user <- Repo.get(User, id) do
+      {:ok, user}
+    else
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc """

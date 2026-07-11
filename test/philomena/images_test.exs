@@ -8,6 +8,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.ImageHides
   alias Philomena.Images
   alias Philomena.ImageVotes
+  alias Philomena.ImageVotes.ImageVote
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Notifications
   alias Philomena.Notifications.ImageCommentNotification
@@ -80,6 +81,10 @@ defmodule Philomena.ImagesTest do
 
   defp hide!(image, user) do
     {:ok, _} = Repo.transaction(ImageHides.create_hide_transaction(image, user))
+  end
+
+  defp has_vote?(image, user) do
+    Repo.exists?(from v in ImageVote, where: v.image_id == ^image.id and v.user_id == ^user.id)
   end
 
   defp feature_row_count(image) do
@@ -2358,6 +2363,169 @@ defmodule Philomena.ImagesTest do
       assert Images.update_description(actor(confirmed_user_fixture()), "99999999999999999999", %{
                "description" => "x"
              }) == {:error, :not_found}
+    end
+  end
+
+  describe "delete_user_vote/3" do
+    test "a moderator removes a target user's upvote, adjusting the score" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      image = image_fixture()
+      baseline_score = Repo.reload!(image).score
+
+      vote!(image, target, true)
+      assert has_vote?(image, target)
+      assert Repo.reload!(image).score == baseline_score + 1
+
+      assert {:ok, returned} =
+               Images.delete_user_vote(moderator, to_string(image.id), to_string(target.id))
+
+      assert returned.id == image.id
+      refute has_vote?(image, target)
+      assert Repo.reload!(image).score == baseline_score
+    end
+
+    test "removing an upvote writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      image = image_fixture()
+      vote!(image, target, true)
+
+      assert {:ok, _} =
+               Images.delete_user_vote(moderator, to_string(image.id), to_string(target.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Tamper:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Deleted upvote by #{target.name} on image #{image.id}"
+    end
+
+    test "removing a downvote writes a log naming a downvote" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      image = image_fixture()
+      vote!(image, target, false)
+
+      assert {:ok, _} =
+               Images.delete_user_vote(moderator, to_string(image.id), to_string(target.id))
+
+      refute has_vote?(image, target)
+
+      log = only_moderation_log!()
+      assert log.body == "Deleted downvote by #{target.name} on image #{image.id}"
+    end
+
+    test "removing a vote the user never cast still succeeds, logging a plain vote" do
+      # With no upvote or downvote deleted, the type derivation falls through to
+      # the neutral "vote".
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      image = image_fixture()
+      refute has_vote?(image, target)
+
+      assert {:ok, returned} =
+               Images.delete_user_vote(moderator, to_string(image.id), to_string(target.id))
+
+      assert returned.id == image.id
+
+      log = only_moderation_log!()
+      assert log.body == "Deleted vote by #{target.name} on image #{image.id}"
+    end
+
+    test "accepts bare integer ids" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      image = image_fixture()
+      vote!(image, target, true)
+
+      assert {:ok, returned} = Images.delete_user_vote(moderator, image.id, target.id)
+      assert returned.id == image.id
+      refute has_vote?(image, target)
+    end
+
+    test "a regular user is unauthorized and the vote is left intact" do
+      # Image :tamper authorization runs before the user load, so a regular user
+      # is denied without the vote being touched.
+      user = confirmed_user_fixture()
+      target = confirmed_user_fixture()
+      image = image_fixture()
+      vote!(image, target, true)
+
+      assert Images.delete_user_vote(user, to_string(image.id), to_string(target.id)) ==
+               {:error, :unauthorized}
+
+      assert has_vote?(image, target)
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user with a garbage user_id is still unauthorized" do
+      # The :tamper check precedes the user load, so a non-castable user id never
+      # reaches the not-found path for an unprivileged actor.
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.delete_user_vote(user, to_string(image.id), "not-a-number") ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor with a garbage user_id is unauthorized" do
+      image = image_fixture()
+
+      assert Images.delete_user_vote(nil, to_string(image.id), "not-a-number") ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown user_id is not found and writes no log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert Images.delete_user_vote(moderator, to_string(image.id), "2147483647") ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with a non-castable user_id is not found and writes no log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert Images.delete_user_vote(moderator, to_string(image.id), "not-a-number") ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an unknown well-formed image_id is unauthorized for a non-admin actor" do
+      # The image loads as nil and a regular user fails :tamper on the nil load,
+      # so the missing image surfaces as unauthorized.
+      user = confirmed_user_fixture()
+      target = confirmed_user_fixture()
+
+      assert Images.delete_user_vote(user, "2147483647", to_string(target.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed image_id is not found for an admin" do
+      # An admin clears :tamper on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+      target = confirmed_user_fixture()
+
+      assert Images.delete_user_vote(admin, "2147483647", to_string(target.id)) ==
+               {:error, :not_found}
+    end
+
+    test "a non-castable image_id is not found" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+
+      assert Images.delete_user_vote(moderator, "not-a-number", to_string(target.id)) ==
+               {:error, :not_found}
     end
   end
 end
