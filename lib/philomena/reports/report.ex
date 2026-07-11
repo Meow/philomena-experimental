@@ -5,6 +5,8 @@ defmodule Philomena.Reports.Report do
   alias Philomena.Users.User
   alias Philomena.Rules.Rule
 
+  @type t :: %__MODULE__{}
+
   schema "reports" do
     belongs_to :user, User
     belongs_to :admin, User

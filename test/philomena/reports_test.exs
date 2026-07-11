@@ -14,10 +14,21 @@ defmodule Philomena.ReportsTest do
   import Philomena.ReportsFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Images.Image
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Reports
   alias Philomena.Reports.Report
   alias Philomena.Repo
+
+  # A truthy ban value in the shape production passes (the result of
+  # Philomena.Bans.find/3); only its presence matters to the write-access and
+  # not-banned checks the loaders run first.
+  @ban %{
+    reason: "Rule #0",
+    valid_until: ~U[3000-01-01 00:00:00Z],
+    generated_ban_id: "U123456",
+    type: "User"
+  }
 
   # Report params in the shape the submission form posts: a reason, a user
   # agent, and a non-internal rule the report cites.
@@ -116,6 +127,121 @@ defmodule Philomena.ReportsTest do
 
       assert Reports.create_report(actor(nil), "Image", image.id, report_params()) ==
                {:error, :too_many_reports}
+    end
+  end
+
+  describe "load_image_for_report/2" do
+    # Backs the report form (a GET-guarded action), so it runs the not-banned
+    # check first (no fingerprint requirement) and then loads and authorizes the
+    # image for :show.
+
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      # verify_not_banned runs before the loader, so a banned actor is
+      # {:error, :ban} even against an id that could never load.
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_image_for_report(actor, "abc") == {:error, :ban}
+    end
+
+    test "an anonymous actor loads the report form for a visible image", %{image: image} do
+      assert {:ok, {%Image{} = loaded, %Ecto.Changeset{} = changeset}} =
+               Reports.load_image_for_report(actor(nil), "#{image.id}")
+
+      assert loaded.id == image.id
+
+      # The image carries the preloads the form renders.
+      assert is_list(loaded.sources)
+      assert is_list(loaded.tags)
+
+      # The changeset is over a Report addressed at this image.
+      assert %Report{} = changeset.data
+      assert changeset.data.reportable_type == "Image"
+      assert changeset.data.reportable_id == image.id
+    end
+
+    test "a regular user loads the report form for a visible image", %{image: image} do
+      assert {:ok, {%Image{} = loaded, %Ecto.Changeset{}}} =
+               Reports.load_image_for_report(actor(confirmed_user_fixture()), "#{image.id}")
+
+      assert loaded.id == image.id
+    end
+
+    test "a regular user cannot load a hidden image's report form" do
+      image = image_fixture(%{hidden_from_users: true})
+
+      assert Reports.load_image_for_report(actor(confirmed_user_fixture()), "#{image.id}") ==
+               {:error, :unauthorized}
+    end
+
+    # A well-formed id naming no row loads nil, which no :show rule permits; the
+    # loader returns unauthorized rather than not-found.
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Reports.load_image_for_report(actor(confirmed_user_fixture()), "999999999") ==
+               {:error, :unauthorized}
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Reports.load_image_for_report(actor(confirmed_user_fixture()), "abc") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_image_for_report_creation/2" do
+    # Backs the report submission (a write), so it runs the write-access check
+    # first (ban -> :ban, missing fingerprint -> :unauthorized) and then the same
+    # image load-and-authorize chain as the report form.
+
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_image_for_report_creation(actor, "abc") == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading, signed in or not" do
+      signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
+      anonymous = actor(nil, fingerprint: nil)
+
+      assert Reports.load_image_for_report_creation(signed_in, "abc") == {:error, :unauthorized}
+      assert Reports.load_image_for_report_creation(anonymous, "abc") == {:error, :unauthorized}
+    end
+
+    test "a valid anonymous fingerprinted actor loads a visible image", %{image: image} do
+      # actor(nil) carries the shared fingerprint, so it clears the write-access
+      # check and reaches the image load.
+      assert {:ok, %Image{} = loaded} =
+               Reports.load_image_for_report_creation(actor(nil), "#{image.id}")
+
+      assert loaded.id == image.id
+      assert is_list(loaded.sources)
+      assert is_list(loaded.tags)
+    end
+
+    test "a regular user cannot load a hidden image" do
+      image = image_fixture(%{hidden_from_users: true})
+
+      assert Reports.load_image_for_report_creation(
+               actor(confirmed_user_fixture()),
+               "#{image.id}"
+             ) ==
+               {:error, :unauthorized}
+    end
+
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Reports.load_image_for_report_creation(actor(confirmed_user_fixture()), "999999999") ==
+               {:error, :unauthorized}
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Reports.load_image_for_report_creation(actor(confirmed_user_fixture()), "abc") ==
+               {:error, :not_found}
     end
   end
 end

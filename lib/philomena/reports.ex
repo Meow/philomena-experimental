@@ -4,11 +4,17 @@ defmodule Philomena.Reports do
   """
 
   import Ecto.Query, warn: false
+
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+
   alias Philomena.Repo
 
   alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
+  alias Philomena.Images.Image
+  alias Philomena.IntegerId
   alias Philomena.Reports.Report
   alias Philomena.Reports
   alias Philomena.IndexWorker
@@ -79,6 +85,84 @@ defmodule Philomena.Reports do
 
   """
   def get_report!(id), do: Repo.get!(Report, id)
+
+  @doc """
+  Loads the image named by the raw request `image_id` for the report form, on
+  behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for
+  an anonymous visitor).
+
+  This backs the report form (`new`), a GET-guarded action, so a banned actor is
+  rejected with `{:error, :ban}` first; the fingerprint requirement the write
+  path enforces is skipped here. The image is then loaded and authorized for
+  `:show`.
+
+  Returns `{:ok, {image, changeset}}` - the image builds the form action and
+  reportable link, and the changeset drives the report form - `{:error, :ban}`
+  for a banned actor, `{:error, :unauthorized}` when the image is not visible, or
+  `{:error, :not_found}` when the id cannot name a row.
+
+  ## Examples
+
+      iex> load_image_for_report(actor, "1")
+      {:ok, {%Image{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_image_for_report(Actor.t(), any()) ::
+          {:ok, {Image.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_image_for_report(%Actor{} = actor, image_id) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, image} <- load_reportable_image(actor.user, image_id) do
+      changeset = change_report(%Report{reportable_type: "Image", reportable_id: image.id})
+      {:ok, {image, changeset}}
+    end
+  end
+
+  @doc """
+  Loads the image named by the raw request `image_id` for report submission, on
+  behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+
+  This backs the report submission (`create`), a write, so `actor`'s write access
+  is verified first: a banned actor is `{:error, :ban}` and an actor with no
+  fingerprint is `{:error, :unauthorized}`. The image is then loaded and
+  authorized for `:show`.
+
+  Returns `{:ok, image}` - it builds the redirect action and the report -
+  `{:error, :ban}` or `{:error, :unauthorized}` from the write-access check,
+  `{:error, :unauthorized}` when the image is not visible, or
+  `{:error, :not_found}` when the id cannot name a row.
+
+  ## Examples
+
+      iex> load_image_for_report_creation(actor, "1")
+      {:ok, %Image{}}
+
+  """
+  @spec load_image_for_report_creation(Actor.t(), any()) ::
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_image_for_report_creation(%Actor{} = actor, image_id) do
+    with :ok <- verify_write_access(actor) do
+      load_reportable_image(actor.user, image_id)
+    end
+  end
+
+  # Loads the reported image by id and authorizes it for `:show`. A non-castable
+  # id is `{:error, :not_found}`; a well-formed id that names no row authorizes
+  # `nil`, which no rule permits, so it is `{:error, :unauthorized}`.
+  defp load_reportable_image(user, image_id) do
+    case IntegerId.parse(image_id) do
+      {:ok, id} ->
+        image =
+          Image
+          |> preload([:sources, tags: :aliases])
+          |> Repo.get(id)
+
+        with :ok <- authorize(user, :show, image), do: {:ok, image}
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
 
   @doc """
   Submits a report against the reportable named by `reportable_type` and
