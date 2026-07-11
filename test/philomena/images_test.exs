@@ -1146,4 +1146,122 @@ defmodule Philomena.ImagesTest do
       assert Images.approve_image(moderator, "99999999999999999999") == {:error, :not_found}
     end
   end
+
+  describe "set_comment_locked/3" do
+    test "a moderator locks comments, clearing commenting_allowed" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(commenting_allowed: true)
+
+      assert {:ok, locked} = Images.set_comment_locked(moderator, to_string(image.id), true)
+      assert locked.id == image.id
+      refute locked.commenting_allowed
+      refute Repo.reload!(image).commenting_allowed
+    end
+
+    test "an admin locks comments" do
+      admin = admin_user_fixture()
+      image = image_fixture(commenting_allowed: true)
+
+      assert {:ok, _} = Images.set_comment_locked(admin, to_string(image.id), true)
+      refute Repo.reload!(image).commenting_allowed
+    end
+
+    test "a moderator unlocks comments, setting commenting_allowed" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(commenting_allowed: false)
+
+      assert {:ok, unlocked} = Images.set_comment_locked(moderator, to_string(image.id), false)
+      assert unlocked.id == image.id
+      assert unlocked.commenting_allowed
+      assert Repo.reload!(image).commenting_allowed
+    end
+
+    test "locking writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(commenting_allowed: true)
+
+      assert {:ok, _} = Images.set_comment_locked(moderator, to_string(image.id), true)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.CommentLock:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Locked comments on image #{image.id}"
+    end
+
+    test "unlocking writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(commenting_allowed: false)
+
+      assert {:ok, _} = Images.set_comment_locked(moderator, to_string(image.id), false)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.CommentLock:delete"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Unlocked comments on image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(commenting_allowed: true)
+
+      assert {:ok, locked} = Images.set_comment_locked(moderator, image.id, true)
+      assert locked.id == image.id
+    end
+
+    test "a regular user cannot lock comments and the flag stays set" do
+      user = confirmed_user_fixture()
+      image = image_fixture(commenting_allowed: true)
+
+      assert Images.set_comment_locked(user, to_string(image.id), true) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(image).commenting_allowed
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot lock comments and the flag stays set" do
+      image = image_fixture(commenting_allowed: true)
+
+      assert Images.set_comment_locked(nil, to_string(image.id), true) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(image).commenting_allowed
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found.
+      moderator = moderator_user_fixture()
+
+      assert Images.set_comment_locked(moderator, "2147483647", true) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.set_comment_locked(admin, "2147483647", true) == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.set_comment_locked(moderator, "not-a-number", true) == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.set_comment_locked(moderator, "99999999999999999999", true) ==
+               {:error, :not_found}
+    end
+  end
 end
