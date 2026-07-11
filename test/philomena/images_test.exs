@@ -72,6 +72,15 @@ defmodule Philomena.ImagesTest do
     {:ok, _} = Repo.transaction(ImageHides.create_hide_transaction(image, user))
   end
 
+  defp locked_tag_names(image) do
+    image
+    |> Repo.reload!()
+    |> Repo.preload(:locked_tags)
+    |> Map.fetch!(:locked_tags)
+    |> Enum.map(& &1.name)
+    |> Enum.sort()
+  end
+
   describe "create_image/2 duplicate detection" do
     # image_changeset's prepare_changes rejects a new upload whose
     # image_orig_sha512_hash already belongs to another image. On INSERT the
@@ -1382,6 +1391,308 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
 
       assert Images.set_description_locked(moderator, "99999999999999999999", true) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "set_tag_locked/3" do
+    test "a moderator locks tags, clearing tag_editing_allowed" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(tag_editing_allowed: true)
+
+      assert {:ok, locked} = Images.set_tag_locked(moderator, to_string(image.id), true)
+      assert locked.id == image.id
+      refute locked.tag_editing_allowed
+      refute Repo.reload!(image).tag_editing_allowed
+    end
+
+    test "an admin locks tags" do
+      admin = admin_user_fixture()
+      image = image_fixture(tag_editing_allowed: true)
+
+      assert {:ok, _} = Images.set_tag_locked(admin, to_string(image.id), true)
+      refute Repo.reload!(image).tag_editing_allowed
+    end
+
+    test "a moderator unlocks tags, setting tag_editing_allowed" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(tag_editing_allowed: false)
+
+      assert {:ok, unlocked} = Images.set_tag_locked(moderator, to_string(image.id), false)
+      assert unlocked.id == image.id
+      assert unlocked.tag_editing_allowed
+      assert Repo.reload!(image).tag_editing_allowed
+    end
+
+    test "locking writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(tag_editing_allowed: true)
+
+      assert {:ok, _} = Images.set_tag_locked(moderator, to_string(image.id), true)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.TagLock:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Locked tags on image #{image.id}"
+    end
+
+    test "unlocking writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(tag_editing_allowed: false)
+
+      assert {:ok, _} = Images.set_tag_locked(moderator, to_string(image.id), false)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.TagLock:delete"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Unlocked tags on image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(tag_editing_allowed: true)
+
+      assert {:ok, locked} = Images.set_tag_locked(moderator, image.id, true)
+      assert locked.id == image.id
+    end
+
+    test "a regular user cannot lock tags and the flag stays set" do
+      user = confirmed_user_fixture()
+      image = image_fixture(tag_editing_allowed: true)
+
+      assert Images.set_tag_locked(user, to_string(image.id), true) == {:error, :unauthorized}
+      assert Repo.reload!(image).tag_editing_allowed
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot lock tags and the flag stays set" do
+      image = image_fixture(tag_editing_allowed: true)
+
+      assert Images.set_tag_locked(nil, to_string(image.id), true) == {:error, :unauthorized}
+      assert Repo.reload!(image).tag_editing_allowed
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found.
+      moderator = moderator_user_fixture()
+
+      assert Images.set_tag_locked(moderator, "2147483647", true) == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.set_tag_locked(admin, "2147483647", true) == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.set_tag_locked(moderator, "not-a-number", true) == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.set_tag_locked(moderator, "99999999999999999999", true) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_image_for_tag_lock/2" do
+    test "a moderator loads a known image with its locked tags preloaded" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_tag_lock(moderator, to_string(image.id))
+      assert loaded.id == image.id
+      assert Ecto.assoc_loaded?(loaded.locked_tags)
+    end
+
+    test "an admin loads a known image with its locked tags preloaded" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_tag_lock(admin, to_string(image.id))
+      assert loaded.id == image.id
+      assert Ecto.assoc_loaded?(loaded.locked_tags)
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_tag_lock(moderator, image.id)
+      assert loaded.id == image.id
+    end
+
+    test "a regular user cannot load the image" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.load_image_for_tag_lock(user, to_string(image.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor cannot load the image" do
+      image = image_fixture()
+
+      assert Images.load_image_for_tag_lock(nil, to_string(image.id)) == {:error, :unauthorized}
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized" do
+      moderator = moderator_user_fixture()
+
+      assert Images.load_image_for_tag_lock(moderator, "2147483647") == {:error, :unauthorized}
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      admin = admin_user_fixture()
+
+      assert Images.load_image_for_tag_lock(admin, "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.load_image_for_tag_lock(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.load_image_for_tag_lock(moderator, "99999999999999999999") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "update_locked_tags/3" do
+    test "a moderator replaces the locked-tags list" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      # Seed a starting locked tag, then replace it wholesale.
+      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "old lock"})
+      assert locked_tag_names(image) == ["old lock"]
+
+      assert {:ok, updated} =
+               Images.update_locked_tags(moderator, to_string(image.id), %{
+                 "tag_input" => "safe, cute"
+               })
+
+      assert updated.id == image.id
+      assert locked_tag_names(image) == ["cute", "safe"]
+    end
+
+    test "an empty tag_input clears the locked-tags list" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "safe, cute"})
+      assert locked_tag_names(image) == ["cute", "safe"]
+
+      assert {:ok, _} =
+               Images.update_locked_tags(moderator, to_string(image.id), %{"tag_input" => ""})
+
+      assert locked_tag_names(image) == []
+    end
+
+    test "an admin replaces the locked-tags list" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.update_locked_tags(admin, to_string(image.id), %{"tag_input" => "safe"})
+
+      assert locked_tag_names(image) == ["safe"]
+    end
+
+    test "a successful update writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.update_locked_tags(moderator, to_string(image.id), %{
+                 "tag_input" => "safe, cute"
+               })
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.TagLock:update"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Updated list of locked tags on image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, updated} =
+               Images.update_locked_tags(moderator, image.id, %{"tag_input" => "safe"})
+
+      assert updated.id == image.id
+      assert locked_tag_names(image) == ["safe"]
+    end
+
+    test "a regular user cannot update and the list and log stay untouched" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "safe"})
+
+      assert Images.update_locked_tags(user, to_string(image.id), %{"tag_input" => "cute"}) ==
+               {:error, :unauthorized}
+
+      assert locked_tag_names(image) == ["safe"]
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot update and the list and log stay untouched" do
+      image = image_fixture()
+      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "safe"})
+
+      assert Images.update_locked_tags(nil, to_string(image.id), %{"tag_input" => "cute"}) ==
+               {:error, :unauthorized}
+
+      assert locked_tag_names(image) == ["safe"]
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_locked_tags(moderator, "2147483647", %{"tag_input" => "safe"}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      admin = admin_user_fixture()
+
+      assert Images.update_locked_tags(admin, "2147483647", %{"tag_input" => "safe"}) ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_locked_tags(moderator, "not-a-number", %{"tag_input" => "safe"}) ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_locked_tags(moderator, "99999999999999999999", %{"tag_input" => "safe"}) ==
                {:error, :not_found}
     end
   end

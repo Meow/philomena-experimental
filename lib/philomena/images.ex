@@ -476,6 +476,53 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Locks (`locked?` true) or unlocks (`locked?` false) tag editing on the image
+  named by `image_id`, on behalf of `actor`.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. On success tag editing is toggled, the image is
+  reindexed, and a moderation log is written attributing the change to `actor`.
+
+  Returns `{:ok, image}` with the updated image.
+
+  ## Examples
+
+      iex> set_tag_locked(moderator, "42", true)
+      {:ok, %Image{}}
+
+      iex> set_tag_locked(user, "42", true)
+      {:error, :unauthorized}
+
+  """
+  @spec set_tag_locked(User.t(), String.t() | integer(), boolean()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def set_tag_locked(actor, image_id, locked?) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, image} <- lock_tags(image, locked?) do
+      {log_type, log_body} =
+        if locked? do
+          {"Image.TagLock:create", "Locked tags on image #{image.id}"}
+        else
+          {"Image.TagLock:delete", "Unlocked tags on image #{image.id}"}
+        end
+
+      ModerationLogs.create_moderation_log(actor, log_type, Paths.image_path(image), log_body)
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
   Locks or unlocks the tags on an image.
 
   ## Examples
@@ -949,6 +996,88 @@ defmodule Philomena.Images do
       fingerprint: attribution[:fingerprint],
       added: added
     }
+  end
+
+  @doc """
+  Loads the image named by `image_id` for editing its locked tags, on behalf of
+  `actor`, with the `locked_tags` association preloaded for the form.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`.
+
+  Returns `{:ok, image}` with the loaded image.
+
+  ## Examples
+
+      iex> load_image_for_tag_lock(moderator, "42")
+      {:ok, %Image{}}
+
+      iex> load_image_for_tag_lock(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec load_image_for_tag_lock(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def load_image_for_tag_lock(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image do
+      {:ok, Repo.preload(image, :locked_tags)}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
+  Updates the locked tag list of the image named by `image_id`, on behalf of
+  `actor`, from the controller-shaped `attrs` (a map with a `"tag_input"` key).
+
+  The image is loaded by id and authorized for `:hide` before it is modified. A
+  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
+  unknown id is authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. A blank `tag_input` clears the list. On success
+  the locked tags are replaced, the image is reindexed, and a moderation log is
+  written attributing the change to `actor`.
+
+  Returns `{:ok, image}` with the updated image.
+
+  ## Examples
+
+      iex> update_locked_tags(moderator, "42", %{"tag_input" => "safe, solo"})
+      {:ok, %Image{}}
+
+      iex> update_locked_tags(user, "42", %{"tag_input" => "safe, solo"})
+      {:error, :unauthorized}
+
+  """
+  @spec update_locked_tags(User.t(), String.t() | integer(), map()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def update_locked_tags(actor, image_id, attrs) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, image} <- update_locked_tags(image, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.TagLock:update",
+        Paths.image_path(image),
+        "Updated list of locked tags on image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
   end
 
   @doc """
