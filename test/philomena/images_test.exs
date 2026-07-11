@@ -3000,4 +3000,86 @@ defmodule Philomena.ImagesTest do
       assert unfaved.faves_count == base_faves
     end
   end
+
+  describe "create_vote/3" do
+    test "an upvote records the row and bumps score and upvotes_count" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+      base_upvotes = Repo.reload!(image).upvotes_count
+
+      assert {:ok, voted} = Images.create_vote(image, user, true)
+      assert voted.id == image.id
+      assert voted.score == base_score + 1
+      assert voted.upvotes_count == base_upvotes + 1
+      assert %ImageVote{up: true} = vote_row(image, user)
+    end
+
+    test "a downvote records the row and drops score" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+      base_downvotes = Repo.reload!(image).downvotes_count
+
+      assert {:ok, voted} = Images.create_vote(image, user, false)
+      assert voted.score == base_score - 1
+      assert voted.downvotes_count == base_downvotes + 1
+      assert %ImageVote{up: false} = vote_row(image, user)
+    end
+
+    test "revoting flips an existing downvote to an upvote in a single row" do
+      # From the downvoted state the score swings up by two (the downvote is
+      # removed and an upvote added), ending one above the baseline.
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+
+      vote!(image, user, false)
+      assert %ImageVote{up: false} = vote_row(image, user)
+      assert Repo.reload!(image).score == base_score - 1
+
+      assert {:ok, voted} = Images.create_vote(image, user, true)
+      # get_by raises on more than one row, so a returned struct confirms a
+      # single vote row survived the flip.
+      assert %ImageVote{up: true} = vote_row(image, user)
+      assert voted.score == base_score + 1
+    end
+  end
+
+  describe "delete_vote/2" do
+    test "removing an upvote restores the score" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+      {:ok, _} = Images.create_vote(image, user, true)
+
+      assert {:ok, unvoted} = Images.delete_vote(image, user)
+      assert unvoted.id == image.id
+      assert vote_row(image, user) == nil
+      assert unvoted.score == base_score
+    end
+
+    test "removing a downvote restores the score" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+      vote!(image, user, false)
+
+      assert {:ok, unvoted} = Images.delete_vote(image, user)
+      assert vote_row(image, user) == nil
+      assert unvoted.score == base_score
+    end
+
+    test "unvoting when no vote exists still succeeds" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+      refute has_vote?(image, user)
+
+      assert {:ok, unvoted} = Images.delete_vote(image, user)
+      assert unvoted.id == image.id
+      assert unvoted.score == base_score
+      refute has_vote?(image, user)
+    end
+  end
 end

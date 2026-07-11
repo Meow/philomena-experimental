@@ -2640,6 +2640,50 @@ defmodule Philomena.Images do
     |> interaction_result(image)
   end
 
+  @doc """
+  Records `user`'s vote on the already-loaded `image` - an upvote when `up` is
+  true, a downvote when false - replacing any existing vote. Voting is idempotent.
+
+  The image must already be loaded and authorized (the vote route's loader plug
+  and forced-filter check run first). Returns `{:ok, image}` with the image
+  reloaded and reindexed, or `{:error, :interaction_failed}` if the transaction
+  is rolled back.
+
+  ## Examples
+
+      iex> create_vote(image, user, true)
+      {:ok, %Image{}}
+
+  """
+  @spec create_vote(Image.t(), User.t(), boolean()) ::
+          {:ok, Image.t()} | {:error, :interaction_failed}
+  def create_vote(%Image{} = image, user, up) do
+    ImageVotes.delete_vote_transaction(image, user)
+    |> Multi.append(ImageVotes.create_vote_transaction(image, user, up))
+    |> Repo.transaction()
+    |> interaction_result(image)
+  end
+
+  @doc """
+  Removes `user`'s vote on the already-loaded `image`. Unvoting is idempotent.
+
+  Returns `{:ok, image}` with the image reloaded and reindexed, or
+  `{:error, :interaction_failed}` if the transaction is rolled back.
+
+  ## Examples
+
+      iex> delete_vote(image, user)
+      {:ok, %Image{}}
+
+  """
+  @spec delete_vote(Image.t(), User.t()) :: {:ok, Image.t()} | {:error, :interaction_failed}
+  def delete_vote(%Image{} = image, user) do
+    image
+    |> ImageVotes.delete_vote_transaction(user)
+    |> Repo.transaction()
+    |> interaction_result(image)
+  end
+
   defp interaction_result({:ok, _changes}, image),
     do: {:ok, get_image!(image.id) |> reindex_image()}
 
