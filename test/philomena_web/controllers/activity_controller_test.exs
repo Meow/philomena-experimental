@@ -48,7 +48,7 @@ defmodule PhilomenaWeb.ActivityControllerTest do
     test "shows the featured image", %{conn: conn} do
       user = confirmed_user_fixture()
       image = image_fixture(created_at: hours_ago(1))
-      {:ok, _feature} = Images.feature_image(user, image)
+      {:ok, _feature} = Images.feature_loaded_image(user, image)
 
       SearchHelpers.reindex_all!(Image)
 

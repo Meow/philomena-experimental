@@ -4,6 +4,7 @@ defmodule Philomena.ImagesTest do
   import Ecto.Query
 
   alias Philomena.ImageFaves
+  alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.ImageHides
   alias Philomena.Images
   alias Philomena.ImageVotes
@@ -70,6 +71,10 @@ defmodule Philomena.ImagesTest do
 
   defp hide!(image, user) do
     {:ok, _} = Repo.transaction(ImageHides.create_hide_transaction(image, user))
+  end
+
+  defp feature_row_count(image) do
+    Repo.aggregate(from(f in ImageFeature, where: f.image_id == ^image.id), :count)
   end
 
   defp locked_tag_names(image) do
@@ -1694,6 +1699,116 @@ defmodule Philomena.ImagesTest do
 
       assert Images.update_locked_tags(moderator, "99999999999999999999", %{"tag_input" => "safe"}) ==
                {:error, :not_found}
+    end
+  end
+
+  describe "feature_image/2" do
+    test "a moderator features a visible image, creating the feature row" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, %ImageFeature{} = feature} =
+               Images.feature_image(moderator, to_string(image.id))
+
+      assert feature.image_id == image.id
+      assert feature.user_id == moderator.id
+      assert feature_row_count(image) == 1
+    end
+
+    test "an admin features a visible image" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, %ImageFeature{}} = Images.feature_image(admin, to_string(image.id))
+      assert feature_row_count(image) == 1
+    end
+
+    test "a successful feature writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} = Images.feature_image(moderator, to_string(image.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Feature:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Featured image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, %ImageFeature{}} = Images.feature_image(moderator, image.id)
+      assert feature_row_count(image) == 1
+    end
+
+    test "a hidden image is deleted with no feature row and no log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.feature_image(moderator, to_string(image.id)) == {:error, :deleted}
+      assert feature_row_count(image) == 0
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user on a hidden image is unauthorized, not deleted" do
+      # Authorization runs before the hidden-state check, so a regular user fails
+      # :hide and never reaches the deleted branch.
+      user = confirmed_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.feature_image(user, to_string(image.id)) == {:error, :unauthorized}
+      assert feature_row_count(image) == 0
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user cannot feature a visible image" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.feature_image(user, to_string(image.id)) == {:error, :unauthorized}
+      assert feature_row_count(image) == 0
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot feature a visible image" do
+      image = image_fixture()
+
+      assert Images.feature_image(nil, to_string(image.id)) == {:error, :unauthorized}
+      assert feature_row_count(image) == 0
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found.
+      moderator = moderator_user_fixture()
+
+      assert Images.feature_image(moderator, "2147483647") == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.feature_image(admin, "2147483647") == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.feature_image(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.feature_image(moderator, "99999999999999999999") == {:error, :not_found}
     end
   end
 end

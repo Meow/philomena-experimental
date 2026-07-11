@@ -15,7 +15,7 @@ defmodule PhilomenaWeb.Api.Json.Image.FeaturedControllerTest do
       old_image = image_fixture()
       new_image = image_fixture()
 
-      {:ok, _} = Images.feature_image(admin, old_image)
+      {:ok, _} = Images.feature_loaded_image(admin, old_image)
 
       # Backdate the first feature so the ordering is unambiguous.
       Repo.update_all(
@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.Api.Json.Image.FeaturedControllerTest do
         set: [created_at: DateTime.add(DateTime.utc_now(:second), -3600)]
       )
 
-      {:ok, _} = Images.feature_image(admin, new_image)
+      {:ok, _} = Images.feature_loaded_image(admin, new_image)
 
       conn = get(conn, ~p"/api/v1/json/images/featured")
 
@@ -36,14 +36,14 @@ defmodule PhilomenaWeb.Api.Json.Image.FeaturedControllerTest do
       visible = image_fixture()
       hidden = image_fixture(hidden_from_users: true)
 
-      {:ok, _} = Images.feature_image(admin, visible)
+      {:ok, _} = Images.feature_loaded_image(admin, visible)
 
       Repo.update_all(
         where(ImageFeature, image_id: ^visible.id),
         set: [created_at: DateTime.add(DateTime.utc_now(:second), -3600)]
       )
 
-      {:ok, _} = Images.feature_image(admin, hidden)
+      {:ok, _} = Images.feature_loaded_image(admin, hidden)
 
       conn = get(conn, ~p"/api/v1/json/images/featured")
 

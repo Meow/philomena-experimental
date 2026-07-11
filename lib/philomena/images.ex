@@ -303,18 +303,68 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Marks the given image as the current featured image.
+  Marks the given already-loaded image as the current featured image.
+
+  This is the internal feature engine; it performs no authorization and writes
+  no moderation log, so controller-facing callers go through `feature_image/2`.
 
   ## Examples
 
-      iex> feature_image(user, image)
+      iex> feature_loaded_image(user, image)
       {:ok, %ImageFeature{}}
 
   """
-  def feature_image(featurer, %Image{} = image) do
+  def feature_loaded_image(featurer, %Image{} = image) do
     %ImageFeature{user_id: featurer.id, image_id: image.id}
     |> ImageFeature.changeset(%{})
     |> Repo.insert()
+  end
+
+  @doc """
+  Marks the image named by `image_id` as the current featured image, on behalf
+  of `actor`.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. A deleted image (hidden from users) cannot be
+  featured and is `{:error, :deleted}`, left untouched. On success the feature
+  is recorded and a moderation log is written attributing it to `actor`.
+
+  Returns `{:ok, feature}` with the created feature.
+
+  ## Examples
+
+      iex> feature_image(moderator, "42")
+      {:ok, %ImageFeature{}}
+
+      iex> feature_image(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec feature_image(User.t(), String.t() | integer()) ::
+          {:ok, ImageFeature.t()} | {:error, :unauthorized | :not_found | :deleted}
+  def feature_image(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{hidden_from_users: false} <- image,
+         {:ok, feature} <- feature_loaded_image(actor, image) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Feature:create",
+        Paths.image_path(image),
+        "Featured image #{image.id}"
+      )
+
+      {:ok, feature}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      %Image{hidden_from_users: true} -> {:error, :deleted}
+    end
   end
 
   @doc """

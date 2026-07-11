@@ -7,6 +7,8 @@ defmodule Philomena.ImageFeatures.ImageFeature do
 
   @primary_key false
 
+  @type t :: %__MODULE__{}
+
   schema "image_features" do
     belongs_to :image, Image
     belongs_to :user, User
