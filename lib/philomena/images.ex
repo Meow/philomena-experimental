@@ -1380,32 +1380,36 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Updates an image's tags with attribution tracking.
+  Updates the tags of the given already-loaded image with attribution tracking.
+  This is the internal tag engine; it performs no authorization, so
+  controller-facing callers go through `update_tags/3`.
 
   Handles both added and removed tags. Automatically determines the user's
-  intended tag changes based on the provided previous image state.
+  intended tag changes based on the provided previous image state. `attribution`
+  is the keyword-list principal (`[ip:, fingerprint:, user:]`) attributed to the
+  created tag change records; it also enforces the per-identity tag-change rate
+  limit inside the transaction.
 
-  This will update the image's tags, create tag change records
-  for tracking, and reindex the image.
+  This will update the image's tags and create tag change records for tracking.
 
   ## Examples
 
-      iex> update_tags(
+      iex> update_loaded_tags(
       ...>   image,
-      ...>   %{attribution: attrs},
+      ...>   [ip: ip, fingerprint: fp, user: user],
       ...>   %{
-      ...>     old_tag_input: "safe",
-      ...>     tag_input: "safe, cute"
+      ...>     "old_tag_input" => "safe",
+      ...>     "tag_input" => "safe, cute"
       ...>   }
       ...> )
       {:ok,
        %{
-         image: image,
+         image: {image, added_tags, removed_tags},
          tag_changes: {1, 0}
        }}
 
   """
-  def update_tags(%Image{} = image, attribution, attrs) do
+  def update_loaded_tags(%Image{} = image, attribution, attrs) do
     old_tags = Tags.get_or_create_tags(attrs["old_tag_input"])
     new_tags = Tags.get_or_create_tags(attrs["tag_input"])
 
@@ -1470,6 +1474,92 @@ defmodule Philomena.Images do
 
       err ->
         err
+    end
+  end
+
+  @doc """
+  Updates the tags of the image named by `image_id`, on behalf of `actor`, from
+  the controller-shaped `attrs` (`"old_tag_input"`/`"tag_input"`), recording tag
+  change records attributed to the actor.
+
+  Banned actors are rejected first with `{:error, :ban}` (a write with no
+  fingerprint is `{:error, :unauthorized}`), before the image is loaded. The
+  image is then loaded by id (with its author, locked tags, sources, and tags
+  preloaded for rendering) and authorized for `:edit_metadata` - editable on a
+  non-hidden image whose tag editing is allowed by anyone (anonymous included),
+  so an image with tag editing disabled is `{:error, :unauthorized}`. A
+  non-castable or out-of-range id is `{:error, :not_found}`; a well-formed but
+  unknown id is authorized as a `nil` load, normally `{:error, :unauthorized}`.
+  On success the tags are updated and attributed, the image, its comments, and
+  the affected tags are reindexed, and the actor's metadata-update stat is
+  incremented when tags actually changed.
+
+  Returns `{:ok, %{image: image, added: added_tags, removed: removed_tags,
+  tag_change_count: count, tag_change_tag_count: tag_count}}` - everything the
+  caller needs to broadcast the change and render the tags partial. Failure
+  shapes: `{:error, %Ecto.Changeset{}}` when the update is rejected (e.g. the
+  image would drop below the minimum tag count), `{:error, :rate_limited}` when
+  the per-identity tag-change limit is exceeded, or `{:error, :update_failed}` for
+  any other rollback; all leave the image untouched.
+
+  ## Examples
+
+      iex> update_tags(actor, "42", %{"old_tag_input" => "safe", "tag_input" => "safe, cute"})
+      {:ok, %{image: %Image{}, added: [%Tag{}], removed: [], tag_change_count: 1, tag_change_tag_count: 1}}
+
+  """
+  @spec update_tags(Actor.t(), String.t() | integer(), map()) ::
+          {:ok,
+           %{
+             image: Image.t(),
+             added: [Tag.t()],
+             removed: [Tag.t()],
+             tag_change_count: non_neg_integer(),
+             tag_change_tag_count: non_neg_integer()
+           }}
+          | {:error,
+             :ban
+             | :unauthorized
+             | :not_found
+             | :rate_limited
+             | :update_failed
+             | Ecto.Changeset.t()}
+  def update_tags(%Actor{} = actor, image_id, attrs) do
+    attribution = [ip: actor.ip, fingerprint: actor.fingerprint, user: actor.user]
+
+    with :ok <- verify_write_access(actor),
+         {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(preload(Image, [:user, :locked_tags, :sources, tags: :aliases]), id),
+         :ok <- authorize(actor, :edit_metadata, image),
+         %Image{} <- image,
+         {:ok, %{image: {image, added, removed}}} <-
+           update_loaded_tags(image, attribution, attrs) do
+      Comments.reindex_comments_on_image(image)
+      reindex_image(image)
+      Tags.reindex_tags(added ++ removed)
+
+      if Enum.any?(added ++ removed) do
+        UserStatistics.inc_stat(actor.user, :metadata_updates_count)
+      end
+
+      {tag_change_count, tag_change_tag_count} = TagChanges.count_tag_changes(:image_id, image.id)
+
+      {:ok,
+       %{
+         image: Repo.preload(image, [:sources, tags: :aliases], force: true),
+         added: added,
+         removed: removed,
+         tag_change_count: tag_change_count,
+         tag_change_tag_count: tag_change_tag_count
+       }}
+    else
+      {:error, :ban} -> {:error, :ban}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :image, changeset, _changes} -> {:error, changeset}
+      {:error, :check_limits, _value, _changes} -> {:error, :rate_limited}
+      _other -> {:error, :update_failed}
     end
   end
 

@@ -16,6 +16,8 @@ defmodule Philomena.ImagesTest do
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
   alias Philomena.SourceChanges.SourceChange
+  alias Philomena.TagChanges.Limits
+  alias Philomena.TagChanges.TagChange
 
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
@@ -114,6 +116,18 @@ defmodule Philomena.ImagesTest do
   # Controller-shaped attrs adding a single source with no prior sources.
   defp add_source_attrs(url) do
     %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => url}}}
+  end
+
+  defp tag_names(image) do
+    image
+    |> Repo.preload(:tags, force: true)
+    |> Map.fetch!(:tags)
+    |> Enum.map(& &1.name)
+    |> Enum.sort()
+  end
+
+  defp tag_attrs(old_tag_input, tag_input) do
+    %{"old_tag_input" => old_tag_input, "tag_input" => tag_input}
   end
 
   # Controller-shaped attrs adding `count` distinct sources.
@@ -3569,6 +3583,169 @@ defmodule Philomena.ImagesTest do
                actor(confirmed_user_fixture()),
                "99999999999999999999",
                add_source_attrs("https://x.test")
+             ) == {:error, :not_found}
+    end
+  end
+
+  describe "update_tags/3" do
+    setup do
+      # The shared attribution fixture's anonymous identity (i:<ip>) is not rolled
+      # back by the SQL sandbox and accumulates across runs, so clear it before
+      # each test. Signed-in tests use fresh users, whose u:<id> bucket starts
+      # empty on its own.
+      reset_tag_change_limits()
+      :ok
+    end
+
+    test "a signed-in actor changes tags, recording an attributed change and bumping stats" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, result} =
+               Images.update_tags(
+                 actor(user),
+                 to_string(image.id),
+                 tag_attrs("safe", "safe, added test tag, other added tag")
+               )
+
+      assert result.image.id == image.id
+      assert Enum.sort(Enum.map(result.added, & &1.name)) == ["added test tag", "other added tag"]
+      assert result.removed == []
+      assert result.tag_change_count >= 1
+      assert result.tag_change_tag_count >= 1
+
+      assert tag_names(image) == ["added test tag", "other added tag", "safe"]
+
+      change = Repo.one(from tc in TagChange, where: tc.image_id == ^image.id)
+      assert change.user_id == user.id
+
+      assert Repo.reload!(user).metadata_updates_count == 1
+    end
+
+    test "an anonymous fingerprinted actor records a change with no user" do
+      image = image_fixture()
+
+      assert {:ok, _result} =
+               Images.update_tags(
+                 actor(nil),
+                 to_string(image.id),
+                 tag_attrs("safe", "safe, added test tag, other added tag")
+               )
+
+      change = Repo.one(from tc in TagChange, where: tc.image_id == ^image.id)
+      assert change.user_id == nil
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, result} =
+               Images.update_tags(
+                 actor(user),
+                 image.id,
+                 tag_attrs("safe", "safe, added test tag, other added tag")
+               )
+
+      assert result.image.id == image.id
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Images.update_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Images.update_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
+               {:error, :unauthorized}
+    end
+
+    test "an image with tag editing disabled is unauthorized and records no change" do
+      user = confirmed_user_fixture()
+      image = image_fixture(tag_editing_allowed: false)
+
+      assert Images.update_tags(
+               actor(user),
+               to_string(image.id),
+               tag_attrs("safe", "safe, added test tag, other added tag")
+             ) == {:error, :unauthorized}
+
+      refute Repo.exists?(from tc in TagChange, where: tc.image_id == ^image.id)
+    end
+
+    test "reducing below the minimum tag count is a changeset error with tags unchanged" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_tags(
+                 actor(user),
+                 to_string(image.id),
+                 tag_attrs("safe", "safe, one more")
+               )
+
+      assert tag_names(image) == ["safe"]
+      refute Repo.exists?(from tc in TagChange, where: tc.image_id == ^image.id)
+    end
+
+    test "exceeding the tag-change rate limit rolls the transaction back" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      ip = %Postgrex.INET{address: {203, 0, 113, 1}, netmask: 32}
+
+      # Fill the user's tag bucket to the 50-change limit so the next multi-tag
+      # update trips check_limits. The counter carries a 10-minute TTL that the
+      # SQL sandbox does not roll back, so clear it afterward.
+      :ok = Limits.update_tag_count_after_update(user, ip, 50)
+      on_exit(fn -> reset_tag_change_limits(user: user, ip: ip) end)
+
+      assert Images.update_tags(
+               actor(user),
+               to_string(image.id),
+               tag_attrs("safe", "safe, added test tag, other added tag")
+             ) == {:error, :rate_limited}
+
+      assert tag_names(image) == ["safe"]
+      refute Repo.exists?(from tc in TagChange, where: tc.image_id == ^image.id)
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular actor" do
+      # The image loads as nil and a regular actor fails :edit_metadata on the nil
+      # load, so the missing image surfaces as unauthorized.
+      assert Images.update_tags(
+               actor(confirmed_user_fixture()),
+               "2147483647",
+               tag_attrs("safe", "safe, a, b")
+             ) == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      # An admin clears :edit_metadata on the nil load via the blanket ability
+      # rule, then the image presence check fails, so it is not found.
+      assert Images.update_tags(
+               actor(admin_user_fixture()),
+               "2147483647",
+               tag_attrs("safe", "safe, a, b")
+             ) == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.update_tags(
+               actor(confirmed_user_fixture()),
+               "not-a-number",
+               tag_attrs("safe", "safe, a, b")
+             ) == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      assert Images.update_tags(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999",
+               tag_attrs("safe", "safe, a, b")
              ) == {:error, :not_found}
     end
   end

@@ -55,6 +55,8 @@ defmodule Philomena.Tags.Tag do
 
   @derive {Phoenix.Param, key: :slug}
 
+  @type t :: %__MODULE__{}
+
   schema "tags" do
     belongs_to :aliased_tag, Tag, source: :aliased_tag_id, on_replace: :nilify
     has_many :aliases, Tag, foreign_key: :aliased_tag_id
