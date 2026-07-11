@@ -3,7 +3,10 @@ defmodule Philomena.ImagesTest do
 
   import Ecto.Query
 
+  alias Philomena.ImageFaves
+  alias Philomena.ImageHides
   alias Philomena.Images
+  alias Philomena.ImageVotes
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Notifications
   alias Philomena.Notifications.ImageCommentNotification
@@ -55,6 +58,18 @@ defmodule Philomena.ImagesTest do
 
   defp source_change_count(image) do
     Repo.aggregate(from(s in SourceChange, where: s.image_id == ^image.id), :count)
+  end
+
+  defp fave!(image, user) do
+    {:ok, _} = Repo.transaction(ImageFaves.create_fave_transaction(image, user))
+  end
+
+  defp vote!(image, user, up) do
+    {:ok, _} = Repo.transaction(ImageVotes.create_vote_transaction(image, user, up))
+  end
+
+  defp hide!(image, user) do
+    {:ok, _} = Repo.transaction(ImageHides.create_hide_transaction(image, user))
   end
 
   describe "create_image/2 duplicate detection" do
@@ -511,6 +526,151 @@ defmodule Philomena.ImagesTest do
 
       assert Images.remove_source_history(moderator, "99999999999999999999") ==
                {:error, :not_found}
+    end
+  end
+
+  describe "image_fave_list/2" do
+    test "an anonymous actor gets the faves without vote data on a visible image" do
+      image = image_fixture()
+
+      assert {:ok, {loaded, has_votes}} = Images.image_fave_list(nil, to_string(image.id))
+      assert loaded.id == image.id
+      refute has_votes
+
+      # Faves are always preloaded; the tamper-only vote associations are not.
+      assert Ecto.assoc_loaded?(loaded.faves)
+      refute Ecto.assoc_loaded?(loaded.upvotes)
+      refute Ecto.assoc_loaded?(loaded.downvotes)
+      refute Ecto.assoc_loaded?(loaded.hides)
+    end
+
+    test "a regular user gets the faves without vote data on a visible image" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, {loaded, has_votes}} = Images.image_fave_list(user, to_string(image.id))
+      assert loaded.id == image.id
+      refute has_votes
+
+      assert Ecto.assoc_loaded?(loaded.faves)
+      refute Ecto.assoc_loaded?(loaded.upvotes)
+      refute Ecto.assoc_loaded?(loaded.downvotes)
+      refute Ecto.assoc_loaded?(loaded.hides)
+    end
+
+    test "faves are preloaded with their user for any actor" do
+      faver = confirmed_user_fixture()
+      image = image_fixture()
+      fave!(image, faver)
+
+      assert {:ok, {loaded, _has_votes}} = Images.image_fave_list(nil, to_string(image.id))
+
+      [fave] = loaded.faves
+      assert fave.user.id == faver.id
+    end
+
+    test "a moderator gets has_votes true with the vote associations preloaded" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, {loaded, has_votes}} = Images.image_fave_list(moderator, to_string(image.id))
+      assert loaded.id == image.id
+      assert has_votes
+
+      assert Ecto.assoc_loaded?(loaded.faves)
+      assert Ecto.assoc_loaded?(loaded.upvotes)
+      assert Ecto.assoc_loaded?(loaded.downvotes)
+      assert Ecto.assoc_loaded?(loaded.hides)
+    end
+
+    test "an admin gets has_votes true" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, {loaded, has_votes}} = Images.image_fave_list(admin, to_string(image.id))
+      assert loaded.id == image.id
+      assert has_votes
+    end
+
+    test "a moderator's vote associations carry their users" do
+      moderator = moderator_user_fixture()
+      upvoter = confirmed_user_fixture()
+      downvoter = confirmed_user_fixture()
+      hider = confirmed_user_fixture()
+      image = image_fixture()
+
+      vote!(image, upvoter, true)
+      vote!(image, downvoter, false)
+      hide!(image, hider)
+
+      assert {:ok, {loaded, true}} = Images.image_fave_list(moderator, to_string(image.id))
+
+      assert [%{user: %{id: up_id}}] = loaded.upvotes
+      assert up_id == upvoter.id
+      assert [%{user: %{id: down_id}}] = loaded.downvotes
+      assert down_id == downvoter.id
+      assert [%{user: %{id: hide_id}}] = loaded.hides
+      assert hide_id == hider.id
+    end
+
+    test "a hidden image is unauthorized for a regular user" do
+      user = confirmed_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.image_fave_list(user, to_string(image.id)) == {:error, :unauthorized}
+    end
+
+    test "a hidden image is unauthorized for an anonymous actor" do
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.image_fave_list(nil, to_string(image.id)) == {:error, :unauthorized}
+    end
+
+    test "a hidden image is listable by a moderator with has_votes true" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert {:ok, {loaded, true}} = Images.image_fave_list(moderator, to_string(image.id))
+      assert loaded.id == image.id
+    end
+
+    test "accepts an integer id" do
+      image = image_fixture()
+
+      assert {:ok, {loaded, false}} = Images.image_fave_list(nil, image.id)
+      assert loaded.id == image.id
+    end
+
+    test "an unknown well-formed id is unauthorized for an anonymous actor" do
+      # The image loads as nil and a nil actor fails :index on the nil load, so
+      # the missing image surfaces as unauthorized rather than not found.
+      assert Images.image_fave_list(nil, "2147483647") == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular user" do
+      assert Images.image_fave_list(confirmed_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator" do
+      assert Images.image_fave_list(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      # An admin clears :index on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      assert Images.image_fave_list(admin_user_fixture(), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.image_fave_list(nil, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      # IntegerId.parse rejects a value the integer column could not hold before
+      # the row is ever queried, ahead of any authorization.
+      assert Images.image_fave_list(nil, "99999999999999999999") == {:error, :not_found}
     end
   end
 end

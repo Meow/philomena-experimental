@@ -1670,6 +1670,55 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Assembles the interaction listing for the image named by `image_id`, on behalf
+  of `actor` (a user, or `nil` for an anonymous visitor).
+
+  The image is loaded by id and authorized for `:index` (visible for any
+  non-hidden image, and to staff for hidden ones). A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:index` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`.
+
+  The image is returned with its faves preloaded. Votes and hides are loaded and
+  `has_votes` is `true` only when `actor` may `:tamper` with the image;
+  otherwise `has_votes` is `false` and those associations are not fetched.
+
+  Returns `{:ok, {image, has_votes}}`.
+
+  ## Examples
+
+      iex> image_fave_list(moderator, "42")
+      {:ok, {%Image{}, true}}
+
+      iex> image_fave_list(user, "42")
+      {:ok, {%Image{}, false}}
+
+  """
+  @spec image_fave_list(User.t() | nil, String.t() | integer()) ::
+          {:ok, {Image.t(), boolean()}} | {:error, :unauthorized | :not_found}
+  def image_fave_list(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :index, image),
+         %Image{} <- image do
+      image = Repo.preload(image, faves: :user)
+
+      case authorize(actor, :tamper, image) do
+        :ok ->
+          {:ok, {Repo.preload(image, upvotes: :user, downvotes: :user, hides: :user), true}}
+
+        {:error, :unauthorized} ->
+          {:ok, {image, false}}
+      end
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
   Clears `actor`'s unread notifications for the image named by `image_id`.
 
   The image is loaded by id with no authorization: any authenticated actor may
