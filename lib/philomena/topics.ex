@@ -125,6 +125,53 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Clears `actor`'s unread notifications for the topic named by `topic_slug`
+  within the forum named by `forum_slug`.
+
+  Unlike the subscription API, this reproduces a plain `load_resource` chain
+  with no authorization: the forum was loaded by short name with `required:
+  true`, so an unknown short name is `{:error, :not_found}` (the not-found
+  handler, not the unauthorized path), and the topic was loaded with
+  `show_hidden: true` and no `:show` check. There is deliberately no forum or
+  topic visibility authorization here - a user can mark topics read in a forum
+  they cannot see, and hidden topics can be marked read, exactly as the retired
+  plug chain allowed.
+
+  Returns `{:ok, topic}` after clearing the notifications, or
+  `{:error, :not_found}` when the forum or the topic does not exist.
+
+  ## Examples
+
+      iex> mark_topic_read(user, "dis", "some-topic")
+      {:ok, %Topic{}}
+
+      iex> mark_topic_read(user, "dis", "nonexistent")
+      {:error, :not_found}
+
+  """
+  @spec mark_topic_read(User.t() | nil, String.t(), String.t()) ::
+          {:ok, Topic.t()} | {:error, :not_found}
+  def mark_topic_read(actor, forum_slug, topic_slug) do
+    with {:ok, topic} <- load_forum_topic_for_read(actor, forum_slug, topic_slug) do
+      clear_topic_notification(topic, actor)
+      {:ok, topic}
+    end
+  end
+
+  # The read path loaded the forum with a plain `required: true` load, so a
+  # missing forum runs the not-found handler rather than authorizing `nil`. The
+  # topic is loaded with `show_hidden: true` and no visibility authorization.
+  defp load_forum_topic_for_read(actor, forum_slug, topic_slug) do
+    case Repo.get_by(Forum, short_name: to_string(forum_slug)) do
+      nil ->
+        {:error, :not_found}
+
+      forum ->
+        load_topic_in_forum(actor, forum, topic_slug, true)
+    end
+  end
+
+  @doc """
   Gets a single topic.
 
   Raises `Ecto.NoResultsError` if the Topic does not exist.

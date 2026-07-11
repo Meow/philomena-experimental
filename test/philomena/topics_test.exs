@@ -1,7 +1,7 @@
 defmodule Philomena.TopicsTest do
   @moduledoc """
-  Context-level tests for the actor-first topic subscription API on
-  `Philomena.Topics`: `subscribe/3` and `unsubscribe/3`.
+  Context-level tests for the actor-first topic APIs on `Philomena.Topics`:
+  `subscribe/3`, `unsubscribe/3`, and `mark_topic_read/3`.
 
   These pin the authorization matrix (anonymous / user / moderator / admin),
   the failure divergence between the two actions (unknown forum, unknown topic,
@@ -20,6 +20,8 @@ defmodule Philomena.TopicsTest do
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Notifications
+  alias Philomena.Notifications.ForumPostNotification
   alias Philomena.Repo
   alias Philomena.Topics
   alias Philomena.Topics.Subscription
@@ -28,6 +30,13 @@ defmodule Philomena.TopicsTest do
     Repo.exists?(
       from s in Subscription,
         where: s.topic_id == ^topic.id and s.user_id == ^user.id
+    )
+  end
+
+  defp post_notification?(topic, user) do
+    Repo.exists?(
+      from n in ForumPostNotification,
+        where: n.topic_id == ^topic.id and n.user_id == ^user.id
     )
   end
 
@@ -231,6 +240,92 @@ defmodule Philomena.TopicsTest do
       topic = topic_fixture(forum)
 
       assert Topics.unsubscribe(user, forum.short_name, topic.slug) == {:error, :unauthorized}
+    end
+  end
+
+  describe "mark_topic_read/3" do
+    test "an unknown forum slug is not found for a regular user" do
+      # Divergence from subscribe/3: the read path loads the forum with a plain
+      # required load and no authorization, so a missing forum is :not_found
+      # rather than the :unauthorized that subscribe returns for a regular user.
+      assert Topics.mark_topic_read(confirmed_user_fixture(), "nonexistent", "whatever") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown forum slug is not found for anonymous" do
+      assert Topics.mark_topic_read(nil, "nonexistent", "whatever") == {:error, :not_found}
+    end
+
+    test "an existing forum with an unknown topic slug is not found" do
+      forum = forum_fixture()
+
+      assert Topics.mark_topic_read(
+               confirmed_user_fixture(),
+               forum.short_name,
+               "nonexistent-topic"
+             ) ==
+               {:error, :not_found}
+    end
+
+    test "a hidden topic is marked read by a regular user with no visibility gate" do
+      # The read path loads the topic with show_hidden: true and runs no :show
+      # authorization, so a regular user reaches a hidden topic that subscribe/3
+      # would refuse with :unauthorized.
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+      {:ok, topic} = Topics.hide_topic(topic, "test hiding", moderator_user_fixture())
+
+      assert {:ok, loaded_topic} = Topics.mark_topic_read(user, forum.short_name, topic.slug)
+      assert loaded_topic.id == topic.id
+    end
+
+    test "a staff-only forum is marked read by a regular user with no forum authorization" do
+      # The read path performs no forum :show authorization, so a forum a regular
+      # user cannot see is still markable, unlike subscribe/3 which returns
+      # :unauthorized here.
+      user = confirmed_user_fixture()
+      forum = forum_fixture(access_level: "staff")
+      topic = topic_fixture(forum)
+
+      assert {:ok, loaded_topic} = Topics.mark_topic_read(user, forum.short_name, topic.slug)
+      assert loaded_topic.id == topic.id
+    end
+
+    test "success clears the topic notification for the user" do
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      # Arrange a real unread notification the way the read controller test does:
+      # subscribe the user to the topic, then have another user post so a
+      # ForumPostNotification lands for the subscriber.
+      {:ok, _} = Topics.create_subscription(topic, user)
+      author = confirmed_user_fixture()
+      post = hd(topic.posts)
+      {:ok, 1} = Notifications.create_forum_post_notification(author, topic, post)
+      assert post_notification?(topic, user)
+
+      assert {:ok, _topic} = Topics.mark_topic_read(user, forum.short_name, topic.slug)
+      refute post_notification?(topic, user)
+    end
+
+    test "marking read is safe when the user has no notifications" do
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+      refute post_notification?(topic, user)
+
+      assert {:ok, loaded_topic} = Topics.mark_topic_read(user, forum.short_name, topic.slug)
+      assert loaded_topic.id == topic.id
+    end
+
+    test "a nil actor marks read harmlessly and returns the topic" do
+      # clear_topic_notification/2 forwards nil to delete_all_for_user, which
+      # short-circuits to {:ok, 0} for a nil user, so an anonymous actor reaching
+      # a visible topic is a successful no-op rather than a crash (contrast
+      # subscribe/3, where a nil actor raises BadMapError in create_subscription).
+      {forum, topic} = visible_topic()
+
+      assert {:ok, loaded_topic} = Topics.mark_topic_read(nil, forum.short_name, topic.slug)
+      assert loaded_topic.id == topic.id
     end
   end
 end
