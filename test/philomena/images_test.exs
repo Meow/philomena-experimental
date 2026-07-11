@@ -1027,4 +1027,123 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
   end
+
+  describe "approve_image/2" do
+    test "a moderator approves an unapproved image and gets the image" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(approved: false)
+
+      assert {:ok, approved} = Images.approve_image(moderator, to_string(image.id))
+      assert approved.id == image.id
+      assert approved.approved
+      assert Repo.reload!(image).approved
+    end
+
+    test "an admin approves an unapproved image" do
+      admin = admin_user_fixture()
+      image = image_fixture(approved: false)
+
+      assert {:ok, _} = Images.approve_image(admin, to_string(image.id))
+      assert Repo.reload!(image).approved
+    end
+
+    test "approving increments the uploader's image count" do
+      moderator = moderator_user_fixture()
+      uploader = confirmed_user_fixture()
+      image = image_fixture(approved: false, user_id: uploader.id)
+      assert Repo.reload!(uploader).images_count == 0
+
+      assert {:ok, _} = Images.approve_image(moderator, to_string(image.id))
+      assert Repo.reload!(uploader).images_count == 1
+    end
+
+    test "a successful approval writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(approved: false)
+
+      assert {:ok, _} = Images.approve_image(moderator, to_string(image.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Approve:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Approved image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(approved: false)
+
+      assert {:ok, approved} = Images.approve_image(moderator, image.id)
+      assert approved.id == image.id
+    end
+
+    test "an already-approved image is already_approved with no log or state change" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(approved: true)
+
+      assert Images.approve_image(moderator, to_string(image.id)) ==
+               {:error, :already_approved}
+
+      assert Repo.reload!(image).approved
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user on an already-approved image is unauthorized, not already_approved" do
+      # Authorization runs before the approved-state check, so a regular user
+      # fails :approve and never reaches the already_approved branch.
+      user = confirmed_user_fixture()
+      image = image_fixture(approved: true)
+
+      assert Images.approve_image(user, to_string(image.id)) == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user cannot approve an unapproved image and it stays unapproved" do
+      user = confirmed_user_fixture()
+      image = image_fixture(approved: false)
+
+      assert Images.approve_image(user, to_string(image.id)) == {:error, :unauthorized}
+      refute Repo.reload!(image).approved
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot approve an unapproved image" do
+      image = image_fixture(approved: false)
+
+      assert Images.approve_image(nil, to_string(image.id)) == {:error, :unauthorized}
+      refute Repo.reload!(image).approved
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized" do
+      # The image loads as nil and a moderator fails :approve on the nil load, so
+      # the missing image surfaces as unauthorized rather than not found. No log.
+      moderator = moderator_user_fixture()
+
+      assert Images.approve_image(moderator, "2147483647") == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      # An admin clears :approve on the nil load via the blanket ability rule,
+      # then the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.approve_image(admin, "2147483647") == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.approve_image(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.approve_image(moderator, "99999999999999999999") == {:error, :not_found}
+    end
+  end
 end

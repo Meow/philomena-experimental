@@ -208,6 +208,55 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc """
+  Approves the image named by `image_id` for public viewing, on behalf of
+  `actor`.
+
+  The image is loaded by id and authorized for `:approve`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:approve` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. An image that is already approved is
+  `{:error, :already_approved}` and is left untouched. On success the image is
+  made visible, statistics are updated, the image is reindexed, and a moderation
+  log is written attributing the approval to `actor`.
+
+  Returns `{:ok, image}` with the approved image.
+
+  ## Examples
+
+      iex> approve_image(moderator, "42")
+      {:ok, %Image{}}
+
+      iex> approve_image(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec approve_image(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found | :already_approved}
+  def approve_image(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :approve, image),
+         %Image{approved: false} <- image do
+      {:ok, image} = approve_image(image)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Approve:create",
+        Paths.image_path(image),
+        "Approved image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      %Image{approved: true} -> {:error, :already_approved}
+    end
+  end
+
   defp maybe_approve_image(_image, nil), do: false
 
   defp maybe_approve_image(_image, %User{verified: false, role: role}) when role == "user",
