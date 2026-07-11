@@ -1579,6 +1579,57 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Updates the deletion reason of the image named by `image_id`, on behalf of
+  `actor`, from the controller-shaped `attrs`.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. Only an already-hidden image may have its reason
+  changed; a visible image is `{:error, :not_deleted}`, left untouched. On success
+  the reason is updated, the image is reindexed, and a moderation log is written
+  attributing the change to `actor`.
+
+  Returns `{:ok, image}` with the updated image, or `{:error, %Ecto.Changeset{}}`
+  when the new reason is rejected (e.g. blank), leaving the image untouched.
+
+  ## Examples
+
+      iex> update_hide_reason(moderator, "42", %{"deletion_reason" => "Duplicate"})
+      {:ok, %Image{}}
+
+      iex> update_hide_reason(user, "42", %{"deletion_reason" => "Duplicate"})
+      {:error, :unauthorized}
+
+  """
+  @spec update_hide_reason(User.t(), String.t() | integer(), map()) ::
+          {:ok, Image.t()}
+          | {:error, :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
+  def update_hide_reason(actor, image_id, attrs) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{hidden_from_users: true} <- image,
+         {:ok, image} <- update_hide_reason(image, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Delete:update",
+        Paths.image_path(image),
+        "Changed deletion reason of #{image.id} (#{image.deletion_reason})"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      %Image{hidden_from_users: false} -> {:error, :not_deleted}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
+  end
+
+  @doc """
   Updates the hide reason for an image.
 
   ## Examples
@@ -1610,7 +1661,9 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Hides an image from public view.
+  Hides the given already-loaded image from public view. This is the internal
+  hide engine; it performs no authorization and writes no moderation log, so
+  controller-facing callers go through `hide_image/3`.
 
   This will:
   1. Mark the image as hidden
@@ -1622,7 +1675,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> hide_image(image, moderator, %{reason: "Rule violation"})
+      iex> hide_loaded_image(image, moderator, %{reason: "Rule violation"})
       {:ok,
        %{
          image: image,
@@ -1631,7 +1684,7 @@ defmodule Philomena.Images do
        }}
 
   """
-  def hide_image(%Image{} = image, user, attrs) do
+  def hide_loaded_image(%Image{} = image, user, attrs) do
     duplicate_reports =
       DuplicateReport
       |> where(state: "open")
@@ -1644,6 +1697,54 @@ defmodule Philomena.Images do
     |> Multi.update_all(:duplicate_reports, duplicate_reports, [])
     |> Repo.transaction()
     |> process_after_hide()
+  end
+
+  @doc """
+  Hides (soft-deletes) the image named by `image_id` from public view, on behalf
+  of `actor`, recording the deletion reason from the controller-shaped `attrs`.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. On success the image is hidden (its reports and
+  duplicate reports closed, tag counts decremented, thumbnails purged, everything
+  reindexed) and a moderation log is written attributing the deletion to `actor`.
+
+  Returns `{:ok, image}` with the hidden image, or `{:error, :hide_failed}` when
+  the hide is rejected (e.g. a blank deletion reason), leaving the image visible.
+
+  ## Examples
+
+      iex> hide_image(moderator, "42", %{"deletion_reason" => "Rule violation"})
+      {:ok, %Image{}}
+
+      iex> hide_image(user, "42", %{"deletion_reason" => "Rule violation"})
+      {:error, :unauthorized}
+
+  """
+  @spec hide_image(User.t(), String.t() | integer(), map()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found | :hide_failed}
+  def hide_image(actor, image_id, attrs) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, %{image: hidden}} <- hide_loaded_image(image, actor, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Delete:create",
+        Paths.image_path(hidden),
+        "Deleted image #{hidden.id} (#{hidden.deletion_reason})"
+      )
+
+      {:ok, hidden}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      {:error, _op, _changeset, _changes} -> {:error, :hide_failed}
+    end
   end
 
   @doc """
@@ -1854,6 +1955,53 @@ defmodule Philomena.Images do
   end
 
   def unhide_image(image), do: {:ok, image}
+
+  @doc """
+  Restores (unhides) the image named by `image_id` from moderation hiding, on
+  behalf of `actor`.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. Restoring an image that is not hidden still
+  succeeds (it is left visible). On success the image is made visible again, its
+  content reindexed, and a moderation log is written attributing the restore to
+  `actor`.
+
+  Returns `{:ok, image}` with the restored image.
+
+  ## Examples
+
+      iex> unhide_image(moderator, "42")
+      {:ok, %Image{}}
+
+      iex> unhide_image(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec unhide_image(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def unhide_image(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, image} <- unhide_image(image) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Delete:delete",
+        Paths.image_path(image),
+        "Restored image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
 
   @doc """
   Performs a batch update on multiple images, adding and removing tags.
@@ -2512,7 +2660,7 @@ defmodule Philomena.Images do
 
   @doc """
   Removes `actor`'s personal hide of the image named by `image_id`. This is the
-  per-user unhide interaction, distinct from the moderator unhide `unhide_image/1`.
+  per-user unhide interaction, distinct from the moderator unhide `unhide_image/2`.
 
   Loading, authorization, and ban semantics mirror `create_image_hide/2`.
   Removing a hide that does not exist still succeeds.

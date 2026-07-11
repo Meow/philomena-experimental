@@ -107,6 +107,17 @@ defmodule Philomena.ImagesTest do
     Repo.get_by(ImageVote, image_id: image.id, user_id: user.id)
   end
 
+  # Hides an image through the internal engine (which writes no moderation log),
+  # so a later log assertion sees only the row the function under test creates.
+  defp hidden_image_fixture(reason \\ "Original reason") do
+    image = image_fixture()
+
+    {:ok, %{image: hidden}} =
+      Images.hide_loaded_image(image, moderator_user_fixture(), %{"deletion_reason" => reason})
+
+    hidden
+  end
+
   defp feature_row_count(image) do
     Repo.aggregate(from(f in ImageFeature, where: f.image_id == ^image.id), :count)
   end
@@ -3080,6 +3091,336 @@ defmodule Philomena.ImagesTest do
       assert unvoted.id == image.id
       assert unvoted.score == base_score
       refute has_vote?(image, user)
+    end
+  end
+
+  describe "hide_image/3" do
+    test "a moderator hides the image, persisting the reason" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, hidden} =
+               Images.hide_image(moderator, to_string(image.id), %{
+                 "deletion_reason" => "Rule #0"
+               })
+
+      assert hidden.id == image.id
+      assert hidden.hidden_from_users
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Rule #0"
+    end
+
+    test "an admin hides the image" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.hide_image(admin, to_string(image.id), %{"deletion_reason" => "Rule #0"})
+
+      assert Repo.reload!(image).hidden_from_users
+    end
+
+    test "hiding writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.hide_image(moderator, to_string(image.id), %{
+                 "deletion_reason" => "Rule #0"
+               })
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Delete:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Deleted image #{image.id} (Rule #0)"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, hidden} =
+               Images.hide_image(moderator, image.id, %{"deletion_reason" => "Rule #0"})
+
+      assert hidden.id == image.id
+    end
+
+    test "a blank reason is hide_failed with the image left visible and no log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert Images.hide_image(moderator, to_string(image.id), %{"deletion_reason" => ""}) ==
+               {:error, :hide_failed}
+
+      refute Repo.reload!(image).hidden_from_users
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user cannot hide the image and it stays visible" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.hide_image(user, to_string(image.id), %{"deletion_reason" => "Rule #0"}) ==
+               {:error, :unauthorized}
+
+      refute Repo.reload!(image).hidden_from_users
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot hide the image" do
+      image = image_fixture()
+
+      assert Images.hide_image(nil, to_string(image.id), %{"deletion_reason" => "Rule #0"}) ==
+               {:error, :unauthorized}
+
+      refute Repo.reload!(image).hidden_from_users
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      moderator = moderator_user_fixture()
+
+      assert Images.hide_image(moderator, "2147483647", %{"deletion_reason" => "Rule #0"}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      admin = admin_user_fixture()
+
+      assert Images.hide_image(admin, "2147483647", %{"deletion_reason" => "Rule #0"}) ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.hide_image(moderator, "not-a-number", %{"deletion_reason" => "Rule #0"}) ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.hide_image(moderator, "99999999999999999999", %{
+               "deletion_reason" => "Rule #0"
+             }) == {:error, :not_found}
+    end
+  end
+
+  describe "update_hide_reason/3" do
+    test "a moderator updates the reason on a hidden image" do
+      moderator = moderator_user_fixture()
+      hidden = hidden_image_fixture("Original reason")
+
+      assert {:ok, updated} =
+               Images.update_hide_reason(moderator, to_string(hidden.id), %{
+                 "deletion_reason" => "Better reason"
+               })
+
+      assert updated.id == hidden.id
+      assert Repo.reload!(hidden).deletion_reason == "Better reason"
+    end
+
+    test "updating the reason writes an exact moderation log with the new reason" do
+      moderator = moderator_user_fixture()
+      hidden = hidden_image_fixture("Original reason")
+
+      assert {:ok, _} =
+               Images.update_hide_reason(moderator, to_string(hidden.id), %{
+                 "deletion_reason" => "Better reason"
+               })
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Delete:update"
+      assert log.subject_path == "/images/#{hidden.id}"
+      assert log.body == "Changed deletion reason of #{hidden.id} (Better reason)"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      hidden = hidden_image_fixture()
+
+      assert {:ok, updated} =
+               Images.update_hide_reason(moderator, hidden.id, %{"deletion_reason" => "New"})
+
+      assert updated.id == hidden.id
+    end
+
+    test "a visible image is not_deleted with no log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert Images.update_hide_reason(moderator, to_string(image.id), %{
+               "deletion_reason" => "New"
+             }) == {:error, :not_deleted}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user on a visible image is unauthorized, not not_deleted" do
+      # Authorization runs before the hidden-state check, so a regular user fails
+      # :hide and never reaches the not_deleted branch.
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.update_hide_reason(user, to_string(image.id), %{"deletion_reason" => "New"}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a blank reason on a hidden image is a changeset error with the reason unchanged" do
+      moderator = moderator_user_fixture()
+      hidden = hidden_image_fixture("Keep me")
+
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_hide_reason(moderator, to_string(hidden.id), %{
+                 "deletion_reason" => ""
+               })
+
+      assert Repo.reload!(hidden).deletion_reason == "Keep me"
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_hide_reason(moderator, "2147483647", %{"deletion_reason" => "New"}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      admin = admin_user_fixture()
+
+      assert Images.update_hide_reason(admin, "2147483647", %{"deletion_reason" => "New"}) ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_hide_reason(moderator, "not-a-number", %{"deletion_reason" => "New"}) ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_hide_reason(moderator, "99999999999999999999", %{
+               "deletion_reason" => "New"
+             }) == {:error, :not_found}
+    end
+  end
+
+  describe "unhide_image/2" do
+    test "a moderator restores a hidden image" do
+      moderator = moderator_user_fixture()
+      hidden = hidden_image_fixture()
+
+      assert {:ok, restored} = Images.unhide_image(moderator, to_string(hidden.id))
+      assert restored.id == hidden.id
+      refute restored.hidden_from_users
+      refute Repo.reload!(hidden).hidden_from_users
+    end
+
+    test "an admin restores a hidden image" do
+      admin = admin_user_fixture()
+      hidden = hidden_image_fixture()
+
+      assert {:ok, _} = Images.unhide_image(admin, to_string(hidden.id))
+      refute Repo.reload!(hidden).hidden_from_users
+    end
+
+    test "restoring writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      hidden = hidden_image_fixture()
+
+      assert {:ok, _} = Images.unhide_image(moderator, to_string(hidden.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Delete:delete"
+      assert log.subject_path == "/images/#{hidden.id}"
+      assert log.body == "Restored image #{hidden.id}"
+    end
+
+    test "restoring an already-visible image still succeeds and logs" do
+      # The engine's fall-through clause returns {:ok, image} for a non-hidden
+      # image, so the wrapper reports success and writes the restore log even
+      # though nothing changed.
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, restored} = Images.unhide_image(moderator, to_string(image.id))
+      assert restored.id == image.id
+      refute Repo.reload!(image).hidden_from_users
+
+      log = only_moderation_log!()
+      assert log.type == "Image.Delete:delete"
+      assert log.body == "Restored image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      hidden = hidden_image_fixture()
+
+      assert {:ok, restored} = Images.unhide_image(moderator, hidden.id)
+      assert restored.id == hidden.id
+    end
+
+    test "a regular user cannot restore a hidden image and it stays hidden" do
+      user = confirmed_user_fixture()
+      hidden = hidden_image_fixture()
+
+      assert Images.unhide_image(user, to_string(hidden.id)) == {:error, :unauthorized}
+      assert Repo.reload!(hidden).hidden_from_users
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot restore a hidden image" do
+      hidden = hidden_image_fixture()
+
+      assert Images.unhide_image(nil, to_string(hidden.id)) == {:error, :unauthorized}
+      assert Repo.reload!(hidden).hidden_from_users
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      moderator = moderator_user_fixture()
+
+      assert Images.unhide_image(moderator, "2147483647") == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      admin = admin_user_fixture()
+
+      assert Images.unhide_image(admin, "2147483647") == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.unhide_image(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.unhide_image(moderator, "99999999999999999999") == {:error, :not_found}
     end
   end
 end
