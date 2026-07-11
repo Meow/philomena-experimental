@@ -8,6 +8,8 @@ defmodule Philomena.Filters.Filter do
   alias Philomena.Users.User
   alias Philomena.Repo
 
+  @type t :: %__MODULE__{}
+
   schema "filters" do
     belongs_to :user, User
 

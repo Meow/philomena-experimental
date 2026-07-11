@@ -6,6 +6,8 @@ defmodule Philomena.Comments.Comment do
   alias Philomena.Users.User
   alias Philomena.Schema.Approval
 
+  @type t :: %__MODULE__{}
+
   schema "comments" do
     belongs_to :user, User
     belongs_to :image, Image

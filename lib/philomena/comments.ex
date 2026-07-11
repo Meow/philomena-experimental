@@ -10,7 +10,9 @@ defmodule Philomena.Comments do
   alias PhilomenaQuery.Search
   alias Philomena.UserStatistics
   alias Philomena.Users.User
+  alias Philomena.Filters.Filter
   alias Philomena.Comments.Comment
+  alias Philomena.Comments.Query
   alias Philomena.Comments
   alias Philomena.IndexWorker
   alias Philomena.Images.Image
@@ -35,6 +37,102 @@ defmodule Philomena.Comments do
 
   """
   def get_comment!(id), do: Repo.get!(Comment, id)
+
+  @doc """
+  Searches comments on behalf of `user`, applying `user`'s hidden-tag `filter`,
+  the compiled query string `cq_string`, and `pagination`, sorted newest first.
+
+  Hidden and non-approved comments are excluded from the results unless `user`
+  is staff. Results are preloaded for display. Returns `{:ok, results}`, or
+  `{:error, msg}` when `cq_string` fails to compile.
+
+  ## Examples
+
+      iex> search_comments(user, filter, "created_at.gte:1 week ago", pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> search_comments(user, filter, "created_at.gte:not-a-date", pagination)
+      {:error, "Cannot parse date."}
+
+  """
+  @spec search_comments(User.t() | nil, Filter.t(), String.t(), map()) ::
+          {:ok, Scrivener.Page.t()} | {:error, String.t()}
+  def search_comments(user, filter, cq_string, pagination) do
+    case Query.compile(cq_string, user: user) do
+      {:ok, query} ->
+        results =
+          Comment
+          |> Search.search_definition(
+            %{
+              query: %{
+                bool: %{
+                  must: query,
+                  must_not: comment_filters(user, filter)
+                }
+              },
+              sort: %{created_at: :desc}
+            },
+            pagination
+          )
+          |> Search.search_records(
+            preload(Comment, [
+              :deleted_by,
+              image: [:sources, tags: :aliases],
+              user: [awards: :badge]
+            ])
+          )
+
+        {:ok, results}
+
+      {:error, msg} ->
+        {:error, msg}
+    end
+  end
+
+  # Search-side exclusion filters mirroring the visibility rules a comment
+  # listing enforces: everyone hides comments carrying the viewer's hidden
+  # tags; non-staff additionally hide deleted and non-approved comments (a
+  # signed-in user still sees their own non-approved comments). The
+  # `show_hidden?` toggle only ever widens visibility for staff.
+  defp comment_filters(user, filter, show_hidden? \\ true) do
+    show_hidden? = show_hidden? and staff?(user)
+
+    [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
+    |> hide_deleted(show_hidden?)
+    |> hide_non_approved(user, show_hidden?)
+  end
+
+  defp staff?(%{role: role}) when role in ~W(assistant moderator admin), do: true
+  defp staff?(_user), do: false
+
+  defp hide_deleted(filters, true), do: filters
+
+  defp hide_deleted(filters, _show_hidden?),
+    do: [
+      %{term: %{hidden_from_users: true}},
+      %{term: %{"image.hidden_from_users" => true}}
+      | filters
+    ]
+
+  defp hide_non_approved(filters, _user, true), do: filters
+
+  defp hide_non_approved(filters, %{id: user_id}, _show_hidden?),
+    do: [
+      %{
+        bool: %{
+          should: [%{term: %{approved: false}}, %{term: %{"image.approved" => false}}],
+          must_not: [%{term: %{user_id: user_id}}]
+        }
+      }
+      | filters
+    ]
+
+  defp hide_non_approved(filters, _user, _show_hidden?),
+    do: [
+      %{term: %{approved: false}},
+      %{term: %{"image.approved" => false}}
+      | filters
+    ]
 
   @doc """
   Creates a comment.
