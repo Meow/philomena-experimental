@@ -80,6 +80,17 @@ defmodule Philomena.TopicsTest do
     {forum, locked}
   end
 
+  # A sticky topic in a normal forum, the shape unstick_topic/3 operates on.
+  # Sticking (like locking) leaves the topic visible, so the loader still admits
+  # a regular user. The internal stick engine writes no moderation log, so a
+  # later log assertion sees only the row unstick_topic/3 itself creates.
+  defp sticky_topic do
+    forum = forum_fixture()
+    topic = topic_fixture(forum)
+    {:ok, sticky} = Topics.stick_topic(topic)
+    {forum, sticky}
+  end
+
   defp only_moderation_log!, do: Repo.one!(ModerationLog)
 
   defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
@@ -676,6 +687,152 @@ defmodule Philomena.TopicsTest do
       assert log.type == "Topic.Lock:delete"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
       assert log.body == "Unlocked topic '#{topic.title}' in #{forum.name}"
+    end
+  end
+
+  describe "stick_topic/3" do
+    test "a regular user cannot stick a visible topic and the topic stays unstuck" do
+      # The visibility loader clears a regular user on a normal, visible topic;
+      # the block on the topic :hide permission is what denies the stick.
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert Topics.stick_topic(user, forum.short_name, topic.slug) == {:error, :unauthorized}
+
+      refute Repo.reload!(topic).sticky
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot stick a visible topic" do
+      # nil clears forum :show and topic visibility on normal content, but fails
+      # the topic :hide permission, so this is a clean unauthorized rather than a
+      # crash on the nil actor.
+      {forum, topic} = visible_topic()
+
+      assert Topics.stick_topic(nil, forum.short_name, topic.slug) == {:error, :unauthorized}
+
+      refute Repo.reload!(topic).sticky
+      assert moderation_log_count() == 0
+    end
+
+    test "an unknown forum is unauthorized for a regular user" do
+      assert Topics.stick_topic(confirmed_user_fixture(), "nonexistent", "whatever") ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.stick_topic(moderator_user_fixture(), forum.short_name, "nonexistent-topic") ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator sticks the topic, setting the sticky flag" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:ok, {loaded_forum, loaded_topic}} =
+               Topics.stick_topic(moderator, forum.short_name, topic.slug)
+
+      assert loaded_forum.id == forum.id
+      assert loaded_topic.id == topic.id
+
+      assert Repo.reload!(topic).sticky
+    end
+
+    test "a successful stick writes a byte-exact moderation log" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:ok, _} = Topics.stick_topic(moderator, forum.short_name, topic.slug)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Stick:create"
+      assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
+      assert log.body == "Stickied topic '#{topic.title}' in #{forum.name}"
+    end
+  end
+
+  describe "unstick_topic/3" do
+    test "a regular user cannot unstick a topic and it stays sticky" do
+      # Sticking leaves the topic visible, so the loader admits a regular user,
+      # who is then denied by the topic :hide permission.
+      user = confirmed_user_fixture()
+      {forum, topic} = sticky_topic()
+
+      assert Topics.unstick_topic(user, forum.short_name, topic.slug) == {:error, :unauthorized}
+
+      assert Repo.reload!(topic).sticky
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot unstick a topic" do
+      {forum, topic} = sticky_topic()
+
+      assert Topics.unstick_topic(nil, forum.short_name, topic.slug) == {:error, :unauthorized}
+
+      assert Repo.reload!(topic).sticky
+      assert moderation_log_count() == 0
+    end
+
+    test "an unknown forum is unauthorized for a regular user" do
+      assert Topics.unstick_topic(confirmed_user_fixture(), "nonexistent", "whatever") ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.unstick_topic(moderator_user_fixture(), forum.short_name, "nonexistent-topic") ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator unsticks the topic, clearing the sticky flag" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = sticky_topic()
+
+      assert {:ok, {loaded_forum, loaded_topic}} =
+               Topics.unstick_topic(moderator, forum.short_name, topic.slug)
+
+      assert loaded_forum.id == forum.id
+      assert loaded_topic.id == topic.id
+
+      refute Repo.reload!(topic).sticky
+    end
+
+    test "unsticking a non-sticky topic still succeeds" do
+      # unstick_changeset sets the column unconditionally, so a topic that was
+      # never sticky is a successful no-op rather than an error.
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+      refute Repo.reload!(topic).sticky
+
+      assert {:ok, {_forum, _topic}} =
+               Topics.unstick_topic(moderator, forum.short_name, topic.slug)
+
+      refute Repo.reload!(topic).sticky
+    end
+
+    test "a successful unstick writes a byte-exact moderation log" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = sticky_topic()
+
+      assert {:ok, _} = Topics.unstick_topic(moderator, forum.short_name, topic.slug)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Stick:delete"
+      assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
+      assert log.body == "Unstickied topic '#{topic.title}' in #{forum.name}"
     end
   end
 end

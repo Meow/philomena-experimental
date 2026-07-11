@@ -297,7 +297,61 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Sticks the topic named by `topic_slug` within the forum named by
+  `forum_slug`, on behalf of `actor` (the acting user).
+
+  The forum is loaded by short name and authorized for `:show`, the topic is
+  loaded by slug (a hidden topic stays invisible unless the actor may `:show`
+  it, exactly as the retired LoadTopicPlug `show_hidden: false` chain behaved),
+  and the `:hide` permission on the topic is then checked. On success a
+  moderation log is written attributing the stick to the actor.
+
+  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
+  to the topic), `{:error, forum, topic}` when the stick changeset is rejected
+  (unreachable in practice, since the changeset has no validation, but kept so
+  the controller can still redirect back to the topic), `{:error, :unauthorized}`
+  when the actor may not see the forum/topic or stick the topic, or
+  `{:error, :not_found}` when the topic does not exist.
+
+  ## Examples
+
+      iex> stick_topic(moderator, "dis", "some-topic")
+      {:ok, {%Forum{}, %Topic{}}}
+
+  """
+  @spec stick_topic(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def stick_topic(actor, forum_slug, topic_slug) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :hide, topic) do
+      case stick_topic(topic) do
+        {:ok, stuck_topic} ->
+          # Body reads the title off the post-update topic; forum name off the
+          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Stick:create",
+            Paths.topic_path(forum, stuck_topic),
+            "Stickied topic '#{stuck_topic.title}' in #{forum.name}"
+          )
+
+          {:ok, {forum, stuck_topic}}
+
+        _error ->
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  @doc """
   Makes a topic sticky, appearing at the top of its forum.
+
+  This is the internal stick engine shared with `stick_topic/3`; it performs no
+  authorization and writes no moderation log, so controller-facing callers go
+  through `stick_topic/3`.
 
   ## Examples
 
@@ -311,7 +365,56 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Unsticks the topic named by `topic_slug` within the forum named by
+  `forum_slug`, on behalf of `actor` (the acting user).
+
+  Loading and authorization mirror `stick_topic/3` (`:show` on the forum,
+  visibility on the topic, then `:hide` on the topic). On success a moderation
+  log is written.
+
+  Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
+  unstick is rejected (so the controller can redirect back to the topic),
+  `{:error, :unauthorized}`, or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> unstick_topic(moderator, "dis", "some-topic")
+      {:ok, {%Forum{}, %Topic{}}}
+
+  """
+  @spec unstick_topic(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def unstick_topic(actor, forum_slug, topic_slug) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :hide, topic) do
+      case unstick_topic(topic) do
+        {:ok, unstuck_topic} ->
+          # Body reads the title off the post-unstick topic; forum name off the
+          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Stick:delete",
+            Paths.topic_path(forum, unstuck_topic),
+            "Unstickied topic '#{unstuck_topic.title}' in #{forum.name}"
+          )
+
+          {:ok, {forum, unstuck_topic}}
+
+        _error ->
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  @doc """
   Removes sticky status from a topic.
+
+  Internal unstick engine shared with `unstick_topic/3`; it performs no
+  authorization and writes no moderation log, so controller-facing callers go
+  through `unstick_topic/3`.
 
   ## Examples
 
