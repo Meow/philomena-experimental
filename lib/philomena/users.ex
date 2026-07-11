@@ -156,6 +156,24 @@ defmodule Philomena.Users do
   """
   def get_user!(id), do: Repo.get!(User, id)
 
+  @doc """
+  Preloads a user's awards and their badges for display.
+
+  Returns `nil` when given `nil`.
+
+  ## Examples
+
+      iex> preload_awards(user)
+      %User{awards: [%Award{badge: %Badge{}}]}
+
+      iex> preload_awards(nil)
+      nil
+
+  """
+  @spec preload_awards(User.t() | nil) :: User.t() | nil
+  def preload_awards(nil), do: nil
+  def preload_awards(%User{} = user), do: Repo.preload(user, awards: :badge)
+
   ## User registration
 
   @doc """
