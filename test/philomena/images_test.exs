@@ -290,4 +290,110 @@ defmodule Philomena.ImagesTest do
       assert Images.remove_image_hash(moderator, "99999999999999999999") == {:error, :not_found}
     end
   end
+
+  describe "repair_image/2" do
+    test "a moderator flags the image for reprocessing and gets the image" do
+      # The engine writes with update_all, so the returned struct still carries
+      # the pre-repair flags; the cleared flags show on reload.
+      moderator = moderator_user_fixture()
+      image = image_fixture(processed: true, thumbnails_generated: true)
+
+      assert {:ok, repaired} = Images.repair_image(moderator, to_string(image.id))
+      assert repaired.id == image.id
+
+      reloaded = Repo.reload!(image)
+      refute reloaded.processed
+      refute reloaded.thumbnails_generated
+    end
+
+    test "an admin flags the image for reprocessing" do
+      admin = admin_user_fixture()
+      image = image_fixture(processed: true, thumbnails_generated: true)
+
+      assert {:ok, repaired} = Images.repair_image(admin, to_string(image.id))
+      assert repaired.id == image.id
+
+      reloaded = Repo.reload!(image)
+      refute reloaded.processed
+      refute reloaded.thumbnails_generated
+    end
+
+    test "a regular user cannot repair and the flags stay set" do
+      user = confirmed_user_fixture()
+      image = image_fixture(processed: true, thumbnails_generated: true)
+
+      assert Images.repair_image(user, to_string(image.id)) == {:error, :unauthorized}
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.processed
+      assert reloaded.thumbnails_generated
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot repair and the flags stay set" do
+      # A nil actor fails the :hide authorization on the loaded image, so this is
+      # a clean unauthorized rather than a crash.
+      image = image_fixture(processed: true, thumbnails_generated: true)
+
+      assert Images.repair_image(nil, to_string(image.id)) == {:error, :unauthorized}
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.processed
+      assert reloaded.thumbnails_generated
+      assert moderation_log_count() == 0
+    end
+
+    test "a successful repair writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} = Images.repair_image(moderator, to_string(image.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Repair:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Repaired image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, repaired} = Images.repair_image(moderator, image.id)
+      assert repaired.id == image.id
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found. No log.
+      moderator = moderator_user_fixture()
+
+      assert Images.repair_image(moderator, "2147483647") == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.repair_image(admin, "2147483647") == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.repair_image(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      # IntegerId.parse rejects a value the integer column could not hold before
+      # the row is ever queried, ahead of any authorization.
+      moderator = moderator_user_fixture()
+
+      assert Images.repair_image(moderator, "99999999999999999999") == {:error, :not_found}
+    end
+  end
 end

@@ -444,6 +444,54 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Repairs the image named by `image_id`, on behalf of `actor`, by regenerating
+  its thumbnails and purging its cached files.
+
+  The image is loaded by id and the `:hide` permission is checked before any
+  work is enqueued. A non-castable or out-of-range id is `{:error, :not_found}`.
+  A well-formed but unknown id is authorized as a `nil` load: an actor who may
+  not `:hide` it gets `{:error, :unauthorized}`, while an actor permitted to act
+  on the `nil` load gets `{:error, :not_found}`. On success the thumbnail
+  regeneration job is enqueued, the image's CDN files are purged, and a
+  moderation log is written attributing the repair to `actor`.
+
+  Returns `{:ok, image}` with the loaded image.
+
+  ## Examples
+
+      iex> repair_image(moderator, "42")
+      {:ok, %Image{}}
+
+      iex> repair_image(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec repair_image(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def repair_image(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image do
+      repair_image(image)
+      purge_files(image, image.hidden_image_key)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Repair:create",
+        Paths.image_path(image),
+        "Repaired image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
   Repairs an image by regenerating its thumbnails.
   Returns the image struct unchanged, for use in a pipeline.
 
