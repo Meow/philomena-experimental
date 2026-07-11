@@ -29,6 +29,7 @@ defmodule Philomena.Images do
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.ImageVotes
   alias Philomena.ImageHides
+  alias Philomena.ImageFaves
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
@@ -2556,6 +2557,93 @@ defmodule Philomena.Images do
 
   defp hide_result({:ok, _changes}, image), do: {:ok, get_image!(image.id) |> reindex_image()}
   defp hide_result(_error, _image), do: {:error, :hide_failed}
+
+  @doc """
+  Loads the image named by `image_id` for a fave or vote interaction by `actor`,
+  with the sources and tags preloaded that the forced-filter check needs.
+
+  Banned actors are rejected first with `{:error, :ban}` (a write with no
+  fingerprint is `{:error, :unauthorized}`), before the image is loaded. The
+  image is then loaded by id and authorized for `:vote`. A non-castable or
+  out-of-range id is `{:error, :not_found}`; a well-formed but unknown id is
+  authorized as a `nil` load, normally `{:error, :unauthorized}`.
+
+  Returns `{:ok, image}`. Shared by the fave and vote controllers, whose loader
+  plugs assign the result before the forced-filter check runs.
+
+  ## Examples
+
+      iex> load_image_for_interaction(actor, "42")
+      {:ok, %Image{}}
+
+  """
+  @spec load_image_for_interaction(Actor.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_image_for_interaction(actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(preload(Image, [:sources, tags: :aliases]), id),
+         :ok <- authorize(actor, :vote, image),
+         %Image{} <- image do
+      {:ok, image}
+    else
+      {:error, :ban} -> {:error, :ban}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Records `user`'s fave of the already-loaded `image`, which also casts an
+  implicit upvote (replacing an existing downvote). Faving is idempotent.
+
+  The image must already be loaded and authorized (the fave route's loader plug
+  and forced-filter check run first). Returns `{:ok, image}` with the image
+  reloaded and reindexed, or `{:error, :interaction_failed}` if the transaction
+  is rolled back.
+
+  ## Examples
+
+      iex> create_fave(image, user)
+      {:ok, %Image{}}
+
+  """
+  @spec create_fave(Image.t(), User.t()) :: {:ok, Image.t()} | {:error, :interaction_failed}
+  def create_fave(%Image{} = image, user) do
+    ImageFaves.delete_fave_transaction(image, user)
+    |> Multi.append(ImageFaves.create_fave_transaction(image, user))
+    |> Multi.append(ImageVotes.delete_vote_transaction(image, user))
+    |> Multi.append(ImageVotes.create_vote_transaction(image, user, true))
+    |> Repo.transaction()
+    |> interaction_result(image)
+  end
+
+  @doc """
+  Removes `user`'s fave of the already-loaded `image`, leaving any upvote in
+  place. Unfaving is idempotent.
+
+  Returns `{:ok, image}` with the image reloaded and reindexed, or
+  `{:error, :interaction_failed}` if the transaction is rolled back.
+
+  ## Examples
+
+      iex> delete_fave(image, user)
+      {:ok, %Image{}}
+
+  """
+  @spec delete_fave(Image.t(), User.t()) :: {:ok, Image.t()} | {:error, :interaction_failed}
+  def delete_fave(%Image{} = image, user) do
+    image
+    |> ImageFaves.delete_fave_transaction(user)
+    |> Repo.transaction()
+    |> interaction_result(image)
+  end
+
+  defp interaction_result({:ok, _changes}, image),
+    do: {:ok, get_image!(image.id) |> reindex_image()}
+
+  defp interaction_result(_error, _image), do: {:error, :interaction_failed}
 
   @doc """
   Assembles the interaction listing for the image named by `image_id`, on behalf

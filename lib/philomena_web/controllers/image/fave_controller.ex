@@ -1,68 +1,48 @@
 defmodule PhilomenaWeb.Image.FaveController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.{Images, Images.Image}
-  alias Philomena.{ImageFaves, ImageVotes}
-  alias Philomena.Repo
-  alias Ecto.Multi
+  alias Philomena.Images.Image
+  alias Philomena.Images
 
-  plug PhilomenaWeb.FilterBannedUsersPlug
-  plug PhilomenaWeb.CanaryMapPlug, create: :vote, delete: :vote
-
-  plug :load_and_authorize_resource,
-    model: Image,
-    id_name: "image_id",
-    persisted: true,
-    preload: [:sources, tags: :aliases]
-
+  plug PhilomenaWeb.UserAttributionPlug
+  plug :load_interaction_image
   plug PhilomenaWeb.FilterForcedUsersPlug
 
   def create(conn, _params) do
-    user = conn.assigns.current_user
-    image = conn.assigns.image
+    case Images.create_fave(conn.assigns.image, conn.assigns.current_user) do
+      {:ok, image} ->
+        json(conn, Image.interaction_data(image))
 
-    Multi.append(
-      ImageFaves.delete_fave_transaction(image, user),
-      ImageFaves.create_fave_transaction(image, user)
-    )
-    |> Multi.append(ImageVotes.delete_vote_transaction(image, user))
-    |> Multi.append(ImageVotes.create_vote_transaction(image, user, true))
-    |> Repo.transaction()
-    |> case do
-      {:ok, _result} ->
-        image =
-          Images.get_image!(image.id)
-          |> Images.reindex_image()
-
+      {:error, :interaction_failed} ->
         conn
-        |> json(Image.interaction_data(image))
-
-      _error ->
-        conn
-        |> Plug.Conn.put_status(409)
+        |> put_status(409)
         |> json(%{})
     end
   end
 
   def delete(conn, _params) do
-    user = conn.assigns.current_user
-    image = conn.assigns.image
+    case Images.delete_fave(conn.assigns.image, conn.assigns.current_user) do
+      {:ok, image} ->
+        json(conn, Image.interaction_data(image))
 
-    ImageFaves.delete_fave_transaction(image, user)
-    |> Repo.transaction()
-    |> case do
-      {:ok, _result} ->
-        image =
-          Images.get_image!(image.id)
-          |> Images.reindex_image()
-
+      {:error, :interaction_failed} ->
         conn
-        |> json(Image.interaction_data(image))
-
-      _error ->
-        conn
-        |> Plug.Conn.put_status(409)
+        |> put_status(409)
         |> json(%{})
+    end
+  end
+
+  # Loads and authorizes the image (and rejects banned actors) before the
+  # forced-filter check, which needs the image with its tags preloaded.
+  defp load_interaction_image(conn, _opts) do
+    case Images.load_image_for_interaction(conn.assigns.actor, conn.params["image_id"]) do
+      {:ok, image} ->
+        assign(conn, :image, image)
+
+      error ->
+        conn
+        |> PhilomenaWeb.FallbackController.call(error)
+        |> halt()
     end
   end
 end

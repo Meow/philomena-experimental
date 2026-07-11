@@ -4,6 +4,7 @@ defmodule Philomena.ImagesTest do
   import Ecto.Query
 
   alias Philomena.ImageFaves
+  alias Philomena.ImageFaves.ImageFave
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.ImageHides
   alias Philomena.ImageHides.ImageHide
@@ -93,6 +94,17 @@ defmodule Philomena.ImagesTest do
       from(h in ImageHide, where: h.image_id == ^image.id and h.user_id == ^user.id),
       :count
     )
+  end
+
+  defp fave_count(image, user) do
+    Repo.aggregate(
+      from(f in ImageFave, where: f.image_id == ^image.id and f.user_id == ^user.id),
+      :count
+    )
+  end
+
+  defp vote_row(image, user) do
+    Repo.get_by(ImageVote, image_id: image.id, user_id: user.id)
   end
 
   defp feature_row_count(image) do
@@ -2848,6 +2860,144 @@ defmodule Philomena.ImagesTest do
     test "an unknown well-formed id is not found for an admin" do
       assert Images.delete_image_hide(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
+    end
+  end
+
+  describe "load_image_for_interaction/2" do
+    test "a signed-in actor loads a visible image with sources and tags preloaded" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_interaction(actor(user), to_string(image.id))
+      assert loaded.id == image.id
+      assert Ecto.assoc_loaded?(loaded.sources)
+      assert Ecto.assoc_loaded?(loaded.tags)
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_interaction(actor(user), image.id)
+      assert loaded.id == image.id
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Images.load_image_for_interaction(actor, "not-a-number") == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Images.load_image_for_interaction(actor, "not-a-number") == {:error, :unauthorized}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.load_image_for_interaction(actor(confirmed_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      assert Images.load_image_for_interaction(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999"
+             ) == {:error, :not_found}
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular actor" do
+      # The image loads as nil and a regular actor fails :vote on the nil load, so
+      # the missing image surfaces as unauthorized.
+      assert Images.load_image_for_interaction(actor(confirmed_user_fixture()), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator" do
+      assert Images.load_image_for_interaction(actor(moderator_user_fixture()), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      # An admin clears :vote on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      assert Images.load_image_for_interaction(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "create_fave/2" do
+    test "records a fave and an implicit upvote, bumping faves_count and score" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+      base_faves = Repo.reload!(image).faves_count
+
+      assert {:ok, faved} = Images.create_fave(image, user)
+      assert faved.id == image.id
+      assert faved.faves_count == base_faves + 1
+      assert faved.score == base_score + 1
+
+      assert fave_count(image, user) == 1
+      assert %ImageVote{up: true} = vote_row(image, user)
+    end
+
+    test "replaces an existing downvote with the fave's upvote" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+
+      vote!(image, user, false)
+      assert %ImageVote{up: false} = vote_row(image, user)
+
+      assert {:ok, faved} = Images.create_fave(image, user)
+      assert %ImageVote{up: true} = vote_row(image, user)
+      assert faved.score == base_score + 1
+    end
+
+    test "faving again when already faved stays at a single fave row" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_faves = Repo.reload!(image).faves_count
+
+      assert {:ok, _} = Images.create_fave(image, user)
+      assert {:ok, again} = Images.create_fave(image, user)
+
+      assert fave_count(image, user) == 1
+      assert again.faves_count == base_faves + 1
+    end
+  end
+
+  describe "delete_fave/2" do
+    test "removes the fave but keeps the upvote, dropping faves_count and leaving score" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_score = Repo.reload!(image).score
+      base_faves = Repo.reload!(image).faves_count
+
+      {:ok, faved} = Images.create_fave(image, user)
+      assert fave_count(image, user) == 1
+
+      assert {:ok, unfaved} = Images.delete_fave(image, user)
+      assert unfaved.id == image.id
+      assert fave_count(image, user) == 0
+      assert unfaved.faves_count == base_faves
+      # The implicit upvote survives, so the score stays where the fave put it.
+      assert unfaved.score == base_score + 1
+      assert %ImageVote{up: true} = vote_row(image, user)
+      assert faved.score == unfaved.score
+    end
+
+    test "unfaving when no fave exists still succeeds" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      base_faves = Repo.reload!(image).faves_count
+      assert fave_count(image, user) == 0
+
+      assert {:ok, unfaved} = Images.delete_fave(image, user)
+      assert unfaved.id == image.id
+      assert fave_count(image, user) == 0
+      assert unfaved.faves_count == base_faves
     end
   end
 end
