@@ -92,14 +92,14 @@ defmodule Philomena.Comments do
   # Search-side exclusion filters mirroring the visibility rules a comment
   # listing enforces: everyone hides comments carrying the viewer's hidden
   # tags; non-staff additionally hide deleted and non-approved comments (a
-  # signed-in user still sees their own non-approved comments). The
-  # `show_hidden?` toggle only ever widens visibility for staff.
-  defp comment_filters(user, filter, show_hidden? \\ true) do
-    show_hidden? = show_hidden? and staff?(user)
+  # signed-in user still sees their own non-approved comments). Staff see the
+  # hidden and non-approved comments the extra filters would exclude.
+  defp comment_filters(user, filter) do
+    staff? = staff?(user)
 
     [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
-    |> hide_deleted(show_hidden?)
-    |> hide_non_approved(user, show_hidden?)
+    |> hide_deleted(staff?)
+    |> hide_non_approved(user, staff?)
   end
 
   defp staff?(%{role: role}) when role in ~W(assistant moderator admin), do: true

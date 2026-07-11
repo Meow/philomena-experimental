@@ -108,8 +108,8 @@ defmodule Philomena.PollVotesTest do
     end
 
     test "a topic without a poll is not found for a moderator" do
-      # The poll load returns not-found when the topic carries no poll, matching
-      # the retired LoadPollPlug 404, before the :hide authorization runs.
+      # A topic that carries no poll is not_found, and this check runs before
+      # the :hide authorization.
       forum = forum_fixture()
       topic = topic_fixture(forum)
 

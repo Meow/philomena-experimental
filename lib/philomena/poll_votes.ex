@@ -26,12 +26,12 @@ defmodule Philomena.PollVotes do
   of `actor` (the acting user), with each option's votes and their voters
   preloaded.
 
-  Reproduces the retired plug chain in its exact order: the forum is loaded by
-  short name and authorized for `:show`, the topic is loaded by slug with hidden
-  topics kept invisible unless the actor may `:show` them, the poll is loaded (a
-  topic with no poll is `{:error, :not_found}`, matching the LoadPollPlug 404),
-  and only then is the `:hide` permission on the topic checked. Options with no
-  votes are dropped so the view only renders options someone voted for.
+  In order: the forum is loaded by short name and authorized for `:show`, the
+  topic is loaded by slug with hidden topics kept invisible unless the actor may
+  `:show` them, the poll is loaded (a topic with no poll is
+  `{:error, :not_found}`), and only then is the `:hide` permission on the topic
+  checked. Options with no votes are dropped so the view only renders options
+  someone voted for.
 
   Returns `{:ok, options}` (the list the index view renders),
   `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
@@ -64,22 +64,20 @@ defmodule Philomena.PollVotes do
   Records `actor`'s votes on the poll attached to the topic named by `topic_slug`
   within the forum named by `forum_slug` from `poll_params`.
 
-  `verify_write_access/1` runs first, before any loading, exactly where the
-  retired `PhilomenaWeb.FilterBannedUsersPlug` sat: a banned actor is
+  `verify_write_access/1` runs first, before any loading: a banned actor is
   `{:error, :ban}` and an actor with no fingerprint is `{:error, :unauthorized}`,
   neither having touched the poll. Then the forum is loaded by short name and
   authorized for `:show`, the topic is loaded by slug with hidden topics kept
   invisible unless the actor may `:show` them, and the poll is loaded (a topic
   with no poll is `{:error, :not_found}`). Unlike the index and delete paths,
   there is no `:hide` check: recording a vote is open to any signed-in actor who
-  passes the ban filter, matching the route.
+  passes the ban filter.
 
   `poll_params` is the raw `"poll"` request parameter, which may be `nil` when
   the caller submitted no poll data. A `nil` (or otherwise non-map) params value
-  records nothing and is reported as a failure, reproducing the controller's
-  second `create` clause; a map is handed to `create_poll_votes/3`, whose own
-  filtering silently drops expired polls, repeat voters, and option ids that do
-  not belong to the poll.
+  records nothing and is reported as a failure; a map is handed to
+  `create_poll_votes/3`, whose own filtering silently drops expired polls, repeat
+  voters, and option ids that do not belong to the poll.
 
   Returns `{:ok, {forum, topic}}` when the votes are recorded,
   `{:error, forum, topic}` when nothing is recorded (both carry the topic needed
@@ -114,8 +112,7 @@ defmodule Philomena.PollVotes do
     end
   end
 
-  # No "poll" parameter was submitted; the controller's second create clause
-  # flashed the failure without recording anything.
+  # No "poll" parameter was submitted; report a failure without recording anything.
   defp record_votes(_user, forum, topic, _poll, _poll_params), do: {:error, forum, topic}
 
   @doc """
@@ -123,13 +120,12 @@ defmodule Philomena.PollVotes do
   named by `topic_slug` within the forum named by `forum_slug`, on behalf of
   `actor` (the acting user).
 
-  Reproduces the retired plug chain in its exact order: forum `:show`, topic
-  visibility, poll existence, then the `:hide` permission on the topic, all
-  before the vote is even looked up. `vote_id` is then parsed with
-  `Philomena.IntegerId`; a non-integer id, or an integer naming no vote, takes
-  the same bespoke failure path the controller used - `{:error, forum, topic}`
-  with the topic to redirect back to - rather than raising. A found vote is
-  deleted (decrementing the cached option and poll tallies).
+  In order: forum `:show`, topic visibility, poll existence, then the `:hide`
+  permission on the topic, all before the vote is even looked up. `vote_id` is
+  then parsed with `Philomena.IntegerId`; a non-integer id, or an integer naming
+  no vote, takes the bespoke failure path `{:error, forum, topic}` with the topic
+  to redirect back to, rather than raising. A found vote is deleted (decrementing
+  the cached option and poll tallies).
 
   Returns `{:ok, {forum, topic}}` when the vote is removed,
   `{:error, forum, topic}` when no vote matches `vote_id`,

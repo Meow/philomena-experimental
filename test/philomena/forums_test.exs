@@ -80,8 +80,8 @@ defmodule Philomena.ForumsTest do
     end
 
     test "an unknown forum slug is unauthorized for a regular user" do
-      # The retired plug loaded the forum by short name and authorized the nil
-      # result for :show, which no ordinary rule permits.
+      # An unknown short name loads nil, and authorizing nil for :show is
+      # unauthorized for every non-admin actor.
       assert Forums.subscribe(confirmed_user_fixture(), "nonexistent") ==
                {:error, :unauthorized}
     end

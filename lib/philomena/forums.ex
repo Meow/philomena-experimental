@@ -19,8 +19,7 @@ defmodule Philomena.Forums do
 
   The forum is loaded by its short name and authorized for `:show`. Because an
   unknown short name loads `nil` and no ordinary rule permits `:show` on `nil`,
-  a nonexistent forum comes back `{:error, :unauthorized}`, exactly as the
-  retired Canary load-and-authorize chain behaved.
+  a nonexistent forum comes back `{:error, :unauthorized}`.
 
   Returns `{:ok, forum}` (the forum is needed to render the subscription
   partial), `{:error, :unauthorized}` when the forum is not visible to the
@@ -64,18 +63,16 @@ defmodule Philomena.Forums do
           {:ok, Forum.t()} | {:error, :unauthorized}
   def unsubscribe(actor, forum_slug) do
     with {:ok, forum} <- load_forum(actor, forum_slug) do
-      # Deletion is idempotent and cannot fail; the hard match pins the crash
-      # semantics of the plug-based controller this replaces.
+      # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(forum, actor)
       {:ok, forum}
     end
   end
 
-  # Reproduces the retired plug chain: the forum was loaded by short name and
-  # authorized for `:show`. An unknown forum authorizes `nil`, which no ordinary
-  # rule permits, so it is unauthorized; the admin blanket rule authorizes `nil`
-  # and the nil forum then flows into the subscription helper unchanged, exactly
-  # as the old chain let it reach the action.
+  # The forum is loaded by short name and authorized for `:show`. An unknown
+  # forum authorizes `nil`, which no ordinary rule permits, so it is
+  # unauthorized; the admin blanket rule authorizes `nil` and the nil forum then
+  # flows into the subscription helper unchanged.
   defp load_forum(actor, forum_slug) do
     forum = Repo.get_by(Forum, short_name: to_string(forum_slug))
 

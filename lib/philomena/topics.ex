@@ -90,8 +90,7 @@ defmodule Philomena.Topics do
   def unsubscribe(actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
            load_forum_topic(actor, forum_slug, topic_slug, show_hidden: true) do
-      # Deletion is idempotent and cannot fail; the hard match pins the crash
-      # semantics of the plug-based controller this replaces.
+      # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(topic, actor)
       {:ok, {forum, topic}}
     end
@@ -101,14 +100,13 @@ defmodule Philomena.Topics do
   Loads the forum named by `forum_slug` and, within it, the topic named by
   `topic_slug`, on behalf of `actor` (the acting user).
 
-  Reproduces the retired plug chain shared by every forum/topic navigation
-  route: the forum was loaded by short name and authorized for `:show` (an
-  unknown forum authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}`), then the topic was loaded by slug within that
-  forum. `show_hidden` is the LoadTopicPlug option that diverges callers on
-  hidden topics: with `show_hidden: false` (the default) a hidden topic is
-  visible only when the actor may `:show` it, otherwise `{:error, :unauthorized}`;
-  with `show_hidden: true` a hidden topic always comes back.
+  The forum is loaded by short name and authorized for `:show` (an unknown forum
+  authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}`), then the topic is loaded by slug within that forum.
+  `show_hidden` diverges callers on hidden topics: with `show_hidden: false` (the
+  default) a hidden topic is visible only when the actor may `:show` it, otherwise
+  `{:error, :unauthorized}`; with `show_hidden: true` a hidden topic always comes
+  back.
 
   Returns `{:ok, forum, topic}`, `{:error, :unauthorized}` when the forum or the
   topic is not visible to the actor, or `{:error, :not_found}` when the forum
@@ -173,14 +171,11 @@ defmodule Philomena.Topics do
   Clears `actor`'s unread notifications for the topic named by `topic_slug`
   within the forum named by `forum_slug`.
 
-  Unlike the subscription API, this reproduces a plain `load_resource` chain
-  with no authorization: the forum was loaded by short name with `required:
-  true`, so an unknown short name is `{:error, :not_found}` (the not-found
-  handler, not the unauthorized path), and the topic was loaded with
-  `show_hidden: true` and no `:show` check. There is deliberately no forum or
-  topic visibility authorization here - a user can mark topics read in a forum
-  they cannot see, and hidden topics can be marked read, exactly as the retired
-  plug chain allowed.
+  Unlike the subscription API, this loads with no authorization: the forum is
+  loaded by short name, so an unknown short name is `{:error, :not_found}`, and
+  the topic is loaded including hidden topics with no `:show` check. There is
+  deliberately no forum or topic visibility authorization here - a user can mark
+  topics read in a forum they cannot see, and hidden topics can be marked read.
 
   Returns `{:ok, topic}` after clearing the notifications, or
   `{:error, :not_found}` when the forum or the topic does not exist.
@@ -521,8 +516,7 @@ defmodule Philomena.Topics do
 
   The forum is loaded by short name and authorized for `:show`, the topic is
   loaded by slug (a hidden topic stays invisible unless the actor may `:show`
-  it, exactly as the retired LoadTopicPlug `show_hidden: false` chain behaved),
-  and the `:hide` permission on the topic is then checked. On success a
+  it), and the `:hide` permission on the topic is then checked. On success a
   moderation log is written attributing the stick to the actor.
 
   Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
@@ -549,7 +543,8 @@ defmodule Philomena.Topics do
       case stick_topic(topic) do
         {:ok, stuck_topic} ->
           # Body reads the title off the post-update topic; forum name off the
-          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          # separately loaded forum. The log type and body strings are stored and
+          # displayed, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Stick:create",
@@ -612,7 +607,8 @@ defmodule Philomena.Topics do
       case unstick_topic(topic) do
         {:ok, unstuck_topic} ->
           # Body reads the title off the post-unstick topic; forum name off the
-          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          # separately loaded forum. The log type and body strings are stored and
+          # displayed, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Stick:delete",
@@ -653,8 +649,7 @@ defmodule Philomena.Topics do
 
   The forum is loaded by short name and authorized for `:show`, the topic is
   loaded by slug (a hidden topic stays invisible unless the actor may `:show`
-  it, exactly as the retired LoadTopicPlug `show_hidden: false` chain behaved),
-  and the `:hide` permission on the topic is then checked. On success a
+  it), and the `:hide` permission on the topic is then checked. On success a
   moderation log is written attributing the lock to the actor.
 
   Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
@@ -684,8 +679,8 @@ defmodule Philomena.Topics do
         {:ok, locked_topic} ->
           # The body reads the reason and title off the post-update topic, and
           # the forum name off the separately loaded forum (the loaded topic
-          # carries no preloaded `:forum`). This reproduces the retired
-          # `log_details/2` string byte-for-byte.
+          # carries no preloaded `:forum`). The log type and body strings are
+          # stored and displayed, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Lock:create",
@@ -696,8 +691,7 @@ defmodule Philomena.Topics do
           {:ok, {forum, locked_topic}}
 
         {:error, %Ecto.Changeset{}} ->
-          # Redirect target uses the pre-update topic, matching the old error
-          # path that redirected using the topic from the plug assigns.
+          # Redirect target uses the pre-update topic.
           {:error, forum, topic}
       end
     end
@@ -750,7 +744,8 @@ defmodule Philomena.Topics do
       case unlock_topic(topic) do
         {:ok, unlocked_topic} ->
           # Body reads the title off the post-unlock topic; forum name off the
-          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          # separately loaded forum. The log type and body strings are stored and
+          # displayed, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Lock:delete",
@@ -791,8 +786,7 @@ defmodule Philomena.Topics do
 
   The forum is loaded by short name and authorized for `:show`, the topic is
   loaded by slug (a hidden topic stays invisible unless the actor may `:show`
-  it, exactly as the retired LoadTopicPlug `show_hidden: false` chain behaved),
-  and the `:hide` permission on the topic is then checked. Only after
+  it), and the `:hide` permission on the topic is then checked. Only after
   authorization is the target forum id parsed and the move attempted, so an
   unprivileged actor sending a malformed target still gets unauthorized. On
   success the NEW forum is preloaded (needed for both the redirect target and
@@ -832,10 +826,9 @@ defmodule Philomena.Topics do
       # back to the SOURCE topic - so it carries the source `forum` and `topic`.
       with {:ok, target_forum_id} <- parse_target_forum_id(topic_params),
            {:ok, %{topic: moved_topic}} <- move_topic(topic, target_forum_id) do
-        # The old controller force-preloaded the NEW forum off the moved topic
-        # for both the redirect target and the log body; that preload lives here
-        # now. The body reproduces the retired `log_details/2` string
-        # byte-for-byte.
+        # Force-preload the NEW forum off the moved topic for both the redirect
+        # target and the log body. The log type and body strings are stored and
+        # displayed, so keep them exact.
         new_forum = Repo.preload(moved_topic, :forum, force: true).forum
 
         ModerationLogs.create_moderation_log(
@@ -853,8 +846,7 @@ defmodule Philomena.Topics do
   end
 
   # `nil` topic_params (the param was absent entirely) and a missing/non-integer
-  # `target_forum_id` all collapse to `:error`, matching the retired
-  # IntegerId-based controller and its missing-param fallback clause.
+  # `target_forum_id` all collapse to `:error`.
   defp parse_target_forum_id(topic_params) do
     (topic_params || %{})
     |> Map.get("target_forum_id")
@@ -902,8 +894,7 @@ defmodule Philomena.Topics do
 
   The forum is loaded by short name and authorized for `:show`, the topic is
   loaded by slug (a topic already hidden stays invisible unless the actor may
-  `:show` it, exactly as the retired LoadTopicPlug `show_hidden: false` chain
-  behaved), and the `:hide` permission on the topic is then checked. On success
+  `:show` it), and the `:hide` permission on the topic is then checked. On success
   the forum post/topic counts are updated, the topic's posts are reindexed, and
   a moderation log is written attributing the deletion to the actor.
 
@@ -934,8 +925,8 @@ defmodule Philomena.Topics do
         {:ok, hidden_topic} ->
           # The body reads the reason and title off the post-update topic, and
           # the forum name off the separately loaded forum (the loaded topic
-          # carries no preloaded `:forum`). This reproduces the retired
-          # `log_details/2` string byte-for-byte.
+          # carries no preloaded `:forum`). The log type and body strings are
+          # stored and displayed, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Hide:create",
@@ -946,8 +937,7 @@ defmodule Philomena.Topics do
           {:ok, {forum, hidden_topic}}
 
         {:error, %Ecto.Changeset{}} ->
-          # Redirect target uses the pre-update topic, matching the old error
-          # path that redirected using the topic from the plug assigns.
+          # Redirect target uses the pre-update topic.
           {:error, forum, topic}
       end
     end
@@ -1022,7 +1012,8 @@ defmodule Philomena.Topics do
       case unhide_topic(topic) do
         {:ok, restored_topic} ->
           # Body reads the title off the post-restore topic; forum name off the
-          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          # separately loaded forum. The log type and body strings are stored and
+          # displayed, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Hide:delete",

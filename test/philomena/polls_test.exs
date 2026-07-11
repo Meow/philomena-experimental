@@ -100,8 +100,7 @@ defmodule Philomena.PollsTest do
     end
 
     test "a topic without a poll is not found for a moderator" do
-      # The poll load returns not-found when the topic carries no poll, matching
-      # the retired LoadPollPlug 404.
+      # A topic that carries no poll is not_found.
       forum = forum_fixture()
       topic = topic_fixture(forum)
 

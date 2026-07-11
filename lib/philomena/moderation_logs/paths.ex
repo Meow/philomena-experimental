@@ -4,19 +4,19 @@ defmodule Philomena.ModerationLogs.Paths do
 
   The values are data, not verified routes: `subject_path` is stored in the
   `moderation_logs` table and rendered by the mod-log UI as an opaque `href`.
-  We deliberately give up compile-time route verification for them; they are
-  simple, stable paths.
+  There is no compile-time route verification for them; they are simple, stable
+  paths.
 
   ## Encoding
 
-  `~p` runs each interpolated dynamic segment through `Phoenix.Param.to_param/1`
-  and then `URI.encode(segment, &URI.char_unreserved?/1)`.
-  Slugs (`Philomena.Slug.slug/1`) can contain characters that are *not*
-  URI-unreserved - notably `+` (from spaces) and other escaped punctuation runs
-  like `-dot-`, `-fwslash-` - so those bytes must be percent-encoded to stay
-  identical to `~p`. `encode_segment/1` below matches Phoenix exactly.
-  Integer ids and forum short names (`~r/\\A[a-z]+\\z/`) pass through unchanged,
-  but are encoded the same way for uniformity.
+  Each dynamic segment runs through `Phoenix.Param.to_param/1` and then
+  `URI.encode(segment, &URI.char_unreserved?/1)`, so the strings match Phoenix's
+  VerifiedRoutes segment encoding used elsewhere in the web layer. Slugs
+  (`Philomena.Slug.slug/1`) can contain characters that are *not* URI-unreserved
+  - notably `+` (from spaces) and escaped punctuation runs like `-dot-`,
+  `-fwslash-` - so those bytes are percent-encoded. Integer ids and forum short
+  names (`~r/\\A[a-z]+\\z/`) pass through unchanged, but are encoded the same way
+  for uniformity.
   """
 
   alias Philomena.Images.Image
