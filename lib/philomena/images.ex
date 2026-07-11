@@ -20,6 +20,7 @@ defmodule Philomena.Images do
   alias Philomena.Images.Source
   alias Philomena.Images
   alias Philomena.IndexWorker
+  alias Philomena.IntegerId
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.Notifications.ImageCommentNotification
@@ -1520,6 +1521,37 @@ defmodule Philomena.Images do
 
   defp notify_merge(_repo, _changes, source, target) do
     Notifications.create_image_merge_notification(target, source)
+  end
+
+  @doc """
+  Clears `actor`'s unread notifications for the image named by `image_id`.
+
+  The image is loaded by id with no authorization: any authenticated actor may
+  mark any image read, so there is deliberately no visibility check. A
+  non-castable or unknown id is `{:error, :not_found}`.
+
+  Returns `{:ok, image}` after clearing `actor`'s image comment and image merge
+  notifications for it.
+
+  ## Examples
+
+      iex> mark_image_read(user, "42")
+      {:ok, %Image{}}
+
+      iex> mark_image_read(user, "nonexistent")
+      {:error, :not_found}
+
+  """
+  @spec mark_image_read(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :not_found}
+  def mark_image_read(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         %Image{} = image <- Repo.get(Image, id) do
+      clear_image_notification(image, actor)
+      {:ok, image}
+    else
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc """

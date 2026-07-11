@@ -24,6 +24,8 @@ defmodule Philomena.Images.Image do
   alias Philomena.Images.DnpValidator
   alias Philomena.Repo
 
+  @type t :: %__MODULE__{}
+
   schema "images" do
     belongs_to :user, User
     belongs_to :deleter, User, source: :deleted_by_id

@@ -1,11 +1,50 @@
 defmodule Philomena.ImagesTest do
   use Philomena.DataCase, async: true
 
+  import Ecto.Query
+
   alias Philomena.Images
+  alias Philomena.Notifications
+  alias Philomena.Notifications.ImageCommentNotification
+  alias Philomena.Notifications.ImageMergeNotification
 
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
+  import Philomena.CommentsFixtures
+
+  defp comment_notification?(image, user) do
+    Repo.exists?(
+      from n in ImageCommentNotification,
+        where: n.image_id == ^image.id and n.user_id == ^user.id
+    )
+  end
+
+  defp merge_notification?(image, user) do
+    Repo.exists?(
+      from n in ImageMergeNotification,
+        where: n.target_id == ^image.id and n.user_id == ^user.id
+    )
+  end
+
+  # Arranges a real unread image comment notification for `user`: subscribe the
+  # user to the image, then have another user comment so a notification lands.
+  defp arrange_comment_notification(image, user) do
+    author = confirmed_user_fixture()
+    {:ok, _} = Images.create_subscription(image, user)
+    comment = comment_fixture(image, author)
+    {:ok, _} = Notifications.create_image_comment_notification(author, image, comment)
+    :ok
+  end
+
+  # Arranges a real unread image merge notification for `user`: subscribe the
+  # user to the target image, then merge a source image into it.
+  defp arrange_merge_notification(image, user) do
+    source = image_fixture()
+    {:ok, _} = Images.create_subscription(image, user)
+    {:ok, _} = Notifications.create_image_merge_notification(image, source)
+    :ok
+  end
 
   describe "create_image/2 duplicate detection" do
     # image_changeset's prepare_changes rejects a new upload whose
@@ -58,6 +97,98 @@ defmodule Philomena.ImagesTest do
       assert "has already been uploaded: it's image #{other.id}" in errors_on(changeset).image
       # The target image keeps its own fingerprint.
       assert Repo.reload!(image).image_orig_sha512_hash == image.image_orig_sha512_hash
+    end
+  end
+
+  describe "mark_image_read/2" do
+    test "clears the actor's image comment notification and returns the image" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      arrange_comment_notification(image, user)
+      assert comment_notification?(image, user)
+
+      assert {:ok, marked} = Images.mark_image_read(user, to_string(image.id))
+      assert marked.id == image.id
+      refute comment_notification?(image, user)
+    end
+
+    test "clears the actor's image merge notification and returns the image" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      arrange_merge_notification(image, user)
+      assert merge_notification?(image, user)
+
+      assert {:ok, marked} = Images.mark_image_read(user, to_string(image.id))
+      assert marked.id == image.id
+      refute merge_notification?(image, user)
+    end
+
+    test "clears both comment and merge notifications at once" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      arrange_comment_notification(image, user)
+      arrange_merge_notification(image, user)
+      assert comment_notification?(image, user)
+      assert merge_notification?(image, user)
+
+      assert {:ok, marked} = Images.mark_image_read(user, to_string(image.id))
+      assert marked.id == image.id
+      refute comment_notification?(image, user)
+      refute merge_notification?(image, user)
+    end
+
+    test "clears only the actor's notifications, leaving another user's intact" do
+      # clear_image_notification filters on the actor's user_id, so a second
+      # subscriber's notification for the same image is untouched.
+      user = confirmed_user_fixture()
+      other = confirmed_user_fixture()
+      image = image_fixture()
+      arrange_comment_notification(image, user)
+      arrange_comment_notification(image, other)
+      assert comment_notification?(image, user)
+      assert comment_notification?(image, other)
+
+      assert {:ok, _} = Images.mark_image_read(user, to_string(image.id))
+      refute comment_notification?(image, user)
+      assert comment_notification?(image, other)
+    end
+
+    test "succeeds with no notifications to clear" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      refute comment_notification?(image, user)
+      refute merge_notification?(image, user)
+
+      assert {:ok, marked} = Images.mark_image_read(user, to_string(image.id))
+      assert marked.id == image.id
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, marked} = Images.mark_image_read(user, image.id)
+      assert marked.id == image.id
+    end
+
+    test "an unknown well-formed id is not found" do
+      user = confirmed_user_fixture()
+
+      assert Images.mark_image_read(user, "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      user = confirmed_user_fixture()
+
+      assert Images.mark_image_read(user, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      # IntegerId.parse rejects a value the integer column could not hold before
+      # the row is ever queried, so it is a plain not found rather than a crash.
+      user = confirmed_user_fixture()
+
+      assert Images.mark_image_read(user, "99999999999999999999") == {:error, :not_found}
     end
   end
 end
