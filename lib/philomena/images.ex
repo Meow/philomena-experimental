@@ -411,6 +411,88 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Loads the image named by `image_id` for editing its moderation notes, on
+  behalf of `actor`.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`.
+
+  Returns `{:ok, image}` with the loaded image.
+
+  ## Examples
+
+      iex> load_image_for_scratchpad(moderator, "42")
+      {:ok, %Image{}}
+
+      iex> load_image_for_scratchpad(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec load_image_for_scratchpad(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def load_image_for_scratchpad(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image do
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
+  Updates the moderation notes on the image named by `image_id`, on behalf of
+  `actor`, from the controller-shaped `attrs` (a map with a `"scratchpad"` key).
+
+  The image is loaded by id and authorized for `:hide` before it is modified. A
+  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
+  unknown id is authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. A blank value clears the notes. On success the
+  notes are updated, the image is reindexed, and a moderation log is written
+  attributing the change to `actor`.
+
+  Returns `{:ok, image}` with the updated image.
+
+  ## Examples
+
+      iex> update_scratchpad(moderator, "42", %{"scratchpad" => "watch closely"})
+      {:ok, %Image{}}
+
+      iex> update_scratchpad(user, "42", %{"scratchpad" => "watch closely"})
+      {:error, :unauthorized}
+
+  """
+  @spec update_scratchpad(User.t(), String.t() | integer(), map()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def update_scratchpad(actor, image_id, attrs) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, image} <- update_scratchpad(image, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Scratchpad:update",
+        Paths.image_path(image),
+        "Updated mod notes on image #{image.id} (#{image.scratchpad})"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
   Updates the scratchpad notes on an image.
 
   ## Examples

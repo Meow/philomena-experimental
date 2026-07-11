@@ -673,4 +673,202 @@ defmodule Philomena.ImagesTest do
       assert Images.image_fave_list(nil, "99999999999999999999") == {:error, :not_found}
     end
   end
+
+  describe "load_image_for_scratchpad/2" do
+    test "a moderator loads a known image" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_scratchpad(moderator, to_string(image.id))
+      assert loaded.id == image.id
+    end
+
+    test "an admin loads a known image" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_scratchpad(admin, to_string(image.id))
+      assert loaded.id == image.id
+    end
+
+    test "a regular user cannot load the image" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.load_image_for_scratchpad(user, to_string(image.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor cannot load the image" do
+      image = image_fixture()
+
+      assert Images.load_image_for_scratchpad(nil, to_string(image.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, loaded} = Images.load_image_for_scratchpad(moderator, image.id)
+      assert loaded.id == image.id
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found.
+      moderator = moderator_user_fixture()
+
+      assert Images.load_image_for_scratchpad(moderator, "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.load_image_for_scratchpad(admin, "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.load_image_for_scratchpad(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.load_image_for_scratchpad(moderator, "99999999999999999999") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "update_scratchpad/3" do
+    test "a moderator stores the scratchpad and gets the image" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, updated} =
+               Images.update_scratchpad(moderator, to_string(image.id), %{
+                 "scratchpad" => "watch closely"
+               })
+
+      assert updated.id == image.id
+      assert updated.scratchpad == "watch closely"
+      assert Repo.reload!(image).scratchpad == "watch closely"
+    end
+
+    test "an admin stores the scratchpad" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _updated} =
+               Images.update_scratchpad(admin, to_string(image.id), %{"scratchpad" => "noted"})
+
+      assert Repo.reload!(image).scratchpad == "noted"
+    end
+
+    test "a blank scratchpad clears the field to nil" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(scratchpad: "existing note")
+
+      assert {:ok, updated} =
+               Images.update_scratchpad(moderator, to_string(image.id), %{"scratchpad" => ""})
+
+      assert updated.scratchpad == nil
+      assert Repo.reload!(image).scratchpad == nil
+    end
+
+    test "a successful update writes an exact moderation log with the new value" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.update_scratchpad(moderator, to_string(image.id), %{
+                 "scratchpad" => "watch closely"
+               })
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Scratchpad:update"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Updated mod notes on image #{image.id} (watch closely)"
+    end
+
+    test "clearing the scratchpad logs an empty value in the parentheses" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(scratchpad: "existing note")
+
+      assert {:ok, _} =
+               Images.update_scratchpad(moderator, to_string(image.id), %{"scratchpad" => ""})
+
+      log = only_moderation_log!()
+      assert log.body == "Updated mod notes on image #{image.id} ()"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, updated} =
+               Images.update_scratchpad(moderator, image.id, %{"scratchpad" => "noted"})
+
+      assert updated.scratchpad == "noted"
+    end
+
+    test "a regular user cannot update and the scratchpad and log stay untouched" do
+      user = confirmed_user_fixture()
+      image = image_fixture(scratchpad: "existing note")
+
+      assert Images.update_scratchpad(user, to_string(image.id), %{"scratchpad" => "new"}) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(image).scratchpad == "existing note"
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot update and the scratchpad and log stay untouched" do
+      image = image_fixture(scratchpad: "existing note")
+
+      assert Images.update_scratchpad(nil, to_string(image.id), %{"scratchpad" => "new"}) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(image).scratchpad == "existing note"
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_scratchpad(moderator, "2147483647", %{"scratchpad" => "new"}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      admin = admin_user_fixture()
+
+      assert Images.update_scratchpad(admin, "2147483647", %{"scratchpad" => "new"}) ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_scratchpad(moderator, "not-a-number", %{"scratchpad" => "new"}) ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_scratchpad(moderator, "99999999999999999999", %{"scratchpad" => "new"}) ==
+               {:error, :not_found}
+    end
+  end
 end
