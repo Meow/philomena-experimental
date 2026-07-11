@@ -1752,6 +1752,77 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Subscribes `actor` to the image named by `image_id`, so they are notified of
+  new comments on it.
+
+  The image is loaded by id and authorized for `:show`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:show` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. Subscribing is idempotent.
+
+  Returns `{:ok, image}` (the image is needed to render the subscription
+  partial), or `{:error, %Ecto.Changeset{}}` if the subscription insert is
+  rejected.
+
+  ## Examples
+
+      iex> subscribe_image(user, "42")
+      {:ok, %Image{}}
+
+      iex> subscribe_image(user, "999999999")
+      {:error, :unauthorized}
+
+  """
+  @spec subscribe_image(User.t() | nil, String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def subscribe_image(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :show, image),
+         %Image{} <- image,
+         {:ok, _subscription} <- create_subscription(image, actor) do
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Unsubscribes `actor` from the image named by `image_id`.
+
+  Loading and authorization mirror `subscribe_image/2`. Unsubscribing is
+  idempotent and cannot fail, so there is no changeset error shape.
+
+  Returns `{:ok, image}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> unsubscribe_image(user, "42")
+      {:ok, %Image{}}
+
+  """
+  @spec unsubscribe_image(User.t() | nil, String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def unsubscribe_image(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :show, image),
+         %Image{} <- image do
+      # Deletion is idempotent and cannot fail; the hard match crashes if it does.
+      {:ok, _subscription} = delete_subscription(image, actor)
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
   Assembles the interaction listing for the image named by `image_id`, on behalf
   of `actor` (a user, or `nil` for an anonymous visitor).
 

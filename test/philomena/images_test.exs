@@ -871,4 +871,160 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
   end
+
+  describe "subscribe_image/2" do
+    test "a regular user subscribes to a visible image and the row is created" do
+      # The :show authorization admits a regular user on a visible image, so
+      # subscribing is not staff-gated.
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, subscribed} = Images.subscribe_image(user, to_string(image.id))
+      assert subscribed.id == image.id
+      assert Images.subscribed?(image, user)
+    end
+
+    test "a moderator subscribes to a visible image" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} = Images.subscribe_image(moderator, to_string(image.id))
+      assert Images.subscribed?(image, moderator)
+    end
+
+    test "subscribing twice is idempotent and stays subscribed" do
+      # create_subscription inserts with on_conflict: :nothing, so a repeat is a
+      # successful no-op rather than a changeset error.
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} = Images.subscribe_image(user, to_string(image.id))
+      assert {:ok, _} = Images.subscribe_image(user, to_string(image.id))
+      assert Images.subscribed?(image, user)
+    end
+
+    test "a banned user still subscribes" do
+      # subscribe_image runs no ban check, so a banned actor reaches the
+      # subscription just like any other viewer.
+      user = banned_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} = Images.subscribe_image(user, to_string(image.id))
+      assert Images.subscribed?(image, user)
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, subscribed} = Images.subscribe_image(user, image.id)
+      assert subscribed.id == image.id
+    end
+
+    test "an unknown well-formed id is unauthorized for an anonymous actor" do
+      # The image loads as nil and a nil actor fails :show on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found.
+      assert Images.subscribe_image(nil, "2147483647") == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular user" do
+      assert Images.subscribe_image(confirmed_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator" do
+      assert Images.subscribe_image(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      # An admin clears :show on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      assert Images.subscribe_image(admin_user_fixture(), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.subscribe_image(confirmed_user_fixture(), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      # IntegerId.parse rejects a value the integer column could not hold before
+      # the row is ever queried, ahead of any authorization.
+      assert Images.subscribe_image(confirmed_user_fixture(), "99999999999999999999") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "unsubscribe_image/2" do
+    test "a regular user unsubscribes from a visible image and the row is removed" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      {:ok, _} = Images.create_subscription(image, user)
+      assert Images.subscribed?(image, user)
+
+      assert {:ok, unsubscribed} = Images.unsubscribe_image(user, to_string(image.id))
+      assert unsubscribed.id == image.id
+      refute Images.subscribed?(image, user)
+    end
+
+    test "unsubscribing with no existing subscription still succeeds" do
+      # delete_subscription runs an unconditional delete and hard-matches {:ok, _},
+      # so the absence of a row is not an error.
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      refute Images.subscribed?(image, user)
+
+      assert {:ok, unsubscribed} = Images.unsubscribe_image(user, to_string(image.id))
+      assert unsubscribed.id == image.id
+      refute Images.subscribed?(image, user)
+    end
+
+    test "a banned user still unsubscribes" do
+      user = banned_user_fixture()
+      image = image_fixture()
+      {:ok, _} = Images.create_subscription(image, user)
+
+      assert {:ok, _} = Images.unsubscribe_image(user, to_string(image.id))
+      refute Images.subscribed?(image, user)
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      {:ok, _} = Images.create_subscription(image, user)
+
+      assert {:ok, unsubscribed} = Images.unsubscribe_image(user, image.id)
+      assert unsubscribed.id == image.id
+      refute Images.subscribed?(image, user)
+    end
+
+    test "an unknown well-formed id is unauthorized for an anonymous actor" do
+      assert Images.unsubscribe_image(nil, "2147483647") == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular user" do
+      assert Images.unsubscribe_image(confirmed_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator" do
+      assert Images.unsubscribe_image(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      assert Images.unsubscribe_image(admin_user_fixture(), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.unsubscribe_image(confirmed_user_fixture(), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      assert Images.unsubscribe_image(confirmed_user_fixture(), "99999999999999999999") ==
+               {:error, :not_found}
+    end
+  end
 end
