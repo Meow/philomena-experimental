@@ -4,10 +4,16 @@ defmodule Philomena.Comments do
   """
 
   import Ecto.Query, warn: false
+
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
   alias PhilomenaQuery.Search
+  alias Philomena.IntegerId
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.UserStatistics
   alias Philomena.Users.User
   alias Philomena.Filters.Filter
@@ -312,38 +318,81 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Approves a comment, closes associated reports, and increments the user comments
-  posted count.
+  Approves the comment named by the raw request `comment_id`, on behalf of
+  `actor` (a user, or `nil` for an anonymous visitor).
 
-  ## Parameters
-  - comment: The comment to approve
-  - user: The user performing the approval
+  Authorization (`:approve` on the loaded comment) happens here; on success the
+  comment's associated reports are closed, the author's comment count is
+  incremented, the comment is reindexed, and a moderation log is written
+  attributing the approval to `actor`. An id that cannot name a row is
+  `{:error, :not_found}`, while a well-formed id that names no row authorizes
+  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`.
+
+  Approving an already-approved comment succeeds and re-logs, matching the
+  action's idempotent behavior. A failed approval changeset returns
+  `{:error, %Comment{}}` carrying the loaded comment.
 
   ## Examples
 
-      iex> approve_comment(comment, user)
+      iex> approve_comment(moderator, "1")
       {:ok, %Comment{}}
 
+      iex> approve_comment(user, "1")
+      {:error, :unauthorized}
+
+      iex> approve_comment(moderator, "not-an-integer")
+      {:error, :not_found}
+
   """
-  def approve_comment(%Comment{} = comment, user) do
-    report_query = Reports.close_report_query({"Comment", comment.id}, user)
-    comment = Comment.approve_changeset(comment)
+  @spec approve_comment(User.t() | nil, any()) ::
+          {:ok, Comment.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Comment.t()}
+  def approve_comment(actor, comment_id) do
+    case IntegerId.parse(comment_id) do
+      {:ok, id} ->
+        comment = Repo.get(Comment, id)
+
+        with :ok <- authorize(actor, :approve, comment) do
+          approve_loaded_comment(actor, comment)
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp approve_loaded_comment(actor, %Comment{} = comment) do
+    report_query = Reports.close_report_query({"Comment", comment.id}, actor)
+    changeset = Comment.approve_changeset(comment)
 
     Multi.new()
-    |> Multi.update(:comment, comment)
+    |> Multi.update(:comment, changeset)
     |> Multi.update_all(:reports, report_query, [])
     |> Repo.transaction()
     |> case do
-      {:ok, %{comment: comment, reports: {_count, reports}}} ->
-        UserStatistics.inc_stat(comment.user_id, :comments_count)
+      {:ok, %{comment: approved_comment, reports: {_count, reports}}} ->
+        UserStatistics.inc_stat(approved_comment.user_id, :comments_count)
         Reports.reindex_reports(reports)
-        reindex_comment(comment)
+        reindex_comment(approved_comment)
+        log_comment_approval(actor, approved_comment)
 
-        {:ok, comment}
+        {:ok, approved_comment}
 
-      error ->
-        error
+      _error ->
+        # The approval changeset sets a boolean unconditionally, so this branch
+        # is not reachable; it carries the loaded comment for symmetry.
+        {:error, comment}
     end
+  end
+
+  defp log_comment_approval(actor, %Comment{} = comment) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Image.Comment.Approve:create",
+      Paths.image_comment_path(comment.image_id, comment.id),
+      "Approved comment on image #{comment.image_id}"
+    )
   end
 
   @doc """

@@ -1,7 +1,13 @@
 defmodule Philomena.CommentsTest do
   @moduledoc """
-  Context-level tests for `Philomena.Comments.search_comments/4`, which runs a
-  comment search against OpenSearch and applies the viewer's visibility rules.
+  Context-level tests for `Philomena.Comments`.
+
+  `search_comments/4` runs a comment search against OpenSearch and applies the
+  viewer's visibility rules. `approve_comment/2` is the actor-first moderation
+  wrapper: it pins the authorization matrix, the two global error shapes routed
+  through the id guard, the approval effects (report closure, author comment
+  count, reindex), and the moderation log entry - type, body, and subject path
+  asserted exactly.
   """
 
   use Philomena.DataCase, async: false
@@ -10,12 +16,16 @@ defmodule Philomena.CommentsTest do
 
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
+  import Philomena.ReportsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Comments
   alias Philomena.Filters.Filter
   alias Philomena.Repo
   alias Philomena.Comments.Comment
+  alias Philomena.ModerationLogs.ModerationLog
+  alias Philomena.Reports.Report
+  alias Philomena.Users.User
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 
@@ -110,6 +120,129 @@ defmodule Philomena.CommentsTest do
                Comments.search_comments(nil, @empty_filter, "grapefruit", @pagination)
 
       assert [_entry] = results.entries
+    end
+  end
+
+  # A comment authored by a fresh (untrusted) user containing an external link
+  # is not auto-approved on creation (see Philomena.Schema.Approval); returns the
+  # comment together with its author so the comments_count bump can be checked.
+  defp unapproved_comment(image) do
+    author = confirmed_user_fixture()
+
+    comment =
+      comment_fixture(image, author, %{"body" => "check this out https://spam.example/"})
+
+    refute comment.approved
+    {comment, author}
+  end
+
+  defp no_moderation_logs! do
+    assert Repo.aggregate(ModerationLog, :count) == 0
+  end
+
+  describe "approve_comment/2" do
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "denies an anonymous actor", %{image: image} do
+      {comment, _author} = unapproved_comment(image)
+
+      assert Comments.approve_comment(nil, "#{comment.id}") == {:error, :unauthorized}
+      refute Repo.reload!(comment).approved
+      no_moderation_logs!()
+    end
+
+    test "denies a regular user", %{image: image} do
+      {comment, _author} = unapproved_comment(image)
+
+      assert Comments.approve_comment(confirmed_user_fixture(), "#{comment.id}") ==
+               {:error, :unauthorized}
+
+      refute Repo.reload!(comment).approved
+      no_moderation_logs!()
+    end
+
+    test "a moderator approves the comment, which is returned approved", %{image: image} do
+      {comment, _author} = unapproved_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, %Comment{} = approved} = Comments.approve_comment(moderator, "#{comment.id}")
+
+      assert approved.id == comment.id
+      assert approved.approved
+
+      assert Repo.reload!(comment).approved
+    end
+
+    test "the moderation log names the image and comment exactly", %{image: image} do
+      {comment, _author} = unapproved_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, _} = Comments.approve_comment(moderator, "#{comment.id}")
+
+      log = Repo.one!(ModerationLog)
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Comment.Approve:create"
+      assert log.body == "Approved comment on image #{image.id}"
+      assert log.subject_path == "/images/#{image.id}#comment_#{comment.id}"
+    end
+
+    test "approving increments the author's comments_count by one", %{image: image} do
+      {comment, author} = unapproved_comment(image)
+      before = Repo.get!(User, author.id).comments_count
+
+      assert {:ok, _} = Comments.approve_comment(moderator_user_fixture(), "#{comment.id}")
+
+      assert Repo.get!(User, author.id).comments_count == before + 1
+    end
+
+    test "approving closes the comment's open reports", %{image: image} do
+      {comment, _author} = unapproved_comment(image)
+      report = report_fixture({"Comment", comment.id}, confirmed_user_fixture())
+
+      assert report.open
+      assert report.state == "open"
+
+      assert {:ok, _} = Comments.approve_comment(moderator_user_fixture(), "#{comment.id}")
+
+      closed = Repo.get!(Report, report.id)
+      refute closed.open
+      assert closed.state == "closed"
+    end
+
+    # Approving an already-approved comment succeeds and re-logs; the comment
+    # count bump runs unconditionally, so it also increments the author's count.
+    test "approving an already-approved comment succeeds and logs again", %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "A perfectly ordinary comment"})
+      assert comment.approved
+
+      before = Repo.get!(User, author.id).comments_count
+
+      assert {:ok, %Comment{} = approved} =
+               Comments.approve_comment(moderator_user_fixture(), "#{comment.id}")
+
+      assert approved.approved
+      assert Repo.get!(User, author.id).comments_count == before + 1
+
+      log = Repo.one!(ModerationLog)
+      assert log.type == "Image.Comment.Approve:create"
+      assert log.body == "Approved comment on image #{image.id}"
+    end
+
+    # A well-formed id naming no row loads nil, which no :approve rule permits;
+    # the context returns unauthorized rather than not-found.
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Comments.approve_comment(moderator_user_fixture(), "999999999") ==
+               {:error, :unauthorized}
+
+      no_moderation_logs!()
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Comments.approve_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
+      no_moderation_logs!()
     end
   end
 end
