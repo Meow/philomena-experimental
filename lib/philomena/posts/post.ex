@@ -6,6 +6,8 @@ defmodule Philomena.Posts.Post do
   alias Philomena.Topics.Topic
   alias Philomena.Schema.Approval
 
+  @type t :: %__MODULE__{}
+
   schema "posts" do
     belongs_to :user, User
     belongs_to :topic, Topic

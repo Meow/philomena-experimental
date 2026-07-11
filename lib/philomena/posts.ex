@@ -4,6 +4,7 @@ defmodule Philomena.Posts do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
   alias Ecto.Multi
   alias Philomena.Repo
 
@@ -11,6 +12,9 @@ defmodule Philomena.Posts do
   alias Philomena.Topics.Topic
   alias Philomena.Topics
   alias Philomena.Forums
+  alias Philomena.IntegerId
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.UserStatistics
   alias Philomena.Users.User
   alias Philomena.Posts.Post
@@ -298,38 +302,87 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Approves a post, closes associated reports, and increments the user forum
-  posts count.
+  Approves the post named by the raw request `post_id`, on behalf of `actor`
+  (a user, or `nil` for an anonymous visitor).
 
-  ## Parameters
-  - post: The post to approve
-  - user: The user performing the approval
+  Authorization (`:approve` on the loaded post) happens here; on success the
+  post's associated reports are closed, the author's forum post count is
+  incremented, the post is reindexed, and a moderation log is written
+  attributing the approval to `actor`. An id that cannot name a row is
+  `{:error, :not_found}`, while a well-formed id that names no row authorizes
+  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`,
+  preserving the behavior of the load-then-authorize plug this replaces.
+
+  The post is loaded (and returned) with its `:topic` and the topic's `:forum`
+  preloaded so the caller can build the post-anchor redirect for either
+  outcome. A failed approval changeset returns `{:error, %Post{}}` carrying
+  that loaded post.
 
   ## Examples
 
-      iex> approve_comment(post, user)
+      iex> approve_post(moderator, "1")
       {:ok, %Post{}}
 
+      iex> approve_post(user, "1")
+      {:error, :unauthorized}
+
+      iex> approve_post(moderator, "not-an-integer")
+      {:error, :not_found}
+
   """
-  def approve_post(%Post{} = post, user) do
-    report_query = Reports.close_report_query({"Post", post.id}, user)
-    post = Post.approve_changeset(post)
+  @spec approve_post(User.t() | nil, any()) ::
+          {:ok, Post.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Post.t()}
+  def approve_post(actor, post_id) do
+    case IntegerId.parse(post_id) do
+      {:ok, id} ->
+        post =
+          Post
+          |> preload([:topic, topic: :forum])
+          |> Repo.get(id)
+
+        with :ok <- authorize(actor, :approve, post) do
+          approve_loaded_post(actor, post)
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp approve_loaded_post(actor, %Post{} = post) do
+    report_query = Reports.close_report_query({"Post", post.id}, actor)
+    changeset = Post.approve_changeset(post)
 
     Multi.new()
-    |> Multi.update(:post, post)
+    |> Multi.update(:post, changeset)
     |> Multi.update_all(:reports, report_query, [])
     |> Repo.transaction()
     |> case do
-      {:ok, %{post: post, reports: {_count, reports}}} ->
-        UserStatistics.inc_stat(post.user_id, :posts_count)
+      {:ok, %{post: approved_post, reports: {_count, reports}}} ->
+        UserStatistics.inc_stat(approved_post.user_id, :posts_count)
         Reports.reindex_reports(reports)
-        reindex_post(post)
+        reindex_post(approved_post)
+        log_post_approval(actor, approved_post)
 
-        {:ok, post}
+        {:ok, approved_post}
 
-      error ->
-        error
+      _error ->
+        # The approval changeset sets a boolean unconditionally, so this branch
+        # is not reachable today; it carries the loaded post so a caller can
+        # still redirect to the post anchor if that ever changes.
+        {:error, post}
     end
+  end
+
+  defp log_post_approval(actor, %Post{topic: topic} = post) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Topic.Post.Approve:create",
+      Paths.forum_post_path(post),
+      "Approved forum post ##{post.id} in topic '#{topic.title}'"
+    )
   end
 
   @doc """
