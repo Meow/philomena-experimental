@@ -65,6 +65,30 @@ defmodule PhilomenaWeb.UserAttributionPlugTest do
     end
   end
 
+  describe "call/2 ban field" do
+    test "mirrors the :current_ban assign when it is set" do
+      ban = %{reason: "Rule #0", generated_ban_id: "B123"}
+
+      conn =
+        build_attribution_conn(path_info: ["images"], current_user: nil)
+        |> assign(:current_ban, ban)
+        |> UserAttributionPlug.call([])
+
+      assert conn.assigns.actor.ban == ban
+    end
+
+    test "is nil when the :current_ban assign was never set (API pipeline shape)" do
+      conn =
+        build_attribution_conn(path_info: ["api", "v1", "json", "images"], current_user: nil)
+        |> UserAttributionPlug.call([])
+
+      # The API pipeline runs no ban lookup, so the assign is absent and the
+      # tolerant Access read yields nil.
+      refute Map.has_key?(conn.assigns, :current_ban)
+      assert conn.assigns.actor.ban == nil
+    end
+  end
+
   describe "call/2 for an /api/... request" do
     test "derives the fingerprint from the user-agent, not the cookie" do
       expected_fingerprint = "a#{:erlang.crc32("TestAgent/1.0")}"

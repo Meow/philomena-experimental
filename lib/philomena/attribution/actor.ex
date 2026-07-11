@@ -16,11 +16,12 @@ defmodule Philomena.Attribution.Actor do
   alias Philomena.Users.User
 
   @enforce_keys [:ip]
-  defstruct user: nil, ip: nil, fingerprint: nil
+  defstruct user: nil, ip: nil, fingerprint: nil, ban: nil
 
   @type t :: %__MODULE__{
           user: User.t() | nil,
           ip: EctoNetwork.INET.t(),
-          fingerprint: String.t() | nil
+          fingerprint: String.t() | nil,
+          ban: map() | nil
         }
 end

@@ -43,4 +43,47 @@ defmodule Philomena.Authorization do
   def authorize(actor, action, subject) do
     if Canada.Can.can?(actor, action, subject), do: :ok, else: {:error, :unauthorized}
   end
+
+  @doc """
+  Verifies that `actor` is not banned.
+
+  Returns `:ok` when the actor carries no active ban, otherwise `{:error, :ban}`.
+  The ban is the one the request pipeline looked up for the session's user, IP,
+  and fingerprint; an anonymous actor with no ban passes.
+
+  `PhilomenaWeb.FallbackController` renders `{:error, :ban}` as the flash
+  "You are currently banned." plus a redirect to the referrer, exactly as
+  `PhilomenaWeb.FilterBannedUsersPlug` responds for not-yet-migrated controllers.
+
+  GET actions that `PhilomenaWeb.FilterBannedUsersPlug` guarded (like `new` and
+  `edit`) use this function alone, because the plug skipped its fingerprint
+  check for GET requests; writes use `verify_write_access/1` instead.
+  """
+  @spec verify_not_banned(actor :: Actor.t()) :: :ok | {:error, :ban}
+  def verify_not_banned(%Actor{ban: nil}), do: :ok
+  def verify_not_banned(%Actor{}), do: {:error, :ban}
+
+  @doc """
+  Verifies that `actor` may perform a write.
+
+  This reproduces the decision the retired `PhilomenaWeb.FilterBannedUsersPlug`
+  made for a non-GET request, in the same order:
+
+    * `{:error, :ban}` when the actor carries an active ban;
+    * `{:error, :unauthorized}` when the actor has no fingerprint (what the
+      plug's `PhilomenaWeb.NotAuthorizedPlug` response maps to);
+    * `:ok` otherwise.
+
+  The fingerprint requirement applies regardless of whether a user is signed in,
+  matching the plug.
+
+  `PhilomenaWeb.FallbackController` renders `{:error, :ban}` as the flash
+  "You are currently banned." plus a redirect to the referrer, exactly as
+  `PhilomenaWeb.FilterBannedUsersPlug` responds for not-yet-migrated controllers.
+  """
+  @spec verify_write_access(actor :: Actor.t()) ::
+          :ok | {:error, :ban} | {:error, :unauthorized}
+  def verify_write_access(%Actor{ban: ban}) when not is_nil(ban), do: {:error, :ban}
+  def verify_write_access(%Actor{fingerprint: nil}), do: {:error, :unauthorized}
+  def verify_write_access(%Actor{}), do: :ok
 end

@@ -4,9 +4,9 @@ defmodule PhilomenaWeb.FallbackController do
   the web layer expects.
 
   Used with Phoenix `action_fallback` (which applies to HTML controllers too):
-  when a controller action returns a bare `{:error, :unauthorized}` or
-  `{:error, :not_found}` instead of a `Plug.Conn`, Phoenix invokes this
-  controller to finish the response.
+  when a controller action returns a bare `{:error, :unauthorized}`,
+  `{:error, :not_found}`, or `{:error, :ban}` instead of a `Plug.Conn`, Phoenix
+  invokes this controller to finish the response.
 
   This fallback handles only these two global error
   shapes. Any action whose failure path is bespoke - a redirect to a specific
@@ -16,7 +16,9 @@ defmodule PhilomenaWeb.FallbackController do
 
   use Phoenix.Controller, formats: [json: "View", html: "View"]
 
-  @spec call(Plug.Conn.t(), {:error, :unauthorized} | {:error, :not_found}) :: Plug.Conn.t()
+  @spec call(Plug.Conn.t(), {:error, :unauthorized} | {:error, :not_found} | {:error, :ban}) ::
+          Plug.Conn.t()
   def call(conn, {:error, :unauthorized}), do: PhilomenaWeb.NotAuthorizedPlug.call(conn)
   def call(conn, {:error, :not_found}), do: PhilomenaWeb.NotFoundPlug.call(conn)
+  def call(conn, {:error, :ban}), do: PhilomenaWeb.FilterBannedUsersPlug.ban_response(conn)
 end

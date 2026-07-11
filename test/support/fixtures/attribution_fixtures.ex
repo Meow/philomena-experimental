@@ -24,14 +24,19 @@ defmodule Philomena.AttributionFixtures do
   The same attribution as `attribution/1`, as the typed
   `Philomena.Attribution.Actor` struct that actor-first context functions
   take.
+
+  The `:ban` and `:fingerprint` options override those struct fields. The ban
+  defaults to nil, matching how `PhilomenaWeb.UserAttributionPlug` builds the
+  actor when the request carries no active ban.
   """
-  def actor(user \\ nil) do
+  def actor(user \\ nil, opts \\ []) do
     attrs = attribution(user)
 
     %Philomena.Attribution.Actor{
       ip: attrs[:ip],
-      fingerprint: attrs[:fingerprint],
-      user: attrs[:user]
+      fingerprint: Keyword.get(opts, :fingerprint, attrs[:fingerprint]),
+      user: attrs[:user],
+      ban: Keyword.get(opts, :ban)
     }
   end
 
