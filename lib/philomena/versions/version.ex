@@ -2,6 +2,8 @@ defmodule Philomena.Versions.Version do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   schema "versions" do
     field :event, :string
     field :whodunnit, :string

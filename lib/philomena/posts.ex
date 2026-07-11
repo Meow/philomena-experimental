@@ -23,6 +23,7 @@ defmodule Philomena.Posts do
   alias Philomena.Forums.Forum
   alias Philomena.Notifications
   alias Philomena.Versions
+  alias Philomena.Versions.Version
   alias Philomena.Reports
 
   @doc """
@@ -583,6 +584,76 @@ defmodule Philomena.Posts do
       Paths.forum_post_path(post),
       "Approved forum post ##{post.id} in topic '#{topic.title}'"
     )
+  end
+
+  @doc """
+  Loads the edit history of the post named by the raw request `post_id` within
+  the topic named by `topic_slug` in the forum named by `forum_slug`, on behalf
+  of `actor` (a user, or `nil` for an anonymous visitor). This is a public read
+  with no ban check.
+
+  The forum is loaded by short name and authorized for `:show`, and the topic is
+  loaded by slug with hidden topics visible only to actors who may `:show` them
+  (the retired LoadTopicPlug `show_hidden: false` chain). The post is then loaded
+  by id within that topic: a missing post is `{:error, :not_found}`, and a post
+  hidden from users is visible only when `actor` may `:show` it, otherwise
+  `{:error, :unauthorized}` - reproducing the retired LoadPostPlug
+  `show_hidden: false` chain. The post id is not integer-guarded before the query,
+  matching that plug, so a non-integer id raises `Ecto.Query.CastError` exactly
+  as before.
+
+  On success the loaded post (with its topic, forum, and author associations
+  preloaded for rendering) is returned alongside the topic (for the page title)
+  and the last 25 versions of the post, newest first, with diffs and version
+  authors resolved.
+
+  Returns `{:ok, {topic, post, versions}}`, `{:error, :unauthorized}` when the
+  forum, topic, or hidden post is not visible to `actor`, or
+  `{:error, :not_found}` when the topic or post does not exist.
+
+  ## Examples
+
+      iex> post_history(user, "dis", "some-topic", "1")
+      {:ok, {%Topic{}, %Post{}, [%Version{}, ...]}}
+
+      iex> post_history(user, "dis", "some-topic", "999999999")
+      {:error, :not_found}
+
+  """
+  @spec post_history(User.t() | nil, String.t(), String.t(), any()) ::
+          {:ok, {Topic.t(), Post.t(), [Version.t()]}}
+          | {:error, :unauthorized | :not_found}
+  def post_history(actor, forum_slug, topic_slug, post_id) do
+    with {:ok, _forum, topic} <-
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         {:ok, post} <- load_topic_post(actor, topic, post_id) do
+      {:ok, {topic, post, Versions.load_last_versions("Post", post)}}
+    end
+  end
+
+  # Reproduces LoadPostPlug with the default `show_hidden: false`: the post is
+  # loaded by id scoped to the topic (with the topic/forum/author preloads the
+  # history page renders), a missing row is `{:error, :not_found}`, and a post
+  # hidden from users is authorized for `:show` - visible to staff, otherwise
+  # `{:error, :unauthorized}`.
+  defp load_topic_post(actor, topic, post_id) do
+    Post
+    |> where(topic_id: ^topic.id, id: ^to_string(post_id))
+    |> preload(topic: :forum, user: [awards: :badge])
+    |> Repo.one()
+    |> authorize_post_visibility(actor)
+  end
+
+  defp authorize_post_visibility(nil, _actor),
+    do: {:error, :not_found}
+
+  defp authorize_post_visibility(%Post{hidden_from_users: false} = post, _actor),
+    do: {:ok, post}
+
+  defp authorize_post_visibility(%Post{} = post, actor) do
+    with :ok <- authorize(actor, :show, post) do
+      {:ok, post}
+    end
   end
 
   @doc """

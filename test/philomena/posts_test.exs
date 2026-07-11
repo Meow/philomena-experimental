@@ -23,6 +23,7 @@ defmodule Philomena.PostsTest do
   alias Philomena.Forums.Forum
   alias Philomena.Repo
   alias Philomena.Users.User
+  alias Philomena.Versions.Version
 
   setup do
     forum = forum_fixture()
@@ -388,6 +389,127 @@ defmodule Philomena.PostsTest do
     test "an id that cannot name a row is not found" do
       assert Posts.destroy_post(moderator_user_fixture(), "abc") == {:error, :not_found}
       no_moderation_logs!()
+    end
+  end
+
+  describe "post_history/4" do
+    # Unlike the moderation actions above, post_history is a public read routed
+    # by forum short name and topic slug (not a bare post id), so it takes the
+    # loaded topic's addressing rather than a raw "#{post.id}" string.
+
+    test "an anonymous actor reads the history of a visible post",
+         %{forum: forum, topic: topic} do
+      [post] = topic.posts
+
+      assert {:ok, {loaded_topic, %Post{} = loaded_post, versions}} =
+               Posts.post_history(nil, forum.short_name, topic.slug, "#{post.id}")
+
+      assert loaded_topic.id == topic.id
+      assert loaded_post.id == post.id
+
+      # The post comes back with the associations the history page renders.
+      assert %{topic: %{forum: %Forum{}}} = loaded_post
+      assert loaded_post.topic.id == topic.id
+      assert loaded_post.topic.forum.id == forum.id
+
+      # A never-edited post has recorded no versions.
+      assert versions == []
+    end
+
+    test "an unknown forum is unauthorized", %{topic: topic} do
+      [post] = topic.posts
+
+      assert Posts.post_history(nil, "nonexistent", topic.slug, "#{post.id}") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown topic in a real forum is not found", %{forum: forum} do
+      assert Posts.post_history(nil, forum.short_name, "nonexistent", "1") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown post id in a real topic is not found", %{forum: forum, topic: topic} do
+      assert Posts.post_history(nil, forum.short_name, topic.slug, "999999999") ==
+               {:error, :not_found}
+    end
+
+    test "an anonymous actor cannot read the history of a hidden post",
+         %{forum: forum, topic: topic} do
+      post = already_hidden_post(topic)
+
+      assert Posts.post_history(nil, forum.short_name, topic.slug, "#{post.id}") ==
+               {:error, :unauthorized}
+    end
+
+    test "a regular user cannot read the history of a hidden post",
+         %{forum: forum, topic: topic} do
+      post = already_hidden_post(topic)
+
+      assert Posts.post_history(
+               confirmed_user_fixture(),
+               forum.short_name,
+               topic.slug,
+               "#{post.id}"
+             ) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator reads the history of a hidden post", %{forum: forum, topic: topic} do
+      post = already_hidden_post(topic)
+
+      assert {:ok, {_topic, %Post{} = loaded_post, versions}} =
+               Posts.post_history(
+                 moderator_user_fixture(),
+                 forum.short_name,
+                 topic.slug,
+                 "#{post.id}"
+               )
+
+      assert loaded_post.id == post.id
+      assert loaded_post.hidden_from_users
+      assert is_list(versions)
+    end
+
+    test "an edited post reports the recorded version, its author, and the pre-edit body",
+         %{forum: forum, topic: topic} do
+      author = confirmed_user_fixture()
+      post = post_fixture(topic, author, %{"body" => "Original post body"})
+
+      {:ok, _} =
+        Posts.update_post(post, author, %{
+          "body" => "Original post body plus an edit",
+          "edit_reason" => "typo fix"
+        })
+
+      assert {:ok, {_topic, _post, [%Version{} = version]}} =
+               Posts.post_history(nil, forum.short_name, topic.slug, "#{post.id}")
+
+      # create_version records the body as it stood before the edit, so the
+      # single version carries the original text and names its editor.
+      assert version.body == "Original post body"
+      assert version.user.id == author.id
+    end
+
+    test "the history is capped at the most recent 25 versions",
+         %{forum: forum, topic: topic} do
+      author = confirmed_user_fixture()
+      post = post_fixture(topic, author, %{"body" => "edit 0"})
+
+      # Each update records one version, so 26 edits record 26 versions; the
+      # query limits the result to 25. Ordering among versions is not pinned:
+      # created_at has second precision, so edits within the same second tie and
+      # the surviving order is left to the database.
+      Enum.reduce(1..26, post, fn n, current ->
+        {:ok, %{post: updated}} =
+          Posts.update_post(current, author, %{"body" => "edit #{n}"})
+
+        updated
+      end)
+
+      assert {:ok, {_topic, _post, versions}} =
+               Posts.post_history(nil, forum.short_name, topic.slug, "#{post.id}")
+
+      assert length(versions) == 25
     end
   end
 end

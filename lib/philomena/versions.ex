@@ -9,6 +9,31 @@ defmodule Philomena.Versions do
   alias Philomena.Versions.Version
   alias Philomena.Users.User
 
+  @doc """
+  Loads the most recent versions recorded for `parent`, identified by
+  `item_type` and `parent.id`, newest first and capped at 25, with each
+  version's diff against `parent` and its author associations resolved via
+  `load_data_and_associations/2`.
+
+  This is the query behind the post/comment/image edit-history pages; the
+  25-version cap and descending order are pinned to match those listings.
+
+  ## Examples
+
+      iex> load_last_versions("Post", post)
+      [%Version{}, ...]
+
+  """
+  @spec load_last_versions(String.t(), struct()) :: [Version.t()]
+  def load_last_versions(item_type, parent) do
+    Version
+    |> where(item_type: ^item_type, item_id: ^parent.id)
+    |> order_by(desc: :created_at)
+    |> limit(25)
+    |> Repo.all()
+    |> load_data_and_associations(parent)
+  end
+
   def load_data_and_associations(versions, parent) do
     user_ids =
       versions
