@@ -5,6 +5,8 @@ defmodule Philomena.Polls.Poll do
   alias Philomena.Topics.Topic
   alias Philomena.PollOptions.PollOption
 
+  @type t :: %__MODULE__{}
+
   schema "polls" do
     belongs_to :topic, Topic
     has_many :options, PollOption

@@ -88,12 +88,35 @@ defmodule Philomena.Topics do
     end
   end
 
-  # Reproduces the retired plug chain: the forum was loaded by short name and
-  # authorized for `:show` (an unknown forum authorizes `nil`, which no
-  # ordinary rule permits, so it is unauthorized), then the topic was loaded by
-  # slug within that forum. `show_hidden` is the LoadTopicPlug option that
-  # diverged the two actions on hidden topics.
-  defp load_forum_topic(actor, forum_slug, topic_slug, opts) do
+  @doc """
+  Loads the forum named by `forum_slug` and, within it, the topic named by
+  `topic_slug`, on behalf of `actor` (the acting user).
+
+  Reproduces the retired plug chain shared by every forum/topic navigation
+  route: the forum was loaded by short name and authorized for `:show` (an
+  unknown forum authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}`), then the topic was loaded by slug within that
+  forum. `show_hidden` is the LoadTopicPlug option that diverges callers on
+  hidden topics: with `show_hidden: false` (the default) a hidden topic is
+  visible only when the actor may `:show` it, otherwise `{:error, :unauthorized}`;
+  with `show_hidden: true` a hidden topic always comes back.
+
+  Returns `{:ok, forum, topic}`, `{:error, :unauthorized}` when the forum or the
+  topic is not visible to the actor, or `{:error, :not_found}` when the forum
+  exists but the topic does not.
+
+  This is the loader that `Philomena.Polls` reuses so poll editing shares the
+  exact forum/topic visibility semantics of the topic routes.
+
+  ## Examples
+
+      iex> load_forum_topic(moderator, "dis", "some-topic", show_hidden: false)
+      {:ok, %Forum{}, %Topic{}}
+
+  """
+  @spec load_forum_topic(User.t() | nil, String.t(), String.t(), keyword()) ::
+          {:ok, Forum.t(), Topic.t()} | {:error, :unauthorized | :not_found}
+  def load_forum_topic(actor, forum_slug, topic_slug, opts) do
     show_hidden = Keyword.get(opts, :show_hidden, false)
     forum = Repo.get_by(Forum, short_name: to_string(forum_slug))
 

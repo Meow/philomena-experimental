@@ -4,8 +4,12 @@ defmodule Philomena.TopicsFixtures do
   entities via the `Philomena.Topics` context.
   """
 
+  import Ecto.Query
+
   import Philomena.AttributionFixtures
 
+  alias Philomena.Polls.Poll
+  alias Philomena.Repo
   alias Philomena.Topics
 
   def unique_topic_title, do: "Test Topic #{System.unique_integer([:positive])}"
@@ -31,5 +35,27 @@ defmodule Philomena.TopicsFixtures do
     {:ok, %{topic: topic}} = Topics.create_topic(forum, attribution(user), attrs)
 
     topic
+  end
+
+  @doc """
+  Creates a topic in `forum` (authored by `user`, anonymous when `nil`) that
+  carries a poll, and returns `{topic, poll}`.
+
+  `poll_attrs` are merged into the poll params the topic controller would
+  submit; the defaults produce a valid single-choice poll with two options.
+  """
+  def topic_with_poll_fixture(forum, user \\ nil, poll_attrs \\ %{}) do
+    poll_params =
+      Enum.into(poll_attrs, %{
+        "title" => "Best test option?",
+        "active_until" => DateTime.add(DateTime.utc_now(:second), 7, :day),
+        "vote_method" => "single",
+        "options" => %{"0" => %{"label" => "Option A"}, "1" => %{"label" => "Option B"}}
+      })
+
+    topic = topic_fixture(forum, user, %{"poll" => poll_params})
+    poll = Repo.one!(from p in Poll, where: p.topic_id == ^topic.id)
+
+    {topic, poll}
   end
 end
