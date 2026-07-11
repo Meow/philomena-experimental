@@ -4,7 +4,10 @@ defmodule Philomena.Posts do
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_not_banned: 1, verify_write_access: 1]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
@@ -25,6 +28,8 @@ defmodule Philomena.Posts do
   alias Philomena.Versions
   alias Philomena.Versions.Version
   alias Philomena.Reports
+  alias Philomena.Reports.Report
+  alias Philomena.Attribution.Actor
 
   @doc """
   Gets a single post.
@@ -653,6 +658,92 @@ defmodule Philomena.Posts do
   defp authorize_post_visibility(%Post{} = post, actor) do
     with :ok <- authorize(actor, :show, post) do
       {:ok, post}
+    end
+  end
+
+  @doc """
+  Loads the post named by the raw request `post_id` within the topic named by
+  `topic_slug` in the forum named by `forum_slug` for the report form, on behalf
+  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
+  anonymous visitor).
+
+  This backs the report form (`new`), a GET-guarded action, so a banned actor is
+  rejected with `{:error, :ban}` first - the fingerprint requirement the write
+  path enforces is skipped here, matching the retired
+  `PhilomenaWeb.FilterBannedUsersPlug` behavior for GET requests. The forum,
+  topic, and post are then loaded and authorized exactly as `post_history/4`
+  does (forum `:show`, topic visibility, and a hidden post visible only to
+  actors who may `:show` it).
+
+  Returns `{:ok, {topic, post, changeset}}` - the topic (with its forum
+  preloaded) and post build the form action and reportable link, and the
+  changeset drives the report form - `{:error, :ban}` for a banned actor,
+  `{:error, :unauthorized}` when the forum, topic, or hidden post is not visible,
+  or `{:error, :not_found}` when the topic or post does not exist.
+
+  ## Examples
+
+      iex> load_post_for_report(actor, "dis", "some-topic", "1")
+      {:ok, {%Topic{}, %Post{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_post_for_report(Actor.t(), String.t(), String.t(), any()) ::
+          {:ok, {Topic.t(), Post.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_post_for_report(actor, forum_slug, topic_slug, post_id) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, {topic, post}} <-
+           load_reportable_post(actor, forum_slug, topic_slug, post_id) do
+      changeset = Reports.change_report(%Report{reportable_type: "Post", reportable_id: post.id})
+      {:ok, {topic, post, changeset}}
+    end
+  end
+
+  @doc """
+  Loads the post named by the raw request `post_id` within the topic named by
+  `topic_slug` in the forum named by `forum_slug` for report submission, on
+  behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+
+  This backs the report submission (`create`), a write, so `actor`'s write
+  access is verified first: a banned actor is `{:error, :ban}` and an actor with
+  no fingerprint is `{:error, :unauthorized}`, in the order the retired
+  `PhilomenaWeb.FilterBannedUsersPlug` used for a non-GET request. That ban
+  check now runs after the captcha plug rather than before it; the captcha plug
+  only halts anonymous requests, so a signed-in banned user still sees the ban
+  response and the reordering is not observable there. The forum, topic, and
+  post are then loaded and authorized exactly as `post_history/4` does.
+
+  Returns `{:ok, {topic, post}}` - the topic (with its forum preloaded) and post
+  build the redirect action and the report - `{:error, :ban}` or
+  `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
+  when the forum, topic, or hidden post is not visible, or `{:error, :not_found}`
+  when the topic or post does not exist.
+
+  ## Examples
+
+      iex> load_post_for_report_creation(actor, "dis", "some-topic", "1")
+      {:ok, {%Topic{}, %Post{}}}
+
+  """
+  @spec load_post_for_report_creation(Actor.t(), String.t(), String.t(), any()) ::
+          {:ok, {Topic.t(), Post.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_post_for_report_creation(actor, forum_slug, topic_slug, post_id) do
+    with :ok <- verify_write_access(actor) do
+      load_reportable_post(actor, forum_slug, topic_slug, post_id)
+    end
+  end
+
+  # Shared forum/topic/post load-and-authorize chain for the report actions,
+  # reproducing `post_history/4`'s chain (forum `:show`, topic visibility, and a
+  # post hidden from users visible only to actors who may `:show` it). The post
+  # is loaded with its topic and forum preloaded, so the topic returned here
+  # carries its forum for building the report form action and redirect.
+  defp load_reportable_post(actor, forum_slug, topic_slug, post_id) do
+    with {:ok, _forum, topic} <-
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         {:ok, post} <- load_topic_post(actor, topic, post_id) do
+      {:ok, {post.topic, post}}
     end
   end
 
