@@ -2080,4 +2080,124 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
   end
+
+  describe "destroy_image/2" do
+    test "an Image-admin role_map moderator destroys a hidden image, nulling the file" do
+      moderator = role_moderator_fixture("Image")
+      image = image_fixture(hidden_from_users: true)
+
+      assert {:ok, destroyed} = Images.destroy_image(moderator, to_string(image.id))
+      assert destroyed.id == image.id
+      assert Repo.reload!(image).image == nil
+    end
+
+    test "an admin destroys a hidden image" do
+      admin = admin_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert {:ok, _} = Images.destroy_image(admin, to_string(image.id))
+      assert Repo.reload!(image).image == nil
+    end
+
+    test "a successful destroy writes an exact moderation log" do
+      admin = admin_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert {:ok, _} = Images.destroy_image(admin, to_string(image.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == admin.id
+      assert log.type == "Image.Destroy:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Hard-deleted image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      admin = admin_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert {:ok, destroyed} = Images.destroy_image(admin, image.id)
+      assert destroyed.id == image.id
+      assert Repo.reload!(image).image == nil
+    end
+
+    test "a visible image is not_deleted with the file intact and no log" do
+      # The precondition requires a hidden image; a still-visible one is refused
+      # before any change.
+      admin = admin_user_fixture()
+      image = image_fixture(hidden_from_users: false)
+
+      assert Images.destroy_image(admin, to_string(image.id)) == {:error, :not_deleted}
+      assert Repo.reload!(image).image == image.image
+      assert moderation_log_count() == 0
+    end
+
+    test "a plain moderator cannot destroy a hidden image and the file stays intact" do
+      # :destroy needs an Image-admin role_map grant, which a plain moderator
+      # lacks, so this is unauthorized even though the image is hidden.
+      moderator = moderator_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.destroy_image(moderator, to_string(image.id)) == {:error, :unauthorized}
+      assert Repo.reload!(image).image == image.image
+      assert moderation_log_count() == 0
+    end
+
+    test "a plain moderator on a visible image is unauthorized, not not_deleted" do
+      # Authorization runs before the hidden-state check, so a plain moderator
+      # fails :destroy and never reaches the not_deleted branch.
+      moderator = moderator_user_fixture()
+      image = image_fixture(hidden_from_users: false)
+
+      assert Images.destroy_image(moderator, to_string(image.id)) == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user cannot destroy a hidden image" do
+      user = confirmed_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.destroy_image(user, to_string(image.id)) == {:error, :unauthorized}
+      assert Repo.reload!(image).image == image.image
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot destroy a hidden image" do
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.destroy_image(nil, to_string(image.id)) == {:error, :unauthorized}
+      assert Repo.reload!(image).image == image.image
+      assert moderation_log_count() == 0
+    end
+
+    test "an Image-admin role_map moderator with an unknown well-formed id is unauthorized" do
+      # The image loads as nil and the :destroy grant does not extend to the nil
+      # load, so the missing image surfaces as unauthorized. No log.
+      moderator = role_moderator_fixture("Image")
+
+      assert Images.destroy_image(moderator, "2147483647") == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      # An admin clears :destroy on the nil load via the blanket ability rule,
+      # then the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.destroy_image(admin, "2147483647") == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      admin = admin_user_fixture()
+
+      assert Images.destroy_image(admin, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      admin = admin_user_fixture()
+
+      assert Images.destroy_image(admin, "99999999999999999999") == {:error, :not_found}
+    end
+  end
 end

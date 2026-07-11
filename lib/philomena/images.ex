@@ -368,6 +368,58 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Hard-deletes the contents of the image named by `image_id`, on behalf of
+  `actor`, purging its stored file and thumbnails.
+
+  The image is loaded by id and authorized for `:destroy` - a capability plain
+  moderators lack (it requires an Image-admin role grant or the admin role). A
+  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
+  unknown id is authorized as a `nil` load: an actor who may not `:destroy` it
+  gets `{:error, :unauthorized}`, while an actor permitted to act on the `nil`
+  load gets `{:error, :not_found}`. Only an already-deleted image (hidden from
+  users) may be destroyed; a still-visible image is `{:error, :not_deleted}`,
+  left untouched. On success the file and thumbnails are purged and a moderation
+  log is written attributing the destruction to `actor`.
+
+  Returns `{:ok, image}` with the destroyed image, or
+  `{:error, %Ecto.Changeset{}}` if the destruction is rejected.
+
+  ## Examples
+
+      iex> destroy_image(admin, "42")
+      {:ok, %Image{}}
+
+      iex> destroy_image(moderator, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec destroy_image(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()}
+          | {:error, :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
+  def destroy_image(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :destroy, image),
+         %Image{hidden_from_users: true} <- image,
+         {:ok, image} <- destroy_image(image) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Destroy:create",
+        Paths.image_path(image),
+        "Hard-deleted image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      %Image{hidden_from_users: false} -> {:error, :not_deleted}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
+  end
+
+  @doc """
   Destroys the contents of an image (hard deletion) by marking it as hidden
   and deleting up associated files.
 
