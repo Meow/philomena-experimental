@@ -6,8 +6,11 @@ defmodule Philomena.DuplicateReports do
   import Philomena.DuplicateReports.Power
   import Ecto.Query, warn: false
 
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias Ecto.Multi
   alias Philomena.Repo
+  alias Philomena.IntegerId
 
   alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.DuplicateReports.SearchQuery
@@ -15,6 +18,7 @@ defmodule Philomena.DuplicateReports do
   alias Philomena.ImageIntensities.ImageIntensity
   alias Philomena.Images.Image
   alias Philomena.Images
+  alias Philomena.Users.User
 
   @doc """
   Generates automated duplicate reports for an image based on perceptual matching.
@@ -143,6 +147,55 @@ defmodule Philomena.DuplicateReports do
   """
   def change_search_query(%SearchQuery{} = search_query) do
     SearchQuery.changeset(search_query)
+  end
+
+  @doc """
+  Lists the duplicate reports involving the image named by `image_id`, on behalf
+  of `actor` (a user, or `nil` for an anonymous visitor).
+
+  The image is loaded by id (with its sources and tags preloaded for rendering)
+  and authorized for `:show`. A non-castable or out-of-range id is
+  `{:error, :not_found}`. A well-formed but unknown id is authorized as a `nil`
+  load: an actor who may not `:show` it gets `{:error, :unauthorized}`, while an
+  actor permitted to act on the `nil` load gets `{:error, :not_found}`. Reports
+  where the image is either the reported image or the claimed duplicate are
+  returned, with their user, modifier, and image associations preloaded.
+
+  Returns `{:ok, {image, duplicate_reports}}`.
+
+  ## Examples
+
+      iex> image_duplicate_reports(user, "42")
+      {:ok, {%Image{}, [%DuplicateReport{}, ...]}}
+
+      iex> image_duplicate_reports(user, "999999999")
+      {:error, :unauthorized}
+
+  """
+  @spec image_duplicate_reports(User.t() | nil, String.t() | integer()) ::
+          {:ok, {Image.t(), [DuplicateReport.t()]}} | {:error, :unauthorized | :not_found}
+  def image_duplicate_reports(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(preload(Image, [:sources, tags: :aliases]), id),
+         :ok <- authorize(actor, :show, image),
+         %Image{} <- image do
+      dupe_reports =
+        DuplicateReport
+        |> preload([
+          :user,
+          :modifier,
+          image: [:user, :sources, tags: :aliases],
+          duplicate_of_image: [:user, :sources, tags: :aliases]
+        ])
+        |> where([d], d.image_id == ^image.id or d.duplicate_of_image_id == ^image.id)
+        |> Repo.all()
+
+      {:ok, {image, dupe_reports}}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
   end
 
   @doc """

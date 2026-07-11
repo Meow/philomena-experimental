@@ -5,6 +5,8 @@ defmodule Philomena.DuplicateReports.DuplicateReport do
   alias Philomena.Images.Image
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "duplicate_reports" do
     belongs_to :image, Image
     belongs_to :duplicate_of_image, Image
