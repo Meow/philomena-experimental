@@ -1,95 +1,52 @@
 defmodule PhilomenaWeb.Topic.Poll.VoteController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Forums.Forum
-  alias Philomena.PollOptions.PollOption
   alias Philomena.PollVotes
-  alias PhilomenaWeb.IntegerId
-  alias Philomena.Repo
-  import Ecto.Query
 
-  plug PhilomenaWeb.FilterBannedUsersPlug when action in [:create]
-  plug PhilomenaWeb.CanaryMapPlug, index: :show, create: :show, delete: :show
+  # Builds the `:actor` struct (with the request's ban) that create's
+  # write-access check consumes; only create needs it.
+  plug PhilomenaWeb.UserAttributionPlug when action in [:create]
 
-  plug :load_and_authorize_resource,
-    model: Forum,
-    id_name: "forum_id",
-    id_field: "short_name",
-    persisted: true
+  action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.LoadTopicPlug
-  plug PhilomenaWeb.LoadPollPlug
-
-  plug :verify_authorized when action in [:index, :delete]
-
-  def index(conn, _params) do
-    poll = conn.assigns.poll
-
-    options =
-      PollOption
-      |> where(poll_id: ^poll.id)
-      |> preload(poll_votes: :user)
-      |> Repo.all()
-      |> Enum.filter(&(&1.vote_count > 0))
-
-    render(conn, "index.html", layout: false, options: options)
+  def index(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug}) do
+    with {:ok, options} <-
+           PollVotes.list_votes(conn.assigns.current_user, forum_slug, topic_slug) do
+      render(conn, "index.html", layout: false, options: options)
+    end
   end
 
-  def create(conn, %{"poll" => poll_params}) do
-    poll = conn.assigns.poll
-    topic = conn.assigns.topic
-
-    case PollVotes.create_poll_votes(conn.assigns.current_user, poll, poll_params) do
-      {:ok, _votes} ->
+  def create(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug} = params) do
+    case PollVotes.create_votes(conn.assigns.actor, forum_slug, topic_slug, params["poll"]) do
+      {:ok, {forum, topic}} ->
         conn
         |> put_flash(:info, "Your vote has been recorded.")
-        |> redirect(to: ~p"/forums/#{topic.forum}/topics/#{topic}")
+        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-      _error ->
+      {:error, forum, topic} ->
         conn
         |> put_flash(:error, "Your vote was not recorded.")
-        |> redirect(to: ~p"/forums/#{topic.forum}/topics/#{topic}")
+        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  def create(conn, _params) do
-    topic = conn.assigns.topic
-
-    conn
-    |> put_flash(:error, "Your vote was not recorded.")
-    |> redirect(to: ~p"/forums/#{topic.forum}/topics/#{topic}")
-  end
-
-  def delete(conn, %{"id" => poll_vote_id}) do
-    topic = conn.assigns.topic
-
-    case load_poll_vote(poll_vote_id) do
-      nil ->
-        conn
-        |> put_flash(:error, "Vote was not removed.")
-        |> redirect(to: ~p"/forums/#{topic.forum}/topics/#{topic}")
-
-      poll_vote ->
-        {:ok, _poll_vote} = PollVotes.delete_poll_vote(poll_vote)
-
+  def delete(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug, "id" => vote_id}) do
+    case PollVotes.delete_vote(conn.assigns.current_user, forum_slug, topic_slug, vote_id) do
+      {:ok, {forum, topic}} ->
         conn
         |> put_flash(:info, "Vote successfully removed.")
-        |> redirect(to: ~p"/forums/#{topic.forum}/topics/#{topic}")
-    end
-  end
+        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-  defp load_poll_vote(poll_vote_id) do
-    case IntegerId.parse(poll_vote_id) do
-      {:ok, id} -> PollVotes.get_poll_vote(id)
-      :error -> nil
-    end
-  end
+      {:error, forum, topic} ->
+        conn
+        |> put_flash(:error, "Vote was not removed.")
+        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-  defp verify_authorized(conn, _opts) do
-    if Canada.Can.can?(conn.assigns.current_user, :hide, conn.assigns.topic) do
-      conn
-    else
-      PhilomenaWeb.NotAuthorizedPlug.call(conn)
+      {:error, _} = error ->
+        error
     end
   end
 end

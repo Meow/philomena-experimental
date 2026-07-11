@@ -4,13 +4,193 @@ defmodule Philomena.PollVotes do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
+  alias Philomena.IntegerId
+  alias Philomena.Topics
+  alias Philomena.Forums.Forum
+  alias Philomena.Topics.Topic
+  alias Philomena.Users.User
   alias Philomena.Polls
   alias Philomena.Polls.Poll
   alias Philomena.PollVotes.PollVote
   alias Philomena.PollOptions.PollOption
+
+  @doc """
+  Lists the poll options carrying at least one vote for the poll attached to the
+  topic named by `topic_slug` within the forum named by `forum_slug`, on behalf
+  of `actor` (the acting user), with each option's votes and their voters
+  preloaded.
+
+  Reproduces the retired plug chain in its exact order: the forum is loaded by
+  short name and authorized for `:show`, the topic is loaded by slug with hidden
+  topics kept invisible unless the actor may `:show` them, the poll is loaded (a
+  topic with no poll is `{:error, :not_found}`, matching the LoadPollPlug 404),
+  and only then is the `:hide` permission on the topic checked. Options with no
+  votes are dropped so the view only renders options someone voted for.
+
+  Returns `{:ok, options}` (the list the index view renders),
+  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
+  the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
+
+  ## Examples
+
+      iex> list_votes(moderator, "dis", "some-topic")
+      {:ok, [%PollOption{}]}
+
+  """
+  @spec list_votes(User.t() | nil, String.t(), String.t()) ::
+          {:ok, [PollOption.t()]} | {:error, :unauthorized | :not_found}
+  def list_votes(actor, forum_slug, topic_slug) do
+    with {:ok, _forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
+         :ok <- authorize(actor, :hide, topic) do
+      {:ok, voted_options(poll)}
+    end
+  end
+
+  defp voted_options(poll) do
+    PollOption
+    |> where(poll_id: ^poll.id)
+    |> where([po], po.vote_count > 0)
+    |> preload(poll_votes: :user)
+    |> Repo.all()
+  end
+
+  @doc """
+  Records `actor`'s votes on the poll attached to the topic named by `topic_slug`
+  within the forum named by `forum_slug` from `poll_params`.
+
+  `verify_write_access/1` runs first, before any loading, exactly where the
+  retired `PhilomenaWeb.FilterBannedUsersPlug` sat: a banned actor is
+  `{:error, :ban}` and an actor with no fingerprint is `{:error, :unauthorized}`,
+  neither having touched the poll. Then the forum is loaded by short name and
+  authorized for `:show`, the topic is loaded by slug with hidden topics kept
+  invisible unless the actor may `:show` them, and the poll is loaded (a topic
+  with no poll is `{:error, :not_found}`). Unlike the index and delete paths,
+  there is no `:hide` check: recording a vote is open to any signed-in actor who
+  passes the ban filter, matching the route.
+
+  `poll_params` is the raw `"poll"` request parameter, which may be `nil` when
+  the caller submitted no poll data. A `nil` (or otherwise non-map) params value
+  records nothing and is reported as a failure, reproducing the controller's
+  second `create` clause; a map is handed to `create_poll_votes/3`, whose own
+  filtering silently drops expired polls, repeat voters, and option ids that do
+  not belong to the poll.
+
+  Returns `{:ok, {forum, topic}}` when the votes are recorded,
+  `{:error, forum, topic}` when nothing is recorded (both carry the topic needed
+  to redirect back to it), `{:error, :ban}` or `{:error, :unauthorized}` from the
+  write-access check, `{:error, :unauthorized}` when the forum/topic is not
+  visible, or `{:error, :not_found}` when the topic or its poll does not exist.
+
+  ## Examples
+
+      iex> create_votes(actor, "dis", "some-topic", %{"option_ids" => ["1"]})
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> create_votes(actor, "dis", "some-topic", nil)
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec create_votes(Actor.t(), String.t(), String.t(), map() | nil) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :ban | :unauthorized | :not_found}
+  def create_votes(%Actor{} = actor, forum_slug, topic_slug, poll_params) do
+    with :ok <- verify_write_access(actor),
+         {:ok, forum, topic, poll} <- load_forum_topic_poll(actor.user, forum_slug, topic_slug) do
+      record_votes(actor.user, forum, topic, poll, poll_params)
+    end
+  end
+
+  defp record_votes(user, forum, topic, poll, %{} = poll_params) do
+    case create_poll_votes(user, poll, poll_params) do
+      {:ok, _votes} -> {:ok, {forum, topic}}
+      _error -> {:error, forum, topic}
+    end
+  end
+
+  # No "poll" parameter was submitted; the controller's second create clause
+  # flashed the failure without recording anything.
+  defp record_votes(_user, forum, topic, _poll, _poll_params), do: {:error, forum, topic}
+
+  @doc """
+  Removes the poll vote named by `vote_id` from the poll attached to the topic
+  named by `topic_slug` within the forum named by `forum_slug`, on behalf of
+  `actor` (the acting user).
+
+  Reproduces the retired plug chain in its exact order: forum `:show`, topic
+  visibility, poll existence, then the `:hide` permission on the topic, all
+  before the vote is even looked up. `vote_id` is then parsed with
+  `Philomena.IntegerId`; a non-integer id, or an integer naming no vote, takes
+  the same bespoke failure path the controller used - `{:error, forum, topic}`
+  with the topic to redirect back to - rather than raising. A found vote is
+  deleted (decrementing the cached option and poll tallies).
+
+  Returns `{:ok, {forum, topic}}` when the vote is removed,
+  `{:error, forum, topic}` when no vote matches `vote_id`,
+  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
+  the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
+
+  ## Examples
+
+      iex> delete_vote(moderator, "dis", "some-topic", "1")
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> delete_vote(moderator, "dis", "some-topic", "999")
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec delete_vote(User.t() | nil, String.t(), String.t(), String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def delete_vote(actor, forum_slug, topic_slug, vote_id) do
+    with {:ok, forum, topic, _poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
+         :ok <- authorize(actor, :hide, topic) do
+      case load_poll_vote(vote_id) do
+        nil ->
+          {:error, forum, topic}
+
+        poll_vote ->
+          {:ok, _poll_vote} = delete_poll_vote(poll_vote)
+          {:ok, {forum, topic}}
+      end
+    end
+  end
+
+  defp load_poll_vote(vote_id) do
+    case IntegerId.parse(vote_id) do
+      {:ok, id} -> get_poll_vote(id)
+      :error -> nil
+    end
+  end
+
+  # Shared loader for the vote routes: forum `:show`, topic visibility (hidden
+  # topics stay invisible without `:show`), then poll existence. The `:hide`
+  # check is deliberately left to the index/delete callers, since create does
+  # not gate on it.
+  defp load_forum_topic_poll(actor, forum_slug, topic_slug) do
+    with {:ok, forum, topic} <-
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         {:ok, poll} <- load_poll(topic) do
+      {:ok, forum, topic, poll}
+    end
+  end
+
+  defp load_poll(topic) do
+    Poll
+    |> where(topic_id: ^topic.id)
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      poll -> {:ok, poll}
+    end
+  end
 
   @doc """
   Gets a single poll_vote.
