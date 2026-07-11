@@ -16,16 +16,34 @@ defmodule Philomena.TopicsTest do
 
   import Ecto.Query
 
+  import Philomena.AttributionFixtures
   import Philomena.ForumsFixtures
+  import Philomena.PostsFixtures
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Notifications
   alias Philomena.Notifications.ForumPostNotification
+  alias Philomena.Posts.Post
   alias Philomena.Repo
   alias Philomena.Topics
   alias Philomena.Topics.Subscription
+  alias Philomena.Topics.Topic
+  alias Philomena.Topics.TopicPage
+
+  # A truthy ban value in the shape production passes (the result of
+  # Philomena.Bans.find/3); only its presence matters to verify_write_access
+  # and verify_not_banned.
+  @ban %{
+    reason: "Rule #0",
+    valid_until: ~U[3000-01-01 00:00:00Z],
+    generated_ban_id: "U123456",
+    type: "User"
+  }
+
+  # The request pagination map load_topic_page reads: only :page_number is used.
+  @first_page %{page_number: 1}
 
   defp subscribed?(topic, user) do
     Repo.exists?(
@@ -976,6 +994,248 @@ defmodule Philomena.TopicsTest do
 
       assert Repo.reload!(topic).forum_id == forum.id
       assert moderation_log_count() == 0
+    end
+  end
+
+  describe "load_topic_page/5" do
+    test "an anonymous visitor reaches a visible topic with raw posts and both changesets" do
+      {forum, topic} = visible_topic()
+
+      assert {:ok, %TopicPage{} = page} =
+               Topics.load_topic_page(nil, forum.short_name, topic.slug, nil, @first_page)
+
+      assert page.forum.id == forum.id
+      assert page.topic.id == topic.id
+
+      # The page entries are raw Post structs, not rendered markup.
+      assert [%Post{}] = page.posts.entries
+      assert page.posts.page_size == 25
+
+      assert page.watching == false
+      # A topic with no poll reports its poll as inactive.
+      assert page.poll_active == false
+
+      assert %Ecto.Changeset{} = page.post_changeset
+      assert %Ecto.Changeset{} = page.topic_changeset
+    end
+
+    test "a hidden topic is unauthorized for a regular user" do
+      user = confirmed_user_fixture()
+      {forum, topic} = hidden_topic()
+
+      assert Topics.load_topic_page(user, forum.short_name, topic.slug, nil, @first_page) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown forum is unauthorized for a regular user" do
+      assert Topics.load_topic_page(
+               confirmed_user_fixture(),
+               "nonexistent",
+               "whatever",
+               nil,
+               @first_page
+             ) == {:error, :unauthorized}
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.load_topic_page(
+               confirmed_user_fixture(),
+               forum.short_name,
+               "nonexistent-topic",
+               nil,
+               @first_page
+             ) == {:error, :not_found}
+    end
+
+    test "a post_id naming a post on the second page derives that page over the pagination" do
+      # The first post sits at topic_position 0; 25 replies fill positions 1..25,
+      # so the last reply falls on page 2 (div(25, 25) + 1) even though the
+      # pagination map asks for page 1.
+      {forum, topic} = visible_topic()
+
+      replies = for _ <- 1..25, do: post_fixture(topic)
+      last = List.last(replies)
+      assert last.topic_position == 25
+
+      assert {:ok, page} =
+               Topics.load_topic_page(nil, forum.short_name, topic.slug, to_string(last.id), %{
+                 page_number: 1
+               })
+
+      assert page.posts.page_number == 2
+      assert Enum.map(page.posts.entries, & &1.id) == [last.id]
+    end
+
+    test "a subscribed user has watching set true" do
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+      {:ok, _} = Topics.create_subscription(topic, user)
+
+      assert {:ok, page} =
+               Topics.load_topic_page(user, forum.short_name, topic.slug, nil, @first_page)
+
+      assert page.watching
+    end
+
+    test "loading the page clears the user's topic notification" do
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      {:ok, _} = Topics.create_subscription(topic, user)
+      author = confirmed_user_fixture()
+      post = hd(topic.posts)
+      {:ok, 1} = Notifications.create_forum_post_notification(author, topic, post)
+      assert post_notification?(topic, user)
+
+      assert {:ok, _page} =
+               Topics.load_topic_page(user, forum.short_name, topic.slug, nil, @first_page)
+
+      refute post_notification?(topic, user)
+    end
+  end
+
+  describe "load_new_topic/2" do
+    test "a banned actor is rejected before any loading" do
+      # verify_not_banned runs first, so a banned actor is {:error, :ban} even
+      # against a forum slug that does not exist.
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Topics.load_new_topic(actor, "nonexistent") == {:error, :ban}
+    end
+
+    test "a regular actor gets the forum and a changeset seeded with a poll and one post" do
+      forum = forum_fixture()
+
+      assert {:ok, {loaded_forum, changeset}} =
+               Topics.load_new_topic(actor(confirmed_user_fixture()), forum.short_name)
+
+      assert loaded_forum.id == forum.id
+      assert %Ecto.Changeset{} = changeset
+      assert length(changeset.data.poll.options) == 2
+      assert length(changeset.data.posts) == 1
+    end
+
+    test "an unknown forum is unauthorized for a regular actor" do
+      assert Topics.load_new_topic(actor(confirmed_user_fixture()), "nonexistent") ==
+               {:error, :unauthorized}
+    end
+  end
+
+  describe "create_topic/3" do
+    @valid_topic_params %{
+      "title" => "A brand new topic",
+      "anonymous" => "false",
+      "posts" => %{"0" => %{"body" => "First post body"}}
+    }
+
+    test "a banned actor is rejected before any loading" do
+      # verify_write_access runs first, so a banned actor is {:error, :ban} even
+      # against a forum slug that does not exist.
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Topics.create_topic(actor, "nonexistent", @valid_topic_params) == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Topics.create_topic(actor, "nonexistent", @valid_topic_params) ==
+               {:error, :unauthorized}
+    end
+
+    test "a valid signed-in actor creates the topic with its first post" do
+      forum = forum_fixture()
+      user = confirmed_user_fixture()
+
+      assert {:ok, %{topic: topic, forum: loaded_forum, post: post}} =
+               Topics.create_topic(actor(user), forum.short_name, @valid_topic_params)
+
+      assert loaded_forum.id == forum.id
+      assert topic.title == "A brand new topic"
+      assert topic.user_id == user.id
+      assert post.topic_id == topic.id
+
+      assert Repo.get(Topic, topic.id)
+      assert Repo.reload!(post).body == "First post body"
+    end
+
+    test "blank params yield the changeset error carrying the forum" do
+      forum = forum_fixture()
+      user = confirmed_user_fixture()
+
+      params = %{
+        "title" => "",
+        "anonymous" => "false",
+        "posts" => %{"0" => %{"body" => ""}}
+      }
+
+      assert {:error, error_forum, %Ecto.Changeset{}} =
+               Topics.create_topic(actor(user), forum.short_name, params)
+
+      assert error_forum.id == forum.id
+    end
+
+    test "an unknown forum is unauthorized for a valid actor" do
+      assert Topics.create_topic(
+               actor(confirmed_user_fixture()),
+               "nonexistent",
+               @valid_topic_params
+             ) == {:error, :unauthorized}
+    end
+  end
+
+  describe "update_topic_title/4" do
+    test "a regular user cannot edit a topic title and it stays unchanged" do
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert Topics.update_topic_title(user, forum.short_name, topic.slug, %{
+               "title" => "New Title"
+             }) == {:error, :unauthorized}
+
+      assert Repo.reload!(topic).title == topic.title
+    end
+
+    test "a moderator updates the title" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:ok, {loaded_forum, updated_topic}} =
+               Topics.update_topic_title(moderator, forum.short_name, topic.slug, %{
+                 "title" => "Renamed topic"
+               })
+
+      assert loaded_forum.id == forum.id
+      assert updated_topic.title == "Renamed topic"
+      assert Repo.reload!(topic).title == "Renamed topic"
+    end
+
+    test "a blank title yields the 3-tuple error and leaves the title unchanged" do
+      # title_changeset requires the title, so a blank one surfaces as
+      # {:error, forum, topic} (both the loaded forum and the pre-update topic).
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+      original_title = topic.title
+
+      assert {:error, error_forum, error_topic} =
+               Topics.update_topic_title(moderator, forum.short_name, topic.slug, %{"title" => ""})
+
+      assert error_forum.id == forum.id
+      assert error_topic.id == topic.id
+      assert Repo.reload!(topic).title == original_title
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.update_topic_title(
+               moderator_user_fixture(),
+               forum.short_name,
+               "nonexistent-topic",
+               %{"title" => "New Title"}
+             ) == {:error, :not_found}
     end
   end
 end

@@ -4,20 +4,29 @@ defmodule Philomena.Topics do
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_not_banned: 1, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
 
   alias Philomena.Topics.Topic
+  alias Philomena.Topics.TopicPage
   alias Philomena.Forums
   alias Philomena.Forums.Forum
   alias Philomena.Posts
+  alias Philomena.Posts.Post
+  alias Philomena.Polls
+  alias Philomena.Polls.Poll
+  alias Philomena.PollVotes
+  alias Philomena.PollOptions.PollOption
   alias Philomena.UserStatistics
   alias Philomena.Notifications
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.IntegerId
+  alias Philomena.Attribution.Actor
   alias Philomena.Users.User
 
   use Philomena.Subscriptions,
@@ -118,11 +127,21 @@ defmodule Philomena.Topics do
           {:ok, Forum.t(), Topic.t()} | {:error, :unauthorized | :not_found}
   def load_forum_topic(actor, forum_slug, topic_slug, opts) do
     show_hidden = Keyword.get(opts, :show_hidden, false)
-    forum = Repo.get_by(Forum, short_name: to_string(forum_slug))
 
-    with :ok <- authorize(actor, :show, forum),
+    with {:ok, forum} <- load_authorized_forum(actor, forum_slug),
          {:ok, topic} <- load_topic_in_forum(actor, forum, topic_slug, show_hidden) do
       {:ok, forum, topic}
+    end
+  end
+
+  # Loads the forum by short name and authorizes it for `:show`. An unknown short
+  # name authorizes `nil`, which no ordinary rule permits, so it comes back
+  # `{:error, :unauthorized}` rather than not-found.
+  defp load_authorized_forum(actor, forum_slug) do
+    forum = Repo.get_by(Forum, short_name: to_string(forum_slug))
+
+    with :ok <- authorize(actor, :show, forum) do
+      {:ok, forum}
     end
   end
 
@@ -198,6 +217,95 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Assembles the page state for viewing the topic named by `topic_slug` within the
+  forum named by `forum_slug`, on behalf of `actor` (a user, or `nil` for an
+  anonymous visitor).
+
+  The forum is loaded by short name and authorized for `:show`, and the topic is
+  loaded by slug with hidden topics visible only to actors who may `:show` them.
+  As a side effect `actor`'s unread notifications for the topic are cleared, so a
+  caller maintaining a notification count must refresh it after this returns.
+
+  `post_id_param` is the raw `"post_id"` request parameter (or `nil`): when it
+  parses to an integer naming an existing post, the returned page is the one
+  containing that post (by its position over the fixed page size of 25);
+  otherwise `pagination`'s `:page_number` is used. The named post is looked up by
+  id alone, not scoped to this topic. `pagination` is the request pagination map;
+  only its `:page_number` is read.
+
+  The `posts` field is a `Scrivener.Page` of raw `Post` structs (25 per page,
+  ordered by creation, with the topic, forum, and author associations the view
+  renders preloaded); their Markdown bodies are rendered by the caller.
+
+  Returns `{:ok, %TopicPage{}}`, `{:error, :unauthorized}` when the forum or the
+  topic is not visible to `actor`, or `{:error, :not_found}` when the forum
+  exists but the topic does not.
+
+  ## Examples
+
+      iex> load_topic_page(user, "dis", "some-topic", nil, %{page_number: 1})
+      {:ok, %TopicPage{}}
+
+  """
+  @spec load_topic_page(User.t() | nil, String.t(), String.t(), String.t() | nil, map()) ::
+          {:ok, TopicPage.t()} | {:error, :unauthorized | :not_found}
+  def load_topic_page(actor, forum_slug, topic_slug, post_id_param, pagination) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false) do
+      topic = Repo.preload(topic, [:user, :forum, :deleted_by, :locked_by, poll: :options])
+
+      clear_topic_notification(topic, actor)
+
+      page = topic_page_number(post_id_param, pagination)
+
+      {:ok,
+       %TopicPage{
+         forum: forum,
+         topic: topic,
+         posts: load_topic_posts(topic, page),
+         watching: subscribed?(topic, actor),
+         voted: PollVotes.voted?(topic.poll, actor),
+         poll_active: Polls.active?(topic.poll),
+         post_changeset: Posts.change_post(%Post{}),
+         topic_changeset: change_topic(topic)
+       }}
+    end
+  end
+
+  # The requested page is the one holding the post named by `post_id_param` when
+  # that parses to an integer naming an existing post; otherwise the page number
+  # carried by the request pagination.
+  defp topic_page_number(post_id_param, pagination) do
+    with {post_id, _extra} <- Integer.parse(post_id_param || ""),
+         [post] <- Post |> where(id: ^post_id) |> Repo.all() do
+      div(post.topic_position, 25) + 1
+    else
+      _ -> pagination.page_number
+    end
+  end
+
+  # One 25-post window of the topic, ordered by creation, with the associations
+  # the view renders preloaded. The total is taken from the topic's cached post
+  # count rather than a separate query.
+  defp load_topic_posts(topic, page) do
+    entries =
+      Post
+      |> where(topic_id: ^topic.id)
+      |> where([p], p.topic_position >= ^(25 * (page - 1)) and p.topic_position < ^(25 * page))
+      |> order_by(asc: :created_at)
+      |> preload([:deleted_by, :topic, topic: :forum, user: [awards: :badge]])
+      |> Repo.all()
+
+    %Scrivener.Page{
+      entries: entries,
+      page_number: page,
+      page_size: 25,
+      total_entries: topic.post_count,
+      total_pages: div(topic.post_count + 25 - 1, 25)
+    }
+  end
+
+  @doc """
   Gets a single topic.
 
   Raises `Ecto.NoResultsError` if the Topic does not exist.
@@ -216,16 +324,62 @@ defmodule Philomena.Topics do
   @doc """
   Creates a topic.
 
+  Called with a `Philomena.Attribution.Actor`, the forum's short name, and the
+  raw `"topic"` request parameter (which may be `nil`), this is the
+  controller-facing entry point. `actor`'s write access is verified first: a
+  banned actor is `{:error, :ban}` and an actor with no fingerprint is
+  `{:error, :unauthorized}`, neither having touched the forum. The forum is then
+  loaded by short name and authorized for `:show`, and the topic together with
+  its first post is inserted from `topic_params`, attributed to `actor`'s IP,
+  fingerprint, and user. On success the returned map carries the topic, forum,
+  and first post the caller needs for the post-anchor redirect and the firehose
+  broadcast.
+
+  Called with a `%Forum{}`, an attribution keyword list, and topic attributes,
+  this is the insertion engine: it performs no authorization and inserts the
+  topic, its first post, and the forum/topic bookkeeping in one transaction.
+
+  Returns, for the actor form, `{:ok, %{topic: topic, forum: forum, post: post}}`
+  on success, `{:error, forum, changeset}` when the topic changeset is rejected
+  (the forum and changeset re-render the new-topic form), `{:error,
+  :creation_failed, forum}` when the insert fails for another reason (the forum
+  builds the redirect back to the new-topic form), or `{:error, :ban |
+  :unauthorized}` from the write-access and forum checks. The engine form returns
+  `{:ok, %{topic: %Topic{}}}` on success or a failed-step tuple.
+
   ## Examples
 
-      iex> create_topic(%{field: value})
-      {:ok, %Topic{}}
+      iex> create_topic(actor, "dis", %{"title" => "Hi", "posts" => %{"0" => %{"body" => "Yo"}}})
+      {:ok, %{topic: %Topic{}, forum: %Forum{}, post: %Post{}}}
 
-      iex> create_topic(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
+      iex> create_topic(forum, attribution, %{field: value})
+      {:ok, %{topic: %Topic{}}}
 
   """
-  def create_topic(forum, attribution, attrs \\ %{}) do
+  @spec create_topic(Actor.t(), String.t(), map() | nil) ::
+          {:ok, %{topic: Topic.t(), forum: Forum.t(), post: Post.t()}}
+          | {:error, Forum.t(), Ecto.Changeset.t()}
+          | {:error, :creation_failed, Forum.t()}
+          | {:error, :ban | :unauthorized}
+  @spec create_topic(Forum.t(), keyword(), map()) ::
+          {:ok, %{topic: Topic.t()}} | {:error, atom(), Ecto.Changeset.t(), map()}
+  def create_topic(%Actor{} = actor, forum_slug, topic_params) do
+    with :ok <- verify_write_access(actor),
+         {:ok, forum} <- load_authorized_forum(actor.user, forum_slug) do
+      case create_topic(forum, actor_attributes(actor), topic_params || %{}) do
+        {:ok, %{topic: topic}} ->
+          {:ok, %{topic: topic, forum: forum, post: hd(topic.posts)}}
+
+        {:error, :topic, changeset, _changes} ->
+          {:error, forum, changeset}
+
+        _error ->
+          {:error, :creation_failed, forum}
+      end
+    end
+  end
+
+  def create_topic(forum, attribution, attrs) do
     now = DateTime.utc_now(:second)
 
     topic =
@@ -271,6 +425,47 @@ defmodule Philomena.Topics do
 
   defp notify_topic(_repo, %{topic: topic}) do
     Notifications.create_forum_topic_notification(topic.user, topic)
+  end
+
+  # The attribution keyword list the insertion engine records, rebuilt from the
+  # actor: the IP, fingerprint, and user that attribute the new topic and its
+  # first post.
+  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
+    do: [ip: ip, fingerprint: fingerprint, user: user]
+
+  @doc """
+  Seeds the new-topic form for `actor` (a `Philomena.Attribution.Actor` whose
+  user may be `nil`) in the forum named by `forum_slug`.
+
+  This backs a GET form, so a banned actor is rejected with `{:error, :ban}`
+  first; the forum is then loaded by short name and authorized for `:show`. The
+  returned changeset is seeded with an empty first post and a two-option poll so
+  the form renders those nested fields.
+
+  Returns `{:ok, {forum, changeset}}` (the forum builds the form action),
+  `{:error, :ban}` for a banned actor, or `{:error, :unauthorized}` when the
+  forum is not visible to `actor`.
+
+  ## Examples
+
+      iex> load_new_topic(actor, "dis")
+      {:ok, {%Forum{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_new_topic(Actor.t(), String.t()) ::
+          {:ok, {Forum.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized}
+  def load_new_topic(%Actor{} = actor, forum_slug) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, forum} <- load_authorized_forum(actor.user, forum_slug) do
+      changeset =
+        change_topic(%Topic{
+          poll: %Poll{options: [%PollOption{}, %PollOption{}]},
+          posts: [%Post{}]
+        })
+
+      {:ok, {forum, changeset}}
+    end
   end
 
   @doc """
@@ -880,7 +1075,52 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Updates the title of the topic named by `topic_slug` within the forum named by
+  `forum_slug` from `topic_params`, on behalf of `actor` (a user, or `nil` for an
+  anonymous visitor).
+
+  The forum is loaded by short name and authorized for `:show`, the topic is
+  loaded by slug with hidden topics visible only to actors who may `:show` them,
+  and the `:edit` permission on the topic is then checked. Only the title is
+  updated; the slug is left intact, so the redirect back to the topic keeps
+  working.
+
+  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back to
+  the topic), `{:error, forum, topic}` when the title changeset is rejected (the
+  forum and pre-update topic redirect back with an error flash),
+  `{:error, :unauthorized}` when the forum or topic is not visible or may not be
+  edited, or `{:error, :not_found}` when the topic does not exist.
+
+  ## Examples
+
+      iex> update_topic_title(moderator, "dis", "some-topic", %{"title" => "New Title"})
+      {:ok, {%Forum{}, %Topic{}}}
+
+  """
+  @spec update_topic_title(User.t() | nil, String.t(), String.t(), map()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def update_topic_title(actor, forum_slug, topic_slug, topic_params) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :edit, topic) do
+      case update_topic_title(topic, topic_params) do
+        {:ok, updated_topic} ->
+          {:ok, {forum, updated_topic}}
+
+        {:error, %Ecto.Changeset{}} ->
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  @doc """
   Updates a topic's title.
+
+  This is the internal title engine shared with `update_topic_title/4`; it
+  performs no authorization, so controller-facing callers go through
+  `update_topic_title/4`.
 
   ## Examples
 
