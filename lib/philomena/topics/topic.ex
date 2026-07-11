@@ -9,6 +9,8 @@ defmodule Philomena.Topics.Topic do
   alias Philomena.Topics.Subscription
   alias Philomena.Slug
 
+  @type t :: %__MODULE__{}
+
   @derive {Phoenix.Param, key: :slug}
   schema "topics" do
     belongs_to :user, User

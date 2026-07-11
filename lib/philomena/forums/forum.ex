@@ -6,6 +6,8 @@ defmodule Philomena.Forums.Forum do
   alias Philomena.Topics.Topic
   alias Philomena.Forums.Subscription
 
+  @type t :: %__MODULE__{}
+
   @derive {Phoenix.Param, key: :short_name}
   schema "forums" do
     belongs_to :last_post, Post

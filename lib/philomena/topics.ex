@@ -4,6 +4,8 @@ defmodule Philomena.Topics do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
@@ -13,10 +15,114 @@ defmodule Philomena.Topics do
   alias Philomena.Posts
   alias Philomena.UserStatistics
   alias Philomena.Notifications
+  alias Philomena.Users.User
 
   use Philomena.Subscriptions,
     on_delete: :clear_topic_notification,
     id_name: :topic_id
+
+  @doc """
+  Subscribes `actor` (the acting user) to the topic named by `topic_slug`
+  within the forum named by `forum_slug`.
+
+  The forum is loaded by its short name and authorized for `:show`; the topic
+  is then loaded by its slug within that forum. Because the subscribe path
+  never revealed hidden topics, a hidden topic that the actor may not `:show`
+  comes back `{:error, :unauthorized}`.
+
+  Returns `{:ok, {forum, topic}}` (both are needed to render the subscription
+  partial), `{:error, :unauthorized}` when the forum or topic is not visible to
+  the actor, `{:error, :not_found}` when the forum exists but the topic does
+  not, or `{:error, %Ecto.Changeset{}}` if the subscription insert is rejected.
+
+  ## Examples
+
+      iex> subscribe(user, "dis", "some-topic")
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> subscribe(user, "dis", "nonexistent")
+      {:error, :not_found}
+
+  """
+  @spec subscribe(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def subscribe(actor, forum_slug, topic_slug) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         {:ok, _subscription} <- create_subscription(topic, actor) do
+      {:ok, {forum, topic}}
+    end
+  end
+
+  @doc """
+  Unsubscribes `actor` (the acting user) from the topic named by `topic_slug`
+  within the forum named by `forum_slug`.
+
+  Loading mirrors `subscribe/3` except that hidden topics stay visible on this
+  path (unsubscribing from a topic that was hidden after subscription must keep
+  working), so only the forum `:show` and the topic existence checks can fail.
+
+  Returns `{:ok, {forum, topic}}`, `{:error, :unauthorized}` when the forum is
+  not visible to the actor, or `{:error, :not_found}` when the forum exists but
+  the topic does not.
+
+  ## Examples
+
+      iex> unsubscribe(user, "dis", "some-topic")
+      {:ok, {%Forum{}, %Topic{}}}
+
+  """
+  @spec unsubscribe(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}} | {:error, :unauthorized | :not_found}
+  def unsubscribe(actor, forum_slug, topic_slug) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: true) do
+      # Deletion is idempotent and cannot fail; the hard match pins the crash
+      # semantics of the plug-based controller this replaces.
+      {:ok, _subscription} = delete_subscription(topic, actor)
+      {:ok, {forum, topic}}
+    end
+  end
+
+  # Reproduces the retired plug chain: the forum was loaded by short name and
+  # authorized for `:show` (an unknown forum authorizes `nil`, which no
+  # ordinary rule permits, so it is unauthorized), then the topic was loaded by
+  # slug within that forum. `show_hidden` is the LoadTopicPlug option that
+  # diverged the two actions on hidden topics.
+  defp load_forum_topic(actor, forum_slug, topic_slug, opts) do
+    show_hidden = Keyword.get(opts, :show_hidden, false)
+    forum = Repo.get_by(Forum, short_name: to_string(forum_slug))
+
+    with :ok <- authorize(actor, :show, forum),
+         {:ok, topic} <- load_topic_in_forum(actor, forum, topic_slug, show_hidden) do
+      {:ok, forum, topic}
+    end
+  end
+
+  defp load_topic_in_forum(actor, forum, topic_slug, show_hidden) do
+    Topic
+    |> where(forum_id: ^forum.id, slug: ^to_string(topic_slug))
+    |> Repo.one()
+    |> authorize_topic_visibility(actor, show_hidden)
+  end
+
+  defp authorize_topic_visibility(nil, _actor, _show_hidden),
+    do: {:error, :not_found}
+
+  defp authorize_topic_visibility(%Topic{hidden_from_users: false} = topic, _actor, _show_hidden),
+    do: {:ok, topic}
+
+  # A hidden topic is visible only when the caller opted into hidden topics (the
+  # unsubscribe path) or the actor may `:show` it.
+  defp authorize_topic_visibility(%Topic{} = topic, _actor, true),
+    do: {:ok, topic}
+
+  defp authorize_topic_visibility(%Topic{} = topic, actor, false) do
+    with :ok <- authorize(actor, :show, topic) do
+      {:ok, topic}
+    end
+  end
 
   @doc """
   Gets a single topic.
