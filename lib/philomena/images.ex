@@ -427,6 +427,54 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Deletes the source change history of the image named by `image_id`, on behalf
+  of `actor`.
+
+  The image is loaded by id and the `:hide` permission is checked before it is
+  modified. A non-castable or out-of-range id is `{:error, :not_found}`. A
+  well-formed but unknown id is authorized as a `nil` load: an actor who may not
+  `:hide` it gets `{:error, :unauthorized}`, while an actor permitted to act on
+  the `nil` load gets `{:error, :not_found}`. On success the source history is
+  removed, the image is reindexed, and a moderation log is written attributing
+  the deletion to `actor`.
+
+  Returns `{:ok, image}` with the updated image.
+
+  ## Examples
+
+      iex> remove_source_history(moderator, "42")
+      {:ok, %Image{}}
+
+      iex> remove_source_history(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec remove_source_history(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def remove_source_history(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, image} <- remove_source_history(image) do
+      reindex_image(image)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.SourceHistory:delete",
+        Paths.image_path(image),
+        "Deleted source history for image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
   Removes all source change history for an image.
 
   ## Examples

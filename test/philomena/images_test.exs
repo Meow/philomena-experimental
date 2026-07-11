@@ -8,11 +8,13 @@ defmodule Philomena.ImagesTest do
   alias Philomena.Notifications
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
+  alias Philomena.SourceChanges.SourceChange
 
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
+  import Philomena.SourceChangesFixtures
 
   defp comment_notification?(image, user) do
     Repo.exists?(
@@ -50,6 +52,10 @@ defmodule Philomena.ImagesTest do
   defp only_moderation_log!, do: Repo.one!(ModerationLog)
 
   defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
+
+  defp source_change_count(image) do
+    Repo.aggregate(from(s in SourceChange, where: s.image_id == ^image.id), :count)
+  end
 
   describe "create_image/2 duplicate detection" do
     # image_changeset's prepare_changes rejects a new upload whose
@@ -394,6 +400,117 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
 
       assert Images.repair_image(moderator, "99999999999999999999") == {:error, :not_found}
+    end
+  end
+
+  describe "remove_source_history/2" do
+    test "a moderator clears the source history and source_url and gets the image" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(source_url: "https://example.com/artwork")
+      source_change_fixture(image)
+      source_change_fixture(image)
+      assert source_change_count(image) == 2
+
+      assert {:ok, cleared} = Images.remove_source_history(moderator, to_string(image.id))
+      assert cleared.id == image.id
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.source_url == nil
+      assert source_change_count(image) == 0
+    end
+
+    test "an admin clears the source history and source_url" do
+      admin = admin_user_fixture()
+      image = image_fixture(source_url: "https://example.com/artwork")
+      source_change_fixture(image)
+
+      assert {:ok, cleared} = Images.remove_source_history(admin, to_string(image.id))
+      assert cleared.id == image.id
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.source_url == nil
+      assert source_change_count(image) == 0
+    end
+
+    test "a regular user cannot clear the history and it stays intact" do
+      user = confirmed_user_fixture()
+      image = image_fixture(source_url: "https://example.com/artwork")
+      source_change_fixture(image)
+
+      assert Images.remove_source_history(user, to_string(image.id)) == {:error, :unauthorized}
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.source_url == "https://example.com/artwork"
+      assert source_change_count(image) == 1
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot clear the history and it stays intact" do
+      # A nil actor fails the :hide authorization on the loaded image, so this is
+      # a clean unauthorized rather than a crash.
+      image = image_fixture(source_url: "https://example.com/artwork")
+      source_change_fixture(image)
+
+      assert Images.remove_source_history(nil, to_string(image.id)) == {:error, :unauthorized}
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.source_url == "https://example.com/artwork"
+      assert source_change_count(image) == 1
+      assert moderation_log_count() == 0
+    end
+
+    test "a successful clear writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} = Images.remove_source_history(moderator, to_string(image.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.SourceHistory:delete"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Deleted source history for image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, cleared} = Images.remove_source_history(moderator, image.id)
+      assert cleared.id == image.id
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found. No log.
+      moderator = moderator_user_fixture()
+
+      assert Images.remove_source_history(moderator, "2147483647") == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.remove_source_history(admin, "2147483647") == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.remove_source_history(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      # IntegerId.parse rejects a value the integer column could not hold before
+      # the row is ever queried, ahead of any authorization.
+      moderator = moderator_user_fixture()
+
+      assert Images.remove_source_history(moderator, "99999999999999999999") ==
+               {:error, :not_found}
     end
   end
 end
