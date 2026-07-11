@@ -17,6 +17,7 @@ defmodule Philomena.Topics do
   alias Philomena.Notifications
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
+  alias Philomena.IntegerId
   alias Philomena.Users.User
 
   use Philomena.Subscriptions,
@@ -566,7 +567,88 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Moves the topic named by `topic_slug` within the forum named by `forum_slug`
+  to the forum identified by the `"target_forum_id"` key of `topic_params`, on
+  behalf of `actor` (the acting user).
+
+  The forum is loaded by short name and authorized for `:show`, the topic is
+  loaded by slug (a hidden topic stays invisible unless the actor may `:show`
+  it, exactly as the retired LoadTopicPlug `show_hidden: false` chain behaved),
+  and the `:hide` permission on the topic is then checked. Only after
+  authorization is the target forum id parsed and the move attempted, so an
+  unprivileged actor sending a malformed target still gets unauthorized. On
+  success the NEW forum is preloaded (needed for both the redirect target and
+  the log body), post/topic counts are updated for both forums, and a
+  moderation log is written attributing the move to the actor.
+
+  Returns `{:ok, {new_forum, topic}}` on success (the new forum is where the
+  controller redirects), `{:error, forum, topic}` carrying the SOURCE forum and
+  topic when the move cannot happen for a reason the controller renders as a
+  flash + redirect back (a missing or non-integer target id, or a well-formed
+  id whose forum does not exist, caught by the `move_changeset` FK constraint
+  and normalized to a changeset failure), `{:error, :unauthorized}` when the
+  actor may not see the forum/topic or move the topic, or `{:error, :not_found}`
+  when the topic does not exist.
+
+  ## Examples
+
+      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum_id" => "3"})
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum_id" => "bogus"})
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec move_topic(User.t() | nil, String.t(), String.t(), map() | nil) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def move_topic(actor, forum_slug, topic_slug, topic_params) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :hide, topic) do
+      # Target id parsing happens only after authorization, so an unprivileged
+      # actor with a malformed target still answers unauthorized rather than the
+      # bespoke failure. A missing or non-integer target and a well-formed id
+      # for a nonexistent forum all funnel to the inner else, which redirects
+      # back to the SOURCE topic - so it carries the source `forum` and `topic`.
+      with {:ok, target_forum_id} <- parse_target_forum_id(topic_params),
+           {:ok, %{topic: moved_topic}} <- move_topic(topic, target_forum_id) do
+        # The old controller force-preloaded the NEW forum off the moved topic
+        # for both the redirect target and the log body; that preload lives here
+        # now. The body reproduces the retired `log_details/2` string
+        # byte-for-byte.
+        new_forum = Repo.preload(moved_topic, :forum, force: true).forum
+
+        ModerationLogs.create_moderation_log(
+          actor,
+          "Topic.Move:create",
+          Paths.topic_path(new_forum, moved_topic),
+          "Topic '#{moved_topic.title}' moved to #{new_forum.name}"
+        )
+
+        {:ok, {new_forum, moved_topic}}
+      else
+        _ -> {:error, forum, topic}
+      end
+    end
+  end
+
+  # `nil` topic_params (the param was absent entirely) and a missing/non-integer
+  # `target_forum_id` all collapse to `:error`, matching the retired
+  # IntegerId-based controller and its missing-param fallback clause.
+  defp parse_target_forum_id(topic_params) do
+    (topic_params || %{})
+    |> Map.get("target_forum_id")
+    |> IntegerId.parse()
+  end
+
+  @doc """
   Moves a topic to a different forum, updating post counts for both forums.
+
+  This is the internal move engine shared with `move_topic/4`; it performs no
+  authorization and writes no moderation log, so controller-facing callers go
+  through `move_topic/4`.
 
   ## Examples
 

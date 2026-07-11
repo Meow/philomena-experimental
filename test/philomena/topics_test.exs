@@ -835,4 +835,147 @@ defmodule Philomena.TopicsTest do
       assert log.body == "Unstickied topic '#{topic.title}' in #{forum.name}"
     end
   end
+
+  describe "move_topic/4" do
+    test "a regular user is unauthorized even with a malformed target, pinning authorize-before-parse" do
+      # The forum/topic load and the :hide authorization run before the target
+      # id is parsed, so an unprivileged actor sending garbage still answers
+      # unauthorized rather than the bespoke parse failure. The topic stays put
+      # and no log row is written.
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert Topics.move_topic(user, forum.short_name, topic.slug, %{
+               "target_forum_id" => "garbage"
+             }) == {:error, :unauthorized}
+
+      assert Repo.reload!(topic).forum_id == forum.id
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor is unauthorized" do
+      # nil clears forum :show and topic visibility on normal content, but fails
+      # the topic :hide permission, so this is a clean unauthorized.
+      {forum, topic} = visible_topic()
+      target = forum_fixture()
+
+      assert Topics.move_topic(nil, forum.short_name, topic.slug, %{
+               "target_forum_id" => to_string(target.id)
+             }) == {:error, :unauthorized}
+
+      assert Repo.reload!(topic).forum_id == forum.id
+      assert moderation_log_count() == 0
+    end
+
+    test "an unknown source forum is unauthorized for a regular user" do
+      target = forum_fixture()
+
+      assert Topics.move_topic(confirmed_user_fixture(), "nonexistent", "whatever", %{
+               "target_forum_id" => to_string(target.id)
+             }) == {:error, :unauthorized}
+    end
+
+    test "an existing source forum with an unknown topic is not found" do
+      forum = forum_fixture()
+      target = forum_fixture()
+
+      assert Topics.move_topic(moderator_user_fixture(), forum.short_name, "nonexistent-topic", %{
+               "target_forum_id" => to_string(target.id)
+             }) == {:error, :not_found}
+    end
+
+    test "a moderator moves the topic, changing forum_id and updating both forum counts" do
+      moderator = moderator_user_fixture()
+      forum = forum_fixture()
+      topic = topic_fixture(forum)
+      target = forum_fixture()
+
+      # create_topic left the source forum at topic_count 1 and the empty target
+      # at topic_count 0; the move engine's Multi shifts one topic across.
+      assert Repo.reload!(forum).topic_count == 1
+      assert Repo.reload!(target).topic_count == 0
+
+      assert {:ok, {new_forum, moved_topic}} =
+               Topics.move_topic(moderator, forum.short_name, topic.slug, %{
+                 "target_forum_id" => to_string(target.id)
+               })
+
+      assert new_forum.id == target.id
+      assert moved_topic.forum_id == target.id
+      assert Repo.reload!(topic).forum_id == target.id
+
+      assert Repo.reload!(forum).topic_count == 0
+      assert Repo.reload!(target).topic_count == 1
+    end
+
+    test "a successful move writes a byte-exact moderation log against the NEW forum" do
+      moderator = moderator_user_fixture()
+      forum = forum_fixture()
+      topic = topic_fixture(forum)
+      target = forum_fixture()
+
+      assert {:ok, _} =
+               Topics.move_topic(moderator, forum.short_name, topic.slug, %{
+                 "target_forum_id" => to_string(target.id)
+               })
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Move:create"
+      assert log.subject_path == "/forums/#{target.short_name}/topics/#{topic.slug}"
+      assert log.body == "Topic '#{topic.title}' moved to #{target.name}"
+    end
+
+    test "a moderator with nil topic_params gets the 3-tuple error, no move, no log" do
+      # A missing "topic" param arrives as nil; parse_target_forum_id tolerates
+      # it and funnels to the bespoke failure carrying the SOURCE forum and
+      # topic, so the controller can redirect back.
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:error, error_forum, error_topic} =
+               Topics.move_topic(moderator, forum.short_name, topic.slug, nil)
+
+      assert error_forum.id == forum.id
+      assert error_topic.id == topic.id
+
+      assert Repo.reload!(topic).forum_id == forum.id
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with a non-integer target id gets the 3-tuple error, no move, no log" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:error, error_forum, error_topic} =
+               Topics.move_topic(moderator, forum.short_name, topic.slug, %{
+                 "target_forum_id" => "not-a-number"
+               })
+
+      assert error_forum.id == forum.id
+      assert error_topic.id == topic.id
+
+      assert Repo.reload!(topic).forum_id == forum.id
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with a nonexistent target forum id gets the 3-tuple error, no move, no log" do
+      # A well-formed id whose forum does not exist is caught by the
+      # move_changeset FK constraint and normalized to a changeset failure, which
+      # surfaces as the same {:error, source_forum, topic} the parse failures do.
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:error, error_forum, error_topic} =
+               Topics.move_topic(moderator, forum.short_name, topic.slug, %{
+                 "target_forum_id" => "999999999"
+               })
+
+      assert error_forum.id == forum.id
+      assert error_topic.id == topic.id
+
+      assert Repo.reload!(topic).forum_id == forum.id
+      assert moderation_log_count() == 0
+    end
+  end
 end
