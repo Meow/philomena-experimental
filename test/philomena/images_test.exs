@@ -18,6 +18,15 @@ defmodule Philomena.ImagesTest do
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
+
+  # A truthy ban value in the shape production passes (the result of
+  # Philomena.Bans.find/3); only its presence matters to verify_write_access.
+  @ban %{
+    reason: "Rule #0",
+    valid_until: ~U[3000-01-01 00:00:00Z],
+    generated_ban_id: "U123456",
+    type: "User"
+  }
   import Philomena.SourceChangesFixtures
 
   defp comment_notification?(image, user) do
@@ -2198,6 +2207,157 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
 
       assert Images.destroy_image(admin, "99999999999999999999") == {:error, :not_found}
+    end
+  end
+
+  describe "update_description/3" do
+    test "the uploader edits its own image, persisting the new description" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id)
+
+      assert {:ok, {updated, old_description}} =
+               Images.update_description(actor(uploader), to_string(image.id), %{
+                 "description" => "A fresh description"
+               })
+
+      assert updated.id == image.id
+      assert updated.description == "A fresh description"
+      assert Repo.reload!(image).description == "A fresh description"
+      # NOTE: a never-described image carries the column default "", so the
+      # returned prior value is the empty string, not nil.
+      assert old_description == ""
+      assert moderation_log_count() == 0
+    end
+
+    test "old_description carries the exact pre-update value" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id, description: "Original text")
+
+      assert {:ok, {_updated, old_description}} =
+               Images.update_description(actor(uploader), to_string(image.id), %{
+                 "description" => "Replacement text"
+               })
+
+      assert old_description == "Original text"
+      assert Repo.reload!(image).description == "Replacement text"
+    end
+
+    test "a moderator edits another user's image" do
+      moderator = moderator_user_fixture()
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id)
+
+      assert {:ok, {updated, _old}} =
+               Images.update_description(actor(moderator), to_string(image.id), %{
+                 "description" => "Moderator edit"
+               })
+
+      assert updated.description == "Moderator edit"
+      assert Repo.reload!(image).description == "Moderator edit"
+    end
+
+    test "accepts an integer id" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id)
+
+      assert {:ok, {updated, _old}} =
+               Images.update_description(actor(uploader), image.id, %{"description" => "Via int"})
+
+      assert updated.description == "Via int"
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      # verify_write_access runs first, so a banned actor is {:error, :ban} even
+      # against an id that could never parse.
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Images.update_description(actor, "not-a-number", %{"description" => "x"}) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Images.update_description(actor, "not-a-number", %{"description" => "x"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "the uploader cannot edit when description editing is locked" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id, description_editing_allowed: false)
+
+      assert Images.update_description(actor(uploader), to_string(image.id), %{
+               "description" => "blocked"
+             }) == {:error, :unauthorized}
+
+      assert Repo.reload!(image).description == image.description
+    end
+
+    test "a non-uploader regular user cannot edit the image" do
+      owner = confirmed_user_fixture()
+      other = confirmed_user_fixture()
+      image = image_fixture(user_id: owner.id)
+
+      assert Images.update_description(actor(other), to_string(image.id), %{
+               "description" => "not mine"
+             }) == {:error, :unauthorized}
+
+      assert Repo.reload!(image).description == image.description
+    end
+
+    test "an anonymous actor with a fingerprint cannot edit the image" do
+      # verify_write_access passes (fingerprint present, no ban) but the nil user
+      # fails :edit_description, so this is unauthorized rather than a write.
+      owner = confirmed_user_fixture()
+      image = image_fixture(user_id: owner.id)
+
+      assert Images.update_description(actor(nil), to_string(image.id), %{
+               "description" => "anon"
+             }) == {:error, :unauthorized}
+
+      assert Repo.reload!(image).description == image.description
+    end
+
+    test "an over-long description is a changeset error with the image unchanged" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id, description: "Original")
+      too_long = String.duplicate("a", 50_001)
+
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_description(actor(uploader), to_string(image.id), %{
+                 "description" => too_long
+               })
+
+      assert Repo.reload!(image).description == "Original"
+    end
+
+    test "an unknown well-formed id is unauthorized for a non-admin actor" do
+      # The image loads as nil and a regular user fails :edit_description on the
+      # nil load, so the missing image surfaces as unauthorized.
+      assert Images.update_description(actor(confirmed_user_fixture()), "2147483647", %{
+               "description" => "x"
+             }) == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      # An admin clears :edit_description on the nil load via the blanket ability
+      # rule, then the image presence check fails, so the missing image is not
+      # found.
+      assert Images.update_description(actor(admin_user_fixture()), "2147483647", %{
+               "description" => "x"
+             }) == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found for a valid actor" do
+      assert Images.update_description(actor(confirmed_user_fixture()), "not-a-number", %{
+               "description" => "x"
+             }) == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found for a valid actor" do
+      assert Images.update_description(actor(confirmed_user_fixture()), "99999999999999999999", %{
+               "description" => "x"
+             }) == {:error, :not_found}
     end
   end
 end

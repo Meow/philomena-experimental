@@ -2,24 +2,15 @@ defmodule PhilomenaWeb.Image.DescriptionController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.MarkdownRenderer
-  alias Philomena.Images.Image
   alias Philomena.Images
 
-  plug PhilomenaWeb.FilterBannedUsersPlug
-  plug PhilomenaWeb.CanaryMapPlug, update: :edit_description
+  action_fallback PhilomenaWeb.FallbackController
 
-  plug :load_and_authorize_resource,
-    model: Image,
-    id_name: "image_id",
-    persisted: true,
-    preload: [:user, :sources, tags: :aliases]
+  plug PhilomenaWeb.UserAttributionPlug
 
-  def update(conn, %{"image" => image_params}) do
-    image = conn.assigns.image
-    old_description = image.description
-
-    case Images.update_description(image, image_params) do
-      {:ok, image} ->
+  def update(conn, %{"image" => image_params} = params) do
+    case Images.update_description(conn.assigns.actor, params["image_id"], image_params) do
+      {:ok, {image, old_description}} ->
         PhilomenaWeb.Endpoint.broadcast!(
           "firehose",
           "image:description_update",
@@ -40,9 +31,11 @@ defmodule PhilomenaWeb.Image.DescriptionController do
         |> put_view(PhilomenaWeb.ImageView)
         |> render("_description.html", layout: false, image: image, body: body)
 
-      {:error, changeset} ->
-        conn
-        |> render("_form.html", layout: false, image: image, changeset: changeset)
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "_form.html", layout: false, image: changeset.data, changeset: changeset)
+
+      {:error, _} = error ->
+        error
     end
   end
 end

@@ -5,7 +5,7 @@ defmodule Philomena.Images do
 
   import Ecto.Query, warn: false
 
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
   require Logger
 
   alias Ecto.Multi
@@ -23,6 +23,7 @@ defmodule Philomena.Images do
   alias Philomena.Images
   alias Philomena.IndexWorker
   alias Philomena.IntegerId
+  alias Philomena.Attribution.Actor
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.ImageFeatures.ImageFeature
@@ -1045,6 +1046,54 @@ defmodule Philomena.Images do
     |> Image.changeset(attrs)
     |> Repo.update()
     |> reindex_after_update()
+  end
+
+  @doc """
+  Updates the description of the image named by `image_id`, on behalf of
+  `actor`, from the controller-shaped `attrs` (a map with a `"description"` key).
+
+  Banned actors are rejected first with `{:error, :ban}` (a write with no
+  fingerprint is `{:error, :unauthorized}`), before the image is loaded, so the
+  ban decision does not depend on the id. The image is then loaded by id and
+  authorized for `:edit_description` - the uploader may edit a non-hidden image
+  whose description editing is allowed, and staff may edit any image. A
+  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
+  unknown id is authorized as a `nil` load: an actor who may not
+  `:edit_description` it gets `{:error, :unauthorized}`, while an actor permitted
+  to act on the `nil` load gets `{:error, :not_found}`.
+
+  Returns `{:ok, {image, old_description}}` with the updated image (its author,
+  sources, and tags preloaded for rendering) and the description it replaced
+  (needed to broadcast the change), or `{:error, %Ecto.Changeset{}}` when the new
+  description is rejected (e.g. too long), leaving the image untouched.
+
+  ## Examples
+
+      iex> update_description(actor, "42", %{"description" => "New description"})
+      {:ok, {%Image{}, "Old description"}}
+
+      iex> update_description(actor, "42", %{"description" => "..."})
+      {:error, :unauthorized}
+
+  """
+  @spec update_description(Actor.t(), String.t() | integer(), map()) ::
+          {:ok, {Image.t(), String.t() | nil}}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_description(%Actor{} = actor, image_id, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(preload(Image, [:user, :sources, tags: :aliases]), id),
+         :ok <- authorize(actor, :edit_description, image),
+         %Image{description: old_description} <- image,
+         {:ok, image} <- update_description(image, attrs) do
+      {:ok, {image, old_description}}
+    else
+      {:error, :ban} -> {:error, :ban}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
   end
 
   @doc """
