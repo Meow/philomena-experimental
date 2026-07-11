@@ -412,6 +412,54 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Locks (`locked?` true) or unlocks (`locked?` false) description editing on the
+  image named by `image_id`, on behalf of `actor`.
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. On success description editing is toggled, the
+  image is reindexed, and a moderation log is written attributing the change to
+  `actor`.
+
+  Returns `{:ok, image}` with the updated image.
+
+  ## Examples
+
+      iex> set_description_locked(moderator, "42", true)
+      {:ok, %Image{}}
+
+      iex> set_description_locked(user, "42", true)
+      {:error, :unauthorized}
+
+  """
+  @spec set_description_locked(User.t(), String.t() | integer(), boolean()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def set_description_locked(actor, image_id, locked?) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, image} <- lock_description(image, locked?) do
+      {log_type, log_body} =
+        if locked? do
+          {"Image.DescriptionLock:create", "Locked description editing on image #{image.id}"}
+        else
+          {"Image.DescriptionLock:delete", "Unlocked description editing on image #{image.id}"}
+        end
+
+      ModerationLogs.create_moderation_log(actor, log_type, Paths.image_path(image), log_body)
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  @doc """
   Locks or unlocks the description of an image.
 
   ## Examples

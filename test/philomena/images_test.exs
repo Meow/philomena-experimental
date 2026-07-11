@@ -1264,4 +1264,125 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
   end
+
+  describe "set_description_locked/3" do
+    test "a moderator locks description editing, clearing description_editing_allowed" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(description_editing_allowed: true)
+
+      assert {:ok, locked} = Images.set_description_locked(moderator, to_string(image.id), true)
+      assert locked.id == image.id
+      refute locked.description_editing_allowed
+      refute Repo.reload!(image).description_editing_allowed
+    end
+
+    test "an admin locks description editing" do
+      admin = admin_user_fixture()
+      image = image_fixture(description_editing_allowed: true)
+
+      assert {:ok, _} = Images.set_description_locked(admin, to_string(image.id), true)
+      refute Repo.reload!(image).description_editing_allowed
+    end
+
+    test "a moderator unlocks description editing, setting description_editing_allowed" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(description_editing_allowed: false)
+
+      assert {:ok, unlocked} =
+               Images.set_description_locked(moderator, to_string(image.id), false)
+
+      assert unlocked.id == image.id
+      assert unlocked.description_editing_allowed
+      assert Repo.reload!(image).description_editing_allowed
+    end
+
+    test "locking writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(description_editing_allowed: true)
+
+      assert {:ok, _} = Images.set_description_locked(moderator, to_string(image.id), true)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.DescriptionLock:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Locked description editing on image #{image.id}"
+    end
+
+    test "unlocking writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(description_editing_allowed: false)
+
+      assert {:ok, _} = Images.set_description_locked(moderator, to_string(image.id), false)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.DescriptionLock:delete"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Unlocked description editing on image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(description_editing_allowed: true)
+
+      assert {:ok, locked} = Images.set_description_locked(moderator, image.id, true)
+      assert locked.id == image.id
+    end
+
+    test "a regular user cannot lock description editing and the flag stays set" do
+      user = confirmed_user_fixture()
+      image = image_fixture(description_editing_allowed: true)
+
+      assert Images.set_description_locked(user, to_string(image.id), true) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(image).description_editing_allowed
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot lock description editing and the flag stays set" do
+      image = image_fixture(description_editing_allowed: true)
+
+      assert Images.set_description_locked(nil, to_string(image.id), true) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(image).description_editing_allowed
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found.
+      moderator = moderator_user_fixture()
+
+      assert Images.set_description_locked(moderator, "2147483647", true) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.set_description_locked(admin, "2147483647", true) == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.set_description_locked(moderator, "not-a-number", true) ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.set_description_locked(moderator, "99999999999999999999", true) ==
+               {:error, :not_found}
+    end
+  end
 end
