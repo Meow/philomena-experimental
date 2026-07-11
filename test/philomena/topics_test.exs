@@ -20,6 +20,7 @@ defmodule Philomena.TopicsTest do
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Notifications
   alias Philomena.Notifications.ForumPostNotification
   alias Philomena.Repo
@@ -54,6 +55,20 @@ defmodule Philomena.TopicsTest do
     topic = topic_fixture(forum)
     {forum, topic}
   end
+
+  # A hidden topic in a normal forum, the shape unhide_topic/3 operates on. The
+  # internal hide engine writes no moderation log, so a later log assertion sees
+  # only the row unhide_topic/3 itself creates.
+  defp hidden_topic do
+    forum = forum_fixture()
+    topic = topic_fixture(forum)
+    {:ok, hidden} = Topics.hide_topic(topic, "Spam", moderator_user_fixture())
+    {forum, hidden}
+  end
+
+  defp only_moderation_log!, do: Repo.one!(ModerationLog)
+
+  defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
 
   describe "subscribe/3" do
     test "a regular user subscribes to a visible topic and the row is created" do
@@ -326,6 +341,170 @@ defmodule Philomena.TopicsTest do
 
       assert {:ok, loaded_topic} = Topics.mark_topic_read(nil, forum.short_name, topic.slug)
       assert loaded_topic.id == topic.id
+    end
+  end
+
+  describe "hide_topic/4" do
+    test "a regular user cannot hide a visible topic and the topic stays visible" do
+      # The visibility loader clears a regular user on a normal, visible topic;
+      # the block on the topic :hide permission is what denies the action.
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert Topics.hide_topic(user, forum.short_name, topic.slug, "Spam") ==
+               {:error, :unauthorized}
+
+      refute Repo.reload!(topic).hidden_from_users
+    end
+
+    test "an anonymous actor cannot hide a visible topic" do
+      # nil clears forum :show and topic visibility on normal content, but fails
+      # the topic :hide permission, so this is a clean unauthorized rather than a
+      # crash on the nil actor.
+      {forum, topic} = visible_topic()
+
+      assert Topics.hide_topic(nil, forum.short_name, topic.slug, "Spam") ==
+               {:error, :unauthorized}
+
+      refute Repo.reload!(topic).hidden_from_users
+    end
+
+    test "an unknown forum is unauthorized for a regular user" do
+      assert Topics.hide_topic(confirmed_user_fixture(), "nonexistent", "whatever", "Spam") ==
+               {:error, :unauthorized}
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.hide_topic(
+               moderator_user_fixture(),
+               forum.short_name,
+               "nonexistent-topic",
+               "Spam"
+             ) ==
+               {:error, :not_found}
+    end
+
+    test "a moderator hides the topic, setting the flag, reason, and deleter" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:ok, {loaded_forum, loaded_topic}} =
+               Topics.hide_topic(moderator, forum.short_name, topic.slug, "Rule violation")
+
+      assert loaded_forum.id == forum.id
+      assert loaded_topic.id == topic.id
+
+      hidden = Repo.reload!(topic)
+      assert hidden.hidden_from_users
+      assert hidden.deletion_reason == "Rule violation"
+      assert hidden.deleted_by_id == moderator.id
+    end
+
+    test "a successful hide writes a byte-exact moderation log" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:ok, _} =
+               Topics.hide_topic(moderator, forum.short_name, topic.slug, "Rule violation")
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Hide:create"
+      assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
+      assert log.body == "Deleted topic '#{topic.title}' (Rule violation) in #{forum.name}"
+    end
+
+    test "a blank or nil reason yields the 3-tuple error and writes no moderation log" do
+      # hide_changeset requires deletion_reason; hide_topic/4 surfaces the
+      # normalized changeset failure as {:error, forum, topic} (both the loaded
+      # forum and the pre-update topic) so the controller can still redirect.
+      moderator = moderator_user_fixture()
+
+      {forum, topic} = visible_topic()
+
+      assert {:error, blank_forum, blank_topic} =
+               Topics.hide_topic(moderator, forum.short_name, topic.slug, "")
+
+      assert blank_forum.id == forum.id
+      assert blank_topic.id == topic.id
+
+      {nil_forum, nil_topic} = visible_topic()
+
+      assert {:error, error_forum, error_topic} =
+               Topics.hide_topic(moderator, nil_forum.short_name, nil_topic.slug, nil)
+
+      assert error_forum.id == nil_forum.id
+      assert error_topic.id == nil_topic.id
+
+      refute Repo.reload!(topic).hidden_from_users
+      refute Repo.reload!(nil_topic).hidden_from_users
+      assert moderation_log_count() == 0
+    end
+  end
+
+  describe "unhide_topic/3" do
+    test "a regular user cannot reach a hidden topic through the visibility loader" do
+      # unhide_topic/3 loads with show_hidden: false, so a hidden topic falls to
+      # the topic :show check, which a regular user fails before :hide is even
+      # considered.
+      user = confirmed_user_fixture()
+      {forum, topic} = hidden_topic()
+
+      assert Topics.unhide_topic(user, forum.short_name, topic.slug) == {:error, :unauthorized}
+      assert Repo.reload!(topic).hidden_from_users
+    end
+
+    test "an anonymous actor cannot reach a hidden topic" do
+      {forum, topic} = hidden_topic()
+
+      assert Topics.unhide_topic(nil, forum.short_name, topic.slug) == {:error, :unauthorized}
+      assert Repo.reload!(topic).hidden_from_users
+    end
+
+    test "an unknown forum is unauthorized for a regular user" do
+      assert Topics.unhide_topic(confirmed_user_fixture(), "nonexistent", "whatever") ==
+               {:error, :unauthorized}
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.unhide_topic(moderator_user_fixture(), forum.short_name, "nonexistent-topic") ==
+               {:error, :not_found}
+    end
+
+    test "a moderator restores a hidden topic, clearing the flag, reason, and deleter" do
+      # Even though the loader passes show_hidden: false, a moderator may :show a
+      # hidden topic, so the visibility loader admits it and :hide then permits
+      # the restore; the moderator reaches and unhides the topic.
+      moderator = moderator_user_fixture()
+      {forum, topic} = hidden_topic()
+
+      assert {:ok, {loaded_forum, loaded_topic}} =
+               Topics.unhide_topic(moderator, forum.short_name, topic.slug)
+
+      assert loaded_forum.id == forum.id
+      assert loaded_topic.id == topic.id
+
+      restored = Repo.reload!(topic)
+      refute restored.hidden_from_users
+      assert restored.deletion_reason == ""
+      assert restored.deleted_by_id == nil
+    end
+
+    test "a successful restore writes a byte-exact moderation log" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = hidden_topic()
+
+      assert {:ok, _} = Topics.unhide_topic(moderator, forum.short_name, topic.slug)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Hide:delete"
+      assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
+      assert log.body == "Restored topic '#{topic.title}' in #{forum.name}"
     end
   end
 end

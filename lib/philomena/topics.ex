@@ -15,6 +15,8 @@ defmodule Philomena.Topics do
   alias Philomena.Posts
   alias Philomena.UserStatistics
   alias Philomena.Notifications
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.Users.User
 
   use Philomena.Subscriptions,
@@ -382,7 +384,68 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Hides the topic named by `topic_slug` within the forum named by `forum_slug`,
+  recording `deletion_reason`, on behalf of `actor` (the acting user).
+
+  The forum is loaded by short name and authorized for `:show`, the topic is
+  loaded by slug (a topic already hidden stays invisible unless the actor may
+  `:show` it, exactly as the retired LoadTopicPlug `show_hidden: false` chain
+  behaved), and the `:hide` permission on the topic is then checked. On success
+  the forum post/topic counts are updated, the topic's posts are reindexed, and
+  a moderation log is written attributing the deletion to the actor.
+
+  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
+  to the topic), `{:error, forum, topic}` when the hide changeset is rejected
+  (e.g. a blank reason, so the controller can still redirect back to the
+  topic), `{:error, :unauthorized}` when the actor may not see the forum/topic
+  or hide the topic, or `{:error, :not_found}` when the topic does not exist.
+
+  ## Examples
+
+      iex> hide_topic(moderator, "dis", "some-topic", "Rule violation")
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> hide_topic(moderator, "dis", "some-topic", "")
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec hide_topic(User.t() | nil, String.t(), String.t(), String.t() | nil) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def hide_topic(actor, forum_slug, topic_slug, deletion_reason) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :hide, topic) do
+      case hide_topic(topic, deletion_reason, actor) do
+        {:ok, hidden_topic} ->
+          # The body reads the reason and title off the post-update topic, and
+          # the forum name off the separately loaded forum (the loaded topic
+          # carries no preloaded `:forum`). This reproduces the retired
+          # `log_details/2` string byte-for-byte.
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Hide:create",
+            Paths.topic_path(forum, hidden_topic),
+            "Deleted topic '#{hidden_topic.title}' (#{hidden_topic.deletion_reason}) in #{forum.name}"
+          )
+
+          {:ok, {forum, hidden_topic}}
+
+        {:error, %Ecto.Changeset{}} ->
+          # Redirect target uses the pre-update topic, matching the old error
+          # path that redirected using the topic from the plug assigns.
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  @doc """
   Hides a topic and updates related forum data.
+
+  This is the internal hide engine shared with `hide_topic/4` and
+  `Philomena.Users.Eraser`; it performs no authorization and writes no
+  moderation log, so controller-facing callers go through `hide_topic/4`.
 
   ## Examples
 
@@ -417,7 +480,57 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Restores the topic named by `topic_slug` within the forum named by
+  `forum_slug`, on behalf of `actor` (the acting user).
+
+  Loading and authorization mirror `hide_topic/4` (`:show` on the forum,
+  visibility on the topic, then `:hide` on the topic - a moderator can still
+  see the hidden topic here). On success the forum counts are restored, the
+  topic's posts are reindexed, and a moderation log is written.
+
+  Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
+  restore is rejected (so the controller can redirect back to the topic),
+  `{:error, :unauthorized}`, or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> unhide_topic(moderator, "dis", "some-topic")
+      {:ok, {%Forum{}, %Topic{}}}
+
+  """
+  @spec unhide_topic(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def unhide_topic(actor, forum_slug, topic_slug) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :hide, topic) do
+      case unhide_topic(topic) do
+        {:ok, restored_topic} ->
+          # Body reads the title off the post-restore topic; forum name off the
+          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Hide:delete",
+            Paths.topic_path(forum, restored_topic),
+            "Restored topic '#{restored_topic.title}' in #{forum.name}"
+          )
+
+          {:ok, {forum, restored_topic}}
+
+        _error ->
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  @doc """
   Unhides a previously hidden topic.
+
+  Internal restore engine shared with `unhide_topic/3`; it performs no
+  authorization and writes no moderation log, so controller-facing callers go
+  through `unhide_topic/3`.
 
   ## Examples
 
