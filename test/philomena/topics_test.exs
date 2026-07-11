@@ -66,6 +66,20 @@ defmodule Philomena.TopicsTest do
     {forum, hidden}
   end
 
+  # A locked topic in a normal forum, the shape unlock_topic/3 operates on.
+  # Locking (unlike hiding) leaves the topic visible, so the loader still admits
+  # a regular user. The internal lock engine writes no moderation log, so a later
+  # log assertion sees only the row unlock_topic/3 itself creates.
+  defp locked_topic do
+    forum = forum_fixture()
+    topic = topic_fixture(forum)
+
+    {:ok, locked} =
+      Topics.lock_topic(topic, %{"lock_reason" => "Off topic"}, moderator_user_fixture())
+
+    {forum, locked}
+  end
+
   defp only_moderation_log!, do: Repo.one!(ModerationLog)
 
   defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
@@ -505,6 +519,163 @@ defmodule Philomena.TopicsTest do
       assert log.type == "Topic.Hide:delete"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
       assert log.body == "Restored topic '#{topic.title}' in #{forum.name}"
+    end
+  end
+
+  describe "lock_topic/4" do
+    test "a regular user cannot lock a visible topic and the topic stays unlocked" do
+      # The visibility loader clears a regular user on a normal, visible topic;
+      # the block on the topic :hide permission is what denies the lock.
+      user = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert Topics.lock_topic(user, forum.short_name, topic.slug, %{"lock_reason" => "Off topic"}) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(topic).locked_at == nil
+    end
+
+    test "an anonymous actor cannot lock a visible topic" do
+      # nil clears forum :show and topic visibility on normal content, but fails
+      # the topic :hide permission, so this is a clean unauthorized rather than a
+      # crash on the nil actor.
+      {forum, topic} = visible_topic()
+
+      assert Topics.lock_topic(nil, forum.short_name, topic.slug, %{"lock_reason" => "Off topic"}) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(topic).locked_at == nil
+    end
+
+    test "an unknown forum is unauthorized for a regular user" do
+      assert Topics.lock_topic(
+               confirmed_user_fixture(),
+               "nonexistent",
+               "whatever",
+               %{"lock_reason" => "Off topic"}
+             ) == {:error, :unauthorized}
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.lock_topic(
+               moderator_user_fixture(),
+               forum.short_name,
+               "nonexistent-topic",
+               %{"lock_reason" => "Off topic"}
+             ) == {:error, :not_found}
+    end
+
+    test "a moderator locks the topic, setting the timestamp, reason, and locker" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:ok, {loaded_forum, loaded_topic}} =
+               Topics.lock_topic(moderator, forum.short_name, topic.slug, %{
+                 "lock_reason" => "Off topic"
+               })
+
+      assert loaded_forum.id == forum.id
+      assert loaded_topic.id == topic.id
+
+      locked = Repo.reload!(topic)
+      assert locked.locked_at != nil
+      assert locked.lock_reason == "Off topic"
+      assert locked.locked_by_id == moderator.id
+    end
+
+    test "a successful lock writes a byte-exact moderation log" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:ok, _} =
+               Topics.lock_topic(moderator, forum.short_name, topic.slug, %{
+                 "lock_reason" => "Off topic"
+               })
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Lock:create"
+      assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
+      assert log.body == "Locked topic '#{topic.title}' (Off topic) in #{forum.name}"
+    end
+
+    test "a blank lock reason yields the 3-tuple error and writes no moderation log" do
+      # lock_changeset requires lock_reason; lock_topic/4 surfaces the rejected
+      # changeset as {:error, forum, topic} (both the loaded forum and the
+      # pre-update topic) so the controller can still redirect.
+      moderator = moderator_user_fixture()
+      {forum, topic} = visible_topic()
+
+      assert {:error, error_forum, error_topic} =
+               Topics.lock_topic(moderator, forum.short_name, topic.slug, %{"lock_reason" => ""})
+
+      assert error_forum.id == forum.id
+      assert error_topic.id == topic.id
+
+      assert Repo.reload!(topic).locked_at == nil
+      assert moderation_log_count() == 0
+    end
+  end
+
+  describe "unlock_topic/3" do
+    test "a regular user cannot unlock a topic and it stays locked" do
+      # Locking leaves the topic visible, so the loader admits a regular user,
+      # who is then denied by the topic :hide permission.
+      user = confirmed_user_fixture()
+      {forum, topic} = locked_topic()
+
+      assert Topics.unlock_topic(user, forum.short_name, topic.slug) == {:error, :unauthorized}
+      assert Repo.reload!(topic).locked_at != nil
+    end
+
+    test "an anonymous actor cannot unlock a topic" do
+      {forum, topic} = locked_topic()
+
+      assert Topics.unlock_topic(nil, forum.short_name, topic.slug) == {:error, :unauthorized}
+      assert Repo.reload!(topic).locked_at != nil
+    end
+
+    test "an unknown forum is unauthorized for a regular user" do
+      assert Topics.unlock_topic(confirmed_user_fixture(), "nonexistent", "whatever") ==
+               {:error, :unauthorized}
+    end
+
+    test "an existing forum with an unknown topic is not found" do
+      forum = forum_fixture()
+
+      assert Topics.unlock_topic(moderator_user_fixture(), forum.short_name, "nonexistent-topic") ==
+               {:error, :not_found}
+    end
+
+    test "a moderator unlocks the topic, clearing the timestamp, reason, and locker" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = locked_topic()
+
+      assert {:ok, {loaded_forum, loaded_topic}} =
+               Topics.unlock_topic(moderator, forum.short_name, topic.slug)
+
+      assert loaded_forum.id == forum.id
+      assert loaded_topic.id == topic.id
+
+      unlocked = Repo.reload!(topic)
+      assert unlocked.locked_at == nil
+      assert unlocked.lock_reason == ""
+      assert unlocked.locked_by_id == nil
+    end
+
+    test "a successful unlock writes a byte-exact moderation log" do
+      moderator = moderator_user_fixture()
+      {forum, topic} = locked_topic()
+
+      assert {:ok, _} = Topics.unlock_topic(moderator, forum.short_name, topic.slug)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Lock:delete"
+      assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
+      assert log.body == "Unlocked topic '#{topic.title}' in #{forum.name}"
     end
   end
 end

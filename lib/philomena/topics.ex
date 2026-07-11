@@ -325,7 +325,68 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Locks the topic named by `topic_slug` within the forum named by `forum_slug`,
+  recording the lock reason from `topic_params`, on behalf of `actor` (the
+  acting user).
+
+  The forum is loaded by short name and authorized for `:show`, the topic is
+  loaded by slug (a hidden topic stays invisible unless the actor may `:show`
+  it, exactly as the retired LoadTopicPlug `show_hidden: false` chain behaved),
+  and the `:hide` permission on the topic is then checked. On success a
+  moderation log is written attributing the lock to the actor.
+
+  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
+  to the topic), `{:error, forum, topic}` when the lock changeset is rejected
+  (e.g. a blank reason, so the controller can still redirect back to the
+  topic), `{:error, :unauthorized}` when the actor may not see the forum/topic
+  or lock the topic, or `{:error, :not_found}` when the topic does not exist.
+
+  ## Examples
+
+      iex> lock_topic(moderator, "dis", "some-topic", %{"lock_reason" => "Off topic"})
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> lock_topic(moderator, "dis", "some-topic", %{"lock_reason" => ""})
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec lock_topic(User.t() | nil, String.t(), String.t(), map()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def lock_topic(actor, forum_slug, topic_slug, topic_params) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :hide, topic) do
+      case lock_topic(topic, topic_params, actor) do
+        {:ok, locked_topic} ->
+          # The body reads the reason and title off the post-update topic, and
+          # the forum name off the separately loaded forum (the loaded topic
+          # carries no preloaded `:forum`). This reproduces the retired
+          # `log_details/2` string byte-for-byte.
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Lock:create",
+            Paths.topic_path(forum, locked_topic),
+            "Locked topic '#{locked_topic.title}' (#{locked_topic.lock_reason}) in #{forum.name}"
+          )
+
+          {:ok, {forum, locked_topic}}
+
+        {:error, %Ecto.Changeset{}} ->
+          # Redirect target uses the pre-update topic, matching the old error
+          # path that redirected using the topic from the plug assigns.
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  @doc """
   Locks a topic to prevent further posting.
+
+  This is the internal lock engine shared with `lock_topic/4`; it performs no
+  authorization and writes no moderation log, so controller-facing callers go
+  through `lock_topic/4`.
 
   ## Examples
 
@@ -339,7 +400,56 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Unlocks the topic named by `topic_slug` within the forum named by
+  `forum_slug`, on behalf of `actor` (the acting user).
+
+  Loading and authorization mirror `lock_topic/4` (`:show` on the forum,
+  visibility on the topic, then `:hide` on the topic). On success a moderation
+  log is written.
+
+  Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
+  unlock is rejected (so the controller can redirect back to the topic),
+  `{:error, :unauthorized}`, or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> unlock_topic(moderator, "dis", "some-topic")
+      {:ok, {%Forum{}, %Topic{}}}
+
+  """
+  @spec unlock_topic(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :unauthorized | :not_found}
+  def unlock_topic(actor, forum_slug, topic_slug) do
+    with {:ok, forum, topic} <-
+           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :hide, topic) do
+      case unlock_topic(topic) do
+        {:ok, unlocked_topic} ->
+          # Body reads the title off the post-unlock topic; forum name off the
+          # separately loaded forum. Byte-for-byte the retired `log_details/2`.
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Lock:delete",
+            Paths.topic_path(forum, unlocked_topic),
+            "Unlocked topic '#{unlocked_topic.title}' in #{forum.name}"
+          )
+
+          {:ok, {forum, unlocked_topic}}
+
+        _error ->
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  @doc """
   Unlocks a topic to allow posting again.
+
+  Internal unlock engine shared with `unlock_topic/3`; it performs no
+  authorization and writes no moderation log, so controller-facing callers go
+  through `unlock_topic/3`.
 
   ## Examples
 
