@@ -4,6 +4,8 @@ defmodule Philomena.Images do
   """
 
   import Ecto.Query, warn: false
+
+  import Philomena.Authorization, only: [authorize: 3]
   require Logger
 
   alias Ecto.Multi
@@ -21,6 +23,8 @@ defmodule Philomena.Images do
   alias Philomena.Images
   alias Philomena.IndexWorker
   alias Philomena.IntegerId
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.Notifications.ImageCommentNotification
@@ -341,6 +345,52 @@ defmodule Philomena.Images do
     |> Image.lock_tags_changeset(locked)
     |> Repo.update()
     |> reindex_after_update()
+  end
+
+  @doc """
+  Clears the original SHA-512 hash of the image named by `image_id`, on behalf
+  of `actor`, allowing the same file to be uploaded again.
+
+  The image is loaded by id and the `:hide` permission is checked before it is
+  modified. A non-castable or out-of-range id is `{:error, :not_found}`. A
+  well-formed but unknown id is authorized as a `nil` load: an actor who may not
+  `:hide` it gets `{:error, :unauthorized}`, while an actor permitted to act on
+  the `nil` load gets `{:error, :not_found}`. On success the hash is cleared, the
+  image is reindexed, and a moderation log is written attributing the change to
+  `actor`.
+
+  Returns `{:ok, image}` with the updated image.
+
+  ## Examples
+
+      iex> remove_image_hash(moderator, "42")
+      {:ok, %Image{}}
+
+      iex> remove_image_hash(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec remove_image_hash(User.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def remove_image_hash(actor, image_id) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{} <- image,
+         {:ok, image} <- remove_hash(image) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Hash:delete",
+        Paths.image_path(image),
+        "Cleared hash of image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
   end
 
   @doc """

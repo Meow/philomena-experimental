@@ -4,6 +4,7 @@ defmodule Philomena.ImagesTest do
   import Ecto.Query
 
   alias Philomena.Images
+  alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Notifications
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
@@ -45,6 +46,10 @@ defmodule Philomena.ImagesTest do
     {:ok, _} = Notifications.create_image_merge_notification(image, source)
     :ok
   end
+
+  defp only_moderation_log!, do: Repo.one!(ModerationLog)
+
+  defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
 
   describe "create_image/2 duplicate detection" do
     # image_changeset's prepare_changes rejects a new upload whose
@@ -189,6 +194,100 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
 
       assert Images.mark_image_read(user, "99999999999999999999") == {:error, :not_found}
+    end
+  end
+
+  describe "remove_image_hash/2" do
+    test "a moderator clears the hash and gets the updated image" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+      assert image.image_orig_sha512_hash != nil
+
+      assert {:ok, cleared} = Images.remove_image_hash(moderator, to_string(image.id))
+      assert cleared.id == image.id
+      assert cleared.image_orig_sha512_hash == nil
+      assert Repo.reload!(image).image_orig_sha512_hash == nil
+    end
+
+    test "an admin clears the hash" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, cleared} = Images.remove_image_hash(admin, to_string(image.id))
+      assert cleared.id == image.id
+      assert Repo.reload!(image).image_orig_sha512_hash == nil
+    end
+
+    test "a regular user cannot clear the hash and it stays set" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.remove_image_hash(user, to_string(image.id)) == {:error, :unauthorized}
+      assert Repo.reload!(image).image_orig_sha512_hash == image.image_orig_sha512_hash
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot clear the hash and it stays set" do
+      # A nil actor fails the :hide authorization on the loaded image, so this is
+      # a clean unauthorized rather than a crash.
+      image = image_fixture()
+
+      assert Images.remove_image_hash(nil, to_string(image.id)) == {:error, :unauthorized}
+      assert Repo.reload!(image).image_orig_sha512_hash == image.image_orig_sha512_hash
+      assert moderation_log_count() == 0
+    end
+
+    test "a successful clear writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} = Images.remove_image_hash(moderator, to_string(image.id))
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Hash:delete"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Cleared hash of image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, cleared} = Images.remove_image_hash(moderator, image.id)
+      assert cleared.id == image.id
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found. No log.
+      moderator = moderator_user_fixture()
+
+      assert Images.remove_image_hash(moderator, "2147483647") == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.remove_image_hash(admin, "2147483647") == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.remove_image_hash(moderator, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      # IntegerId.parse rejects a value the integer column could not hold before
+      # the row is ever queried, ahead of any authorization.
+      moderator = moderator_user_fixture()
+
+      assert Images.remove_image_hash(moderator, "99999999999999999999") == {:error, :not_found}
     end
   end
 end
