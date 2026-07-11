@@ -123,6 +123,83 @@ defmodule Philomena.Posts do
   end
 
   @doc """
+  Creates a reply on behalf of `actor` (a `Philomena.Attribution.Actor` whose
+  user may be `nil` for an anonymous visitor) in the topic named by `topic_slug`
+  within the forum named by `forum_slug`, from `post_params` (the raw `"post"`
+  request parameter, which may be `nil` when none was submitted).
+
+  This is a write, so `actor`'s write access is verified first, before any
+  loading, exactly where the retired `PhilomenaWeb.FilterBannedUsersPlug` sat: a
+  banned actor is `{:error, :ban}` and an actor with no fingerprint is
+  `{:error, :unauthorized}`, neither having touched the topic. Then the forum is
+  loaded by short name and authorized for `:show`, the topic is loaded by slug
+  with hidden topics kept invisible unless the actor may `:show` them, and the
+  actor is authorized for `:create_post` on the topic (which no rule permits on a
+  locked or hidden topic). The reply is then inserted by `create_post/3` with the
+  IP, fingerprint, and user carried by `actor`.
+
+  On a successful insert the post-processing the controller used to perform moves
+  here: an approved post increments its author's forum post count, an unapproved
+  one is reported for containing external links. The returned map carries the
+  post, topic, and forum the controller needs both for the firehose broadcast
+  (which stays in the web layer, since it renders a view) and the post-anchor
+  redirect.
+
+  Returns `{:ok, %{post: post, topic: topic, forum: forum}}` on success,
+  `{:error, forum, topic}` when the insert is rejected (both carry the topic
+  needed to redirect back to it with the error flash), `{:error, :ban}` or
+  `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
+  when the forum or topic is not visible or the topic may not be posted in, or
+  `{:error, :not_found}` when the topic does not exist.
+
+  ## Examples
+
+      iex> create_post(actor, "dis", "some-topic", %{"body" => "Hi"})
+      {:ok, %{post: %Post{}, topic: %Topic{}, forum: %Forum{}}}
+
+      iex> create_post(actor, "dis", "some-topic", %{"body" => ""})
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec create_post(Actor.t(), String.t(), String.t(), map() | nil) ::
+          {:ok, %{post: Post.t(), topic: Topic.t(), forum: Forum.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :ban | :unauthorized | :not_found}
+  def create_post(%Actor{} = actor, forum_slug, topic_slug, post_params) do
+    with :ok <- verify_write_access(actor),
+         {:ok, forum, topic} <-
+           Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor.user, :create_post, topic) do
+      case create_post(topic, actor_attributes(actor), post_params || %{}) do
+        {:ok, %{post: post}} ->
+          record_post_creation(actor, post)
+          # The firehose broadcast renders the topic's author, so the topic
+          # carries its `:user` here exactly as the retired LoadTopicPlug
+          # preloaded it.
+          {:ok, %{post: post, topic: Repo.preload(topic, :user), forum: forum}}
+
+        _error ->
+          {:error, forum, topic}
+      end
+    end
+  end
+
+  # The IP/fingerprint/user attribution `create_post/3` records, rebuilt from the
+  # actor: the same keyword list `PhilomenaWeb.UserAttributionPlug` put in the
+  # `:attributes` assign the controller used to pass through.
+  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
+    do: [ip: ip, fingerprint: fingerprint, user: user]
+
+  # Post-insert bookkeeping the controller used to run: an approved post counts
+  # toward its author's forum post total (a no-op for an anonymous author, whose
+  # user is nil), an unapproved one is reported for external links.
+  defp record_post_creation(%Actor{user: user}, %Post{approved: true}),
+    do: UserStatistics.inc_stat(user, :posts_count)
+
+  defp record_post_creation(_actor, post),
+    do: report_non_approved(post)
+
+  @doc """
   Creates a system report for non-approved posts containing external images.
   Returns false for already approved posts.
 
@@ -185,6 +262,107 @@ defmodule Philomena.Posts do
 
       error ->
         error
+    end
+  end
+
+  @doc """
+  Loads the post named by the raw request `post_id` within the topic named by
+  `topic_slug` in the forum named by `forum_slug` for editing, on behalf of
+  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+
+  This backs the edit form, a GET-guarded action, so a banned actor is rejected
+  with `{:error, :ban}` first - the fingerprint requirement the write path
+  enforces is skipped here, matching the retired
+  `PhilomenaWeb.FilterBannedUsersPlug` behavior for GET requests. The forum,
+  topic, and post are then loaded and authorized through the same chain the
+  retired edit/update plugs used (see `load_editable_post/4`).
+
+  Returns `{:ok, {post, changeset}}` - the post (with its topic, forum, and
+  author preloaded) builds the form action, the changeset drives the form -
+  `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the forum,
+  topic, or post is not visible or may not be edited, or `{:error, :not_found}`
+  when the topic or post does not exist.
+
+  ## Examples
+
+      iex> load_post_for_edit(actor, "dis", "some-topic", "1")
+      {:ok, {%Post{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_post_for_edit(Actor.t(), String.t(), String.t(), any()) ::
+          {:ok, {Post.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_post_for_edit(actor, forum_slug, topic_slug, post_id) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, post} <- load_editable_post(actor.user, forum_slug, topic_slug, post_id) do
+      {:ok, {post, change_post(post)}}
+    end
+  end
+
+  @doc """
+  Updates the post named by the raw request `post_id` within the topic named by
+  `topic_slug` in the forum named by `forum_slug` from `post_params`, on behalf
+  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+
+  This is a write, so `actor`'s write access is verified first (banned actor
+  `{:error, :ban}`, no fingerprint `{:error, :unauthorized}`), before the same
+  load-and-authorize chain `load_post_for_edit/4` uses (see
+  `load_editable_post/4`). The edit is then applied by `update_post/3`, recording
+  a version attributed to `actor`'s user; an unapproved result is reported for
+  containing external links, as the controller used to do (an approved result is
+  a no-op there).
+
+  Returns `{:ok, post}` on success (the post carries its topic and forum for the
+  post-anchor redirect), `{:error, {post, changeset}}` when the edit is rejected
+  (the post and changeset re-render the edit form, matching the controller's
+  error render), `{:error, :ban}` or `{:error, :unauthorized}` from the
+  write-access check, `{:error, :unauthorized}` when the forum, topic, or post is
+  not visible or may not be edited, or `{:error, :not_found}` when the topic or
+  post does not exist.
+
+  ## Examples
+
+      iex> update_post(actor, "dis", "some-topic", "1", %{"body" => "Edited"})
+      {:ok, %Post{}}
+
+      iex> update_post(actor, "dis", "some-topic", "1", %{"body" => ""})
+      {:error, {%Post{}, %Ecto.Changeset{}}}
+
+  """
+  @spec update_post(Actor.t(), String.t(), String.t(), any(), map() | nil) ::
+          {:ok, Post.t()}
+          | {:error, {Post.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def update_post(%Actor{} = actor, forum_slug, topic_slug, post_id, post_params) do
+    with :ok <- verify_write_access(actor),
+         {:ok, post} <- load_editable_post(actor.user, forum_slug, topic_slug, post_id) do
+      case update_post(post, actor.user, post_params || %{}) do
+        {:ok, %{post: updated_post}} ->
+          report_non_approved(updated_post)
+          {:ok, updated_post}
+
+        {:error, :post, changeset, _changes} ->
+          {:error, {post, changeset}}
+      end
+    end
+  end
+
+  # Load-and-authorize chain shared by the edit and update actions, reproducing
+  # the retired plug chain in order: the forum is authorized for `:show` and the
+  # topic loaded (a hidden topic needs `:show`), the actor is authorized for
+  # `:create_post` on the topic, the post is loaded within the topic
+  # (reproducing LoadPostPlug: a missing row is `{:error, :not_found}`, a post
+  # hidden from users needs `:show`), and finally the post is authorized for
+  # `:edit`. The `:create_post` check precedes the post load, as the plug chain
+  # ordered it, so a locked topic answers unauthorized before an unknown id could
+  # answer not-found.
+  defp load_editable_post(user, forum_slug, topic_slug, post_id) do
+    with {:ok, _forum, topic} <-
+           Topics.load_forum_topic(user, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(user, :create_post, topic),
+         {:ok, post} <- load_topic_post(user, topic, post_id),
+         :ok <- authorize(user, :edit, post) do
+      {:ok, post}
     end
   end
 

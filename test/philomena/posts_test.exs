@@ -12,6 +12,7 @@ defmodule Philomena.PostsTest do
 
   use Philomena.DataCase, async: true
 
+  import Ecto.Query
   import Philomena.AttributionFixtures
   import Philomena.ForumsFixtures
   import Philomena.PostsFixtures
@@ -24,6 +25,7 @@ defmodule Philomena.PostsTest do
   alias Philomena.Forums.Forum
   alias Philomena.Reports.Report
   alias Philomena.Repo
+  alias Philomena.Topics.Topic
   alias Philomena.Users.User
   alias Philomena.Versions.Version
 
@@ -686,6 +688,266 @@ defmodule Philomena.PostsTest do
                "#{post.id}"
              ) ==
                {:error, :unauthorized}
+    end
+  end
+
+  describe "create_post/4" do
+    # This is a write, so it runs verify_write_access first (ban -> :ban,
+    # missing fingerprint -> :unauthorized), both before any loading, then the
+    # forum/topic load-and-authorize chain and finally the insert engine.
+
+    test "a banned actor is rejected before any loading, even with an unknown forum" do
+      # verify_write_access runs first, so a banned actor is {:error, :ban} even
+      # against a forum slug that does not exist (a missing forum would otherwise
+      # surface as :unauthorized). Getting :ban pins that the ban check precedes
+      # the load.
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Posts.create_post(actor, "nonexistent", "whatever", %{"body" => "Hi"}) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      # The fingerprint requirement precedes loading, so a missing forum still
+      # answers unauthorized from the write-access gate rather than the loader.
+      anonymous = actor(nil, fingerprint: nil)
+
+      assert Posts.create_post(anonymous, "nonexistent", "whatever", %{"body" => "Hi"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "a valid anonymous fingerprinted actor creates a post with no author",
+         %{forum: forum, topic: topic} do
+      # actor(nil) carries the shared fingerprint, so it clears verify_write_access
+      # and reaches the public forum/topic create; the engine records the post
+      # with a nil user (anonymous attribution).
+      assert {:ok, %{post: %Post{} = post, topic: returned_topic, forum: returned_forum}} =
+               Posts.create_post(actor(nil), forum.short_name, topic.slug, %{
+                 "body" => "An anonymous reply"
+               })
+
+      assert post.user_id == nil
+      assert post.body == "An anonymous reply"
+      assert returned_topic.id == topic.id
+      assert returned_forum.id == forum.id
+
+      # The topic carries its author preloaded for the firehose broadcast.
+      assert %{user: _} = returned_topic
+    end
+
+    test "a signed-in actor creates a post attributed to the user",
+         %{forum: forum, topic: topic} do
+      user = confirmed_user_fixture()
+
+      assert {:ok, %{post: %Post{} = post}} =
+               Posts.create_post(actor(user), forum.short_name, topic.slug, %{
+                 "body" => "A logged-in reply"
+               })
+
+      assert post.user_id == user.id
+      assert post.body == "A logged-in reply"
+    end
+
+    test "a regular actor cannot post in a locked topic", %{forum: forum, topic: topic} do
+      # authorize(:create_post, topic) permits no rule on a locked topic, so a
+      # regular actor is unauthorized after the load.
+      {:ok, _} =
+        Philomena.Topics.lock_topic(
+          topic,
+          %{"lock_reason" => "Test lock"},
+          moderator_user_fixture()
+        )
+
+      assert Posts.create_post(actor(confirmed_user_fixture()), forum.short_name, topic.slug, %{
+               "body" => "Reply to a locked topic"
+             }) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown topic in a real forum is not found", %{forum: forum} do
+      assert Posts.create_post(
+               actor(confirmed_user_fixture()),
+               forum.short_name,
+               "nonexistent-topic",
+               %{"body" => "Reply to nothing"}
+             ) ==
+               {:error, :not_found}
+    end
+
+    test "a blank body is a rejected insert carrying the forum and topic",
+         %{forum: forum, topic: topic} do
+      assert {:error, %Forum{} = returned_forum, %Topic{} = returned_topic} =
+               Posts.create_post(actor(confirmed_user_fixture()), forum.short_name, topic.slug, %{
+                 "body" => ""
+               })
+
+      assert returned_forum.id == forum.id
+      assert returned_topic.id == topic.id
+
+      # No reply was inserted beyond the topic's own first post.
+      assert Repo.aggregate(from(p in Post, where: p.topic_id == ^topic.id), :count) == 1
+    end
+
+    test "an approved post increments the author's forum posts_count by one",
+         %{forum: forum, topic: topic} do
+      # A fresh confirmed user's plain (link-free) reply is auto-approved, so the
+      # post-insert bookkeeping bumps the author's forum post total.
+      author = confirmed_user_fixture()
+      before = Repo.get!(User, author.id).posts_count
+
+      assert {:ok, %{post: post}} =
+               Posts.create_post(actor(author), forum.short_name, topic.slug, %{
+                 "body" => "A trustworthy reply"
+               })
+
+      assert post.approved
+      assert Repo.get!(User, author.id).posts_count == before + 1
+    end
+  end
+
+  describe "load_post_for_edit/4" do
+    # This backs the edit form (a GET-guarded action), so it runs
+    # verify_not_banned first (no fingerprint requirement) and then the same
+    # load-and-authorize chain update_post/5 uses, ending in the post's :edit
+    # authorization.
+
+    test "a banned actor is rejected before any loading, even with an unknown forum" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Posts.load_post_for_edit(actor, "nonexistent", "whatever", "1") ==
+               {:error, :ban}
+    end
+
+    test "the post's author loads the form", %{forum: forum, topic: topic} do
+      author = confirmed_user_fixture()
+      post = post_fixture(topic, author)
+
+      assert {:ok, {%Post{} = loaded, %Ecto.Changeset{} = changeset}} =
+               Posts.load_post_for_edit(actor(author), forum.short_name, topic.slug, "#{post.id}")
+
+      assert loaded.id == post.id
+
+      # The changeset is over the loaded post, driving the edit form.
+      assert %Post{} = changeset.data
+      assert changeset.data.id == post.id
+    end
+
+    test "another regular user cannot load the form", %{forum: forum, topic: topic} do
+      post = post_fixture(topic, confirmed_user_fixture())
+
+      assert Posts.load_post_for_edit(
+               actor(confirmed_user_fixture()),
+               forum.short_name,
+               topic.slug,
+               "#{post.id}"
+             ) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator loads the form", %{forum: forum, topic: topic} do
+      post = post_fixture(topic, confirmed_user_fixture())
+
+      assert {:ok, {%Post{} = loaded, %Ecto.Changeset{}}} =
+               Posts.load_post_for_edit(
+                 actor(moderator_user_fixture()),
+                 forum.short_name,
+                 topic.slug,
+                 "#{post.id}"
+               )
+
+      assert loaded.id == post.id
+    end
+
+    test "an unknown post id in a real topic is not found", %{forum: forum, topic: topic} do
+      assert Posts.load_post_for_edit(
+               actor(confirmed_user_fixture()),
+               forum.short_name,
+               topic.slug,
+               "999999999"
+             ) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "update_post/5" do
+    # This is a write, so it runs verify_write_access first (ban -> :ban), then
+    # the same load-and-authorize chain load_post_for_edit/4 uses, then the edit
+    # engine which records a version.
+
+    test "a banned actor is rejected before any loading, even with an unknown forum" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Posts.update_post(actor, "nonexistent", "whatever", "1", %{"body" => "Edited"}) ==
+               {:error, :ban}
+    end
+
+    test "the author edits the body and a version is recorded",
+         %{forum: forum, topic: topic} do
+      author = confirmed_user_fixture()
+      post = post_fixture(topic, author, %{"body" => "Original reply body"})
+
+      assert {:ok, %Post{} = updated} =
+               Posts.update_post(actor(author), forum.short_name, topic.slug, "#{post.id}", %{
+                 "body" => "Original reply body plus an edit",
+                 "edit_reason" => "typo"
+               })
+
+      assert updated.body == "Original reply body plus an edit"
+      assert Repo.reload!(post).body == "Original reply body plus an edit"
+
+      # A version row was written for the post. Its `body` is virtual, decoded
+      # from the persisted `object` blob only through the history loader, so the
+      # value is read back via post_history: create_version records the body as it
+      # stood before the edit, so the single version carries the original text.
+      assert Repo.exists?(
+               from v in Version, where: v.item_type == "Post" and v.item_id == ^post.id
+             )
+
+      assert {:ok, {_topic, _post, [%Version{} = version]}} =
+               Posts.post_history(nil, forum.short_name, topic.slug, "#{post.id}")
+
+      assert version.body == "Original reply body"
+    end
+
+    test "another regular user cannot edit, leaving the body unchanged",
+         %{forum: forum, topic: topic} do
+      post = post_fixture(topic, confirmed_user_fixture(), %{"body" => "Original reply body"})
+
+      assert Posts.update_post(
+               actor(confirmed_user_fixture()),
+               forum.short_name,
+               topic.slug,
+               "#{post.id}",
+               %{"body" => "Hijacked"}
+             ) ==
+               {:error, :unauthorized}
+
+      assert Repo.reload!(post).body == "Original reply body"
+    end
+
+    test "a blank body is a rejected changeset carrying the loaded post",
+         %{forum: forum, topic: topic} do
+      author = confirmed_user_fixture()
+      post = post_fixture(topic, author, %{"body" => "Original reply body"})
+
+      assert {:error, {%Post{} = returned, %Ecto.Changeset{}}} =
+               Posts.update_post(actor(author), forum.short_name, topic.slug, "#{post.id}", %{
+                 "body" => ""
+               })
+
+      assert returned.id == post.id
+      assert Repo.reload!(post).body == "Original reply body"
+    end
+
+    test "an unknown post id in a real topic is not found", %{forum: forum, topic: topic} do
+      assert Posts.update_post(
+               actor(confirmed_user_fixture()),
+               forum.short_name,
+               topic.slug,
+               "999999999",
+               %{"body" => "Edited"}
+             ) ==
+               {:error, :not_found}
     end
   end
 end
