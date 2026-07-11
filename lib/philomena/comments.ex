@@ -274,6 +274,72 @@ defmodule Philomena.Comments do
   end
 
   @doc """
+  Destroys the content of the comment named by the raw request `comment_id`, on
+  behalf of `actor` (a user, or `nil` for an anonymous visitor).
+
+  Authorization (`:hide` on the loaded comment) happens here; on success the
+  comment's text is removed, its image's comment count is decremented, the
+  comment is reindexed, and a moderation log is written attributing the
+  destruction to `actor`. An id that cannot name a row is `{:error, :not_found}`,
+  while a well-formed id that names no row authorizes `nil` - which no rule
+  permits - and is therefore `{:error, :unauthorized}`.
+
+  A failed destruction returns `{:error, %Comment{}}` carrying the loaded comment
+  so the caller can still redirect to the comment anchor.
+
+  ## Examples
+
+      iex> destroy_comment(moderator, "1")
+      {:ok, %Comment{}}
+
+      iex> destroy_comment(user, "1")
+      {:error, :unauthorized}
+
+      iex> destroy_comment(moderator, "not-an-integer")
+      {:error, :not_found}
+
+  """
+  @spec destroy_comment(User.t() | nil, any()) ::
+          {:ok, Comment.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Comment.t()}
+  def destroy_comment(actor, comment_id) do
+    case IntegerId.parse(comment_id) do
+      {:ok, id} ->
+        comment = Repo.get(Comment, id)
+
+        with :ok <- authorize(actor, :hide, comment) do
+          destroy_loaded_comment(actor, comment)
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp destroy_loaded_comment(actor, %Comment{} = comment) do
+    case destroy_comment(comment) do
+      {:ok, destroyed_comment} ->
+        log_comment_destruction(actor, destroyed_comment)
+        {:ok, destroyed_comment}
+
+      _error ->
+        # The destroy changeset always succeeds, so this branch is not reachable;
+        # it carries the loaded comment for the caller's anchor redirect.
+        {:error, comment}
+    end
+  end
+
+  defp log_comment_destruction(actor, %Comment{} = comment) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Image.Comment.Delete:create",
+      Paths.image_comment_path(comment.image_id, comment.id),
+      "Destroyed comment on image #{comment.image_id}"
+    )
+  end
+
+  @doc """
   Marks a comment as destroyed and removes its text (hard deletion).
 
   ## Examples

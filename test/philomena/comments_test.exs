@@ -245,4 +245,126 @@ defmodule Philomena.CommentsTest do
       no_moderation_logs!()
     end
   end
+
+  # A visible comment authored by a fresh user, ready to be destroyed.
+  defp visible_comment(image) do
+    comment_fixture(image, confirmed_user_fixture(), %{"body" => "Rule-breaking comment"})
+  end
+
+  # An already-hidden comment, set up through the log-free hide engine so no
+  # moderation log exists before the destroy under test runs.
+  defp already_hidden_comment(image) do
+    {:ok, hidden} =
+      Comments.hide_comment(
+        visible_comment(image),
+        %{"deletion_reason" => "Spam"},
+        moderator_user_fixture()
+      )
+
+    hidden
+  end
+
+  describe "destroy_comment/2" do
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "denies an anonymous actor, leaving the body intact", %{image: image} do
+      comment = visible_comment(image)
+
+      assert Comments.destroy_comment(nil, "#{comment.id}") == {:error, :unauthorized}
+
+      reloaded = Repo.reload!(comment)
+      assert reloaded.body == "Rule-breaking comment"
+      refute reloaded.destroyed_content
+      no_moderation_logs!()
+    end
+
+    test "denies a regular user, leaving the body intact", %{image: image} do
+      comment = visible_comment(image)
+
+      assert Comments.destroy_comment(confirmed_user_fixture(), "#{comment.id}") ==
+               {:error, :unauthorized}
+
+      reloaded = Repo.reload!(comment)
+      assert reloaded.body == "Rule-breaking comment"
+      refute reloaded.destroyed_content
+      no_moderation_logs!()
+    end
+
+    test "a moderator destroys the comment, emptying its body", %{image: image} do
+      comment = visible_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, %Comment{} = destroyed} = Comments.destroy_comment(moderator, "#{comment.id}")
+
+      assert destroyed.id == comment.id
+
+      # The destroy engine blanks the body and marks the content destroyed; it
+      # does not touch the comment's hidden/deletion_reason fields, so a visible
+      # comment stays visible while its text is wiped.
+      reloaded = Repo.reload!(comment)
+      assert reloaded.body == ""
+      assert reloaded.destroyed_content
+      refute reloaded.hidden_from_users
+      assert reloaded.deletion_reason == ""
+    end
+
+    # The engine authorizes :hide and never inspects hidden_from_users, so an
+    # already-hidden comment is destroyable too; it keeps its hidden flag and
+    # reason while the text is wiped.
+    test "destroys an already-hidden comment, keeping its hidden flag and reason",
+         %{image: image} do
+      comment = already_hidden_comment(image)
+
+      # Set up through the log-free engine, so no log exists before the destroy.
+      no_moderation_logs!()
+
+      assert {:ok, %Comment{}} =
+               Comments.destroy_comment(moderator_user_fixture(), "#{comment.id}")
+
+      reloaded = Repo.reload!(comment)
+      assert reloaded.body == ""
+      assert reloaded.destroyed_content
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Spam"
+    end
+
+    test "the moderation log names the image and comment exactly", %{image: image} do
+      comment = visible_comment(image)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, _} = Comments.destroy_comment(moderator, "#{comment.id}")
+
+      log = Repo.one!(ModerationLog)
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Comment.Delete:create"
+      assert log.body == "Destroyed comment on image #{image.id}"
+      assert log.subject_path == "/images/#{image.id}#comment_#{comment.id}"
+    end
+
+    test "destroying decrements the author's comments_count by one", %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "Rule-breaking comment"})
+      before = Repo.get!(User, author.id).comments_count
+
+      assert {:ok, _} = Comments.destroy_comment(moderator_user_fixture(), "#{comment.id}")
+
+      assert Repo.get!(User, author.id).comments_count == before - 1
+    end
+
+    # A well-formed id naming no row loads nil, which no :hide rule permits; the
+    # context returns unauthorized rather than not-found.
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Comments.destroy_comment(moderator_user_fixture(), "999999999") ==
+               {:error, :unauthorized}
+
+      no_moderation_logs!()
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Comments.destroy_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
+      no_moderation_logs!()
+    end
+  end
 end
