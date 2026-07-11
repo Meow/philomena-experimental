@@ -298,4 +298,96 @@ defmodule Philomena.PostsTest do
       no_moderation_logs!()
     end
   end
+
+  describe "destroy_post/2" do
+    test "denies an anonymous actor, leaving the body intact", %{topic: topic} do
+      post = visible_post(topic)
+
+      assert Posts.destroy_post(nil, "#{post.id}") == {:error, :unauthorized}
+
+      reloaded = Repo.reload!(post)
+      assert reloaded.body == "Rule-breaking post"
+      refute reloaded.destroyed_content
+      no_moderation_logs!()
+    end
+
+    test "denies a regular user, leaving the body intact", %{topic: topic} do
+      post = visible_post(topic)
+
+      assert Posts.destroy_post(confirmed_user_fixture(), "#{post.id}") == {:error, :unauthorized}
+
+      reloaded = Repo.reload!(post)
+      assert reloaded.body == "Rule-breaking post"
+      refute reloaded.destroyed_content
+      no_moderation_logs!()
+    end
+
+    test "a moderator destroys the post, which is returned with topic and forum preloaded",
+         %{forum: forum, topic: topic} do
+      post = visible_post(topic)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, %Post{} = destroyed} = Posts.destroy_post(moderator, "#{post.id}")
+
+      assert destroyed.id == post.id
+      assert %{topic: %{forum: %Forum{}}} = destroyed
+      assert destroyed.topic.id == topic.id
+      assert destroyed.topic.forum.id == forum.id
+
+      # The destroy engine blanks the body and marks the content destroyed; it
+      # does not touch the post's hidden/deletion_reason fields, so a visible
+      # post stays visible while its text is wiped.
+      reloaded = Repo.reload!(post)
+      assert reloaded.body == ""
+      assert reloaded.destroyed_content
+      refute reloaded.hidden_from_users
+      assert reloaded.deletion_reason == ""
+    end
+
+    # The engine authorizes :hide and never inspects hidden_from_users, so an
+    # already-hidden post is destroyable too; it keeps its hidden flag and reason
+    # while the text is wiped.
+    test "destroys an already-hidden post, keeping its hidden flag and reason", %{topic: topic} do
+      post = already_hidden_post(topic)
+
+      # Set up through the log-free engine, so no log exists before the destroy.
+      no_moderation_logs!()
+
+      assert {:ok, %Post{}} = Posts.destroy_post(moderator_user_fixture(), "#{post.id}")
+
+      reloaded = Repo.reload!(post)
+      assert reloaded.body == ""
+      assert reloaded.destroyed_content
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Spam"
+    end
+
+    test "the moderation log names the post and topic byte-for-byte",
+         %{forum: forum, topic: topic} do
+      post = visible_post(topic)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, _} = Posts.destroy_post(moderator, "#{post.id}")
+
+      log = Repo.one!(ModerationLog)
+      assert log.user_id == moderator.id
+      assert log.type == "Topic.Post.Delete:create"
+      assert log.body == "Destroyed forum post ##{post.id} in topic '#{topic.title}'"
+
+      assert log.subject_path ==
+               "/forums/#{forum.short_name}/topics/#{topic.slug}?post_id=#{post.id}#post_#{post.id}"
+    end
+
+    # As with the other id-guarded actions, a well-formed id naming no row loads
+    # nil and is unauthorized rather than not-found.
+    test "a well-formed id naming no row is unauthorized, not not-found" do
+      assert Posts.destroy_post(moderator_user_fixture(), "999999999") == {:error, :unauthorized}
+      no_moderation_logs!()
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Posts.destroy_post(moderator_user_fixture(), "abc") == {:error, :not_found}
+      no_moderation_logs!()
+    end
+  end
 end

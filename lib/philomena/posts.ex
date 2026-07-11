@@ -396,7 +396,76 @@ defmodule Philomena.Posts do
   end
 
   @doc """
+  Destroys (permanently wipes the text of) the post named by the raw request
+  `post_id`, on behalf of `actor` (a user, or `nil` for an anonymous visitor).
+
+  Authorization (`:hide` on the loaded post) happens here; on success the post's
+  text is blanked, the topic's and forum's post counts and the author's forum
+  post count are decremented, the post is reindexed, and a moderation log is
+  written attributing the destruction to `actor`. An id that cannot name a row is
+  `{:error, :not_found}`, while a well-formed id that names no row authorizes
+  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`,
+  preserving the behavior of the load-then-authorize plug this replaces.
+
+  The post is loaded (and returned) with its `:topic` and the topic's `:forum`
+  preloaded so the caller can build the post-anchor redirect for either outcome.
+  A failed destroy returns `{:error, %Post{}}` carrying that loaded post.
+
+  ## Examples
+
+      iex> destroy_post(moderator, "1")
+      {:ok, %Post{}}
+
+      iex> destroy_post(user, "1")
+      {:error, :unauthorized}
+
+      iex> destroy_post(moderator, "not-an-integer")
+      {:error, :not_found}
+
+  """
+  @spec destroy_post(User.t() | nil, any()) ::
+          {:ok, Post.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Post.t()}
+  def destroy_post(actor, post_id) do
+    case IntegerId.parse(post_id) do
+      {:ok, id} ->
+        post =
+          Post
+          |> preload([:topic, topic: :forum])
+          |> Repo.get(id)
+
+        with :ok <- authorize(actor, :hide, post) do
+          case destroy_post(post) do
+            {:ok, destroyed_post} ->
+              log_post_destroy(actor, destroyed_post)
+              {:ok, destroyed_post}
+
+            _error ->
+              {:error, post}
+          end
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp log_post_destroy(actor, %Post{topic: topic} = post) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Topic.Post.Delete:create",
+      Paths.forum_post_path(post),
+      "Destroyed forum post ##{post.id} in topic '#{topic.title}'"
+    )
+  end
+
+  @doc """
   Marks a post as destroyed and removes its text (hard deletion).
+
+  This is the internal destroy engine shared with `destroy_post/2` and
+  `Philomena.Users.Eraser`; it performs no authorization and writes no
+  moderation log, so controller-facing callers go through `destroy_post/2`.
 
   ## Examples
 
