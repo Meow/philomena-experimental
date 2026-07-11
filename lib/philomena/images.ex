@@ -1354,6 +1354,55 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Sets (`anonymous?` true) or clears (`anonymous?` false) the anonymity of the
+  image named by `image_id`, on behalf of `actor`.
+
+  Authorization is `:show` on `:ip_address` - a moderator-and-above capability -
+  and is checked before the image is loaded, so an actor without it gets
+  `{:error, :unauthorized}` regardless of the id. The image is then loaded by id
+  with no per-image authorization: a non-castable, out-of-range, or unknown id is
+  `{:error, :not_found}`. On success the anonymity is toggled, the image is
+  reindexed, and a moderation log is written attributing the change to `actor`.
+
+  Returns `{:ok, image}` with the updated image.
+
+  ## Examples
+
+      iex> update_anonymous(moderator, "42", true)
+      {:ok, %Image{}}
+
+      iex> update_anonymous(user, "42", true)
+      {:error, :unauthorized}
+
+  """
+  @spec update_anonymous(User.t(), String.t() | integer(), boolean()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def update_anonymous(actor, image_id, anonymous?) do
+    with :ok <- authorize(actor, :show, :ip_address),
+         {:ok, id} <- IntegerId.parse(image_id),
+         %Image{} = image <- Repo.get(Image, id),
+         {:ok, image} <- update_anonymous(image, %{"anonymous" => anonymous?}) do
+      reindex_image(image)
+
+      log_type = if anonymous?, do: "Image.Anonymous:create", else: "Image.Anonymous:delete"
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        log_type,
+        Paths.image_path(image),
+        "Updated anonymity of image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable/out-of-range id, or an unknown id (loaded with no per-image
+      # authorization, so it is a plain not-found rather than unauthorized).
+      shape when shape in [:error, nil] -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Updates the anonymous status of an image.
 
   ## Examples

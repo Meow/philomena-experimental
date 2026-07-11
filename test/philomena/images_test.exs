@@ -1960,4 +1960,124 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
   end
+
+  describe "update_anonymous/3" do
+    test "a moderator sets anonymity, flagging the image anonymous" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(anonymous: false)
+
+      assert {:ok, updated} = Images.update_anonymous(moderator, to_string(image.id), true)
+      assert updated.id == image.id
+      assert updated.anonymous
+      assert Repo.reload!(image).anonymous
+    end
+
+    test "an admin sets anonymity" do
+      admin = admin_user_fixture()
+      image = image_fixture(anonymous: false)
+
+      assert {:ok, _} = Images.update_anonymous(admin, to_string(image.id), true)
+      assert Repo.reload!(image).anonymous
+    end
+
+    test "a moderator clears anonymity" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(anonymous: true)
+
+      assert {:ok, updated} = Images.update_anonymous(moderator, to_string(image.id), false)
+      assert updated.id == image.id
+      refute updated.anonymous
+      refute Repo.reload!(image).anonymous
+    end
+
+    test "setting anonymity writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(anonymous: false)
+
+      assert {:ok, _} = Images.update_anonymous(moderator, to_string(image.id), true)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Anonymous:create"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Updated anonymity of image #{image.id}"
+    end
+
+    test "clearing anonymity writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(anonymous: true)
+
+      assert {:ok, _} = Images.update_anonymous(moderator, to_string(image.id), false)
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Anonymous:delete"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Updated anonymity of image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(anonymous: false)
+
+      assert {:ok, updated} = Images.update_anonymous(moderator, image.id, true)
+      assert updated.id == image.id
+      assert Repo.reload!(image).anonymous
+    end
+
+    test "a regular user is unauthorized on a real image and the flag stays put" do
+      # Authorization on :ip_address runs before the load, so a regular user is
+      # denied without the image ever being touched.
+      user = confirmed_user_fixture()
+      image = image_fixture(anonymous: false)
+
+      assert Images.update_anonymous(user, to_string(image.id), true) == {:error, :unauthorized}
+      refute Repo.reload!(image).anonymous
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user with a garbage id is still unauthorized, not not_found" do
+      # The :ip_address authorization precedes the id parse, so a non-castable id
+      # never reaches the not-found path for an unprivileged actor.
+      user = confirmed_user_fixture()
+
+      assert Images.update_anonymous(user, "not-a-number", true) == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor is unauthorized on a real image" do
+      image = image_fixture(anonymous: false)
+
+      assert Images.update_anonymous(nil, to_string(image.id), true) == {:error, :unauthorized}
+      refute Repo.reload!(image).anonymous
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor with a garbage id is still unauthorized" do
+      assert Images.update_anonymous(nil, "not-a-number", true) == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
+      # Unlike the :hide wrappers, the load has no per-image authorization, so a
+      # missing image is a plain not-found rather than unauthorized.
+      moderator = moderator_user_fixture()
+
+      assert Images.update_anonymous(moderator, "2147483647", true) == {:error, :not_found}
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_anonymous(moderator, "not-a-number", true) == {:error, :not_found}
+    end
+
+    test "a moderator with an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_anonymous(moderator, "99999999999999999999", true) ==
+               {:error, :not_found}
+    end
+  end
 end
