@@ -137,4 +137,29 @@ defmodule Philomena.SourceChangesTest do
                {:error, :not_found}
     end
   end
+
+  describe "count_for_image/1" do
+    test "returns the number of source changes for the image" do
+      image = image_fixture()
+      source_change_fixture(image)
+      source_change_fixture(image)
+
+      assert SourceChanges.count_for_image(image.id) == 2
+    end
+
+    test "counts only the given image's changes" do
+      image = image_fixture()
+      other = image_fixture()
+      source_change_fixture(image)
+      source_change_fixture(other)
+
+      assert SourceChanges.count_for_image(image.id) == 1
+    end
+
+    test "returns zero when the image has no source changes" do
+      image = image_fixture()
+
+      assert SourceChanges.count_for_image(image.id) == 0
+    end
+  end
 end

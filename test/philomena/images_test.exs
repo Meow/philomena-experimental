@@ -107,6 +107,25 @@ defmodule Philomena.ImagesTest do
     Repo.get_by(ImageVote, image_id: image.id, user_id: user.id)
   end
 
+  defp source_change_row_count(image) do
+    Repo.aggregate(from(s in SourceChange, where: s.image_id == ^image.id), :count)
+  end
+
+  # Controller-shaped attrs adding a single source with no prior sources.
+  defp add_source_attrs(url) do
+    %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => url}}}
+  end
+
+  # Controller-shaped attrs adding `count` distinct sources.
+  defp many_source_attrs(count) do
+    sources =
+      Map.new(0..(count - 1), fn i ->
+        {to_string(i), %{"source" => "https://example.com/#{i}"}}
+      end)
+
+    %{"old_sources" => %{}, "sources" => sources}
+  end
+
   # Hides an image through the internal engine (which writes no moderation log),
   # so a later log assertion sees only the row the function under test creates.
   defp hidden_image_fixture(reason \\ "Original reason") do
@@ -3421,6 +3440,136 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
 
       assert Images.unhide_image(moderator, "99999999999999999999") == {:error, :not_found}
+    end
+  end
+
+  describe "update_sources/3" do
+    test "a signed-in actor adds a source, recording an attributed change and bumping stats" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, result} =
+               Images.update_sources(
+                 actor(user),
+                 to_string(image.id),
+                 add_source_attrs("https://example.com/art")
+               )
+
+      assert result.image.id == image.id
+      assert result.added == ["https://example.com/art"]
+      assert result.removed == []
+      assert result.source_change_count == 1
+
+      change = Repo.one(from s in SourceChange, where: s.image_id == ^image.id)
+      assert change.user_id == user.id
+      assert change.added == true
+
+      assert Repo.reload!(user).metadata_updates_count == 1
+    end
+
+    test "an anonymous fingerprinted actor records a change with no user" do
+      image = image_fixture()
+
+      assert {:ok, result} =
+               Images.update_sources(
+                 actor(nil),
+                 to_string(image.id),
+                 add_source_attrs("https://example.com/anon")
+               )
+
+      assert result.added == ["https://example.com/anon"]
+
+      change = Repo.one(from s in SourceChange, where: s.image_id == ^image.id)
+      assert change.user_id == nil
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, result} =
+               Images.update_sources(
+                 actor(user),
+                 image.id,
+                 add_source_attrs("https://example.com/i")
+               )
+
+      assert result.image.id == image.id
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Images.update_sources(actor, "not-a-number", add_source_attrs("https://x.test")) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Images.update_sources(actor, "not-a-number", add_source_attrs("https://x.test")) ==
+               {:error, :unauthorized}
+    end
+
+    test "a hidden image is unauthorized and records no change" do
+      # edit_metadata requires a non-hidden image, so a hidden one fails
+      # authorization for a signed-in actor.
+      user = confirmed_user_fixture()
+      hidden = hidden_image_fixture()
+
+      assert Images.update_sources(
+               actor(user),
+               to_string(hidden.id),
+               add_source_attrs("https://x.test")
+             ) == {:error, :unauthorized}
+
+      assert source_change_row_count(hidden) == 0
+    end
+
+    test "more than 15 sources is a changeset error with no change recorded" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_sources(actor(user), to_string(image.id), many_source_attrs(16))
+
+      assert source_change_row_count(image) == 0
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular actor" do
+      # The image loads as nil and a regular actor fails :edit_metadata on the nil
+      # load, so the missing image surfaces as unauthorized.
+      assert Images.update_sources(
+               actor(confirmed_user_fixture()),
+               "2147483647",
+               add_source_attrs("https://x.test")
+             ) == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      # An admin clears :edit_metadata on the nil load via the blanket ability
+      # rule, then the image presence check fails, so it is not found.
+      assert Images.update_sources(
+               actor(admin_user_fixture()),
+               "2147483647",
+               add_source_attrs("https://x.test")
+             ) == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.update_sources(
+               actor(confirmed_user_fixture()),
+               "not-a-number",
+               add_source_attrs("https://x.test")
+             ) == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      assert Images.update_sources(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999",
+               add_source_attrs("https://x.test")
+             ) == {:error, :not_found}
     end
   end
 end

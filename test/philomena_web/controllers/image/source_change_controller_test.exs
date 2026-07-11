@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.Image.SourceChangeControllerTest do
       image = image_fixture()
 
       {:ok, _result} =
-        Images.update_sources(image, attribution(nil), %{
+        Images.update_loaded_sources(image, attribution(nil), %{
           "old_sources" => %{},
           "sources" => %{"0" => %{"source" => "https://example.com/test-source"}}
         })

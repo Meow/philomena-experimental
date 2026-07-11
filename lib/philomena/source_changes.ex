@@ -14,6 +14,22 @@ defmodule Philomena.SourceChanges do
   alias Philomena.SourceChanges.SourceChange
 
   @doc """
+  Counts the source changes recorded on the image with the given id.
+
+  ## Examples
+
+      iex> count_for_image(42)
+      3
+
+  """
+  @spec count_for_image(integer()) :: non_neg_integer()
+  def count_for_image(image_id) do
+    SourceChange
+    |> where(image_id: ^image_id)
+    |> Repo.aggregate(:count, :id)
+  end
+
+  @doc """
   Lists the source changes recorded on the image named by `image_id`, newest
   first, on behalf of `actor` (a user, or `nil` for an anonymous visitor).
 

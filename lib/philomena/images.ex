@@ -30,6 +30,7 @@ defmodule Philomena.Images do
   alias Philomena.ImageVotes
   alias Philomena.ImageHides
   alias Philomena.ImageFaves
+  alias Philomena.SourceChanges
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
@@ -1116,19 +1117,23 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Updates an image's sources with attribution tracking.
+  Updates the sources of the given already-loaded image with attribution
+  tracking. This is the internal source engine; it performs no authorization,
+  so controller-facing callers go through `update_sources/3`.
 
   Handles both added and removed sources. Automatically determines the user's
-  intended source changes based on the provided previous image state.
+  intended source changes based on the provided previous image state. `attribution`
+  is the keyword-list principal (`[ip:, fingerprint:, user:]`) attributed to the
+  created source change records.
 
-  This will update the image's sources, create source change records
-  for tracking, and reindex the image.
+  This will update the image's sources and create source change records for
+  tracking.
 
   ## Examples
 
-      iex> update_sources(
+      iex> update_loaded_sources(
       ...>   image,
-      ...>   %{attribution: attrs},
+      ...>   [ip: ip, fingerprint: fp, user: user],
       ...>   %{
       ...>     "old_sources" => %{},
       ...>     "sources" => %{"0" => "http://example.com"}
@@ -1136,13 +1141,13 @@ defmodule Philomena.Images do
       ...> )
       {:ok,
        %{
-         image: image,
+         image: {image, added_sources, removed_sources},
          added_source_changes: 1,
          removed_source_changes: 0
        }}
 
   """
-  def update_sources(%Image{} = image, attribution, attrs) do
+  def update_loaded_sources(%Image{} = image, attribution, attrs) do
     old_sources = attrs["old_sources"]
     new_sources = attrs["sources"]
 
@@ -1180,6 +1185,74 @@ defmodule Philomena.Images do
       {:ok, count}
     end)
     |> Repo.transaction()
+  end
+
+  @doc """
+  Updates the sources of the image named by `image_id`, on behalf of `actor`,
+  from the controller-shaped `attrs` (`"old_sources"`/`"sources"` maps),
+  recording source change records attributed to the actor.
+
+  Banned actors are rejected first with `{:error, :ban}` (a write with no
+  fingerprint is `{:error, :unauthorized}`), before the image is loaded. The
+  image is then loaded by id (with its author, sources, and tags preloaded for
+  rendering) and authorized for `:edit_metadata` - editable on a non-hidden image
+  by anyone (anonymous included), so a hidden image is `{:error, :unauthorized}`.
+  A non-castable or out-of-range id is `{:error, :not_found}`; a well-formed but
+  unknown id is authorized as a `nil` load, normally `{:error, :unauthorized}`.
+  On success the sources are updated and attributed, the actor's metadata-update
+  stat is incremented when sources actually changed, and the image is reindexed.
+
+  Returns `{:ok, %{image: image, added: added_sources, removed: removed_sources,
+  source_change_count: count}}` - everything the caller needs to broadcast the
+  change and render the sources partial - or `{:error, %Ecto.Changeset{}}` when
+  the update is rejected (e.g. more than the allowed number of sources), leaving
+  the image untouched.
+
+  ## Examples
+
+      iex> update_sources(actor, "42", %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => "http://example.com"}}})
+      {:ok, %{image: %Image{}, added: ["http://example.com"], removed: [], source_change_count: 1}}
+
+  """
+  @spec update_sources(Actor.t(), String.t() | integer(), map()) ::
+          {:ok,
+           %{
+             image: Image.t(),
+             added: [String.t()],
+             removed: [String.t()],
+             source_change_count: non_neg_integer()
+           }}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_sources(%Actor{} = actor, image_id, attrs) do
+    attribution = [ip: actor.ip, fingerprint: actor.fingerprint, user: actor.user]
+
+    with :ok <- verify_write_access(actor),
+         {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(preload(Image, [:user, :sources, tags: :aliases]), id),
+         :ok <- authorize(actor, :edit_metadata, image),
+         %Image{} <- image,
+         {:ok, %{image: {image, added, removed}}} <-
+           update_loaded_sources(image, attribution, attrs) do
+      if Enum.any?(added) or Enum.any?(removed) do
+        UserStatistics.inc_stat(actor.user, :metadata_updates_count)
+      end
+
+      reindex_image(image)
+
+      {:ok,
+       %{
+         image: image,
+         added: added,
+         removed: removed,
+         source_change_count: SourceChanges.count_for_image(image.id)
+       }}
+    else
+      {:error, :ban} -> {:error, :ban}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :image, changeset, _changes} -> {:error, changeset}
+    end
   end
 
   defp source_change_attributes(attribution, image, source, added, user) do

@@ -3,7 +3,7 @@ defmodule Philomena.SourceChangesFixtures do
   Test helpers for `m:Philomena.SourceChanges.SourceChange` rows.
 
   Source changes are normally produced as a side effect of
-  `Philomena.Images.update_sources/3`; the IP / fingerprint source-change pages
+  `Philomena.Images.update_loaded_sources/3`; the IP / fingerprint source-change pages
   filter them by attribution, so tests need rows with a chosen `ip` /
   `fingerprint`. The schema changeset casts nothing, so - like the `UserIp` /
   `UserFingerprint` fixtures - this inserts directly. `source_changes.ip`,
