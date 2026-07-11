@@ -28,6 +28,7 @@ defmodule Philomena.Images do
   alias Philomena.ModerationLogs.Paths
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.ImageVotes
+  alias Philomena.ImageHides
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
@@ -2473,6 +2474,88 @@ defmodule Philomena.Images do
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
+
+  @doc """
+  Records a personal hide of the image named by `image_id` for `actor`, so the
+  image is filtered out of `actor`'s browsing. This is the per-user hide
+  interaction, distinct from the moderator hide `hide_image/3`.
+
+  Banned actors are rejected first with `{:error, :ban}` (a write with no
+  fingerprint is `{:error, :unauthorized}`), before the image is loaded. The
+  image is then loaded by id and authorized for `:vote`. A non-castable or
+  out-of-range id is `{:error, :not_found}`; a well-formed but unknown id is
+  authorized as a `nil` load, normally `{:error, :unauthorized}`. Hiding is
+  idempotent (an existing hide is replaced).
+
+  Returns `{:ok, image}` with the image reloaded and reindexed (so its hide count
+  is current), or `{:error, :hide_failed}` if the hide transaction is rolled back.
+
+  ## Examples
+
+      iex> create_image_hide(actor, "42")
+      {:ok, %Image{}}
+
+  """
+  @spec create_image_hide(Actor.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
+  def create_image_hide(actor, image_id) do
+    with {:ok, image} <- load_image_for_hide(actor, image_id) do
+      Multi.append(
+        ImageHides.delete_hide_transaction(image, actor.user),
+        ImageHides.create_hide_transaction(image, actor.user)
+      )
+      |> Repo.transaction()
+      |> hide_result(image)
+    end
+  end
+
+  @doc """
+  Removes `actor`'s personal hide of the image named by `image_id`. This is the
+  per-user unhide interaction, distinct from the moderator unhide `unhide_image/1`.
+
+  Loading, authorization, and ban semantics mirror `create_image_hide/2`.
+  Removing a hide that does not exist still succeeds.
+
+  Returns `{:ok, image}` with the image reloaded and reindexed, or
+  `{:error, :hide_failed}` if the transaction is rolled back.
+
+  ## Examples
+
+      iex> delete_image_hide(actor, "42")
+      {:ok, %Image{}}
+
+  """
+  @spec delete_image_hide(Actor.t(), String.t() | integer()) ::
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
+  def delete_image_hide(actor, image_id) do
+    with {:ok, image} <- load_image_for_hide(actor, image_id) do
+      image
+      |> ImageHides.delete_hide_transaction(actor.user)
+      |> Repo.transaction()
+      |> hide_result(image)
+    end
+  end
+
+  # Shared loader for the per-user hide interaction: a banned actor is rejected
+  # first (matching the plug that ran ahead of authorization), then the image is
+  # loaded by id and authorized for `:vote`.
+  defp load_image_for_hide(actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :vote, image),
+         %Image{} <- image do
+      {:ok, image}
+    else
+      {:error, :ban} -> {:error, :ban}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+    end
+  end
+
+  defp hide_result({:ok, _changes}, image), do: {:ok, get_image!(image.id) |> reindex_image()}
+  defp hide_result(_error, _image), do: {:error, :hide_failed}
 
   @doc """
   Assembles the interaction listing for the image named by `image_id`, on behalf

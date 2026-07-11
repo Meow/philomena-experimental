@@ -1,59 +1,40 @@
 defmodule PhilomenaWeb.Image.HideController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.{Images, Images.Image}
-  alias Philomena.ImageHides
-  alias Philomena.Repo
-  alias Ecto.Multi
+  alias Philomena.Images.Image
+  alias Philomena.Images
 
-  plug PhilomenaWeb.FilterBannedUsersPlug
-  plug PhilomenaWeb.CanaryMapPlug, create: :vote, delete: :vote
-  plug :load_and_authorize_resource, model: Image, id_name: "image_id", persisted: true
+  action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, _params) do
-    user = conn.assigns.current_user
-    image = conn.assigns.image
+  plug PhilomenaWeb.UserAttributionPlug
 
-    Multi.append(
-      ImageHides.delete_hide_transaction(image, user),
-      ImageHides.create_hide_transaction(image, user)
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, _result} ->
-        image =
-          Images.get_image!(image.id)
-          |> Images.reindex_image()
+  def create(conn, params) do
+    case Images.create_image_hide(conn.assigns.actor, params["image_id"]) do
+      {:ok, image} ->
+        json(conn, Image.interaction_data(image))
 
+      {:error, :hide_failed} ->
         conn
-        |> json(Image.interaction_data(image))
-
-      _error ->
-        conn
-        |> Plug.Conn.put_status(409)
+        |> put_status(409)
         |> json(%{})
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  def delete(conn, _params) do
-    user = conn.assigns.current_user
-    image = conn.assigns.image
+  def delete(conn, params) do
+    case Images.delete_image_hide(conn.assigns.actor, params["image_id"]) do
+      {:ok, image} ->
+        json(conn, Image.interaction_data(image))
 
-    ImageHides.delete_hide_transaction(image, user)
-    |> Repo.transaction()
-    |> case do
-      {:ok, _result} ->
-        image =
-          Images.get_image!(image.id)
-          |> Images.reindex_image()
-
+      {:error, :hide_failed} ->
         conn
-        |> json(Image.interaction_data(image))
-
-      _error ->
-        conn
-        |> Plug.Conn.put_status(409)
+        |> put_status(409)
         |> json(%{})
+
+      {:error, _} = error ->
+        error
     end
   end
 end

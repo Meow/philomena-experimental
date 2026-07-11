@@ -6,6 +6,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.ImageFaves
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.ImageHides
+  alias Philomena.ImageHides.ImageHide
   alias Philomena.Images
   alias Philomena.ImageVotes
   alias Philomena.ImageVotes.ImageVote
@@ -85,6 +86,13 @@ defmodule Philomena.ImagesTest do
 
   defp has_vote?(image, user) do
     Repo.exists?(from v in ImageVote, where: v.image_id == ^image.id and v.user_id == ^user.id)
+  end
+
+  defp image_hide_count(image, user) do
+    Repo.aggregate(
+      from(h in ImageHide, where: h.image_id == ^image.id and h.user_id == ^user.id),
+      :count
+    )
   end
 
   defp feature_row_count(image) do
@@ -2694,6 +2702,152 @@ defmodule Philomena.ImagesTest do
       assert Images.update_uploader(moderator, "99999999999999999999", %{
                "username" => new_owner.name
              }) == {:error, :not_found}
+    end
+  end
+
+  describe "create_image_hide/2" do
+    test "a signed-in actor hides a visible image, recording a row and bumping the count" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      baseline = Repo.reload!(image).hides_count
+
+      assert {:ok, hidden} = Images.create_image_hide(actor(user), to_string(image.id))
+      assert hidden.id == image.id
+      assert hidden.hides_count == baseline + 1
+      assert image_hide_count(image, user) == 1
+    end
+
+    test "hiding again when already hidden leaves a single row" do
+      # create appends a delete before the insert, so a repeat replaces the row
+      # rather than stacking, and the count nets out unchanged.
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      baseline = Repo.reload!(image).hides_count
+
+      assert {:ok, _} = Images.create_image_hide(actor(user), to_string(image.id))
+      assert {:ok, again} = Images.create_image_hide(actor(user), to_string(image.id))
+
+      assert again.hides_count == baseline + 1
+      assert image_hide_count(image, user) == 1
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, hidden} = Images.create_image_hide(actor(user), image.id)
+      assert hidden.id == image.id
+      assert image_hide_count(image, user) == 1
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Images.create_image_hide(actor, "not-a-number") == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Images.create_image_hide(actor, "not-a-number") == {:error, :unauthorized}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.create_image_hide(actor(confirmed_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      assert Images.create_image_hide(actor(confirmed_user_fixture()), "99999999999999999999") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular actor" do
+      # The image loads as nil and a regular actor fails :vote on the nil load, so
+      # the missing image surfaces as unauthorized.
+      assert Images.create_image_hide(actor(confirmed_user_fixture()), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator" do
+      assert Images.create_image_hide(actor(moderator_user_fixture()), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      # An admin clears :vote on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      assert Images.create_image_hide(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "delete_image_hide/2" do
+    test "a signed-in actor unhides an image, removing the row and decrementing" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      baseline = Repo.reload!(image).hides_count
+      {:ok, _} = Images.create_image_hide(actor(user), to_string(image.id))
+      assert image_hide_count(image, user) == 1
+
+      assert {:ok, unhidden} = Images.delete_image_hide(actor(user), to_string(image.id))
+      assert unhidden.id == image.id
+      assert unhidden.hides_count == baseline
+      assert image_hide_count(image, user) == 0
+    end
+
+    test "unhiding when no row exists still succeeds" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      baseline = Repo.reload!(image).hides_count
+      assert image_hide_count(image, user) == 0
+
+      assert {:ok, unhidden} = Images.delete_image_hide(actor(user), to_string(image.id))
+      assert unhidden.id == image.id
+      assert unhidden.hides_count == baseline
+      assert image_hide_count(image, user) == 0
+    end
+
+    test "accepts an integer id" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      {:ok, _} = Images.create_image_hide(actor(user), image.id)
+
+      assert {:ok, unhidden} = Images.delete_image_hide(actor(user), image.id)
+      assert unhidden.id == image.id
+      assert image_hide_count(image, user) == 0
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Images.delete_image_hide(actor, "not-a-number") == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Images.delete_image_hide(actor, "not-a-number") == {:error, :unauthorized}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.delete_image_hide(actor(confirmed_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      assert Images.delete_image_hide(actor(confirmed_user_fixture()), "99999999999999999999") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown well-formed id is unauthorized for a regular actor" do
+      assert Images.delete_image_hide(actor(confirmed_user_fixture()), "2147483647") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      assert Images.delete_image_hide(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
   end
 end
