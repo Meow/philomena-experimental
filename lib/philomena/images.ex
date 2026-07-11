@@ -1440,6 +1440,62 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Reassigns the uploader of the image named by `image_id`, on behalf of `actor`,
+  from the controller-shaped `image_params` (a map with a `"username"` key; a
+  blank username clears the uploader, anonymizing it).
+
+  Authorization is `:show` on `:ip_address` - a moderator-and-above capability -
+  and is checked before the image is loaded, so an actor without it gets
+  `{:error, :unauthorized}` regardless of the id. The image is then loaded by id
+  with no per-image authorization: a non-castable, out-of-range, or unknown id is
+  `{:error, :not_found}`. On success the uploader is reassigned, the image is
+  reindexed, and a moderation log is written attributing the change to `actor`.
+
+  Returns `{:ok, image}` with the updated image (its new uploader and their awards
+  preloaded for rendering), `{:error, :invalid_params}` when `image_params` is not
+  a map, or `{:error, %Ecto.Changeset{}}` when the username names no user, both
+  leaving the image untouched.
+
+  ## Examples
+
+      iex> update_uploader(moderator, "42", %{"username" => "Admin"})
+      {:ok, %Image{}}
+
+      iex> update_uploader(user, "42", %{"username" => "Admin"})
+      {:error, :unauthorized}
+
+  """
+  @spec update_uploader(User.t(), String.t() | integer(), any()) ::
+          {:ok, Image.t()}
+          | {:error, :unauthorized | :not_found | :invalid_params | Ecto.Changeset.t()}
+  def update_uploader(actor, image_id, image_params) do
+    with :ok <- authorize(actor, :show, :ip_address),
+         {:ok, id} <- IntegerId.parse(image_id),
+         %Image{} = image <- Repo.get(Image, id),
+         true <- is_map(image_params),
+         {:ok, image} <- update_uploader(image, image_params) do
+      reindex_image(image)
+      image = Repo.preload(image, user: [awards: :badge])
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.Uploader:update",
+        Paths.image_path(image),
+        "Changed uploader of image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable/out-of-range id, or an unknown id (loaded with no per-image
+      # authorization, so it is a plain not-found rather than unauthorized).
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      false -> {:error, :invalid_params}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
+  end
+
+  @doc """
   Changes the uploader of an image.
 
   ## Examples

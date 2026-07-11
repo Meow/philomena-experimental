@@ -2528,4 +2528,172 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
   end
+
+  describe "update_uploader/3" do
+    test "a moderator reassigns the uploader, preloading the new user with awards" do
+      moderator = moderator_user_fixture()
+      owner = confirmed_user_fixture()
+      new_owner = confirmed_user_fixture()
+      image = image_fixture(user_id: owner.id)
+
+      assert {:ok, updated} =
+               Images.update_uploader(moderator, to_string(image.id), %{
+                 "username" => new_owner.name
+               })
+
+      assert updated.id == image.id
+      assert Repo.reload!(image).user_id == new_owner.id
+
+      assert Ecto.assoc_loaded?(updated.user)
+      assert updated.user.id == new_owner.id
+      assert Ecto.assoc_loaded?(updated.user.awards)
+    end
+
+    test "an admin reassigns the uploader" do
+      admin = admin_user_fixture()
+      owner = confirmed_user_fixture()
+      new_owner = confirmed_user_fixture()
+      image = image_fixture(user_id: owner.id)
+
+      assert {:ok, _} =
+               Images.update_uploader(admin, to_string(image.id), %{"username" => new_owner.name})
+
+      assert Repo.reload!(image).user_id == new_owner.id
+    end
+
+    test "an empty username clears the uploader to nil" do
+      moderator = moderator_user_fixture()
+      owner = confirmed_user_fixture()
+      image = image_fixture(user_id: owner.id)
+
+      assert {:ok, updated} =
+               Images.update_uploader(moderator, to_string(image.id), %{"username" => ""})
+
+      assert updated.id == image.id
+      assert Repo.reload!(image).user_id == nil
+    end
+
+    test "reassigning writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      new_owner = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.update_uploader(moderator, to_string(image.id), %{
+                 "username" => new_owner.name
+               })
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.Uploader:update"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Changed uploader of image #{image.id}"
+    end
+
+    test "clearing the uploader also succeeds and writes the same log" do
+      moderator = moderator_user_fixture()
+      owner = confirmed_user_fixture()
+      image = image_fixture(user_id: owner.id)
+
+      assert {:ok, _} =
+               Images.update_uploader(moderator, to_string(image.id), %{"username" => ""})
+
+      log = only_moderation_log!()
+      assert log.type == "Image.Uploader:update"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Changed uploader of image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      new_owner = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, updated} =
+               Images.update_uploader(moderator, image.id, %{"username" => new_owner.name})
+
+      assert updated.id == image.id
+      assert Repo.reload!(image).user_id == new_owner.id
+    end
+
+    test "an unknown username is a changeset error with the image untouched and no log" do
+      moderator = moderator_user_fixture()
+      owner = confirmed_user_fixture()
+      image = image_fixture(user_id: owner.id)
+
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_uploader(moderator, to_string(image.id), %{
+                 "username" => "no-such-user"
+               })
+
+      assert Repo.reload!(image).user_id == owner.id
+      assert moderation_log_count() == 0
+    end
+
+    test "non-map params for a moderator are invalid_params with no log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert Images.update_uploader(moderator, to_string(image.id), nil) ==
+               {:error, :invalid_params}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user is unauthorized on a real image and params" do
+      # Authorization on :ip_address runs before the load, so a regular user is
+      # denied without the image ever being touched.
+      user = confirmed_user_fixture()
+      new_owner = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.update_uploader(user, to_string(image.id), %{"username" => new_owner.name}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user with a garbage id and nil params is still unauthorized" do
+      # The :ip_address authorization precedes the id parse and the params check,
+      # so neither the not-found nor the invalid_params path is reached.
+      user = confirmed_user_fixture()
+
+      assert Images.update_uploader(user, "not-a-number", nil) == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor with a garbage id and nil params is unauthorized" do
+      assert Images.update_uploader(nil, "not-a-number", nil) == {:error, :unauthorized}
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed image_id is not found and writes no log" do
+      # Unlike the :hide wrappers, the load has no per-image authorization, so a
+      # missing image is a plain not-found rather than unauthorized.
+      moderator = moderator_user_fixture()
+      new_owner = confirmed_user_fixture()
+
+      assert Images.update_uploader(moderator, "2147483647", %{"username" => new_owner.name}) ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with a non-castable image_id is not found" do
+      moderator = moderator_user_fixture()
+      new_owner = confirmed_user_fixture()
+
+      assert Images.update_uploader(moderator, "not-a-number", %{"username" => new_owner.name}) ==
+               {:error, :not_found}
+    end
+
+    test "a moderator with an out-of-range image_id is not found" do
+      moderator = moderator_user_fixture()
+      new_owner = confirmed_user_fixture()
+
+      assert Images.update_uploader(moderator, "99999999999999999999", %{
+               "username" => new_owner.name
+             }) == {:error, :not_found}
+    end
+  end
 end
