@@ -890,6 +890,57 @@ defmodule Philomena.Images do
   defp queue(_mime_type), do: "images"
 
   @doc """
+  Replaces the file content of the image named by `image_id`, on behalf of
+  `actor`, from the controller-shaped `attrs` (a map with an `"image"` upload).
+
+  The image is loaded by id and authorized for `:hide`. A non-castable or
+  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
+  authorized as a `nil` load: an actor who may not `:hide` it gets
+  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
+  gets `{:error, :not_found}`. A deleted image (hidden from users) cannot be
+  replaced and is `{:error, :deleted}`, left untouched. On success the file is
+  replaced, thumbnails are regenerated, old files are purged, the image is
+  reindexed, and a moderation log is written attributing the change to `actor`.
+
+  Returns `{:ok, image}` with the updated image, or
+  `{:error, %Ecto.Changeset{}}` when the replacement is rejected (e.g. no file,
+  or a file already uploaded as another image), leaving the image untouched.
+
+  ## Examples
+
+      iex> update_file(moderator, "42", %{"image" => upload})
+      {:ok, %Image{}}
+
+      iex> update_file(user, "42", %{"image" => upload})
+      {:error, :unauthorized}
+
+  """
+  @spec update_file(User.t(), String.t() | integer(), map()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found | :deleted | Ecto.Changeset.t()}
+  def update_file(actor, image_id, attrs) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(Image, id),
+         :ok <- authorize(actor, :hide, image),
+         %Image{hidden_from_users: false} <- image,
+         {:ok, image} <- update_file(image, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Image.File:update",
+        Paths.image_path(image),
+        "Updated file of image #{image.id}"
+      )
+
+      {:ok, image}
+    else
+      # Non-castable id, or a `nil` load the actor was permitted to act on.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      %Image{hidden_from_users: true} -> {:error, :deleted}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
+  end
+
+  @doc """
   Updates the file content of an image.
 
   This will:

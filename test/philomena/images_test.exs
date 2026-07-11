@@ -1811,4 +1811,153 @@ defmodule Philomena.ImagesTest do
       assert Images.feature_image(moderator, "99999999999999999999") == {:error, :not_found}
     end
   end
+
+  describe "update_file/3" do
+    test "a moderator replaces the file and gets the image" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, updated} =
+               Images.update_file(moderator, to_string(image.id), %{"image" => png_upload()})
+
+      assert updated.id == image.id
+      assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
+    end
+
+    test "an admin replaces the file" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.update_file(admin, to_string(image.id), %{"image" => png_upload()})
+
+      assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
+    end
+
+    test "a successful replacement writes an exact moderation log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.update_file(moderator, to_string(image.id), %{"image" => png_upload()})
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Image.File:update"
+      assert log.subject_path == "/images/#{image.id}"
+      assert log.body == "Updated file of image #{image.id}"
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, updated} =
+               Images.update_file(moderator, image.id, %{"image" => png_upload()})
+
+      assert updated.id == image.id
+    end
+
+    test "a file duplicating another image is a changeset error with no log" do
+      moderator = moderator_user_fixture()
+      dup_sha = png_upload_sha512()
+      _other = image_fixture(image_sha512_hash: dup_sha, image_orig_sha512_hash: dup_sha)
+      image = image_fixture()
+
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_file(moderator, to_string(image.id), %{"image" => png_upload()})
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a missing file is a changeset error with no log" do
+      # With no "image" key the upload analysis fails the required-file check, so
+      # the engine returns the changeset error the wrapper passes straight
+      # through without logging.
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_file(moderator, to_string(image.id), %{})
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a hidden image is deleted with no log" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.update_file(moderator, to_string(image.id), %{"image" => png_upload()}) ==
+               {:error, :deleted}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user on a hidden image is unauthorized, not deleted" do
+      # Authorization runs before the hidden-state check, so a regular user fails
+      # :hide and never reaches the deleted branch.
+      user = confirmed_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      assert Images.update_file(user, to_string(image.id), %{"image" => png_upload()}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a regular user cannot replace the file" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.update_file(user, to_string(image.id), %{"image" => png_upload()}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an anonymous actor cannot replace the file" do
+      image = image_fixture()
+
+      assert Images.update_file(nil, to_string(image.id), %{"image" => png_upload()}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+      # The image loads as nil and a moderator fails :hide on the nil load, so the
+      # missing image surfaces as unauthorized rather than not found.
+      moderator = moderator_user_fixture()
+
+      assert Images.update_file(moderator, "2147483647", %{"image" => png_upload()}) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "an admin with an unknown well-formed id is not found and writes no log" do
+      # An admin clears :hide on the nil load via the blanket ability rule, then
+      # the image presence check fails, so the missing image is not found.
+      admin = admin_user_fixture()
+
+      assert Images.update_file(admin, "2147483647", %{"image" => png_upload()}) ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_file(moderator, "not-a-number", %{"image" => png_upload()}) ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.update_file(moderator, "99999999999999999999", %{"image" => png_upload()}) ==
+               {:error, :not_found}
+    end
+  end
 end
