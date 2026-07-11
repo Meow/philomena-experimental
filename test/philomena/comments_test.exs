@@ -26,6 +26,7 @@ defmodule Philomena.CommentsTest do
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Reports.Report
   alias Philomena.Users.User
+  alias Philomena.Versions.Version
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 
@@ -542,6 +543,109 @@ defmodule Philomena.CommentsTest do
     test "an id that cannot name a row is not found" do
       assert Comments.unhide_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
       no_moderation_logs!()
+    end
+  end
+
+  describe "comment_history/3" do
+    # A public read routed by image id and comment id. It writes no moderation
+    # log and runs no ban check; it authorizes :show on the image and, for a
+    # hidden comment, :show on the comment.
+
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "an anonymous actor reads the history of a visible comment", %{image: image} do
+      comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "A visible comment"})
+
+      assert {:ok, {loaded_image, %Comment{} = loaded_comment, versions}} =
+               Comments.comment_history(nil, "#{image.id}", "#{comment.id}")
+
+      assert loaded_image.id == image.id
+      assert loaded_comment.id == comment.id
+
+      # The comment comes back with the associations the history page renders.
+      assert %Philomena.Images.Image{} = loaded_comment.image
+      assert %User{} = loaded_comment.user
+
+      # A never-edited comment has recorded no versions.
+      assert versions == []
+    end
+
+    test "an unknown image id is unauthorized" do
+      assert Comments.comment_history(nil, "999999999", "1") == {:error, :unauthorized}
+    end
+
+    test "an unknown comment id on a real image is not found", %{image: image} do
+      assert Comments.comment_history(nil, "#{image.id}", "999999999") == {:error, :not_found}
+    end
+
+    test "an anonymous actor cannot read the history of a hidden comment", %{image: image} do
+      comment = already_hidden_comment(image)
+
+      assert Comments.comment_history(nil, "#{image.id}", "#{comment.id}") ==
+               {:error, :unauthorized}
+    end
+
+    test "a regular user cannot read the history of a hidden comment", %{image: image} do
+      comment = already_hidden_comment(image)
+
+      assert Comments.comment_history(confirmed_user_fixture(), "#{image.id}", "#{comment.id}") ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator reads the history of a hidden comment", %{image: image} do
+      comment = already_hidden_comment(image)
+
+      assert {:ok, {_image, %Comment{} = loaded_comment, versions}} =
+               Comments.comment_history(
+                 moderator_user_fixture(),
+                 "#{image.id}",
+                 "#{comment.id}"
+               )
+
+      assert loaded_comment.id == comment.id
+      assert loaded_comment.hidden_from_users
+      assert is_list(versions)
+    end
+
+    test "an edited comment reports the recorded version, its author, and the pre-edit body",
+         %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "Original comment body"})
+
+      {:ok, _} =
+        Comments.update_comment(comment, author, %{
+          "body" => "Original comment body plus an edit",
+          "edit_reason" => "typo fix"
+        })
+
+      assert {:ok, {_image, _comment, [%Version{} = version]}} =
+               Comments.comment_history(nil, "#{image.id}", "#{comment.id}")
+
+      # create_version records the body as it stood before the edit, so the
+      # single version carries the original text and names its editor.
+      assert version.body == "Original comment body"
+      assert version.user.id == author.id
+    end
+
+    test "the history is capped at the most recent 25 versions", %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "edit 0"})
+
+      # Each update records one version, so 26 edits record 26 versions; the
+      # query limits the result to 25.
+      Enum.reduce(1..26, comment, fn n, current ->
+        {:ok, %{comment: updated}} =
+          Comments.update_comment(current, author, %{"body" => "edit #{n}"})
+
+        updated
+      end)
+
+      assert {:ok, {_image, _comment, versions}} =
+               Comments.comment_history(nil, "#{image.id}", "#{comment.id}")
+
+      assert length(versions) == 25
     end
   end
 end

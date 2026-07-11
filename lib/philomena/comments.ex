@@ -26,6 +26,7 @@ defmodule Philomena.Comments do
   alias Philomena.Tags.Tag
   alias Philomena.Notifications
   alias Philomena.Versions
+  alias Philomena.Versions.Version
   alias Philomena.Reports
 
   @doc """
@@ -43,6 +44,77 @@ defmodule Philomena.Comments do
 
   """
   def get_comment!(id), do: Repo.get!(Comment, id)
+
+  @doc """
+  Loads the edit history of the comment named by the raw request `comment_id` on
+  the image named by `image_id`, on behalf of `actor` (a user, or `nil` for an
+  anonymous visitor). This is a public read with no ban check.
+
+  The image is loaded by id and authorized for `:show`, so a missing or
+  non-visible image is `{:error, :unauthorized}`. The comment is then loaded by
+  id scoped to that image (with the associations the history page renders): a
+  missing comment is `{:error, :not_found}`, and a comment hidden from users is
+  visible only when `actor` may `:show` it, otherwise `{:error, :unauthorized}`.
+
+  Returns `{:ok, {image, comment, versions}}` carrying the last 25 versions,
+  newest first, with diffs and version authors resolved.
+
+  ## Examples
+
+      iex> comment_history(user, "1", "1")
+      {:ok, {%Image{}, %Comment{}, [%Version{}, ...]}}
+
+      iex> comment_history(user, "1", "999999999")
+      {:error, :not_found}
+
+  """
+  @spec comment_history(User.t() | nil, any(), any()) ::
+          {:ok, {Image.t(), Comment.t(), [Version.t()]}}
+          | {:error, :unauthorized | :not_found}
+  def comment_history(actor, image_id, comment_id) do
+    with {:ok, image} <- load_visible_image(actor, image_id),
+         {:ok, comment} <- load_image_comment(actor, image, comment_id) do
+      {:ok, {image, comment, Versions.load_last_versions("Comment", comment)}}
+    end
+  end
+
+  defp load_visible_image(actor, image_id) do
+    case IntegerId.parse(image_id) do
+      {:ok, id} ->
+        image = Repo.get(Image, id)
+
+        with :ok <- authorize(actor, :show, image) do
+          {:ok, image}
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  # The comment is loaded by id scoped to the image (with the associations the
+  # history page renders), a missing row is `{:error, :not_found}`, and a comment
+  # hidden from users is authorized for `:show` - visible to staff, otherwise
+  # `{:error, :unauthorized}`.
+  defp load_image_comment(actor, %Image{} = image, comment_id) do
+    Comment
+    |> where(image_id: ^image.id, id: ^to_string(comment_id))
+    |> preload([:image, :deleted_by, user: [awards: :badge]])
+    |> Repo.one()
+    |> authorize_comment_visibility(actor)
+  end
+
+  defp authorize_comment_visibility(nil, _actor),
+    do: {:error, :not_found}
+
+  defp authorize_comment_visibility(%Comment{hidden_from_users: false} = comment, _actor),
+    do: {:ok, comment}
+
+  defp authorize_comment_visibility(%Comment{} = comment, actor) do
+    with :ok <- authorize(actor, :show, comment) do
+      {:ok, comment}
+    end
+  end
 
   @doc """
   Searches comments on behalf of `user`, applying `user`'s hidden-tag `filter`,
