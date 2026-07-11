@@ -199,23 +199,80 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Hides a post and handles associated reports.
+  Hides the post named by the raw request `post_id`, recording the
+  `"deletion_reason"` carried in `post_params`, on behalf of `actor` (a user, or
+  `nil` for an anonymous visitor).
 
-  ## Parameters
-  - post: The post to hide
-  - attrs: Attributes for the hide operation
-  - user: The user performing the hide action
+  Authorization (`:hide` on the loaded post) happens here; on success the post's
+  associated reports are closed, the topic's and forum's last-post pointers are
+  refreshed, the post is reindexed, and a moderation log is written attributing
+  the deletion to `actor`. An id that cannot name a row is `{:error, :not_found}`,
+  while a well-formed id that names no row authorizes `nil` - which no rule
+  permits - and is therefore `{:error, :unauthorized}`, preserving the behavior
+  of the load-then-authorize plug this replaces.
+
+  The post is loaded (and returned) with its `:topic` and the topic's `:forum`
+  preloaded so the caller can build the post-anchor redirect for either outcome.
+  A rejected hide changeset (e.g. a blank deletion reason) returns
+  `{:error, %Post{}}` carrying that loaded post.
 
   ## Examples
 
-      iex> hide_post(post, %{staff_note: "Rule violation"}, user)
+      iex> hide_post(moderator, "1", %{"deletion_reason" => "Spam"})
       {:ok, %Post{}}
 
-      iex> hide_post(post, %{deletion_reason: ""}, user)
+      iex> hide_post(moderator, "1", %{"deletion_reason" => ""})
+      {:error, %Post{}}
+
+      iex> hide_post(user, "1", %{"deletion_reason" => "Spam"})
+      {:error, :unauthorized}
+
+  """
+  @spec hide_post(User.t() | nil, any(), map()) ::
+          {:ok, Post.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Post.t()}
+  def hide_post(actor, post_id, post_params) do
+    case IntegerId.parse(post_id) do
+      {:ok, id} ->
+        post =
+          Post
+          |> preload([:topic, topic: :forum])
+          |> Repo.get(id)
+
+        with :ok <- authorize(actor, :hide, post) do
+          case hide_loaded_post(post, post_params, actor) do
+            {:ok, hidden_post} ->
+              log_post_hide(actor, hidden_post)
+              {:ok, hidden_post}
+
+            {:error, %Ecto.Changeset{}} ->
+              {:error, post}
+          end
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Hides an already-loaded post and handles associated reports.
+
+  This is the internal hide engine shared with `hide_post/3` and
+  `Philomena.Users.Eraser`; it performs no authorization and writes no
+  moderation log, so controller-facing callers go through `hide_post/3`.
+
+  ## Examples
+
+      iex> hide_loaded_post(post, %{staff_note: "Rule violation"}, user)
+      {:ok, %Post{}}
+
+      iex> hide_loaded_post(post, %{deletion_reason: ""}, user)
       {:error, %Ecto.Changeset{}}
 
   """
-  def hide_post(%Post{} = post, attrs, user) do
+  def hide_loaded_post(%Post{} = post, attrs, user) do
     post = post |> Repo.preload(:topic)
 
     Multi.new()
@@ -236,8 +293,82 @@ defmodule Philomena.Posts do
     end
   end
 
+  defp log_post_hide(actor, %Post{topic: topic} = post) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Topic.Post.Hide:create",
+      Paths.forum_post_path(post),
+      "Deleted forum post ##{post.id} in topic '#{topic.title}' (#{post.deletion_reason})"
+    )
+  end
+
+  @doc """
+  Restores the post named by the raw request `post_id`, on behalf of `actor`
+  (a user, or `nil` for an anonymous visitor).
+
+  Loading and authorization mirror `hide_post/3` (`:hide` on the loaded post -
+  a moderator can still see the hidden post here). On success the topic's and
+  forum's last-post pointers are refreshed, the post is reindexed, and a
+  moderation log is written attributing the restore to `actor`. An id that
+  cannot name a row is `{:error, :not_found}`; a well-formed id naming no row
+  authorizes `nil` and is `{:error, :unauthorized}`.
+
+  The post is loaded (and returned) with its `:topic` and the topic's `:forum`
+  preloaded so the caller can build the post-anchor redirect. A rejected restore
+  returns `{:error, %Post{}}` carrying that loaded post.
+
+  ## Examples
+
+      iex> unhide_post(moderator, "1")
+      {:ok, %Post{}}
+
+      iex> unhide_post(user, "1")
+      {:error, :unauthorized}
+
+  """
+  @spec unhide_post(User.t() | nil, any()) ::
+          {:ok, Post.t()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, Post.t()}
+  def unhide_post(actor, post_id) do
+    case IntegerId.parse(post_id) do
+      {:ok, id} ->
+        post =
+          Post
+          |> preload([:topic, topic: :forum])
+          |> Repo.get(id)
+
+        with :ok <- authorize(actor, :hide, post) do
+          case unhide_post(post) do
+            {:ok, restored_post} ->
+              log_post_unhide(actor, restored_post)
+              {:ok, restored_post}
+
+            _error ->
+              {:error, post}
+          end
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp log_post_unhide(actor, %Post{topic: topic} = post) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      "Topic.Post.Hide:delete",
+      Paths.forum_post_path(post),
+      "Restored forum post ##{post.id} in topic '#{topic.title}'"
+    )
+  end
+
   @doc """
   Unhides a previously hidden post.
+
+  This is the internal restore engine shared with `unhide_post/2`; it performs
+  no authorization and writes no moderation log, so controller-facing callers go
+  through `unhide_post/2`.
 
   ## Examples
 

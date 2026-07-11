@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.Topic.Post.HideControllerTest do
 
   defp hidden_post(post) do
     {:ok, post} =
-      Posts.hide_post(
+      Posts.hide_loaded_post(
         post,
         %{"deletion_reason" => "Spam"},
         Philomena.UsersFixtures.moderator_user_fixture()

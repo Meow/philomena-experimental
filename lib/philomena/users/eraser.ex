@@ -32,7 +32,7 @@ defmodule Philomena.Users.Eraser do
     |> where(user_id: ^user.id)
     |> Repo.all()
     |> Enum.each(fn post ->
-      {:ok, post} = Posts.hide_post(post, %{deletion_reason: @reason}, moderator)
+      {:ok, post} = Posts.hide_loaded_post(post, %{deletion_reason: @reason}, moderator)
       {:ok, _post} = Posts.destroy_post(post)
     end)
 

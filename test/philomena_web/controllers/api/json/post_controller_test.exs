@@ -56,7 +56,7 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
       topic = topic_fixture(forum)
       post = post_fixture(topic, user, %{"body" => "Rule-breaking post"})
 
-      {:ok, _} = Posts.hide_post(post, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} = Posts.hide_loaded_post(post, %{"deletion_reason" => "spam"}, moderator)
 
       conn = get(conn, ~p"/api/v1/json/posts/#{post.id}")
 
