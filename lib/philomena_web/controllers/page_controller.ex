@@ -1,28 +1,37 @@
 defmodule PhilomenaWeb.PageController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.StaticPages.StaticPage
   alias Philomena.StaticPages
   alias PhilomenaWeb.MarkdownRenderer
 
-  plug :load_and_authorize_resource, model: StaticPage, id_field: "slug"
+  action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    render(conn, "index.html", title: "Pages")
+    with {:ok, static_pages} <- StaticPages.load_page_listing(conn.assigns.current_user) do
+      render(conn, "index.html", title: "Pages", static_pages: static_pages)
+    end
   end
 
-  def show(conn, _params) do
-    rendered = MarkdownRenderer.render_unsafe(conn.assigns.static_page.body, conn)
-    render(conn, "show.html", title: conn.assigns.static_page.title, rendered: rendered)
+  def show(conn, %{"id" => slug}) do
+    with {:ok, static_page} <- StaticPages.load_page_for_show(conn.assigns.current_user, slug) do
+      rendered = MarkdownRenderer.render_unsafe(static_page.body, conn)
+
+      render(conn, "show.html",
+        title: static_page.title,
+        static_page: static_page,
+        rendered: rendered
+      )
+    end
   end
 
   def new(conn, _params) do
-    changeset = StaticPages.change_static_page(%StaticPage{})
-    render(conn, "new.html", title: "New Page", changeset: changeset)
+    with {:ok, changeset} <- StaticPages.new_page(conn.assigns.current_user) do
+      render(conn, "new.html", title: "New Page", changeset: changeset)
+    end
   end
 
   def create(conn, %{"static_page" => static_page_params}) do
-    case StaticPages.create_static_page(conn.assigns.current_user, static_page_params) do
+    case StaticPages.create_page(conn.assigns.current_user, static_page_params) do
       {:ok, %{static_page: static_page}} ->
         conn
         |> put_flash(:info, "Static page successfully created.")
@@ -30,27 +39,35 @@ defmodule PhilomenaWeb.PageController do
 
       {:error, :static_page, changeset, _changes} ->
         render(conn, "new.html", changeset: changeset)
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  def edit(conn, _params) do
-    changeset = StaticPages.change_static_page(conn.assigns.static_page)
-    render(conn, "edit.html", title: "Editing Page", changeset: changeset)
+  def edit(conn, %{"id" => slug}) do
+    with {:ok, {static_page, changeset}} <-
+           StaticPages.load_page_for_edit(conn.assigns.current_user, slug) do
+      render(conn, "edit.html",
+        title: "Editing Page",
+        static_page: static_page,
+        changeset: changeset
+      )
+    end
   end
 
-  def update(conn, %{"static_page" => static_page_params}) do
-    case StaticPages.update_static_page(
-           conn.assigns.static_page,
-           conn.assigns.current_user,
-           static_page_params
-         ) do
+  def update(conn, %{"id" => slug, "static_page" => static_page_params}) do
+    case StaticPages.update_page(conn.assigns.current_user, slug, static_page_params) do
       {:ok, %{static_page: static_page}} ->
         conn
         |> put_flash(:info, "Static page successfully updated.")
         |> redirect(to: ~p"/pages/#{static_page}")
 
       {:error, :static_page, changeset, _changes} ->
-        render(conn, "edit.html", changeset: changeset)
+        render(conn, "edit.html", static_page: changeset.data, changeset: changeset)
+
+      {:error, _} = error ->
+        error
     end
   end
 end
