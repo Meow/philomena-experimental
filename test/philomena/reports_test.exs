@@ -1,19 +1,32 @@
 defmodule Philomena.ReportsTest do
   @moduledoc """
-  Context-level tests for the actor-first `Philomena.Reports.create_report/4`.
+  Context-level tests for the controller-facing `Philomena.Reports` functions:
+  the actor-first `create_report/4`, the report form/submission loaders, the
+  admin report listing (`load_report_index/3`) and single-report load
+  (`load_report/2`), the claim/unclaim/close moderation actions, and the
+  mod-note staff gate.
 
   These pin the attribution carried onto the inserted report, the open-report
   limit (regular users and anonymous IPs capped at `max_open_reports/0`, staff
-  exempt), and the rejected-changeset shape. No moderation log is written.
+  exempt), the rejected-changeset shape, the `:index`/`:show`/`:edit`
+  authorization matrices (including the plain/moderator-unauthorized vs
+  admin-not-found split on an unknown id), the `ReportPage` struct shape and its
+  `rq`-search vs default branches, and the mod-note staff gate.
+
+  `load_report_index/3` reads through OpenSearch, so this module follows the
+  search rules: async: false, with the Report index cycled in setup.
   """
 
-  use Philomena.DataCase, async: true
+  use Philomena.DataCase, async: false
+
+  @moduletag :search
 
   import Philomena.AttributionFixtures
   import Philomena.CommissionsFixtures
   import Philomena.ConversationsFixtures
   import Philomena.GalleriesFixtures
   import Philomena.ImagesFixtures
+  import Philomena.ModNotesFixtures
   import Philomena.ReportsFixtures
   import Philomena.UsersFixtures
 
@@ -24,8 +37,18 @@ defmodule Philomena.ReportsTest do
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Reports
   alias Philomena.Reports.Report
+  alias Philomena.Reports.ReportPage
   alias Philomena.Repo
   alias Philomena.Users.User
+  alias PhilomenaQuery.Search
+  alias PhilomenaQuery.SearchHelpers
+
+  @pagination %{page_number: 1, page_size: 25}
+
+  setup do
+    Search.clear_index!(Report)
+    :ok
+  end
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to the write-access and
@@ -134,6 +157,301 @@ defmodule Philomena.ReportsTest do
 
       assert Reports.create_report(actor(nil), "Image", image.id, report_params()) ==
                {:error, :too_many_reports}
+    end
+  end
+
+  describe "load_report_index/3" do
+    test "an anonymous viewer is unauthorized" do
+      assert Reports.load_report_index(nil, %{}, @pagination) == {:error, :unauthorized}
+    end
+
+    test "a regular user is unauthorized" do
+      assert Reports.load_report_index(confirmed_user_fixture(), %{}, @pagination) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator is authorized" do
+      assert {:ok, %ReportPage{}} =
+               Reports.load_report_index(moderator_user_fixture(), %{}, @pagination)
+    end
+
+    test "an admin gets the assembled page struct with the searched report" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+      report = report_fixture({"Image", image.id})
+      SearchHelpers.reindex_all!(Report)
+
+      assert {:ok, %ReportPage{reports: reports, my_reports: my, system_reports: system}} =
+               Reports.load_report_index(admin, %{}, @pagination)
+
+      assert %Scrivener.Page{} = reports
+      assert is_list(my)
+      assert is_list(system)
+
+      # The open, non-own, non-system report is in the default searched list.
+      assert report.id in Enum.map(reports.entries, & &1.id)
+    end
+
+    test "the default view returns empty lists on an empty table" do
+      SearchHelpers.reindex_all!(Report)
+
+      assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []}} =
+               Reports.load_report_index(admin_user_fixture(), %{}, @pagination)
+
+      assert Enum.empty?(reports.entries)
+    end
+
+    test "the actor's own open reports populate my_reports and leave the searched list" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+      report = report_fixture({"Image", image.id})
+      {:ok, _} = Reports.claim_report(admin, to_string(report.id))
+      SearchHelpers.reindex_all!(Report)
+
+      assert {:ok, %ReportPage{my_reports: my, reports: reports}} =
+               Reports.load_report_index(admin, %{}, @pagination)
+
+      assert report.id in Enum.map(my, & &1.id)
+      refute report.id in Enum.map(reports.entries, & &1.id)
+    end
+
+    test "open system reports populate system_reports" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+      rule = Philomena.RulesFixtures.rule_fixture()
+
+      {:ok, report} =
+        Reports.create_system_report({"Image", image.id}, rule.name, "System reason")
+
+      SearchHelpers.reindex_all!(Report)
+
+      assert {:ok, %ReportPage{system_reports: system, reports: reports}} =
+               Reports.load_report_index(admin, %{}, @pagination)
+
+      assert report.id in Enum.map(system, & &1.id)
+
+      # The system report is excluded from the default searched list.
+      refute report.id in Enum.map(reports.entries, & &1.id)
+    end
+
+    test "the rq search branch drives reports and empties the own and system lists" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+      report = report_fixture({"Image", image.id})
+
+      # A report that would land in my_reports in the default view.
+      {:ok, _} = Reports.claim_report(admin, to_string(report.id))
+      SearchHelpers.reindex_all!(Report)
+
+      assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []}} =
+               Reports.load_report_index(admin, %{"rq" => "*"}, @pagination)
+
+      assert report.id in Enum.map(reports.entries, & &1.id)
+    end
+
+    test "a malformed rq raises MatchError" do
+      # An authorized actor reaches the query compile, which returns an error
+      # tuple that the {:ok, query} match rejects.
+      assert_raise MatchError, fn ->
+        Reports.load_report_index(admin_user_fixture(), %{"rq" => "("}, @pagination)
+      end
+    end
+  end
+
+  describe "load_report/2" do
+    setup do
+      image = image_fixture()
+      %{image: image, report: report_fixture({"Image", image.id})}
+    end
+
+    test "a moderator loads a report with the reportable resolved", %{
+      image: image,
+      report: report
+    } do
+      assert {:ok, loaded} = Reports.load_report(moderator_user_fixture(), to_string(report.id))
+      assert loaded.id == report.id
+      assert loaded.reportable_type == "Image"
+      assert loaded.reportable.id == image.id
+    end
+
+    test "an admin loads a report", %{report: report} do
+      assert {:ok, loaded} = Reports.load_report(admin_user_fixture(), to_string(report.id))
+      assert loaded.id == report.id
+    end
+
+    test "a regular user is unauthorized", %{report: report} do
+      assert Reports.load_report(confirmed_user_fixture(), to_string(report.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous viewer is unauthorized", %{report: report} do
+      assert Reports.load_report(nil, to_string(report.id)) == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+      assert Reports.load_report(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+
+      assert Reports.load_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-integer id is not-found" do
+      assert Reports.load_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+    end
+  end
+
+  describe "claim_report/2" do
+    setup do
+      image = image_fixture()
+      %{report: report_fixture({"Image", image.id})}
+    end
+
+    test "a moderator claims a report", %{report: report} do
+      moderator = moderator_user_fixture()
+
+      assert {:ok, claimed} = Reports.claim_report(moderator, to_string(report.id))
+      assert claimed.admin_id == moderator.id
+      assert claimed.state == "in_progress"
+      assert claimed.open
+    end
+
+    test "claiming an already-claimed report reassigns it to the new claimant", %{report: report} do
+      # NOTE: the claim changeset's validate_inclusion(:admin_id, []) runs before
+      # the admin_id is put, so it never guards an already-claimed report; a
+      # second claim succeeds and reassigns the admin.
+      first = moderator_user_fixture()
+      second = moderator_user_fixture()
+
+      {:ok, claimed} = Reports.claim_report(first, to_string(report.id))
+      assert claimed.admin_id == first.id
+
+      assert {:ok, reclaimed} = Reports.claim_report(second, to_string(report.id))
+      assert reclaimed.admin_id == second.id
+    end
+
+    test "a regular user is unauthorized", %{report: report} do
+      assert Reports.claim_report(confirmed_user_fixture(), to_string(report.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor is unauthorized", %{report: report} do
+      assert Reports.claim_report(nil, to_string(report.id)) == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+      assert Reports.claim_report(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+
+      assert Reports.claim_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-integer id is not-found" do
+      assert Reports.claim_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+    end
+  end
+
+  describe "unclaim_report/2" do
+    setup do
+      image = image_fixture()
+      report = report_fixture({"Image", image.id})
+      {:ok, _} = Reports.claim_report(admin_user_fixture(), to_string(report.id))
+      %{report: report}
+    end
+
+    test "a moderator unclaims a report", %{report: report} do
+      assert {:ok, unclaimed} =
+               Reports.unclaim_report(moderator_user_fixture(), to_string(report.id))
+
+      assert unclaimed.admin_id == nil
+      assert unclaimed.state == "open"
+      assert unclaimed.open
+    end
+
+    test "a regular user is unauthorized", %{report: report} do
+      assert Reports.unclaim_report(confirmed_user_fixture(), to_string(report.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor is unauthorized", %{report: report} do
+      assert Reports.unclaim_report(nil, to_string(report.id)) == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+      assert Reports.unclaim_report(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+
+      assert Reports.unclaim_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-integer id is not-found" do
+      assert Reports.unclaim_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+    end
+  end
+
+  describe "close_report/2" do
+    setup do
+      image = image_fixture()
+      %{report: report_fixture({"Image", image.id})}
+    end
+
+    test "a moderator closes a report", %{report: report} do
+      moderator = moderator_user_fixture()
+
+      assert {:ok, closed} = Reports.close_report(moderator, to_string(report.id))
+      assert closed.admin_id == moderator.id
+      assert closed.state == "closed"
+      refute closed.open
+    end
+
+    test "a regular user is unauthorized", %{report: report} do
+      assert Reports.close_report(confirmed_user_fixture(), to_string(report.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor is unauthorized", %{report: report} do
+      assert Reports.close_report(nil, to_string(report.id)) == {:error, :unauthorized}
+    end
+
+    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+      assert Reports.close_report(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+
+      assert Reports.close_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-integer id is not-found" do
+      assert Reports.close_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+    end
+  end
+
+  describe "mod_notes/3" do
+    setup do
+      image = image_fixture()
+      report = report_fixture({"Image", image.id})
+
+      note =
+        mod_note_fixture(moderator_user_fixture(), %{
+          "notable_type" => "Report",
+          "notable_id" => report.id
+        })
+
+      %{report: report, note: note}
+    end
+
+    test "a moderator gets the rendered mod notes for the report", %{report: report, note: note} do
+      # The renderer zips each note with its rendered body into a {note, body}
+      # tuple, so the identity renderer pairs each note with itself.
+      notes = Reports.mod_notes(moderator_user_fixture(), report, & &1)
+      assert is_list(notes)
+      assert note.id in Enum.map(notes, fn {loaded, _body} -> loaded.id end)
+    end
+
+    test "a regular user gets nil", %{report: report} do
+      assert Reports.mod_notes(confirmed_user_fixture(), report, & &1) == nil
+    end
+
+    test "an anonymous viewer gets nil", %{report: report} do
+      assert Reports.mod_notes(nil, report, & &1) == nil
     end
   end
 
