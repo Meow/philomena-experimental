@@ -4,9 +4,16 @@ defmodule Philomena.ArtistLinks do
   """
 
   import Ecto.Query, warn: false
+
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
+  alias Philomena.IntegerId
+  alias Philomena.Users.User
   alias Philomena.ArtistLinks.ArtistLink
   alias Philomena.ArtistLinks.AutomaticVerifier
   alias Philomena.ArtistLinks.BadgeAwarder
@@ -37,6 +44,151 @@ defmodule Philomena.ArtistLinks do
   def get_artist_link!(id), do: Repo.get!(ArtistLink, id)
 
   @doc """
+  Lists the artist links belonging to the user named by the profile `slug`, on
+  behalf of `actor`.
+
+  The profile user is loaded by slug and authorized for `:create_links`; an
+  unknown slug authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
+  cover `nil`).
+
+  Returns `{:ok, {user, artist_links}}`.
+  """
+  @spec list_artist_links(User.t() | nil, String.t()) ::
+          {:ok, {User.t(), [ArtistLink.t()]}} | {:error, :unauthorized | :not_found}
+  def list_artist_links(actor, slug) do
+    with {:ok, user} <- authorized_profile(actor, :create_links, slug) do
+      links =
+        ArtistLink
+        |> where(user_id: ^user.id)
+        |> Repo.all()
+
+      {:ok, {user, links}}
+    end
+  end
+
+  @doc """
+  Loads the profile user named by `slug` for the new artist link form, on behalf
+  of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. The profile user is
+  then loaded by slug and authorized for `:create_links`.
+
+  Returns `{:ok, {user, changeset}}`.
+  """
+  @spec load_artist_link_for_new(Actor.t(), String.t()) ::
+          {:ok, {User.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_artist_link_for_new(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
+      {:ok, {user, change_artist_link(%ArtistLink{})}}
+    end
+  end
+
+  @doc """
+  Submits a new artist link for the user named by the profile `slug`, on behalf
+  of `actor`, from the controller-shaped `attrs`.
+
+  The actor's write access is verified first: a banned actor is `{:error, :ban}`
+  and an actor with no fingerprint `{:error, :unauthorized}`. The profile user is
+  then loaded by slug and authorized for `:create_links` before the link is
+  inserted in the unverified state.
+
+  Returns `{:ok, {user, artist_link}}` on success, or
+  `{:error, {user, changeset}}` when the insert is rejected.
+  """
+  @spec create_artist_link(Actor.t(), String.t(), map()) ::
+          {:ok, {User.t(), ArtistLink.t()}}
+          | {:error, {User.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def create_artist_link(%Actor{} = actor, slug, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
+      case create_artist_link(user, attrs) do
+        {:ok, artist_link} -> {:ok, {user, artist_link}}
+        {:error, changeset} -> {:error, {user, changeset}}
+      end
+    end
+  end
+
+  @doc """
+  Loads the artist link named by `id` under the profile `slug` for display, on
+  behalf of `actor`.
+
+  The link is loaded by id and authorized for `:show`; then the profile user is
+  loaded by slug and authorized for `:create_links`. A non-castable or unknown
+  id is `{:error, :not_found}`; a load the actor may not act on is
+  `{:error, :unauthorized}`.
+
+  Returns `{:ok, {user, artist_link}}`.
+  """
+  @spec load_artist_link_for_show(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {User.t(), ArtistLink.t()}} | {:error, :unauthorized | :not_found}
+  def load_artist_link_for_show(actor, slug, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor, :show, id),
+         {:ok, user} <- authorized_profile(actor, :create_links, slug) do
+      {:ok, {user, artist_link}}
+    end
+  end
+
+  @doc """
+  Loads the artist link named by `id` under the profile `slug` for editing, on
+  behalf of `actor`.
+
+  The link is loaded by id and authorized for `:edit`; then the profile user is
+  loaded by slug and authorized for `:edit_links`. A non-castable or unknown id
+  is `{:error, :not_found}`; a load the actor may not act on is
+  `{:error, :unauthorized}`.
+
+  Returns `{:ok, {artist_link, changeset}}`.
+  """
+  @spec load_artist_link_for_edit(User.t() | nil, String.t(), String.t()) ::
+          {:ok, {ArtistLink.t(), Ecto.Changeset.t()}}
+          | {:error, :unauthorized | :not_found}
+  def load_artist_link_for_edit(actor, slug, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor, :edit, id),
+         {:ok, _user} <- authorized_profile(actor, :edit_links, slug) do
+      {:ok, {artist_link, change_artist_link(artist_link)}}
+    end
+  end
+
+  # Loads a user by profile slug and authorizes the acting user for `action`.
+  defp authorized_profile(actor, action, slug) do
+    user = Repo.get_by(User, slug: slug)
+
+    with :ok <- authorize(actor, action, user),
+         %User{} <- user do
+      {:ok, user}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  # Loads an artist link by id (with its form/display preloads) and authorizes
+  # the acting user for `action`. A non-castable id, or a `nil` load the actor
+  # was permitted to act on, is `{:error, :not_found}`.
+  defp authorized_artist_link(actor, action, id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         artist_link = load_artist_link_by_id(id),
+         :ok <- authorize(actor, action, artist_link),
+         %ArtistLink{} <- artist_link do
+      {:ok, artist_link}
+    else
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  defp load_artist_link_by_id(id) do
+    ArtistLink
+    |> where(id: ^id)
+    |> preload([:user, :tag, :contacted_by_user])
+    |> Repo.one()
+  end
+
+  @doc """
   Creates an artist link.
 
   ## Examples
@@ -54,6 +206,32 @@ defmodule Philomena.ArtistLinks do
     %ArtistLink{}
     |> ArtistLink.creation_changeset(attrs, user, tag)
     |> Repo.insert()
+  end
+
+  @doc """
+  Updates the artist link named by `id` under the profile `slug`, on behalf of
+  `actor`, from the controller-shaped `attrs`.
+
+  The link is loaded by id and authorized for `:update`; then the profile user
+  is loaded by slug and authorized for `:edit_links`. A non-castable or unknown
+  id is `{:error, :not_found}`; a load the actor may not act on is
+  `{:error, :unauthorized}`.
+
+  Returns `{:ok, {user, artist_link}}` on success, or
+  `{:error, {artist_link, changeset}}` when the update is rejected.
+  """
+  @spec update_artist_link(User.t() | nil, String.t(), String.t(), map()) ::
+          {:ok, {User.t(), ArtistLink.t()}}
+          | {:error, {ArtistLink.t(), Ecto.Changeset.t()}}
+          | {:error, :unauthorized | :not_found}
+  def update_artist_link(actor, slug, id, attrs) do
+    with {:ok, artist_link} <- authorized_artist_link(actor, :update, id),
+         {:ok, user} <- authorized_profile(actor, :edit_links, slug) do
+      case update_artist_link(artist_link, attrs) do
+        {:ok, artist_link} -> {:ok, {user, artist_link}}
+        {:error, changeset} -> {:error, {artist_link, changeset}}
+      end
+    end
   end
 
   @doc """
