@@ -836,35 +836,58 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Marks the report as claimed by the given user.
+  Marks the report named by the raw request `id` as claimed by `actor`, on
+  behalf of `actor` (the acting staff user), and reindexes it.
+
+  Authorizes `:edit` against the loaded report: a non-castable id is
+  `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
+  which no ordinary rule permits, so it is `{:error, :unauthorized}`
+  (`{:error, :not_found}` for admins).
+
+  Returns `{:ok, report}`, `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
 
   ## Example
 
-      iex> claim_report(%Report{}, %User{})
+      iex> claim_report(moderator, "1")
       {:ok, %Report{}}
 
   """
-  def claim_report(%Report{} = report, user) do
-    report
-    |> Report.claim_changeset(user)
-    |> Repo.update()
-    |> reindex_after_update()
+  @spec claim_report(User.t() | nil, any()) ::
+          {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def claim_report(actor, id) do
+    with {:ok, report} <- load_report_for_edit(actor, id) do
+      report
+      |> Report.claim_changeset(actor)
+      |> Repo.update()
+      |> reindex_after_update()
+    end
   end
 
   @doc """
-  Marks the report as unclaimed.
+  Marks the report named by the raw request `id` as unclaimed, on behalf of
+  `actor` (the acting staff user), and reindexes it.
+
+  Loading and authorization follow `claim_report/2`, authorizing `:edit`.
+
+  Returns `{:ok, report}`, `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
 
   ## Example
 
-      iex> unclaim_report(%Report{})
+      iex> unclaim_report(moderator, "1")
       {:ok, %Report{}}
 
   """
-  def unclaim_report(%Report{} = report) do
-    report
-    |> Report.unclaim_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
+  @spec unclaim_report(User.t() | nil, any()) ::
+          {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def unclaim_report(actor, id) do
+    with {:ok, report} <- load_report_for_edit(actor, id) do
+      report
+      |> Report.unclaim_changeset()
+      |> Repo.update()
+      |> reindex_after_update()
+    end
   end
 
   @doc """
@@ -881,6 +904,20 @@ defmodule Philomena.Reports do
     |> Report.close_changeset(user)
     |> Repo.update()
     |> reindex_after_update()
+  end
+
+  # Loads the report named by the raw request `id` and authorizes `:edit`
+  # against it, matching the report claim/close controllers' resource guard.
+  defp load_report_for_edit(actor, id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         report = Repo.get(Report, id),
+         :ok <- authorize(actor, :edit, report),
+         %Report{} <- report do
+      {:ok, report}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc """
