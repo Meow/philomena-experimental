@@ -22,7 +22,7 @@ defmodule Philomena.DonationsFixtures do
       })
       |> maybe_put_user(user)
 
-    {:ok, donation} = Donations.create_donation(attrs)
+    {:ok, donation} = Donations.insert_donation(attrs)
     donation
   end
 

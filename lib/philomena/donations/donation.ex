@@ -4,6 +4,8 @@ defmodule Philomena.Donations.Donation do
 
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "donations" do
     belongs_to :user, User
 
