@@ -4,9 +4,14 @@ defmodule Philomena.Users do
   """
 
   import Ecto.Query, warn: false
+
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Schema.Approval
   alias PhilomenaQuery.Search
   alias Philomena.Users
@@ -686,6 +691,66 @@ defmodule Philomena.Users do
     |> User.settings_changeset(attrs)
     |> Repo.update()
     |> reindex_after_update()
+  end
+
+  @doc """
+  Loads the user named by the profile `slug` for the description edit form, on
+  behalf of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. The user is then
+  loaded by slug and authorized for `:edit_description`; an unknown slug
+  authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
+  cover `nil`).
+
+  Returns `{:ok, user}`.
+  """
+  @spec load_profile_for_description_edit(Actor.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_profile_for_description_edit(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor) do
+      load_authorized_profile(actor.user, :edit_description, slug)
+    end
+  end
+
+  @doc """
+  Updates the description and personal title of the user named by the profile
+  `slug`, on behalf of `actor`, from the controller-shaped `attrs`.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. The user is then loaded by slug and authorized for
+  `:edit_description` following `load_profile_for_description_edit/2`. On success
+  the description and personal title are updated and the user reindexed; a
+  profile that gains an unapproved external link files a system report.
+
+  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
+  rejected.
+  """
+  @spec update_description(Actor.t(), String.t(), map()) ::
+          {:ok, User.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_description(%Actor{} = actor, slug, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_authorized_profile(actor.user, :edit_description, slug) do
+      update_description(user, attrs)
+    end
+  end
+
+  # Loads a user by profile slug and authorizes the acting user for `action`
+  # against the loaded record. An unknown slug authorizes a `nil` record, so an
+  # actor whose grants do not cover `nil` gets `{:error, :unauthorized}` and one
+  # who is permitted to act on `nil` gets `{:error, :not_found}`.
+  defp load_authorized_profile(user, action, slug) do
+    target = Repo.get_by(User, slug: slug)
+
+    with :ok <- authorize(user, action, target),
+         %User{} <- target do
+      {:ok, target}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
   end
 
   @doc """
