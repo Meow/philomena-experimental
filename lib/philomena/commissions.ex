@@ -431,4 +431,142 @@ defmodule Philomena.Commissions do
   def change_item(%Item{} = item) do
     Item.changeset(item, %{})
   end
+
+  @doc """
+  Loads the commission of the user named by the profile `slug` for adding an
+  item, on behalf of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. A missing commission
+  (or unknown slug) is `{:error, :not_found}`. Items are strictly owner-only, so
+  an actor who is not the profile owner is `{:error, :unauthorized}`.
+
+  Returns `{:ok, {user, commission, changeset}}`.
+  """
+  @spec load_item_for_new(Actor.t(), String.t()) ::
+          {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_item_for_new(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, {user, commission}} <- authorize_item(actor, slug) do
+      {:ok, {user, commission, change_item(%Item{})}}
+    end
+  end
+
+  @doc """
+  Adds an item to the commission of the user named by the profile `slug`, on
+  behalf of `actor`, from the controller-shaped `attrs`.
+
+  The actor's write access is verified first (`{:error, :ban}` /
+  `{:error, :unauthorized}`); then the same gating as `load_item_for_new/2`
+  applies.
+
+  Returns `{:ok, user}` on success, or `{:error, {user, commission, changeset}}`
+  when the insert is rejected.
+  """
+  @spec create_item(Actor.t(), String.t(), map()) ::
+          {:ok, User.t()}
+          | {:error, {User.t(), Commission.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def create_item(%Actor{} = actor, slug, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, {user, commission}} <- authorize_item(actor, slug) do
+      case create_item(commission, attrs) do
+        {:ok, _multi} -> {:ok, user}
+        {:error, changeset} -> {:error, {user, commission, changeset}}
+      end
+    end
+  end
+
+  @doc """
+  Loads the item named by `id` under the commission of the user named by the
+  profile `slug` for editing, on behalf of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. A missing commission
+  (or unknown slug) is `{:error, :not_found}`, and a non-owner is
+  `{:error, :unauthorized}`. An item id that does not belong to this commission
+  raises `Ecto.NoResultsError` (a 404).
+
+  Returns `{:ok, {user, commission, item, changeset}}`.
+  """
+  @spec load_item_for_edit(Actor.t(), String.t(), String.t()) ::
+          {:ok, {User.t(), Commission.t(), Item.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_item_for_edit(%Actor{} = actor, slug, id) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, {user, commission}} <- authorize_item(actor, slug) do
+      item = fetch_item!(commission, id)
+      {:ok, {user, commission, item, change_item(item)}}
+    end
+  end
+
+  @doc """
+  Updates the item named by `id` under the commission of the user named by the
+  profile `slug`, on behalf of `actor`, from the controller-shaped `attrs`.
+
+  The actor's write access is verified first (`{:error, :ban}` /
+  `{:error, :unauthorized}`); then the same gating as `load_item_for_edit/3`
+  applies, including the raising item lookup.
+
+  Returns `{:ok, user}` on success, or
+  `{:error, {user, commission, item, changeset}}` when the update is rejected.
+  """
+  @spec update_item(Actor.t(), String.t(), String.t(), map()) ::
+          {:ok, User.t()}
+          | {:error, {User.t(), Commission.t(), Item.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def update_item(%Actor{} = actor, slug, id, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, {user, commission}} <- authorize_item(actor, slug) do
+      item = fetch_item!(commission, id)
+
+      case update_item(item, attrs) do
+        {:ok, _item} -> {:ok, user}
+        {:error, changeset} -> {:error, {user, commission, item, changeset}}
+      end
+    end
+  end
+
+  @doc """
+  Deletes the item named by `id` under the commission of the user named by the
+  profile `slug`, on behalf of `actor`.
+
+  The actor's write access is verified first (`{:error, :ban}` /
+  `{:error, :unauthorized}`); then the same gating as `load_item_for_edit/3`
+  applies, including the raising item lookup.
+
+  Returns `{:ok, user}`.
+  """
+  @spec delete_item(Actor.t(), String.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
+  def delete_item(%Actor{} = actor, slug, id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, {user, commission}} <- authorize_item(actor, slug) do
+      item = fetch_item!(commission, id)
+      {:ok, _multi} = delete_item(item)
+      {:ok, user}
+    end
+  end
+
+  # Gates item management: the profile must exist and have a commission, and the
+  # actor must be the profile owner. Unlike commission management, item routes
+  # have no staff bypass.
+  defp authorize_item(actor, slug) do
+    with %User{} = user <- load_profile_user(slug),
+         {:ok, commission} <- ensure_commission(user),
+         :ok <- ensure_item_owner(actor.user, user) do
+      {:ok, {user, commission}}
+    else
+      nil -> {:error, :not_found}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp ensure_item_owner(%{id: id}, %User{id: id}), do: :ok
+  defp ensure_item_owner(_current, _user), do: {:error, :unauthorized}
+
+  # Loads an item scoped to its commission, raising `Ecto.NoResultsError` (a 404)
+  # when the id names no item of this commission.
+  defp fetch_item!(commission, id) do
+    Repo.get_by!(Item, commission_id: commission.id, id: id)
+  end
 end
