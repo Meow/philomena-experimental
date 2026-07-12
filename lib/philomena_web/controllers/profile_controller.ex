@@ -16,7 +16,7 @@ defmodule PhilomenaWeb.ProfileController do
            ) do
       user = page.user
 
-      rendered_comments = MarkdownRenderer.render_collection(page.authorized_comments, conn)
+      rendered_comments = MarkdownRenderer.render_collection(page.recent_comments, conn)
       recent_comments = Enum.zip(rendered_comments, page.recent_comments)
 
       about_me = MarkdownRenderer.render_one(%{body: user.description || ""}, conn)

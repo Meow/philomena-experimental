@@ -6,11 +6,9 @@ defmodule Philomena.Profiles.ProfilePage do
   galleries, the 90-day statistics series, watcher counts for the user's
   verified-link tags, the user's public-link tags, and the user's bans.
 
-  Comments are carried twice: `recent_comments` is the unfiltered strip the
-  view pairs rendered bodies against, and `authorized_comments` is the subset
-  whose images the viewer may see, which the caller renders. Descriptions and
-  commission text are carried raw on `user`; rendering them is the caller's
-  concern.
+  `recent_comments` holds only the comments whose images the viewer may see.
+  Descriptions, comment bodies, and commission text are carried raw;
+  rendering them is the caller's concern.
   """
 
   alias Philomena.Users.User
@@ -21,7 +19,6 @@ defmodule Philomena.Profiles.ProfilePage do
     :recent_faves,
     :recent_artwork,
     :recent_comments,
-    :authorized_comments,
     :recent_posts,
     :recent_galleries,
     :statistics,
@@ -36,7 +33,6 @@ defmodule Philomena.Profiles.ProfilePage do
     :recent_faves,
     :recent_artwork,
     :recent_comments,
-    :authorized_comments,
     :recent_posts,
     :recent_galleries,
     :statistics,
@@ -52,7 +48,6 @@ defmodule Philomena.Profiles.ProfilePage do
           recent_faves: list(),
           recent_artwork: list(),
           recent_comments: list(),
-          authorized_comments: list(),
           recent_posts: list(),
           recent_galleries: list(),
           statistics: map(),

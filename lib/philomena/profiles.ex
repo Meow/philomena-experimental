@@ -149,7 +149,7 @@ defmodule Philomena.Profiles do
       )
 
     recent_posts = Enum.filter(recent_posts, &Canada.Can.can?(viewer, :show, &1.topic))
-    authorized_comments = Enum.filter(recent_comments, &Canada.Can.can?(viewer, :show, &1.image))
+    recent_comments = Enum.filter(recent_comments, &Canada.Can.can?(viewer, :show, &1.image))
 
     recent_galleries =
       Gallery
@@ -167,7 +167,6 @@ defmodule Philomena.Profiles do
       recent_faves: recent_faves,
       recent_artwork: recent_artwork,
       recent_comments: recent_comments,
-      authorized_comments: authorized_comments,
       recent_posts: recent_posts,
       recent_galleries: recent_galleries,
       statistics: calculate_statistics(user),
