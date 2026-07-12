@@ -21,6 +21,7 @@ defmodule Philomena.DnpEntriesTest do
 
   alias Philomena.DnpEntries
   alias Philomena.DnpEntries.{DnpEntry, DnpListing}
+  alias Philomena.ModerationLogs.ModerationLog
 
   # A truthy ban value in the shape production passes; only its presence matters
   # to the write-access and not-banned checks the write paths run first.
@@ -370,6 +371,163 @@ defmodule Philomena.DnpEntriesTest do
                )
 
       assert %{tag_id: ["must be one of your linked tags"]} = errors_on(changeset)
+    end
+  end
+
+  describe "load_admin_dnp_entries/3" do
+    test "an anonymous viewer is unauthorized" do
+      assert DnpEntries.load_admin_dnp_entries(nil, %{}, @pagination) == {:error, :unauthorized}
+    end
+
+    test "a regular user is unauthorized" do
+      assert DnpEntries.load_admin_dnp_entries(confirmed_user_fixture(), %{}, @pagination) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator and an admin are authorized" do
+      for actor <- [moderator_user_fixture(), admin_user_fixture()] do
+        assert {:ok, %Scrivener.Page{}} =
+                 DnpEntries.load_admin_dnp_entries(actor, %{}, @pagination)
+      end
+    end
+
+    test "the default view lists the active states and excludes listed entries" do
+      {user, tag} = linked_user()
+      requested = dnp_entry_fixture(user, tag)
+
+      {other, other_tag} = linked_user()
+      listed = dnp_entry_fixture(other, other_tag, %{state: "listed"})
+
+      assert {:ok, page} =
+               DnpEntries.load_admin_dnp_entries(moderator_user_fixture(), %{}, @pagination)
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert requested.id in ids
+      refute listed.id in ids
+    end
+
+    test "a states list restricts to those states" do
+      {user, tag} = linked_user()
+      requested = dnp_entry_fixture(user, tag)
+
+      {other, other_tag} = linked_user()
+      listed = dnp_entry_fixture(other, other_tag, %{state: "listed"})
+
+      assert {:ok, page} =
+               DnpEntries.load_admin_dnp_entries(
+                 moderator_user_fixture(),
+                 %{"states" => ["listed"]},
+                 @pagination
+               )
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert listed.id in ids
+      refute requested.id in ids
+    end
+
+    test "an eq param filters by the tag name" do
+      {user, tag} = linked_user()
+      wanted = dnp_entry_fixture(user, tag)
+
+      {other, other_tag} = linked_user()
+      unrelated = dnp_entry_fixture(other, other_tag)
+
+      assert {:ok, page} =
+               DnpEntries.load_admin_dnp_entries(
+                 moderator_user_fixture(),
+                 %{"eq" => tag.name},
+                 @pagination
+               )
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert wanted.id in ids
+      refute unrelated.id in ids
+    end
+  end
+
+  describe "transition_dnp_entry/3" do
+    test "a moderator transitions an entry and writes a moderation log" do
+      {user, tag} = linked_user()
+      entry = dnp_entry_fixture(user, tag)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, %DnpEntry{aasm_state: "acknowledged"} = transitioned} =
+               DnpEntries.transition_dnp_entry(moderator, to_string(entry.id), "acknowledged")
+
+      assert transitioned.id == entry.id
+
+      log = Repo.one!(ModerationLog)
+      assert log.user_id == moderator.id
+      assert log.type == "Admin.DnpEntry.Transition:create"
+      assert log.subject_path == "/dnp/#{entry.id}"
+      assert log.body == "Acknowledged DNP entry #{entry.id} on #{tag.name}"
+    end
+
+    test "an admin transitions an entry" do
+      {user, tag} = linked_user()
+      entry = dnp_entry_fixture(user, tag)
+
+      assert {:ok, %DnpEntry{aasm_state: "rescinded"}} =
+               DnpEntries.transition_dnp_entry(
+                 admin_user_fixture(),
+                 to_string(entry.id),
+                 "rescinded"
+               )
+    end
+
+    test "an anonymous actor is unauthorized" do
+      {user, tag} = linked_user()
+      entry = dnp_entry_fixture(user, tag)
+
+      assert DnpEntries.transition_dnp_entry(nil, to_string(entry.id), "acknowledged") ==
+               {:error, :unauthorized}
+
+      assert Repo.aggregate(ModerationLog, :count) == 0
+    end
+
+    test "a regular user is unauthorized" do
+      {user, tag} = linked_user()
+      entry = dnp_entry_fixture(user, tag)
+
+      assert DnpEntries.transition_dnp_entry(
+               confirmed_user_fixture(),
+               to_string(entry.id),
+               "acknowledged"
+             ) == {:error, :unauthorized}
+
+      assert Repo.aggregate(ModerationLog, :count) == 0
+    end
+
+    test "an invalid target state is a rejected changeset and writes no log" do
+      {user, tag} = linked_user()
+      entry = dnp_entry_fixture(user, tag)
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               DnpEntries.transition_dnp_entry(
+                 moderator_user_fixture(),
+                 to_string(entry.id),
+                 "not-a-state"
+               )
+
+      refute changeset.valid?
+      assert Repo.aggregate(ModerationLog, :count) == 0
+    end
+
+    test "an unknown well-formed id is not-found for an authorized actor" do
+      assert DnpEntries.transition_dnp_entry(
+               moderator_user_fixture(),
+               "2147483647",
+               "acknowledged"
+             ) ==
+               {:error, :not_found}
+    end
+
+    test "a non-integer id is not-found for an authorized actor" do
+      assert DnpEntries.transition_dnp_entry(
+               moderator_user_fixture(),
+               "not-a-number",
+               "acknowledged"
+             ) == {:error, :not_found}
     end
   end
 end
