@@ -891,19 +891,29 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Marks the report as closed by the given user.
+  Marks the report named by the raw request `id` as closed by `actor`, on
+  behalf of `actor` (the acting staff user), and reindexes it.
+
+  Loading and authorization follow `claim_report/2`, authorizing `:edit`.
+
+  Returns `{:ok, report}`, `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
 
   ## Example
 
-      iex> close_report(%Report{}, %User{})
+      iex> close_report(moderator, "1")
       {:ok, %Report{}}
 
   """
-  def close_report(%Report{} = report, user) do
-    report
-    |> Report.close_changeset(user)
-    |> Repo.update()
-    |> reindex_after_update()
+  @spec close_report(User.t() | nil, any()) ::
+          {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def close_report(actor, id) do
+    with {:ok, report} <- load_report_for_edit(actor, id) do
+      report
+      |> Report.close_changeset(actor)
+      |> Repo.update()
+      |> reindex_after_update()
+    end
   end
 
   # Loads the report named by the raw request `id` and authorizes `:edit`
