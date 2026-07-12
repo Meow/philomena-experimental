@@ -68,6 +68,54 @@ defmodule Philomena.ArtistLinks do
   end
 
   @doc """
+  Returns the paginated artist links for the admin listing, on behalf of
+  `actor`, newest first, with the moderation-view associations preloaded.
+
+  Authorizes `:index` against the artist link model. `params` selects the
+  listing mode: `"all"` lists every link, `"lq"` filters by a `%term%` match on
+  the profile user name or the link uri, and otherwise only links awaiting
+  moderation (`unverified`/`link_verified`/`contacted`) are shown.
+
+  Returns `{:ok, artist_links}` as a `m:Scrivener.Page` or
+  `{:error, :unauthorized}`.
+  """
+  @spec load_artist_links_index(User.t() | nil, map(), map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def load_artist_links_index(actor, params, pagination) do
+    with :ok <- authorize(actor, :index, %ArtistLink{}) do
+      artist_links =
+        params
+        |> index_query()
+        |> order_by(desc: :created_at)
+        |> preload([
+          :tag,
+          :verified_by_user,
+          :contacted_by_user,
+          user: [:linked_tags, awards: :badge]
+        ])
+        |> Repo.paginate(pagination)
+
+      {:ok, artist_links}
+    end
+  end
+
+  defp index_query(%{"all" => _value}) do
+    ArtistLink
+  end
+
+  defp index_query(%{"lq" => query}) do
+    query = "%#{query}%"
+
+    ArtistLink
+    |> join(:inner, [ul], _ in assoc(ul, :user))
+    |> where([ul, u], ilike(u.name, ^query) or ilike(ul.uri, ^query))
+  end
+
+  defp index_query(_params) do
+    where(ArtistLink, [ul], ul.aasm_state in ^["unverified", "link_verified", "contacted"])
+  end
+
+  @doc """
   Loads the profile user named by `slug` for the new artist link form, on behalf
   of `actor`.
 
