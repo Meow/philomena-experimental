@@ -172,6 +172,9 @@ defmodule Philomena.Tags do
   # Associations the tag alias and reindex pages need.
   @alias_preloads [:implied_tags, :aliased_tag]
 
+  # Associations the tag spoiler image page needs.
+  @image_preloads [:implied_tags]
+
   @doc """
   Runs the tag listing search the `"tq"` parameter describes.
 
@@ -315,6 +318,36 @@ defmodule Philomena.Tags do
     tag = tag_by_slug(slug, @alias_preloads)
 
     with :ok <- authorize(actor, :alias, tag),
+         %Tag{} <- tag do
+      {:ok, {tag, change_tag(tag)}}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads the tag named by `slug` for editing its spoiler image, on behalf of
+  `actor`.
+
+  Authorizes `:edit`. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
+
+  Returns `{:ok, {tag, changeset}}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_tag_image_for_edit(moderator, "safe")
+      {:ok, {%Tag{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_tag_image_for_edit(User.t() | nil, String.t()) ::
+          {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
+  def load_tag_image_for_edit(actor, slug) do
+    tag = tag_by_slug(slug, @image_preloads)
+
+    with :ok <- authorize(actor, :edit, tag),
          %Tag{} <- tag do
       {:ok, {tag, change_tag(tag)}}
     else
@@ -614,6 +647,47 @@ defmodule Philomena.Tags do
   end
 
   @doc """
+  Updates the spoiler image of the tag named by `slug`, on behalf of `actor`.
+
+  Authorizes `:edit` first. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
+  a moderation log is written attributing the update to `actor`.
+
+  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
+  or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> update_tag_image(moderator, "safe", %{"image" => upload})
+      {:ok, %Tag{}}
+
+  """
+  @spec update_tag_image(User.t() | nil, String.t(), map()) ::
+          {:ok, Tag.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized}
+  def update_tag_image(actor, slug, attrs) do
+    tag = tag_by_slug(slug, @image_preloads)
+
+    with :ok <- authorize(actor, :edit, tag),
+         %Tag{} <- tag,
+         {:ok, tag} <- update_tag_image(tag, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Tag.Image:update",
+        Paths.tag_path(tag),
+        "Updated image on tag '#{tag.name}'"
+      )
+
+      {:ok, tag}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
+  end
+
+  @doc """
   Removes a tag's associated image.
 
   Removes the image from the tag and deletes the persisted file.
@@ -636,6 +710,47 @@ defmodule Philomena.Tags do
 
       error ->
         error
+    end
+  end
+
+  @doc """
+  Removes the spoiler image of the tag named by `slug`, on behalf of `actor`.
+
+  Authorizes `:edit` first. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
+  a moderation log is written attributing the removal to `actor`.
+
+  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
+  or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> remove_tag_image(moderator, "safe")
+      {:ok, %Tag{}}
+
+  """
+  @spec remove_tag_image(User.t() | nil, String.t()) ::
+          {:ok, Tag.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized}
+  def remove_tag_image(actor, slug) do
+    tag = tag_by_slug(slug, @image_preloads)
+
+    with :ok <- authorize(actor, :edit, tag),
+         %Tag{} <- tag,
+         {:ok, tag} <- remove_tag_image(tag) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Tag.Image:delete",
+        Paths.tag_path(tag),
+        "Removed image on tag '#{tag.name}'"
+      )
+
+      {:ok, tag}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+      {:error, %Ecto.Changeset{}} = error -> error
     end
   end
 
