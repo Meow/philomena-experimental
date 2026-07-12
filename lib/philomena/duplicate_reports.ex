@@ -469,18 +469,64 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Accepts a duplicate report in reverse, making the target image the duplicate instead.
+  Accepts the duplicate report named by `id` in reverse, making the reported
+  image the duplicate of the target instead, on behalf of `actor` (the acting
+  user).
 
-  Creates a new duplicate report with reversed image relationship if one doesn't exist,
-  rejects the original report, and accepts the reversed report.
+  The report is authorized for `:edit` after being loaded by id, with the same
+  not-found/unauthorized shapes as `accept_duplicate_report/2`. The original
+  report is rejected, the images are merged the other way, and a moderation log
+  is written on success. A merge that cannot complete is
+  `{:error, :report_failed}`.
+
+  Returns `{:ok, results}` (the transaction result map), `{:error, :not_found}`,
+  `{:error, :unauthorized}`, or `{:error, :report_failed}`.
 
   ## Examples
 
-      iex> accept_reverse_duplicate_report(duplicate_report, user)
+      iex> accept_reverse_duplicate_report(moderator, "42")
       {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
 
   """
-  def accept_reverse_duplicate_report(%DuplicateReport{} = duplicate_report, user) do
+  @spec accept_reverse_duplicate_report(User.t() | nil, String.t() | integer()) ::
+          {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
+  def accept_reverse_duplicate_report(actor, id) do
+    with {:ok, report_id} <- IntegerId.parse(id),
+         report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
+         :ok <- authorize(actor, :edit, report),
+         %DuplicateReport{} <- report,
+         {:ok, results} <- accept_reverse_report_multi(report, actor) do
+      report = results.duplicate_report
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "DuplicateReport.AcceptReverse:create",
+        Paths.image_path(report.image),
+        "Reverse-accepted duplicate report, merged #{report.image.id} into #{report.duplicate_of_image.id}"
+      )
+
+      {:ok, results}
+    else
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _ -> {:error, :report_failed}
+    end
+  end
+
+  @doc """
+  Merges the target of `duplicate_report` into its reported image.
+
+  Creates a duplicate report with the reversed image relationship if one does not
+  already exist, rejects the original report, and accepts the reversed report,
+  running the transaction.
+
+  ## Examples
+
+      iex> accept_reverse_report_multi(duplicate_report, user)
+      {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
+
+  """
+  def accept_reverse_report_multi(%DuplicateReport{} = duplicate_report, user) do
     new_report =
       DuplicateReport
       |> where(duplicate_of_image_id: ^duplicate_report.image_id)
