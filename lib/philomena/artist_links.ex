@@ -379,18 +379,46 @@ defmodule Philomena.ArtistLinks do
   end
 
   @doc """
+  Marks the artist link named by `id` as contacted, on behalf of `actor`,
+  transitioning it to the contacted state.
+
+  The link is loaded by id and authorized for `:edit`: a non-castable or unknown
+  id is `{:error, :not_found}`, and a load a moderator may not act on is
+  `{:error, :unauthorized}`. On success a moderation log attributing the contact
+  to `actor` is written.
+
+  Returns `{:ok, artist_link}`.
+  """
+  @spec contact_artist_link(User.t() | nil, String.t()) ::
+          {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
+  def contact_artist_link(actor, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor, :edit, id) do
+      {:ok, artist_link} = contact_loaded_link(artist_link, actor)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Admin.ArtistLink.Contact:create",
+        Paths.artist_link_path(artist_link.user, artist_link),
+        "Contacted artist #{artist_link.user.name} at #{artist_link.uri}"
+      )
+
+      {:ok, artist_link}
+    end
+  end
+
+  @doc """
   Transitions an artist link to the contacted state.
 
   ## Examples
 
-      iex> contact_artist_link(artist_link)
+      iex> contact_loaded_link(artist_link, user)
       {:ok, %ArtistLink{}}
 
-      iex> contact_artist_link(artist_link)
+      iex> contact_loaded_link(artist_link, user)
       {:error, %Ecto.Changeset{}}
 
   """
-  def contact_artist_link(%ArtistLink{} = artist_link, user) do
+  def contact_loaded_link(%ArtistLink{} = artist_link, user) do
     artist_link
     |> ArtistLink.contact_changeset(user)
     |> Repo.update()
