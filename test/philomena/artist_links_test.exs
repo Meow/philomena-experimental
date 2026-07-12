@@ -15,12 +15,21 @@ defmodule Philomena.ArtistLinksTest do
 
   import Philomena.AttributionFixtures
   import Philomena.ArtistLinksFixtures
+  import Philomena.BadgesFixtures
   import Philomena.TagsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.ArtistLinks
   alias Philomena.ArtistLinks.ArtistLink
+  alias Philomena.Badges.Award
+  alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Repo
+
+  defp moderation_logs, do: Repo.all(ModerationLog)
+
+  defp no_moderation_logs! do
+    assert Repo.aggregate(ModerationLog, :count) == 0
+  end
 
   # A truthy ban value in the shape production passes; only its presence matters
   # to the write-access and not-banned checks the loaders run first.
@@ -33,6 +42,12 @@ defmodule Philomena.ArtistLinksTest do
 
   defp artist_tag_fixture do
     tag_fixture(name: "artist:test-link-artist-#{System.unique_integer([:positive])}")
+  end
+
+  # A link owner with an all-unreserved slug, so a moderation-log subject_path
+  # is identical to "/profiles/<slug>/artist_links/<id>" with no percent-encoding.
+  defp link_owner_fixture do
+    confirmed_user_fixture(%{name: "linkowner#{System.unique_integer([:positive])}"})
   end
 
   # Link params in the shape the artist-link form posts.
@@ -254,6 +269,235 @@ defmodule Philomena.ArtistLinksTest do
                )
 
       assert updated.tag_id == nil
+    end
+  end
+
+  describe "load_artist_links_index/3 authorization" do
+    @pagination %{page_number: 1, page_size: 25}
+
+    test "a moderator and an admin may list, an anonymous viewer and a regular user may not" do
+      assert {:ok, %Scrivener.Page{}} =
+               ArtistLinks.load_artist_links_index(moderator_user_fixture(), %{}, @pagination)
+
+      assert {:ok, %Scrivener.Page{}} =
+               ArtistLinks.load_artist_links_index(admin_user_fixture(), %{}, @pagination)
+
+      assert ArtistLinks.load_artist_links_index(nil, %{}, @pagination) ==
+               {:error, :unauthorized}
+
+      assert ArtistLinks.load_artist_links_index(confirmed_user_fixture(), %{}, @pagination) ==
+               {:error, :unauthorized}
+    end
+  end
+
+  describe "load_artist_links_index/3 listing modes" do
+    @pagination %{page_number: 1, page_size: 25}
+
+    test "the default listing shows only links awaiting moderation" do
+      moderator = moderator_user_fixture()
+      user = confirmed_user_fixture()
+      pending = artist_link_fixture(user, artist_tag_fixture())
+      verified = verified_artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, page} = ArtistLinks.load_artist_links_index(moderator, %{}, @pagination)
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert pending.id in ids
+      refute verified.id in ids
+    end
+
+    test "the all mode lists every link regardless of state" do
+      moderator = moderator_user_fixture()
+      user = confirmed_user_fixture()
+      pending = artist_link_fixture(user, artist_tag_fixture())
+      verified = verified_artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, page} =
+               ArtistLinks.load_artist_links_index(moderator, %{"all" => "1"}, @pagination)
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert pending.id in ids
+      assert verified.id in ids
+    end
+
+    test "the lq mode filters by a match on the link uri" do
+      moderator = moderator_user_fixture()
+      user = confirmed_user_fixture()
+
+      wanted =
+        artist_link_fixture(user, artist_tag_fixture(), %{
+          "uri" => "https://match.example.com/needle"
+        })
+
+      _other =
+        artist_link_fixture(user, artist_tag_fixture(), %{
+          "uri" => "https://other.example.com/haystack"
+        })
+
+      assert {:ok, page} =
+               ArtistLinks.load_artist_links_index(moderator, %{"lq" => "needle"}, @pagination)
+
+      assert Enum.map(page.entries, & &1.id) == [wanted.id]
+    end
+
+    test "the lq mode filters by a match on the profile user name" do
+      moderator = moderator_user_fixture()
+
+      wanted_user =
+        confirmed_user_fixture(%{name: "lqmatchowner#{System.unique_integer([:positive])}"})
+
+      other_user = confirmed_user_fixture()
+      wanted = artist_link_fixture(wanted_user, artist_tag_fixture())
+      _other = artist_link_fixture(other_user, artist_tag_fixture())
+
+      assert {:ok, page} =
+               ArtistLinks.load_artist_links_index(
+                 moderator,
+                 %{"lq" => wanted_user.name},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [wanted.id]
+    end
+  end
+
+  describe "verify_artist_link/2" do
+    test "a moderator verifies a link, awards the Artist badge, and writes a byte-exact log" do
+      moderator = moderator_user_fixture()
+      user = link_owner_fixture()
+      badge = badge_fixture(%{title: "Artist"})
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, verified} = ArtistLinks.verify_artist_link(moderator, "#{link.id}")
+      assert verified.aasm_state == "verified"
+      assert Repo.get(ArtistLink, link.id).aasm_state == "verified"
+
+      # The verification awards the owner the badge titled "Artist".
+      assert Repo.get_by(Award, badge_id: badge.id, user_id: user.id)
+
+      assert [log] = moderation_logs()
+      assert log.user_id == moderator.id
+      assert log.type == "Admin.ArtistLink.Verification:create"
+      assert log.body == "Verified artist link #{link.uri} created by #{user.name}"
+      assert log.subject_path == "/profiles/#{user.slug}/artist_links/#{link.id}"
+    end
+
+    test "an admin verifies a link" do
+      user = confirmed_user_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, verified} =
+               ArtistLinks.verify_artist_link(admin_user_fixture(), "#{link.id}")
+
+      assert verified.aasm_state == "verified"
+    end
+
+    test "a regular user is unauthorized and writes no log" do
+      user = confirmed_user_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert ArtistLinks.verify_artist_link(confirmed_user_fixture(), "#{link.id}") ==
+               {:error, :unauthorized}
+
+      assert Repo.get(ArtistLink, link.id).aasm_state == "unverified"
+      no_moderation_logs!()
+    end
+
+    test "a non-castable id is not-found" do
+      assert ArtistLinks.verify_artist_link(moderator_user_fixture(), "abc") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown integer id is unauthorized for a moderator, not-found for an admin" do
+      assert ArtistLinks.verify_artist_link(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+
+      assert ArtistLinks.verify_artist_link(admin_user_fixture(), "2147483647") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "contact_artist_link/2" do
+    test "a moderator marks a link as contacted and writes a byte-exact log" do
+      moderator = moderator_user_fixture()
+      user = link_owner_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, contacted} = ArtistLinks.contact_artist_link(moderator, "#{link.id}")
+      assert contacted.aasm_state == "contacted"
+      assert Repo.get(ArtistLink, link.id).contacted_by_user_id == moderator.id
+
+      assert [log] = moderation_logs()
+      assert log.user_id == moderator.id
+      assert log.type == "Admin.ArtistLink.Contact:create"
+      assert log.body == "Contacted artist #{user.name} at #{link.uri}"
+      assert log.subject_path == "/profiles/#{user.slug}/artist_links/#{link.id}"
+    end
+
+    test "a regular user is unauthorized and writes no log" do
+      user = confirmed_user_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert ArtistLinks.contact_artist_link(confirmed_user_fixture(), "#{link.id}") ==
+               {:error, :unauthorized}
+
+      assert Repo.get(ArtistLink, link.id).aasm_state == "unverified"
+      no_moderation_logs!()
+    end
+
+    test "a non-castable id is not-found" do
+      assert ArtistLinks.contact_artist_link(moderator_user_fixture(), "abc") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown integer id is unauthorized for a moderator, not-found for an admin" do
+      assert ArtistLinks.contact_artist_link(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+
+      assert ArtistLinks.contact_artist_link(admin_user_fixture(), "2147483647") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "reject_artist_link/2" do
+    test "a moderator rejects a link and writes a byte-exact log" do
+      moderator = moderator_user_fixture()
+      user = link_owner_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, rejected} = ArtistLinks.reject_artist_link(moderator, "#{link.id}")
+      assert rejected.aasm_state == "rejected"
+      assert Repo.get(ArtistLink, link.id).aasm_state == "rejected"
+
+      assert [log] = moderation_logs()
+      assert log.user_id == moderator.id
+      assert log.type == "Admin.ArtistLink.Reject:create"
+      assert log.body == "Rejected artist link #{link.uri} created by #{user.name}"
+      assert log.subject_path == "/profiles/#{user.slug}/artist_links/#{link.id}"
+    end
+
+    test "a regular user is unauthorized and writes no log" do
+      user = confirmed_user_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert ArtistLinks.reject_artist_link(confirmed_user_fixture(), "#{link.id}") ==
+               {:error, :unauthorized}
+
+      assert Repo.get(ArtistLink, link.id).aasm_state == "unverified"
+      no_moderation_logs!()
+    end
+
+    test "a non-castable id is not-found" do
+      assert ArtistLinks.reject_artist_link(moderator_user_fixture(), "abc") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown integer id is unauthorized for a moderator, not-found for an admin" do
+      assert ArtistLinks.reject_artist_link(moderator_user_fixture(), "2147483647") ==
+               {:error, :unauthorized}
+
+      assert ArtistLinks.reject_artist_link(admin_user_fixture(), "2147483647") ==
+               {:error, :not_found}
     end
   end
 end
