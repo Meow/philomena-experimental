@@ -37,6 +37,7 @@ defmodule Philomena.Users do
   alias Philomena.IndexWorker
   alias Philomena.UserEraseWorker
   alias Philomena.UserRenameWorker
+  alias Philomena.UserUnvoteWorker
 
   @typedoc """
   Describes the entity performing the action.
@@ -1019,6 +1020,33 @@ defmodule Philomena.Users do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = remove_avatar(user)
       log_managed_user(actor, user, "Admin.User.Avatar:delete", "Removed avatar for #{user.name}")
+
+      {:ok, user}
+    end
+  end
+
+  @doc """
+  Starts a downvote wipe for the user named by `slug`, on behalf of `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success a background job to remove the user's
+  downvotes is enqueued and a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_wipe_downvotes(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_wipe_downvotes(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, false])
+
+      log_managed_user(
+        actor,
+        user,
+        "Admin.User.Downvote:delete",
+        "Wiped downvotes for #{user.name}"
+      )
 
       {:ok, user}
     end
