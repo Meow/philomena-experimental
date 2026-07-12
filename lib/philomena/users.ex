@@ -1071,17 +1071,62 @@ defmodule Philomena.Users do
   end
 
   @doc """
+  Loads the rename form changeset for the acting user's own account, on behalf
+  of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. Renaming is authorized
+  with `:change_username` against the actor's own user, which the ability rules
+  gate on the 90-day rename window, so an actor who renamed within the window
+  gets `{:error, :unauthorized}`.
+
+  Returns `{:ok, %Ecto.Changeset{}}`.
+  """
+  @spec load_user_for_rename(Actor.t()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
+  def load_user_for_rename(%Actor{user: user} = actor) do
+    with :ok <- verify_not_banned(actor),
+         :ok <- authorize(user, :change_username, user) do
+      {:ok, change_user(user)}
+    end
+  end
+
+  @doc """
+  Updates the acting user's own name from the controller-shaped `user_params`,
+  on behalf of `actor`, recording the change in history.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. Renaming is then authorized with
+  `:change_username` against the actor's own user (the ability rules gate it on
+  the 90-day rename window). On success the old name becomes a name-change row,
+  the account is reindexed, and a background job rewrites references to the old
+  username.
+
+  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
+  rejected.
+  """
+  @spec update_name(Actor.t(), map()) ::
+          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
+  def update_name(%Actor{user: user} = actor, user_params) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(user, :change_username, user) do
+      rename_user(user, user_params)
+    end
+  end
+
+  @doc """
   Updates a user's name and records the change in history.
 
   Triggers a background job to update references to the old username.
 
   ## Examples
 
-      iex> update_name(user, %{"name" => "new_name"})
+      iex> rename_user(user, %{"name" => "new_name"})
       {:ok, %User{}}
 
   """
-  def update_name(user, user_params) do
+  @spec rename_user(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def rename_user(user, user_params) do
     old_name = user.name
 
     name_change = UserNameChange.changeset(%UserNameChange{user_id: user.id}, user.name)
