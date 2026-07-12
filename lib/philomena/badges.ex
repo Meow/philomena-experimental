@@ -254,6 +254,33 @@ defmodule Philomena.Badges do
     end
   end
 
+  @doc """
+  Updates the image of the badge named by the raw request `id`, on behalf of
+  `actor`, running the SVG upload pipeline.
+
+  Authorizes badge administration, then loads the badge by id. A non-castable or
+  unknown id is `{:error, :not_found}`. On success a moderation log attributing
+  the change to `actor` is written. Returns `{:ok, badge}`,
+  `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_badge_image(User.t() | nil, any(), map()) ::
+          {:ok, Badge.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_badge_image(actor, id, attrs) do
+    with :ok <- authorize(actor, :index, Badge),
+         {:ok, badge} <- fetch_badge(id),
+         {:ok, badge} <- update_badge_image(badge, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Admin.Badge.Image:update",
+        "/admin/badges",
+        "Updated image of badge '#{badge.title}'"
+      )
+
+      {:ok, badge}
+    end
+  end
+
   # Loads a badge by a raw request id. A non-castable or unknown id is
   # `{:error, :not_found}`.
   defp fetch_badge(id) do
