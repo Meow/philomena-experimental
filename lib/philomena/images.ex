@@ -109,6 +109,42 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Runs the search the scope's "q" parameter describes for the viewer.
+
+  Compiles "q" against the viewer's filter and display switches and executes
+  it with the standard listing preloads. A custom sort field (anything under
+  "sf" other than `id`/`first_seen_at`) needs its sort cursor, so the page is
+  loaded with hits; the default orders load records alone. The raw sidebar
+  `Tag` records the query names come back alongside the page (rendering their
+  descriptions is a presentation concern).
+
+  Returns `{:ok, %{images: page, tags: tags}}`, or the compiler's
+  `{:error, msg}` for a malformed query.
+
+  ## Examples
+
+      iex> search_images(scope)
+      {:ok, %{images: %Scrivener.Page{}, tags: [%Tag{}]}}
+
+      iex> search_images(bad_query_scope)
+      {:error, "There was an error parsing your query."}
+
+  """
+  @spec search_images(Scope.t()) ::
+          {:ok, %{images: Scrivener.Page.t(), tags: [Tag.t()]}} | {:error, String.t()}
+  def search_images(scope) do
+    with {:ok, {definition, tags}} <-
+           ImageSearch.search_string(scope, scope.params["q"]) do
+      images = ImageSearch.execute(definition, hits: custom_ordering?(scope))
+
+      {:ok, %{images: images, tags: tags}}
+    end
+  end
+
+  defp custom_ordering?(%{params: %{"sf" => sf}}) when sf not in ~W(id first_seen_at), do: true
+  defp custom_ordering?(_scope), do: false
+
+  @doc """
   Loads the image `id` names for its show page, on behalf of `user` (`nil`
   for an anonymous visitor).
 
