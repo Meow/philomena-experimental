@@ -1,52 +1,23 @@
 defmodule PhilomenaWeb.IpProfile.SourceChangeController do
   use PhilomenaWeb, :controller
 
-  alias PhilomenaQuery.IpMask
-  alias Philomena.SourceChanges.SourceChange
-  alias Philomena.Repo
-  import Ecto.Query
+  alias Philomena.SourceChanges
 
-  plug :verify_authorized
+  action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"ip_profile_id" => ip} = params) do
-    case EctoNetwork.INET.cast(ip) do
-      {:ok, ip} -> list_source_changes(conn, ip, params)
-      _error -> PhilomenaWeb.NotFoundPlug.call(conn)
-    end
-  end
-
-  defp list_source_changes(conn, ip, params) do
-    range = IpMask.parse_mask(ip, params)
-
-    source_changes =
-      SourceChange
-      |> where(fragment("? >>= ip", ^range))
-      |> added_filter(params)
-      |> order_by(desc: :id)
-      |> preload([:user, image: [:user, :sources, tags: :aliases]])
-      |> Repo.paginate(conn.assigns.scrivener)
-
-    render(conn, "index.html",
-      title: "Source Changes for IP `#{ip}'",
-      ip: range,
-      source_changes: source_changes
-    )
-  end
-
-  defp added_filter(query, %{"added" => "1"}),
-    do: where(query, added: true)
-
-  defp added_filter(query, %{"added" => "0"}),
-    do: where(query, added: false)
-
-  defp added_filter(query, _params),
-    do: query
-
-  defp verify_authorized(conn, _opts) do
-    if Canada.Can.can?(conn.assigns.current_user, :show, :ip_address) do
-      conn
-    else
-      PhilomenaWeb.NotAuthorizedPlug.call(conn)
+    with {:ok, {ip, range, source_changes}} <-
+           SourceChanges.ip_source_changes(
+             conn.assigns.current_user,
+             ip,
+             params,
+             conn.assigns.scrivener
+           ) do
+      render(conn, "index.html",
+        title: "Source Changes for IP `#{ip}'",
+        ip: range,
+        source_changes: source_changes
+      )
     end
   end
 end

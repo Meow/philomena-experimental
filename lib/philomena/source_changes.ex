@@ -12,6 +12,7 @@ defmodule Philomena.SourceChanges do
   alias Philomena.Images.Image
   alias Philomena.Users.User
   alias Philomena.SourceChanges.SourceChange
+  alias PhilomenaQuery.IpMask
 
   @doc """
   Counts the source changes recorded on the image with the given id.
@@ -128,6 +129,48 @@ defmodule Philomena.SourceChanges do
     else
       {:error, :unauthorized} -> {:error, :unauthorized}
       nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Lists the source changes attributed to the IP address `ip`, newest first, on
+  behalf of `actor` (the current viewer).
+
+  Listing is staff-only: a viewer who may not see IP addresses gets
+  `{:error, :unauthorized}` before the address is parsed, matching the order the
+  authorization gate runs in. An unparsable address is `{:error, :not_found}`.
+  `params["mask"]` widens the query to a subnet; `params["added"]` narrows to
+  additions (`"1"`) or removals (`"0"`); `pagination` is passed to
+  `Repo.paginate/2`.
+
+  Returns `{:ok, {ip, range, source_changes}}` where `ip` is the parsed address,
+  `range` is the masked address actually queried, and `source_changes` is a
+  paginated set with its user and image associations preloaded for rendering.
+  """
+  @spec ip_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
+          {:ok, {Postgrex.INET.t(), Postgrex.INET.t(), Scrivener.Page.t()}}
+          | {:error, :unauthorized | :not_found}
+  def ip_source_changes(actor, ip, params, pagination) do
+    with :ok <- authorize(actor, :show, :ip_address),
+         {:ok, ip} <- cast_ip(ip) do
+      range = IpMask.parse_mask(ip, params)
+
+      source_changes =
+        SourceChange
+        |> where(fragment("? >>= ip", ^range))
+        |> added_filter(params)
+        |> order_by(desc: :id)
+        |> preload([:user, image: [:user, :sources, tags: :aliases]])
+        |> Repo.paginate(pagination)
+
+      {:ok, {ip, range, source_changes}}
+    end
+  end
+
+  defp cast_ip(ip) do
+    case EctoNetwork.INET.cast(ip) do
+      {:ok, ip} -> {:ok, ip}
+      _error -> {:error, :not_found}
     end
   end
 
