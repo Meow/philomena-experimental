@@ -6,12 +6,13 @@ defmodule Philomena.DuplicateReports do
   import Philomena.DuplicateReports.Power
   import Ecto.Query, warn: false
 
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
   alias Philomena.IntegerId
 
+  alias Philomena.Attribution.Actor
   alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.DuplicateReports.SearchQuery
   alias Philomena.DuplicateReports.Uploader
@@ -19,6 +20,73 @@ defmodule Philomena.DuplicateReports do
   alias Philomena.Images.Image
   alias Philomena.Images
   alias Philomena.Users.User
+
+  @valid_states ~w(open rejected accepted claimed)
+
+  @doc """
+  Returns a paginated list of duplicate reports for the report index.
+
+  `params["states"]` selects which report states to show; a single value or a
+  list is accepted, filtered against the `open`/`rejected`/`accepted`/`claimed`
+  allowlist. A blank or missing selection defaults to `open` and `claimed`; a
+  selection that survives the filter as an empty list matches nothing. The
+  reports carry their user, modifier, and both images (with users, sources, and
+  tags) preloaded, newest first.
+
+  ## Examples
+
+      iex> list_duplicate_reports(%{"states" => ["rejected"]}, page_size: 25)
+      %Scrivener.Page{}
+
+  """
+  @spec list_duplicate_reports(map(), Scrivener.Config.t() | keyword()) :: Scrivener.Page.t()
+  def list_duplicate_reports(params, pagination) do
+    states =
+      (presence(params["states"]) || ~w(open claimed))
+      |> wrap()
+      |> Enum.filter(&Enum.member?(@valid_states, &1))
+
+    DuplicateReport
+    |> where([d], d.state in ^states)
+    |> preload([
+      :user,
+      :modifier,
+      image: [:user, :sources, tags: :aliases],
+      duplicate_of_image: [:user, :sources, tags: :aliases]
+    ])
+    |> order_by(desc: :created_at)
+    |> Repo.paginate(pagination)
+  end
+
+  @doc """
+  Loads the duplicate report named by `id` for its show page.
+
+  A non-castable or out-of-range id, and a well-formed but unknown id, are both
+  `{:error, :not_found}`. The report carries its reported and claimed-duplicate
+  images preloaded. Any visitor may view a report; there is no authorization.
+
+  Returns `{:ok, duplicate_report}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> show_duplicate_report("42")
+      {:ok, %DuplicateReport{}}
+
+      iex> show_duplicate_report("not-an-integer")
+      {:error, :not_found}
+
+  """
+  @spec show_duplicate_report(String.t() | integer()) ::
+          {:ok, DuplicateReport.t()} | {:error, :not_found}
+  def show_duplicate_report(id) do
+    with {:ok, report_id} <- IntegerId.parse(id),
+         %DuplicateReport{} = report <-
+           Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id) do
+      {:ok, report}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
 
   @doc """
   Generates automated duplicate reports for an image based on perceptual matching.
@@ -213,6 +281,84 @@ defmodule Philomena.DuplicateReports do
 
   """
   def get_duplicate_report!(id), do: Repo.get!(DuplicateReport, id)
+
+  @doc """
+  Submits a duplicate report from `params["duplicate_report"]`, on behalf of
+  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
+  anonymous visitor).
+
+  The write is refused for a banned actor (`{:error, :ban}`) or one without a
+  fingerprint (`{:error, :unauthorized}`), checked before anything else. A
+  missing `duplicate_report` param, or a source `image_id` that names no image,
+  has nowhere to redirect back to and is `{:error, :not_found}`. A resolvable
+  source with an unresolvable `duplicate_of_image_id`, or a rejected changeset
+  (such as reporting an image as a duplicate of itself), is
+  `{:error, :report_failed, source}`, carrying the source image for the caller's
+  redirect. On success the report is inserted with the actor's user recorded as
+  the reporter.
+
+  Returns `{:ok, duplicate_report}`, `{:error, :ban}`, `{:error, :unauthorized}`,
+  `{:error, :not_found}`, or `{:error, :report_failed, source}`.
+
+  ## Examples
+
+      iex> create_duplicate_report(actor, %{"duplicate_report" => %{"image_id" => "1", "duplicate_of_image_id" => "2"}})
+      {:ok, %DuplicateReport{}}
+
+      iex> create_duplicate_report(actor, %{"duplicate_report" => %{"image_id" => "1", "duplicate_of_image_id" => "1"}})
+      {:error, :report_failed, %Image{}}
+
+  """
+  @spec create_duplicate_report(Actor.t(), map()) ::
+          {:ok, DuplicateReport.t()}
+          | {:error, :ban | :unauthorized | :not_found}
+          | {:error, :report_failed, Image.t()}
+  def create_duplicate_report(%Actor{} = actor, params) do
+    with :ok <- verify_write_access(actor) do
+      submit_duplicate_report(actor, params)
+    end
+  end
+
+  # A missing or malformed duplicate_report param has nowhere to redirect back to.
+  defp submit_duplicate_report(actor, %{"duplicate_report" => report_params})
+       when is_map(report_params) do
+    source = load_image(report_params["image_id"])
+    target = load_image(report_params["duplicate_of_image_id"])
+
+    build_duplicate_report(actor, source, target, report_params)
+  end
+
+  defp submit_duplicate_report(_actor, _params), do: {:error, :not_found}
+
+  # Without a source image there is nowhere to redirect back to.
+  defp build_duplicate_report(_actor, nil, _target, _params), do: {:error, :not_found}
+
+  defp build_duplicate_report(_actor, source, nil, _params),
+    do: {:error, :report_failed, source}
+
+  defp build_duplicate_report(actor, source, target, report_params) do
+    case create_duplicate_report(source, target, actor_attributes(actor), report_params) do
+      {:ok, duplicate_report} -> {:ok, duplicate_report}
+      {:error, _changeset} -> {:error, :report_failed, source}
+    end
+  end
+
+  defp load_image(id) do
+    case IntegerId.parse(id) do
+      {:ok, id} -> Repo.get(Image, id)
+      :error -> nil
+    end
+  end
+
+  # The user attribution the report changeset records, rebuilt from the actor.
+  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
+    do: [ip: ip, fingerprint: fingerprint, user: user]
+
+  defp presence(""), do: nil
+  defp presence(x), do: x
+
+  defp wrap(list) when is_list(list), do: list
+  defp wrap(not_a_list), do: [not_a_list]
 
   @doc """
   Creates a duplicate_report.
