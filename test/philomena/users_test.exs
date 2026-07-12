@@ -8,6 +8,8 @@ defmodule Philomena.UsersTest do
   import Philomena.UserFingerprintsFixtures
   alias Philomena.Users.{User, UserToken}
 
+  @png_fixture Path.absname("test/support/fixtures/files/upload-test.png")
+
   # A truthy ban value in the shape production passes; only its presence matters
   # to the write-access and not-banned checks the profile loaders run first.
   @ban %{
@@ -16,6 +18,52 @@ defmodule Philomena.UsersTest do
     generated_ban_id: "U123456",
     type: "User"
   }
+
+  # A Plug.Upload whose tempfile is registered to the test process, the way
+  # Plug.Parsers would provide it.
+  defp png_upload do
+    {:ok, path} = Plug.Upload.random_file("avatar-test")
+    File.cp!(@png_fixture, path)
+    %Plug.Upload{path: path, content_type: "image/png", filename: "upload-test.png"}
+  end
+
+  defp valid_totp_code(user), do: :pot.totp(User.totp_secret(user))
+
+  # Controller-shaped params for enabling or disabling TOTP: current password
+  # plus a live second-factor code computed from the user's stored secret.
+  defp totp_params(token) do
+    %{"user" => %{"current_password" => valid_user_password(), "twofactor_token" => token}}
+  end
+
+  # A confirmed user with a role and, optionally, a secondary role and the
+  # hide-default-role flag, in the shape the staff page groups on.
+  defp staff_user(role, opts \\ []) do
+    confirmed_user_fixture()
+    |> Ecto.Changeset.change(
+      role: role,
+      secondary_role: Keyword.get(opts, :secondary_role),
+      hide_default_role: Keyword.get(opts, :hide_default_role, false)
+    )
+    |> Repo.update!()
+  end
+
+  # A confirmed user reloaded from the database, so its last_renamed_at carries
+  # the 1970 column default the way a request-loaded actor does. A freshly
+  # inserted struct instead has last_renamed_at nil, which the :change_username
+  # ability's DateTime.diff cannot handle - the request pipeline never sees that
+  # struct.
+  defp renameable_user do
+    Users.get_user!(confirmed_user_fixture().id)
+  end
+
+  # A user whose rename window is closed: last_renamed_at is now, so the
+  # :change_username ability (which requires the last rename to be over 90 days
+  # ago) refuses.
+  defp recently_renamed_user do
+    confirmed_user_fixture()
+    |> Ecto.Changeset.change(last_renamed_at: DateTime.utc_now(:second))
+    |> Repo.update!()
+  end
 
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
@@ -860,6 +908,359 @@ defmodule Philomena.UsersTest do
 
       assert Users.load_alias_matches(admin_user_fixture(), "no-such-user") ==
                {:error, :not_found}
+    end
+  end
+
+  describe "staff_categories/0" do
+    test "groups an admin under Administrators" do
+      admin = staff_user("admin")
+
+      categories = Users.staff_categories()
+      assert admin.id in Enum.map(categories[:Administrators], & &1.id)
+    end
+
+    test "groups a plain moderator under Moderators" do
+      mod = staff_user("moderator")
+
+      categories = Users.staff_categories()
+      assert mod.id in Enum.map(categories[:Moderators], & &1.id)
+      refute mod.id in Enum.map(categories[:Administrators], & &1.id)
+    end
+
+    test "groups a plain assistant under Assistants" do
+      assistant = staff_user("assistant")
+
+      categories = Users.staff_categories()
+      assert assistant.id in Enum.map(categories[:Assistants], & &1.id)
+    end
+
+    test "groups a Site Developer under Technical Team by secondary role" do
+      dev = staff_user("moderator", secondary_role: "Site Developer")
+
+      categories = Users.staff_categories()
+      assert dev.id in Enum.map(categories[:"Technical Team"], & &1.id)
+      # A distinguishing secondary role takes the user out of Moderators.
+      refute dev.id in Enum.map(categories[:Moderators], & &1.id)
+    end
+
+    test "groups a Public Relations staffer under Public Relations" do
+      pr = staff_user("moderator", secondary_role: "Public Relations")
+
+      categories = Users.staff_categories()
+      assert pr.id in Enum.map(categories[:"Public Relations"], & &1.id)
+    end
+
+    test "omits a staff member who hides their default role with no distinguishing secondary role" do
+      hidden = staff_user("moderator", hide_default_role: true)
+
+      all_listed =
+        Users.staff_categories()
+        |> Enum.flat_map(fn {_category, users} -> Enum.map(users, & &1.id) end)
+
+      refute hidden.id in all_listed
+    end
+
+    test "does not list ordinary users" do
+      user = confirmed_user_fixture()
+
+      all_listed =
+        Users.staff_categories()
+        |> Enum.flat_map(fn {_category, users} -> Enum.map(users, & &1.id) end)
+
+      refute user.id in all_listed
+    end
+  end
+
+  describe "load_user_for_rename/1" do
+    test "returns a changeset for a user whose rename window is open" do
+      user = renameable_user()
+
+      assert {:ok, %Ecto.Changeset{}} = Users.load_user_for_rename(actor(user))
+    end
+
+    test "a banned actor is rejected before authorization" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_user_for_rename(actor(user, ban: @ban)) == {:error, :ban}
+    end
+
+    test "a user who renamed within the window is unauthorized" do
+      user = recently_renamed_user()
+
+      assert Users.load_user_for_rename(actor(user)) == {:error, :unauthorized}
+    end
+  end
+
+  describe "update_name/2" do
+    test "renames the acting user and records the change in history" do
+      user = renameable_user()
+      old_name = user.name
+
+      assert {:ok, updated} = Users.update_name(actor(user), %{"name" => "renamed_user_ok"})
+      assert updated.name == "renamed_user_ok"
+      assert Users.get_user!(user.id).name == "renamed_user_ok"
+
+      assert Repo.get_by(Philomena.UserNameChanges.UserNameChange,
+               user_id: user.id,
+               name: old_name
+             )
+    end
+
+    test "a banned actor is rejected" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_name(actor(user, ban: @ban), %{"name" => "renamed_user_ban"}) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_name(actor(user, fingerprint: nil), %{"name" => "renamed_user_fp"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "a user whose rename window is closed is unauthorized" do
+      user = recently_renamed_user()
+
+      assert Users.update_name(actor(user), %{"name" => "renamed_user_window"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "a blank name is a rejected changeset" do
+      user = renameable_user()
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Users.update_name(actor(user), %{"name" => ""})
+
+      assert %{name: ["can't be blank"]} = errors_on(changeset)
+    end
+  end
+
+  describe "rename_user/2" do
+    test "renames a user, records history, and stamps last_renamed_at" do
+      user = confirmed_user_fixture()
+      old_name = user.name
+
+      assert {:ok, renamed} = Users.rename_user(user, %{"name" => "engine_renamed"})
+      assert renamed.name == "engine_renamed"
+      assert renamed.last_renamed_at
+
+      assert Repo.get_by(Philomena.UserNameChanges.UserNameChange,
+               user_id: user.id,
+               name: old_name
+             )
+    end
+
+    test "an invalid name leaves the user unchanged and returns a changeset" do
+      user = confirmed_user_fixture()
+
+      assert {:error, %Ecto.Changeset{}} = Users.rename_user(user, %{"name" => ""})
+      assert Users.get_user!(user.id).name == user.name
+    end
+  end
+
+  describe "load_user_for_avatar_edit/1" do
+    test "returns the avatar form changeset for a normal actor" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, %Ecto.Changeset{}} = Users.load_user_for_avatar_edit(actor(user))
+    end
+
+    test "a banned actor is rejected" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_user_for_avatar_edit(actor(user, ban: @ban)) == {:error, :ban}
+    end
+  end
+
+  describe "update_avatar/2 (actor)" do
+    test "uploads the acting user's avatar" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, updated} =
+               Users.update_avatar(actor(user), %{"avatar" => png_upload()})
+
+      assert updated.avatar =~ ~r/\.png$/
+      assert Users.get_user!(user.id).avatar =~ ~r/\.png$/
+    end
+
+    test "a banned actor is rejected before analysis" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_avatar(actor(user, ban: @ban), %{"avatar" => png_upload()}) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before analysis" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_avatar(actor(user, fingerprint: nil), %{"avatar" => png_upload()}) ==
+               {:error, :unauthorized}
+    end
+
+    test "the ban wins over a missing fingerprint" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_avatar(actor(user, ban: @ban, fingerprint: nil), %{
+               "avatar" => png_upload()
+             }) == {:error, :ban}
+    end
+  end
+
+  describe "update_avatar/2 (user engine)" do
+    test "uploads the given user's avatar with no write-access check" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, updated} = Users.update_avatar(user, %{"avatar" => png_upload()})
+      assert updated.avatar =~ ~r/\.png$/
+    end
+
+    test "a missing avatar file is a rejected changeset" do
+      user = confirmed_user_fixture()
+
+      assert {:error, %Ecto.Changeset{}} = Users.update_avatar(user, %{})
+    end
+  end
+
+  describe "remove_avatar/1 (actor)" do
+    test "removes the acting user's avatar" do
+      user = user_with_avatar_fixture()
+
+      assert {:ok, updated} = Users.remove_avatar(actor(user))
+      refute updated.avatar
+      refute Users.get_user!(user.id).avatar
+    end
+
+    test "a banned actor is rejected" do
+      user = user_with_avatar_fixture()
+
+      assert Users.remove_avatar(actor(user, ban: @ban)) == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized" do
+      user = user_with_avatar_fixture()
+
+      assert Users.remove_avatar(actor(user, fingerprint: nil)) == {:error, :unauthorized}
+    end
+  end
+
+  describe "remove_avatar/1 (user engine)" do
+    test "removes the given user's avatar with no write-access check" do
+      user = user_with_avatar_fixture()
+
+      assert {:ok, updated} = Users.remove_avatar(user)
+      refute updated.avatar
+    end
+  end
+
+  describe "setup_totp_secret/1" do
+    test "stores a fresh TOTP secret without enabling 2FA" do
+      user = confirmed_user_fixture()
+      refute user.encrypted_otp_secret
+
+      assert {:ok, updated} = Users.setup_totp_secret(user)
+      assert updated.encrypted_otp_secret
+      refute updated.otp_required_for_login
+    end
+  end
+
+  describe "update_totp/2" do
+    test "enables 2FA with a valid code, returning ten fresh backup codes" do
+      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+
+      assert {:ok, updated, backup_codes} =
+               Users.update_totp(user, totp_params(valid_totp_code(user)))
+
+      assert updated.otp_required_for_login
+      assert length(backup_codes) == 10
+      assert Enum.all?(backup_codes, &is_binary/1)
+      # The persisted codes are the hashed form of the returned plaintext.
+      assert length(Users.get_user!(user.id).otp_backup_codes) == 10
+    end
+
+    test "disables 2FA and still returns ten fresh backup codes, clearing the stored ones" do
+      user = totp_user_fixture()
+
+      assert {:ok, updated, backup_codes} =
+               Users.update_totp(user, totp_params(valid_totp_code(user)))
+
+      refute updated.otp_required_for_login
+      # Codes are regenerated even on disable, but the account keeps none.
+      assert length(backup_codes) == 10
+      assert Users.get_user!(user.id).otp_backup_codes == []
+      refute Users.get_user!(user.id).encrypted_otp_secret
+    end
+
+    test "a wrong password is a rejected changeset" do
+      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Users.update_totp(user, %{
+                 "user" => %{
+                   "current_password" => "wrong password",
+                   "twofactor_token" => valid_totp_code(user)
+                 }
+               })
+
+      assert %{current_password: ["is invalid"]} = errors_on(changeset)
+      refute Users.get_user!(user.id).otp_required_for_login
+    end
+
+    test "an invalid second-factor code is a rejected changeset when enabling" do
+      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Users.update_totp(user, totp_params("not a code"))
+
+      assert %{twofactor_token: ["Invalid token"]} = errors_on(changeset)
+      refute Users.get_user!(user.id).otp_required_for_login
+    end
+  end
+
+  describe "consume_totp_token/2" do
+    test "accepts a valid live TOTP code" do
+      user = totp_user_fixture()
+
+      assert {:ok, %User{} = consumed} =
+               Users.consume_totp_token(user, %{
+                 "user" => %{"twofactor_token" => valid_totp_code(user)}
+               })
+
+      assert consumed.consumed_timestep
+    end
+
+    test "accepts a backup code once, then rejects the same code" do
+      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+
+      {:ok, user, [backup_code | _rest]} =
+        Users.update_totp(user, totp_params(valid_totp_code(user)))
+
+      assert {:ok, %User{} = consumed} =
+               Users.consume_totp_token(user, %{
+                 "user" => %{"twofactor_token" => backup_code}
+               })
+
+      # The consumed code is removed from the remaining set.
+      assert length(consumed.otp_backup_codes) == 9
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Users.consume_totp_token(consumed, %{
+                 "user" => %{"twofactor_token" => backup_code}
+               })
+
+      assert %{twofactor_token: ["Invalid token"]} = errors_on(changeset)
+    end
+
+    test "rejects an invalid token" do
+      user = totp_user_fixture()
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Users.consume_totp_token(user, %{
+                 "user" => %{"twofactor_token" => "not a code"}
+               })
+
+      assert %{twofactor_token: ["Invalid token"]} = errors_on(changeset)
     end
   end
 end
