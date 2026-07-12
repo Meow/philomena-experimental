@@ -170,16 +170,24 @@ defmodule Philomena.TagsTest do
       assert log.body == "Updated details on tag '#{tag.name}'"
     end
 
-    # Tag.changeset casts category with no inclusion validation, so an arbitrary
-    # category string is accepted and the moderation log is still written; the
-    # changeset-error branch of update_tag is not reachable through this field.
-    test "an arbitrary category string is accepted and logged" do
+    test "a category outside the allowed list is a rejected changeset and writes no log" do
+      tag = tag_fixture()
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Tags.update_tag(moderator_user_fixture(), tag.slug, %{"category" => "bogus"})
+
+      refute changeset.valid?
+      assert Repo.reload!(tag).category == tag.category
+      assert moderation_log_count() == 0
+    end
+
+    test "updating to another allowed category succeeds and writes a log" do
       tag = tag_fixture()
 
       assert {:ok, %Tag{}} =
-               Tags.update_tag(moderator_user_fixture(), tag.slug, %{"category" => "bogus"})
+               Tags.update_tag(moderator_user_fixture(), tag.slug, %{"category" => "species"})
 
-      assert Repo.reload!(tag).category == "bogus"
+      assert Repo.reload!(tag).category == "species"
       assert only_moderation_log!().type == "Tag:update"
     end
 

@@ -104,6 +104,7 @@ defmodule Philomena.Tags.Tag do
     |> cast(attrs, [:category, :description, :short_description, :mod_notes])
     |> put_change(:implied_tag_list, Enum.map_join(tag.implied_tags, ",", & &1.name))
     |> validate_required([])
+    |> validate_inclusion(:category, categories())
   end
 
   def changeset(tag, attrs, implied_tags) do
@@ -111,6 +112,7 @@ defmodule Philomena.Tags.Tag do
     |> cast(attrs, [:category, :description, :short_description, :mod_notes])
     |> put_assoc(:implied_tags, implied_tags)
     |> validate_required([])
+    |> validate_inclusion(:category, categories())
   end
 
   def image_changeset(tag, attrs) do
