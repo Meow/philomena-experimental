@@ -38,6 +38,7 @@ defmodule Philomena.Users do
   alias Philomena.UserEraseWorker
   alias Philomena.UserRenameWorker
   alias Philomena.UserUnvoteWorker
+  alias Philomena.UserWipeWorker
 
   @typedoc """
   Describes the entity performing the action.
@@ -1276,6 +1277,27 @@ defmodule Philomena.Users do
         "Admin.User.Vote:delete",
         "Wiped votes and faves for #{user.name}"
       )
+
+      {:ok, user}
+    end
+  end
+
+  @doc """
+  Queues a PII wipe for the user named by `slug`, on behalf of `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success a background job to wipe the user's
+  personally identifying information is enqueued and a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_wipe_user(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_wipe_user(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      Exq.enqueue(Exq, "indexing", UserWipeWorker, [user.id])
+      log_managed_user(actor, user, "Admin.User.Wipe:create", "Wiped PII for #{user.name}")
 
       {:ok, user}
     end
