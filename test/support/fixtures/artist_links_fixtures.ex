@@ -33,7 +33,7 @@ defmodule Philomena.ArtistLinksFixtures do
   """
   def verified_artist_link_fixture(user, tag, attrs \\ %{}) do
     artist_link = artist_link_fixture(user, tag, attrs)
-    {:ok, artist_link} = ArtistLinks.verify_artist_link(artist_link, user)
+    {:ok, artist_link} = ArtistLinks.verify_loaded_link(artist_link, user)
     artist_link
   end
 end

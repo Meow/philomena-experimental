@@ -13,6 +13,8 @@ defmodule Philomena.ArtistLinks do
 
   alias Philomena.Attribution.Actor
   alias Philomena.IntegerId
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.Users.User
   alias Philomena.ArtistLinks.ArtistLink
   alias Philomena.ArtistLinks.AutomaticVerifier
@@ -303,18 +305,46 @@ defmodule Philomena.ArtistLinks do
   end
 
   @doc """
+  Verifies the artist link named by `id`, on behalf of `actor`, transitioning it
+  to the verified state and awarding the artist badge to its owner.
+
+  The link is loaded by id and authorized for `:edit`: a non-castable or unknown
+  id is `{:error, :not_found}`, and a load a moderator may not act on is
+  `{:error, :unauthorized}`. On success a moderation log attributing the
+  verification to `actor` is written.
+
+  Returns `{:ok, artist_link}`.
+  """
+  @spec verify_artist_link(User.t() | nil, String.t()) ::
+          {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
+  def verify_artist_link(actor, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor, :edit, id) do
+      {:ok, artist_link} = verify_loaded_link(artist_link, actor)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Admin.ArtistLink.Verification:create",
+        Paths.artist_link_path(artist_link.user, artist_link),
+        "Verified artist link #{artist_link.uri} created by #{artist_link.user.name}"
+      )
+
+      {:ok, artist_link}
+    end
+  end
+
+  @doc """
   Transitions an artist link to the verified state.
 
   ## Examples
 
-      iex> verify_artist_link(artist_link, verifying_user)
+      iex> verify_loaded_link(artist_link, verifying_user)
       {:ok, %ArtistLink{}}
 
-      iex> verify_artist_link(artist_link, verifying_user)
+      iex> verify_loaded_link(artist_link, verifying_user)
       :error
 
   """
-  def verify_artist_link(%ArtistLink{} = artist_link, verifying_user) do
+  def verify_loaded_link(%ArtistLink{} = artist_link, verifying_user) do
     artist_link_changeset = ArtistLink.verify_changeset(artist_link, verifying_user)
 
     Multi.new()

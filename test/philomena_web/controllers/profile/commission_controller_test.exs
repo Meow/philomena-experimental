@@ -20,7 +20,7 @@ defmodule PhilomenaWeb.Profile.CommissionControllerTest do
         "uri" => "https://example.com/gallery"
       })
 
-    {:ok, _link} = ArtistLinks.verify_artist_link(link, user)
+    {:ok, _link} = ArtistLinks.verify_loaded_link(link, user)
     :ok
   end
 
