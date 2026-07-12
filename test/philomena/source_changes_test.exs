@@ -138,6 +138,101 @@ defmodule Philomena.SourceChangesTest do
     end
   end
 
+  describe "user_source_changes/4" do
+    test "an anonymous actor lists a user's source changes newest-first" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      older = source_change_fixture(image, user_id: user.id)
+      newer = source_change_fixture(image, user_id: user.id)
+
+      assert {:ok, {loaded_user, %Page{} = page, image_count}} =
+               SourceChanges.user_source_changes(nil, user.slug, %{}, @pagination)
+
+      assert loaded_user.id == user.id
+      assert Enum.map(page.entries, & &1.id) == [newer.id, older.id]
+      assert image_count == 1
+    end
+
+    test "excludes changes to the user's own anonymous uploads" do
+      user = confirmed_user_fixture()
+      anon_image = image_fixture(%{user_id: user.id, anonymous: true})
+      public_image = image_fixture()
+      source_change_fixture(anon_image, user_id: user.id)
+      kept = source_change_fixture(public_image, user_id: user.id)
+
+      assert {:ok, {_user, page, image_count}} =
+               SourceChanges.user_source_changes(nil, user.slug, %{}, @pagination)
+
+      # The change on the user's own anonymous upload is dropped; only the change
+      # on the public image survives.
+      assert Enum.map(page.entries, & &1.id) == [kept.id]
+      assert image_count == 1
+    end
+
+    test "the added filter narrows to additions" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      added = source_change_fixture(image, user_id: user.id, added: true)
+      source_change_fixture(image, user_id: user.id, added: false)
+
+      assert {:ok, {_user, page, _count}} =
+               SourceChanges.user_source_changes(nil, user.slug, %{"added" => "1"}, @pagination)
+
+      assert Enum.map(page.entries, & &1.id) == [added.id]
+    end
+
+    test "the added filter narrows to removals" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      source_change_fixture(image, user_id: user.id, added: true)
+      removed = source_change_fixture(image, user_id: user.id, added: false)
+
+      assert {:ok, {_user, page, _count}} =
+               SourceChanges.user_source_changes(nil, user.slug, %{"added" => "0"}, @pagination)
+
+      assert Enum.map(page.entries, & &1.id) == [removed.id]
+    end
+
+    test "image_count reports the number of distinct images touched" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      other = image_fixture()
+      source_change_fixture(image, user_id: user.id)
+      source_change_fixture(image, user_id: user.id)
+      source_change_fixture(other, user_id: user.id)
+
+      assert {:ok, {_user, _page, image_count}} =
+               SourceChanges.user_source_changes(nil, user.slug, %{}, @pagination)
+
+      assert image_count == 2
+    end
+
+    test "page_size caps the entries and reports the total" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      for _ <- 1..3, do: source_change_fixture(image, user_id: user.id)
+
+      assert {:ok, {_user, page, _count}} =
+               SourceChanges.user_source_changes(nil, user.slug, %{}, page: 1, page_size: 2)
+
+      assert page.page_size == 2
+      assert length(page.entries) == 2
+      assert page.total_entries == 3
+    end
+
+    test "an unknown slug is unauthorized for an anonymous actor, not-found for an admin" do
+      assert SourceChanges.user_source_changes(nil, "no-such-user", %{}, @pagination) ==
+               {:error, :unauthorized}
+
+      assert SourceChanges.user_source_changes(
+               admin_user_fixture(),
+               "no-such-user",
+               %{},
+               @pagination
+             ) == {:error, :not_found}
+    end
+  end
+
   describe "count_for_image/1" do
     test "returns the number of source changes for the image" do
       image = image_fixture()

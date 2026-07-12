@@ -3,7 +3,19 @@ defmodule Philomena.UsersTest do
 
   alias Philomena.Users
   import Philomena.UsersFixtures
+  import Philomena.AttributionFixtures
+  import Philomena.UserIpsFixtures
+  import Philomena.UserFingerprintsFixtures
   alias Philomena.Users.{User, UserToken}
+
+  # A truthy ban value in the shape production passes; only its presence matters
+  # to the write-access and not-banned checks the profile loaders run first.
+  @ban %{
+    reason: "Rule #0",
+    valid_until: ~U[3000-01-01 00:00:00Z],
+    generated_ban_id: "U123456",
+    type: "User"
+  }
 
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
@@ -643,6 +655,211 @@ defmodule Philomena.UsersTest do
   describe "inspect/2" do
     test "does not include password" do
       refute inspect(%User{password: "123456"}) =~ "password: \"123456\""
+    end
+  end
+
+  describe "load_profile_for_description_edit/2" do
+    test "the profile owner may edit their own description" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, loaded} = Users.load_profile_for_description_edit(actor(user), user.slug)
+      assert loaded.id == user.id
+    end
+
+    test "a moderator may edit another user's description" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, loaded} =
+               Users.load_profile_for_description_edit(actor(moderator_user_fixture()), user.slug)
+
+      assert loaded.id == user.id
+    end
+
+    test "an unrelated user may not edit another user's description" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_profile_for_description_edit(actor(confirmed_user_fixture()), user.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "a banned actor is rejected before any authorization" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_profile_for_description_edit(actor(user, ban: @ban), user.slug) ==
+               {:error, :ban}
+    end
+
+    test "an unknown slug is unauthorized for a moderator, not-found for an admin" do
+      assert Users.load_profile_for_description_edit(
+               actor(moderator_user_fixture()),
+               "no-such-user"
+             ) ==
+               {:error, :unauthorized}
+
+      assert Users.load_profile_for_description_edit(actor(admin_user_fixture()), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "update_description/3" do
+    test "the owner updates their description" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, updated} =
+               Users.update_description(actor(user), user.slug, %{"description" => "New bio text"})
+
+      assert updated.id == user.id
+      assert Users.get_user!(user.id).description == "New bio text"
+    end
+
+    test "a banned actor is rejected" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_description(actor(user, ban: @ban), user.slug, %{
+               "description" => "New bio text"
+             }) == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_description(actor(user, fingerprint: nil), user.slug, %{
+               "description" => "New bio text"
+             }) == {:error, :unauthorized}
+    end
+
+    test "an unrelated user may not update another user's description" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_description(actor(confirmed_user_fixture()), user.slug, %{
+               "description" => "New bio text"
+             }) == {:error, :unauthorized}
+    end
+  end
+
+  describe "load_profile_for_scratchpad_edit/2" do
+    test "a moderator may edit the scratchpad" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, loaded} =
+               Users.load_profile_for_scratchpad_edit(actor(moderator_user_fixture()), user.slug)
+
+      assert loaded.id == user.id
+    end
+
+    test "an assistant may edit the scratchpad" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, loaded} =
+               Users.load_profile_for_scratchpad_edit(actor(assistant_user_fixture()), user.slug)
+
+      assert loaded.id == user.id
+    end
+
+    test "a regular user may not edit the scratchpad" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_profile_for_scratchpad_edit(actor(confirmed_user_fixture()), user.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "a banned actor is rejected before the mod-note check" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_profile_for_scratchpad_edit(
+               actor(moderator_user_fixture(), ban: @ban),
+               user.slug
+             ) == {:error, :ban}
+    end
+
+    test "a permitted actor naming an unknown slug is not-found" do
+      assert Users.load_profile_for_scratchpad_edit(
+               actor(moderator_user_fixture()),
+               "no-such-user"
+             ) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "update_scratchpad/3" do
+    test "a moderator updates the scratchpad" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, updated} =
+               Users.update_scratchpad(actor(moderator_user_fixture()), user.slug, %{
+                 "scratchpad" => "Mod notes here"
+               })
+
+      assert updated.id == user.id
+      assert Users.get_user!(user.id).scratchpad == "Mod notes here"
+    end
+
+    test "a regular user may not update the scratchpad" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_scratchpad(actor(confirmed_user_fixture()), user.slug, %{
+               "scratchpad" => "Mod notes here"
+             }) == {:error, :unauthorized}
+    end
+
+    test "a banned actor is rejected" do
+      user = confirmed_user_fixture()
+
+      assert Users.update_scratchpad(actor(moderator_user_fixture(), ban: @ban), user.slug, %{
+               "scratchpad" => "Mod notes here"
+             }) == {:error, :ban}
+    end
+  end
+
+  describe "load_alias_matches/2" do
+    test "a moderator sees a user sharing only an IP under ip_matches" do
+      subject = confirmed_user_fixture()
+      alias_user = confirmed_user_fixture()
+      user_ip_fixture(subject, "203.0.113.70")
+      user_ip_fixture(alias_user, "203.0.113.70")
+
+      assert {:ok, matches} = Users.load_alias_matches(moderator_user_fixture(), subject.slug)
+      assert alias_user.id in Enum.map(matches.ip_matches, & &1.id)
+      refute alias_user.id in Enum.map(matches.fp_matches, & &1.id)
+      refute alias_user.id in Enum.map(matches.both_matches, & &1.id)
+    end
+
+    test "a moderator sees a user sharing only a fingerprint under fp_matches" do
+      subject = confirmed_user_fixture()
+      alias_user = confirmed_user_fixture()
+      user_fingerprint_fixture(subject, "aliasfp70")
+      user_fingerprint_fixture(alias_user, "aliasfp70")
+
+      assert {:ok, matches} = Users.load_alias_matches(moderator_user_fixture(), subject.slug)
+      assert alias_user.id in Enum.map(matches.fp_matches, & &1.id)
+      refute alias_user.id in Enum.map(matches.ip_matches, & &1.id)
+    end
+
+    test "a moderator sees a user sharing both an IP and a fingerprint under both_matches" do
+      subject = confirmed_user_fixture()
+      alias_user = confirmed_user_fixture()
+      user_ip_fixture(subject, "203.0.113.71")
+      user_ip_fixture(alias_user, "203.0.113.71")
+      user_fingerprint_fixture(subject, "aliasfp71")
+      user_fingerprint_fixture(alias_user, "aliasfp71")
+
+      assert {:ok, matches} = Users.load_alias_matches(moderator_user_fixture(), subject.slug)
+      assert alias_user.id in Enum.map(matches.both_matches, & &1.id)
+      refute alias_user.id in Enum.map(matches.ip_matches, & &1.id)
+      refute alias_user.id in Enum.map(matches.fp_matches, & &1.id)
+    end
+
+    test "a regular user may not load alias matches" do
+      assert Users.load_alias_matches(confirmed_user_fixture(), confirmed_user_fixture().slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown slug is unauthorized for a moderator, not-found for an admin" do
+      assert Users.load_alias_matches(moderator_user_fixture(), "no-such-user") ==
+               {:error, :unauthorized}
+
+      assert Users.load_alias_matches(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
     end
   end
 end
