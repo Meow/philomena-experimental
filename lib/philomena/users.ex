@@ -20,6 +20,7 @@ defmodule Philomena.Users do
   alias Philomena.Bans
   alias Philomena.Topics
   alias Philomena.Roles.Role
+  alias Philomena.ModNotes.ModNote
   alias Philomena.UserNameChanges.UserNameChange
   alias Philomena.Images
   alias Philomena.Comments
@@ -785,6 +786,58 @@ defmodule Philomena.Users do
 
       error ->
         error
+    end
+  end
+
+  @doc """
+  Loads the user named by the profile `slug` for the moderation scratchpad edit
+  form, on behalf of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. Editing the scratchpad
+  requires the mod-note viewing permission, so an actor without it is
+  `{:error, :unauthorized}`; a permitted actor naming an unknown slug is
+  `{:error, :not_found}`.
+
+  Returns `{:ok, user}`.
+  """
+  @spec load_profile_for_scratchpad_edit(Actor.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_profile_for_scratchpad_edit(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor),
+         :ok <- authorize(actor.user, :index, ModNote),
+         %User{} = user <- Repo.get_by(User, slug: slug) do
+      {:ok, user}
+    else
+      {:error, _} = error -> error
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Updates the moderation scratchpad of the user named by the profile `slug`, on
+  behalf of `actor`, from the controller-shaped `attrs`.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. Editing the scratchpad requires the mod-note viewing
+  permission, so an actor without it is `{:error, :unauthorized}`; a permitted
+  actor naming an unknown slug is `{:error, :not_found}`. On success the
+  scratchpad is updated and the user reindexed.
+
+  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
+  rejected.
+  """
+  @spec update_scratchpad(Actor.t(), String.t(), map()) ::
+          {:ok, User.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_scratchpad(%Actor{} = actor, slug, attrs) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor.user, :index, ModNote),
+         %User{} = user <- Repo.get_by(User, slug: slug) do
+      update_scratchpad(user, attrs)
+    else
+      {:error, _} = error -> error
+      nil -> {:error, :not_found}
     end
   end
 
