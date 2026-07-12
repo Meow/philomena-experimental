@@ -25,7 +25,7 @@ defmodule Philomena.ConversationsFixtures do
         "messages" => %{"0" => %{"body" => "Test message body"}}
       })
 
-    {:ok, conversation} = Conversations.create_conversation(from, attrs)
+    {:ok, conversation} = Conversations.create_conversation_from(from, attrs)
 
     conversation
   end
@@ -36,7 +36,7 @@ defmodule Philomena.ConversationsFixtures do
   def message_fixture(conversation, user, attrs \\ %{}) do
     attrs = Enum.into(attrs, %{"body" => "Test reply body"})
 
-    {:ok, message} = Conversations.create_message(conversation, user, attrs)
+    {:ok, message} = Conversations.create_conversation_message(conversation, user, attrs)
 
     message
   end

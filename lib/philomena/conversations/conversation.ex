@@ -7,6 +7,8 @@ defmodule Philomena.Conversations.Conversation do
 
   @derive {Phoenix.Param, key: :slug}
 
+  @type t :: %__MODULE__{}
+
   schema "conversations" do
     belongs_to :from, User
     belongs_to :to, User

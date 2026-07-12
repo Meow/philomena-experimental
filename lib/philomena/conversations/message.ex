@@ -6,6 +6,8 @@ defmodule Philomena.Conversations.Message do
   alias Philomena.Users.User
   alias Philomena.Schema.Approval
 
+  @type t :: %__MODULE__{}
+
   schema "messages" do
     belongs_to :conversation, Conversation
     belongs_to :from, User
