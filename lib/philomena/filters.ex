@@ -14,6 +14,7 @@ defmodule Philomena.Filters do
   alias Philomena.IntegerId
   alias Philomena.Schema.TagList
   alias Philomena.Tags.Tag
+  alias Philomena.Users
   alias Philomena.Users.User
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
@@ -249,6 +250,64 @@ defmodule Philomena.Filters do
 
       {:ok, {filter, change_filter(filter)}}
     end
+  end
+
+  @doc """
+  Switches `user`'s current filter to the one named by `id`.
+
+  Loads the filter named by `id` and, when the viewer may not see it (a private
+  filter belonging to someone else), substitutes the default filter. For a
+  signed-in `user` the choice is persisted to their account; for an anonymous
+  visitor the resolved filter is returned for the caller to store in a cookie.
+  A well-formed unknown `id` is `{:error, :not_found}`; a missing `id` reaches
+  the query layer, which rejects a nil comparison.
+
+  Returns `{:ok, %Filter{}}` (the filter actually switched to) or
+  `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> switch_current_filter(user, "1")
+      {:ok, %Filter{}}
+
+  """
+  @spec switch_current_filter(User.t() | nil, any()) ::
+          {:ok, Filter.t()} | {:error, :not_found}
+  def switch_current_filter(user, id) do
+    case filter_for_switch(id) do
+      nil ->
+        {:error, :not_found}
+
+      %Filter{} = filter ->
+        filter = visible_or_default(user, filter)
+        persist_current_filter(user, filter)
+        {:ok, filter}
+    end
+  end
+
+  # A missing id reaches the query layer, which rejects a nil comparison; a
+  # non-castable id can never name a row.
+  defp filter_for_switch(nil), do: Repo.get_by(Filter, id: nil)
+
+  defp filter_for_switch(id) do
+    case IntegerId.parse(id) do
+      {:ok, id} -> Repo.get(Filter, id)
+      :error -> nil
+    end
+  end
+
+  defp visible_or_default(user, filter) do
+    case authorize(user, :show, filter) do
+      :ok -> filter
+      _error -> default_filter()
+    end
+  end
+
+  defp persist_current_filter(nil, _filter), do: :ok
+
+  defp persist_current_filter(user, filter) do
+    {:ok, _user} = Users.update_filter(user, filter)
+    :ok
   end
 
   @doc """
