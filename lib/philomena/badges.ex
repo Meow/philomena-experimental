@@ -166,6 +166,115 @@ defmodule Philomena.Badges do
     Badge.changeset(badge, %{})
   end
 
+  @doc """
+  Returns the paginated badges for the admin listing, on behalf of `actor`,
+  ordered by title.
+
+  Authorizes badge administration. Returns `{:ok, badges}` as a
+  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  """
+  @spec load_badges(User.t() | nil, map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def load_badges(actor, pagination) do
+    with :ok <- authorize(actor, :index, Badge) do
+      badges =
+        Badge
+        |> order_by(asc: :title)
+        |> Repo.paginate(pagination)
+
+      {:ok, badges}
+    end
+  end
+
+  @doc """
+  Builds the changeset backing the new-badge form, on behalf of `actor`.
+
+  Authorizes badge administration. Returns `{:ok, changeset}` or
+  `{:error, :unauthorized}`.
+  """
+  @spec new_badge(User.t() | nil) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_badge(actor) do
+    with :ok <- authorize(actor, :index, Badge) do
+      {:ok, change_badge(%Badge{})}
+    end
+  end
+
+  @doc """
+  Creates a badge on behalf of `actor`, running the SVG upload pipeline.
+
+  Authorizes badge administration, then inserts the badge. On success a
+  moderation log attributing the creation to `actor` is written. Returns
+  `{:ok, badge}`, `{:error, :unauthorized}`, or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec create_badge(User.t() | nil, map()) ::
+          {:ok, Badge.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_badge(actor, attrs) do
+    with :ok <- authorize(actor, :index, Badge),
+         {:ok, badge} <- create_badge(attrs) do
+      badge_log(actor, :create, badge)
+      {:ok, badge}
+    end
+  end
+
+  @doc """
+  Loads the badge named by the raw request `id` for editing, on behalf of
+  `actor`, pairing it with the changeset backing the edit form.
+
+  Authorizes badge administration, then loads the badge by id. A non-castable or
+  unknown id is `{:error, :not_found}`. Returns `{:ok, {badge, changeset}}` or
+  `{:error, :unauthorized | :not_found}`.
+  """
+  @spec load_badge_for_edit(User.t() | nil, any()) ::
+          {:ok, {Badge.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+  def load_badge_for_edit(actor, id) do
+    with :ok <- authorize(actor, :index, Badge),
+         {:ok, badge} <- fetch_badge(id) do
+      {:ok, {badge, change_badge(badge)}}
+    end
+  end
+
+  @doc """
+  Updates the badge named by the raw request `id` without touching its image, on
+  behalf of `actor`.
+
+  Authorizes badge administration, then loads the badge by id. A non-castable or
+  unknown id is `{:error, :not_found}`. On success a moderation log attributing
+  the change to `actor` is written. Returns `{:ok, badge}`,
+  `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_badge(User.t() | nil, any(), map()) ::
+          {:ok, Badge.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_badge(actor, id, attrs) do
+    with :ok <- authorize(actor, :index, Badge),
+         {:ok, badge} <- fetch_badge(id),
+         {:ok, badge} <- update_badge(badge, attrs) do
+      badge_log(actor, :update, badge)
+      {:ok, badge}
+    end
+  end
+
+  # Loads a badge by a raw request id. A non-castable or unknown id is
+  # `{:error, :not_found}`.
+  defp fetch_badge(id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         %Badge{} = badge <- Repo.get(Badge, id) do
+      {:ok, badge}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp badge_log(actor, action, badge) do
+    body =
+      case action do
+        :create -> "Created badge '#{badge.title}'"
+        :update -> "Updated badge '#{badge.title}'"
+      end
+
+    ModerationLogs.create_moderation_log(actor, "Admin.Badge:#{action}", "/admin/badges", body)
+  end
+
   alias Philomena.Badges.Award
 
   @doc """
