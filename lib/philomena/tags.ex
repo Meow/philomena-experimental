@@ -25,6 +25,7 @@ defmodule Philomena.Tags do
   alias Philomena.Interactions
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
+  alias Philomena.Users
   alias Philomena.Users.User
   alias Philomena.Filters
   alias Philomena.Filters.Filter
@@ -515,6 +516,54 @@ defmodule Philomena.Tags do
     |> case do
       nil -> nil
       tag -> tag.aliased_tag || tag
+    end
+  end
+
+  @doc """
+  Adds the tag named by `slug` to `user`'s watched tags.
+
+  An unknown slug is `{:error, :not_found}`. Otherwise this defers to the
+  watched-tags update, which reindexes the user.
+
+  Returns `{:ok, user}`, `{:error, %Ecto.Changeset{}}`, or
+  `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> watch_tag(user, "safe")
+      {:ok, %User{}}
+
+  """
+  @spec watch_tag(User.t(), String.t()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+  def watch_tag(user, slug) do
+    case tag_by_slug(slug, []) do
+      nil -> {:error, :not_found}
+      tag -> Users.watch_tag(user, tag)
+    end
+  end
+
+  @doc """
+  Removes the tag named by `slug` from `user`'s watched tags.
+
+  An unknown slug is `{:error, :not_found}`. Otherwise this defers to the
+  watched-tags update, which reindexes the user.
+
+  Returns `{:ok, user}`, `{:error, %Ecto.Changeset{}}`, or
+  `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> unwatch_tag(user, "safe")
+      {:ok, %User{}}
+
+  """
+  @spec unwatch_tag(User.t(), String.t()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+  def unwatch_tag(user, slug) do
+    case tag_by_slug(slug, []) do
+      nil -> {:error, :not_found}
+      tag -> Users.unwatch_tag(user, tag)
     end
   end
 
