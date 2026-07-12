@@ -4,8 +4,14 @@ defmodule Philomena.Adverts do
   """
 
   import Ecto.Query, warn: false
+
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias Philomena.Repo
 
+  alias Philomena.IntegerId
+  alias Philomena.ModerationLogs
+  alias Philomena.Users.User
   alias Philomena.Adverts.Advert
   alias Philomena.Adverts.Restrictions
   alias Philomena.Adverts.Server
@@ -210,5 +216,142 @@ defmodule Philomena.Adverts do
   """
   def change_advert(%Advert{} = advert) do
     Advert.changeset(advert, %{})
+  end
+
+  @doc """
+  Returns the paginated adverts for the admin listing, on behalf of `actor`,
+  newest finish date first.
+
+  Authorizes advert administration. Returns `{:ok, adverts}` as a
+  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  """
+  @spec load_adverts(User.t() | nil, map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def load_adverts(actor, pagination) do
+    with :ok <- authorize(actor, :index, Advert) do
+      adverts =
+        Advert
+        |> order_by(desc: :finish_date)
+        |> Repo.paginate(pagination)
+
+      {:ok, adverts}
+    end
+  end
+
+  @doc """
+  Builds the changeset backing the new-advert form, on behalf of `actor`.
+
+  Authorizes advert administration. Returns `{:ok, changeset}` or
+  `{:error, :unauthorized}`.
+  """
+  @spec new_advert(User.t() | nil) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_advert(actor) do
+    with :ok <- authorize(actor, :index, Advert) do
+      {:ok, change_advert(%Advert{})}
+    end
+  end
+
+  @doc """
+  Creates an advert on behalf of `actor`, running the image upload pipeline.
+
+  Authorizes advert administration, then inserts the advert. On success a
+  moderation log attributing the creation to `actor` is written. Returns
+  `{:ok, advert}`, `{:error, :unauthorized}`, or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec create_advert(User.t() | nil, map()) ::
+          {:ok, Advert.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_advert(actor, attrs) do
+    with :ok <- authorize(actor, :index, Advert),
+         {:ok, advert} <- create_advert(attrs) do
+      advert_log(actor, :create, advert)
+      {:ok, advert}
+    end
+  end
+
+  @doc """
+  Loads the advert named by the raw request `id` for editing, on behalf of
+  `actor`, pairing it with the changeset backing the edit form.
+
+  Authorizes advert administration, then loads and authorizes the advert for
+  `:edit`. A non-castable or unknown id is `{:error, :not_found}`; a load a
+  moderator may not act on is `{:error, :unauthorized}`. Returns
+  `{:ok, {advert, changeset}}` or `{:error, :unauthorized | :not_found}`.
+  """
+  @spec load_advert_for_edit(User.t() | nil, any()) ::
+          {:ok, {Advert.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+  def load_advert_for_edit(actor, id) do
+    with :ok <- authorize(actor, :index, Advert),
+         {:ok, advert} <- authorized_advert(actor, :edit, id) do
+      {:ok, {advert, change_advert(advert)}}
+    end
+  end
+
+  @doc """
+  Updates the advert named by the raw request `id` without touching its image,
+  on behalf of `actor`.
+
+  Authorizes advert administration, then loads and authorizes the advert for
+  `:update`. A non-castable or unknown id is `{:error, :not_found}`; a load a
+  moderator may not act on is `{:error, :unauthorized}`. On success a moderation
+  log attributing the change to `actor` is written. Returns `{:ok, advert}`,
+  `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_advert(User.t() | nil, any(), map()) ::
+          {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_advert(actor, id, attrs) do
+    with :ok <- authorize(actor, :index, Advert),
+         {:ok, advert} <- authorized_advert(actor, :update, id),
+         {:ok, advert} <- update_advert(advert, attrs) do
+      advert_log(actor, :update, advert)
+      {:ok, advert}
+    end
+  end
+
+  @doc """
+  Deletes the advert named by the raw request `id`, on behalf of `actor`.
+
+  Authorizes advert administration, then loads and authorizes the advert for
+  `:delete`. A non-castable or unknown id is `{:error, :not_found}`; a load a
+  moderator may not act on is `{:error, :unauthorized}`. On success a moderation
+  log attributing the deletion to `actor` is written. Returns `{:ok, advert}` or
+  `{:error, :unauthorized | :not_found}`.
+  """
+  @spec delete_advert(User.t() | nil, any()) ::
+          {:ok, Advert.t()} | {:error, :unauthorized | :not_found}
+  def delete_advert(actor, id) do
+    with :ok <- authorize(actor, :index, Advert),
+         {:ok, advert} <- authorized_advert(actor, :delete, id) do
+      {:ok, advert} = delete_advert(advert)
+      advert_log(actor, :delete, advert)
+      {:ok, advert}
+    end
+  end
+
+  # Loads an advert by a raw request id and authorizes `action` against it: a
+  # non-castable or unknown id is `{:error, :not_found}`, and a load the actor
+  # may not act on is `{:error, :unauthorized}` (an admin, who may act on the
+  # `nil` load, gets `{:error, :not_found}`).
+  defp authorized_advert(actor, action, id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         advert = Repo.get(Advert, id),
+         :ok <- authorize(actor, action, advert),
+         %Advert{} <- advert do
+      {:ok, advert}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp advert_log(actor, action, advert) do
+    body =
+      case action do
+        :create -> "Created advert #{advert.id}"
+        :update -> "Updated advert #{advert.id}"
+        :delete -> "Deleted advert #{advert.id}"
+      end
+
+    ModerationLogs.create_moderation_log(actor, "Admin.Advert:#{action}", "/admin/adverts", body)
   end
 end
