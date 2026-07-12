@@ -20,8 +20,12 @@ defmodule Philomena.Reports do
   alias Philomena.IntegerId
   alias Philomena.Users.User
   alias Philomena.Reports.Report
+  alias Philomena.Reports.ReportPage
+  alias Philomena.Reports.Query
   alias Philomena.Reports
   alias Philomena.IndexWorker
+  alias Philomena.ModNotes
+  alias Philomena.ModNotes.ModNote
   alias Philomena.Polymorphic
   alias Philomena.Rules
 
@@ -89,6 +93,164 @@ defmodule Philomena.Reports do
 
   """
   def get_report!(id), do: Repo.get!(Report, id)
+
+  @doc """
+  Assembles the admin report listing, on behalf of `actor`, for the given raw
+  request `params` and `pagination`.
+
+  Authorizes `:index` against the report model first, so a viewer without report
+  access is `{:error, :unauthorized}`. When `params` carries an `"rq"` search
+  string it is compiled and drives the searched-report list, and the own-open
+  and system-report lists are empty; otherwise the default view lists the
+  closed reports plus open reports the actor did not claim, alongside the
+  actor's own open reports and the open system reports. A malformed `"rq"`
+  raises `MatchError`.
+
+  Returns `{:ok, %Philomena.Reports.ReportPage{}}` or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_report_index(admin, %{"rq" => "open:true"}, pagination)
+      {:ok, %Philomena.Reports.ReportPage{}}
+
+  """
+  @spec load_report_index(User.t() | nil, map(), map() | keyword()) ::
+          {:ok, ReportPage.t()} | {:error, :unauthorized}
+  def load_report_index(actor, params, pagination) do
+    with :ok <- authorize(actor, :index, Report) do
+      {:ok, build_report_page(actor, params, pagination)}
+    end
+  end
+
+  defp build_report_page(_actor, %{"rq" => query_string}, pagination) do
+    {:ok, query} = Query.compile(query_string)
+
+    %ReportPage{
+      reports: searched_reports(query, pagination),
+      my_reports: [],
+      system_reports: []
+    }
+  end
+
+  defp build_report_page(actor, _params, pagination) do
+    query = %{
+      bool: %{
+        should: [
+          %{term: %{open: false}},
+          %{
+            bool: %{
+              must: %{term: %{open: true}},
+              must_not: [
+                %{term: %{admin_id: actor.id}},
+                %{term: %{system: true}}
+              ]
+            }
+          }
+        ]
+      }
+    }
+
+    %ReportPage{
+      reports: searched_reports(query, pagination),
+      my_reports: own_open_reports(actor),
+      system_reports: open_system_reports()
+    }
+  end
+
+  defp searched_reports(query, pagination) do
+    reports =
+      Report
+      |> Search.search_definition(
+        %{
+          query: query,
+          sort: report_sorts()
+        },
+        pagination
+      )
+      |> Search.search_records(preload(Report, [:admin, :rule, user: :linked_tags]))
+
+    entries = Polymorphic.load_polymorphic(reports, reportable: [reportable_id: :reportable_type])
+
+    %{reports | entries: entries}
+  end
+
+  defp own_open_reports(actor) do
+    Report
+    |> where(open: true, admin_id: ^actor.id)
+    |> preload([:admin, :rule, user: :linked_tags])
+    |> order_by(desc: :created_at)
+    |> Repo.all()
+    |> Polymorphic.load_polymorphic(reportable: [reportable_id: :reportable_type])
+  end
+
+  defp open_system_reports do
+    Report
+    |> where(open: true, system: true)
+    |> preload([:admin, :rule, user: :linked_tags])
+    |> order_by(desc: :created_at)
+    |> Repo.all()
+    |> Polymorphic.load_polymorphic(reportable: [reportable_id: :reportable_type])
+  end
+
+  defp report_sorts do
+    [
+      %{open: :desc},
+      %{state: :desc},
+      %{created_at: :desc}
+    ]
+  end
+
+  @doc """
+  Loads the report named by the raw request `id` for display, on behalf of
+  `actor`, with the admin, rule, and reporting-user associations preloaded and
+  its reportable resolved.
+
+  Authorizes `:show` against the loaded report: a non-castable id is
+  `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
+  which no ordinary rule permits, so it is `{:error, :unauthorized}`
+  (`{:error, :not_found}` for admins, whose grant covers `nil`).
+
+  Returns `{:ok, report}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> load_report(admin, "1")
+      {:ok, %Report{}}
+
+  """
+  @spec load_report(User.t() | nil, any()) ::
+          {:ok, Report.t()} | {:error, :unauthorized | :not_found}
+  def load_report(actor, id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         report = load_report_with_preloads(id),
+         :ok <- authorize(actor, :show, report),
+         %Report{} <- report do
+      [report] =
+        Polymorphic.load_polymorphic([report], reportable: [reportable_id: :reportable_type])
+
+      {:ok, report}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp load_report_with_preloads(id) do
+    Report
+    |> preload([:admin, :rule, user: [:linked_tags, awards: :badge]])
+    |> Repo.get(id)
+  end
+
+  @doc """
+  Returns the mod notes attached to `report` for `viewer`, rendered with
+  `collection_renderer`, or `nil` when the viewer may not read mod notes.
+  """
+  @spec mod_notes(User.t() | nil, Report.t(), (list() -> list())) :: list() | nil
+  def mod_notes(viewer, report, collection_renderer) do
+    if Canada.Can.can?(viewer, :index, ModNote) do
+      ModNotes.list_all_mod_notes_by_type_and_id("Report", report.id, collection_renderer)
+    end
+  end
 
   @doc """
   Loads the image named by the raw request `image_id` for the report form, on
