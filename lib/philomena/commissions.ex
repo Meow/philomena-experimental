@@ -4,13 +4,27 @@ defmodule Philomena.Commissions do
   """
 
   import Ecto.Query, warn: false
+
+  import Philomena.Authorization, only: [verify_write_access: 1, verify_not_banned: 1]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
+  alias Philomena.Users.User
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.Item
   alias Philomena.Commissions.QueryBuilder
   alias Philomena.Commissions.SearchQuery
+
+  @profile_preloads [
+    :verified_links,
+    commission: [
+      sheet_image: [:sources, tags: :aliases],
+      user: [awards: :badge],
+      items: [example_image: [:sources, tags: :aliases]]
+    ]
+  ]
 
   @doc """
   Gets a single commission.
@@ -91,6 +105,193 @@ defmodule Philomena.Commissions do
   """
   def change_commission(%Commission{} = commission) do
     Commission.changeset(commission, %{})
+  end
+
+  @doc """
+  Loads the commission of the user named by the profile `slug` for display.
+
+  The commission sheet is public. An unknown slug, or a user without a
+  commission, is `{:error, :not_found}`.
+
+  Returns `{:ok, {user, commission}}` with the commission's items, sheet image,
+  and owner preloaded for rendering.
+  """
+  @spec load_commission_for_show(String.t()) ::
+          {:ok, {User.t(), Commission.t()}} | {:error, :not_found}
+  def load_commission_for_show(slug) do
+    case load_profile_user(slug) do
+      %User{commission: %Commission{} = commission} = user -> {:ok, {user, commission}}
+      _other -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads the user named by the profile `slug` for the new commission form, on
+  behalf of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. An unknown slug is
+  `{:error, :not_found}`. Creating a commission requires the profile to have no
+  existing commission, the actor to be the profile owner or staff, and the
+  profile to hold a verified artist link; the respective failures are
+  `{:error, :unauthorized}`, `{:error, :unauthorized}`, and
+  `{:error, :no_verified_links}`.
+
+  Returns `{:ok, user}`.
+  """
+  @spec load_commission_for_new(Actor.t(), String.t()) ::
+          {:ok, User.t()}
+          | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
+  def load_commission_for_new(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor) do
+      authorize_new_commission(actor, slug)
+    end
+  end
+
+  @doc """
+  Creates a commission for the user named by the profile `slug`, on behalf of
+  `actor`, from the controller-shaped `attrs`.
+
+  The actor's write access is verified first (`{:error, :ban}` /
+  `{:error, :unauthorized}`); then the same gating as
+  `load_commission_for_new/2` applies. On success the commission is created for
+  the profile user.
+
+  Returns `{:ok, {user, commission}}` on success, or
+  `{:error, {user, changeset}}` when the insert is rejected.
+  """
+  @spec create_commission(Actor.t(), String.t(), map()) ::
+          {:ok, {User.t(), Commission.t()}}
+          | {:error, {User.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
+  def create_commission(%Actor{} = actor, slug, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- authorize_new_commission(actor, slug) do
+      case create_commission(user, attrs) do
+        {:ok, commission} -> {:ok, {user, commission}}
+        {:error, changeset} -> {:error, {user, changeset}}
+      end
+    end
+  end
+
+  @doc """
+  Loads the commission of the user named by the profile `slug` for editing, on
+  behalf of `actor`.
+
+  A banned actor is rejected first with `{:error, :ban}`. A missing commission
+  (or unknown slug) is `{:error, :not_found}`. Editing requires the actor to be
+  the profile owner or staff (`{:error, :unauthorized}`) and the profile to hold
+  a verified artist link (`{:error, :no_verified_links}`).
+
+  Returns `{:ok, {user, commission, changeset}}`.
+  """
+  @spec load_commission_for_edit(Actor.t(), String.t()) ::
+          {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
+  def load_commission_for_edit(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, {user, commission}} <- authorize_existing_commission(actor, slug) do
+      {:ok, {user, commission, change_commission(commission)}}
+    end
+  end
+
+  @doc """
+  Updates the commission of the user named by the profile `slug`, on behalf of
+  `actor`, from the controller-shaped `attrs`.
+
+  The actor's write access is verified first (`{:error, :ban}` /
+  `{:error, :unauthorized}`); then the same gating as
+  `load_commission_for_edit/2` applies.
+
+  Returns `{:ok, {user, commission}}` on success, or
+  `{:error, {user, changeset}}` when the update is rejected.
+  """
+  @spec update_commission(Actor.t(), String.t(), map()) ::
+          {:ok, {User.t(), Commission.t()}}
+          | {:error, {User.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
+  def update_commission(%Actor{} = actor, slug, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, {user, commission}} <- authorize_existing_commission(actor, slug) do
+      case update_commission(commission, attrs) do
+        {:ok, commission} -> {:ok, {user, commission}}
+        {:error, changeset} -> {:error, {user, changeset}}
+      end
+    end
+  end
+
+  @doc """
+  Deletes the commission of the user named by the profile `slug`, on behalf of
+  `actor`.
+
+  The actor's write access is verified first (`{:error, :ban}` /
+  `{:error, :unauthorized}`); then the same gating as
+  `load_commission_for_edit/2` applies.
+
+  Returns `{:ok, commission}`.
+  """
+  @spec delete_commission(Actor.t(), String.t()) ::
+          {:ok, Commission.t()}
+          | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
+  def delete_commission(%Actor{} = actor, slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, {_user, commission}} <- authorize_existing_commission(actor, slug) do
+      delete_commission(commission)
+    end
+  end
+
+  defp load_profile_user(slug) do
+    User
+    |> where(slug: ^slug)
+    |> preload(^@profile_preloads)
+    |> Repo.one()
+  end
+
+  # Gates commission creation: the profile must exist and have no commission, the
+  # actor must be the profile owner or staff, and the profile must hold a
+  # verified artist link.
+  defp authorize_new_commission(actor, slug) do
+    with %User{} = user <- load_profile_user(slug),
+         :ok <- ensure_no_commission(user),
+         :ok <- ensure_correct_user(actor.user, user),
+         :ok <- ensure_links_verified(user) do
+      {:ok, user}
+    else
+      nil -> {:error, :not_found}
+      {:error, _} = error -> error
+    end
+  end
+
+  # Gates access to an existing commission: the profile must exist and have a
+  # commission, the actor must be the profile owner or staff, and the profile
+  # must hold a verified artist link.
+  defp authorize_existing_commission(actor, slug) do
+    with %User{} = user <- load_profile_user(slug),
+         {:ok, commission} <- ensure_commission(user),
+         :ok <- ensure_correct_user(actor.user, user),
+         :ok <- ensure_links_verified(user) do
+      {:ok, {user, commission}}
+    else
+      nil -> {:error, :not_found}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp ensure_no_commission(%User{commission: nil}), do: :ok
+  defp ensure_no_commission(%User{}), do: {:error, :unauthorized}
+
+  defp ensure_commission(%User{commission: %Commission{} = commission}), do: {:ok, commission}
+  defp ensure_commission(%User{}), do: {:error, :not_found}
+
+  defp ensure_correct_user(%{id: id}, %User{id: id}), do: :ok
+  defp ensure_correct_user(%{role: role}, _user) when role in ["admin", "moderator"], do: :ok
+  defp ensure_correct_user(_current, _user), do: {:error, :unauthorized}
+
+  defp ensure_links_verified(user) do
+    if Enum.any?(user.verified_links) do
+      :ok
+    else
+      {:error, :no_verified_links}
+    end
   end
 
   @doc """
