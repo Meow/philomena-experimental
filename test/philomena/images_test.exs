@@ -21,6 +21,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.Images.Image
   alias Philomena.Images.ImagePage
   alias Philomena.Images.Search.Scope
+  alias Philomena.Tags.Tag
   alias Philomena.Galleries
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
@@ -3787,6 +3788,10 @@ defmodule Philomena.ImagesTest do
     %Scope{user: user, filter: default_filter()}
   end
 
+  defp search_scope(params, user \\ nil) do
+    %Scope{user: user, filter: default_filter(), params: params}
+  end
+
   defp minutes_ago(minutes) do
     DateTime.utc_now()
     |> DateTime.add(-minutes * 60, :second)
@@ -4098,6 +4103,88 @@ defmodule Philomena.ImagesTest do
       page = Images.load_image_index(index_scope())
 
       refute image.id in Enum.map(page.entries, & &1.id)
+    end
+  end
+
+  describe "search_images/1" do
+    @describetag :search
+
+    setup do
+      Search.clear_index!(Image)
+      :ok
+    end
+
+    test "a wildcard query returns the record page and an empty sidebar tag list" do
+      image = image_fixture()
+      SearchHelpers.reindex_all!(Image)
+
+      assert {:ok, %{images: page, tags: []}} = Images.search_images(search_scope(%{"q" => "*"}))
+
+      assert %Scrivener.Page{} = page
+      assert image.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "a single-tag query returns the raw Tag record it names in the sidebar list" do
+      _image = image_fixture(tags: "safe")
+      SearchHelpers.reindex_all!(Image)
+
+      assert {:ok, %{tags: tags}} = Images.search_images(search_scope(%{"q" => "safe"}))
+
+      assert [%Tag{} = tag] = tags
+      assert tag.name == "safe"
+      assert is_integer(tag.id)
+    end
+
+    test "a malformed query returns the compiler error tuple" do
+      assert {:error, msg} = Images.search_images(search_scope(%{"q" => "width.gte:abc"}))
+      assert is_binary(msg)
+    end
+
+    # A custom sort field (anything under "sf" other than id/first_seen_at)
+    # needs its sort cursor, so the page is loaded with hits and each entry is
+    # a {record, hit} tuple.
+    test "a custom sort field pairs each entry with its raw hit" do
+      image = image_fixture()
+      SearchHelpers.reindex_all!(Image)
+
+      assert {:ok, %{images: page}} =
+               Images.search_images(search_scope(%{"q" => "*", "sf" => "score"}))
+
+      assert Enum.all?(page.entries, &match?({%Image{}, hit} when is_map(hit), &1))
+      assert {%Image{id: id}, _hit} = Enum.find(page.entries, &(elem(&1, 0).id == image.id))
+      assert id == image.id
+    end
+
+    test "the default sort returns plain records" do
+      image = image_fixture()
+      SearchHelpers.reindex_all!(Image)
+
+      assert {:ok, %{images: page}} = Images.search_images(search_scope(%{"q" => "*"}))
+
+      assert Enum.all?(page.entries, &match?(%Image{}, &1))
+      assert image.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "sf=id returns plain records" do
+      image = image_fixture()
+      SearchHelpers.reindex_all!(Image)
+
+      assert {:ok, %{images: page}} =
+               Images.search_images(search_scope(%{"q" => "*", "sf" => "id"}))
+
+      assert Enum.all?(page.entries, &match?(%Image{}, &1))
+      assert image.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "sf=first_seen_at returns plain records" do
+      image = image_fixture()
+      SearchHelpers.reindex_all!(Image)
+
+      assert {:ok, %{images: page}} =
+               Images.search_images(search_scope(%{"q" => "*", "sf" => "first_seen_at"}))
+
+      assert Enum.all?(page.entries, &match?(%Image{}, &1))
+      assert image.id in Enum.map(page.entries, & &1.id)
     end
   end
 end
