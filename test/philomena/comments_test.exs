@@ -1128,4 +1128,242 @@ defmodule Philomena.CommentsTest do
                {:error, :not_found}
     end
   end
+
+  # Pulls the must_not exclusion list out of an unexecuted comment search
+  # definition.
+  defp must_not(definition), do: definition.body.query.bool.must_not
+
+  describe "comment_search_definition/4" do
+    test "an anonymous viewer excludes deleted, non-approved, and hidden-tag comments" do
+      filter = %Filter{hidden_tag_ids: [7, 8]}
+      definition = Comments.comment_search_definition(nil, filter, %{match_all: %{}})
+
+      assert definition.module == Comment
+      assert definition.body.query.bool.must == %{match_all: %{}}
+      assert definition.body.sort == %{created_at: :desc}
+
+      filters = must_not(definition)
+      assert %{term: %{approved: false}} in filters
+      assert %{term: %{"image.approved" => false}} in filters
+      assert %{term: %{hidden_from_users: true}} in filters
+      assert %{term: %{"image.hidden_from_users" => true}} in filters
+      assert %{terms: %{"image.tag_ids" => [7, 8]}} in filters
+    end
+
+    test "a signed-in non-staff viewer scopes the approved exception to their own id" do
+      user = confirmed_user_fixture()
+
+      filters =
+        must_not(Comments.comment_search_definition(user, @empty_filter, %{match_all: %{}}))
+
+      # The plain approved/image.approved excludes are replaced by a should-clause
+      # that keeps the viewer's own non-approved comments.
+      should = [%{term: %{approved: false}}, %{term: %{"image.approved" => false}}]
+
+      assert %{bool: %{should: should, must_not: [%{term: %{user_id: user.id}}]}} in filters
+      refute %{term: %{approved: false}} in filters
+
+      # The deleted and hidden-tag excludes still apply.
+      assert %{term: %{hidden_from_users: true}} in filters
+    end
+
+    test "a staff viewer drops the deleted and non-approved excludes by default" do
+      moderator = moderator_user_fixture()
+      filter = %Filter{hidden_tag_ids: [7]}
+      filters = must_not(Comments.comment_search_definition(moderator, filter, %{match_all: %{}}))
+
+      assert filters == [%{terms: %{"image.tag_ids" => [7]}}]
+    end
+
+    test "a staff viewer with show_hidden false keeps the deleted and non-approved excludes" do
+      moderator = moderator_user_fixture()
+
+      filters =
+        must_not(
+          Comments.comment_search_definition(
+            moderator,
+            @empty_filter,
+            %{match_all: %{}},
+            show_hidden: false
+          )
+        )
+
+      # With show_hidden disabled a staff viewer is filtered like a signed-in
+      # non-staff user, so the own-comments exception is scoped to their id.
+      should = [%{term: %{approved: false}}, %{term: %{"image.approved" => false}}]
+
+      assert %{bool: %{should: should, must_not: [%{term: %{user_id: moderator.id}}]}} in filters
+      assert %{term: %{hidden_from_users: true}} in filters
+    end
+
+    test "passes pagination through to the search window" do
+      definition =
+        Comments.comment_search_definition(
+          nil,
+          @empty_filter,
+          %{match_all: %{}},
+          pagination: %{page_number: 3, page_size: 10}
+        )
+
+      assert definition.page_number == 3
+      assert definition.page_size == 10
+      assert definition.body.from == 20
+      assert definition.body.size == 10
+    end
+  end
+
+  # Creates an approved comment on `image`, its created_at fixed to a distinct
+  # second so listing order is deterministic under the second-precision column.
+  defp comment_at(image, offset) do
+    comment_fixture(image, confirmed_user_fixture(), %{"body" => "Comment #{offset}"})
+    |> Ecto.Changeset.change(created_at: DateTime.add(~U[2024-01-01 00:00:00Z], offset, :second))
+    |> Repo.update!()
+  end
+
+  defp pending_comment(image, user \\ nil) do
+    comment_fixture(image, user || confirmed_user_fixture())
+    |> Ecto.Changeset.change(approved: false)
+    |> Repo.update!()
+  end
+
+  defp destroyed_comment(image) do
+    comment_fixture(image, confirmed_user_fixture())
+    |> Ecto.Changeset.change(destroyed_content: true)
+    |> Repo.update!()
+  end
+
+  defp oldest_first_user do
+    confirmed_user_fixture()
+    |> Ecto.Changeset.change(comments_newest_first: false)
+    |> Repo.update!()
+  end
+
+  describe "paginate_image_comments/3" do
+    setup do
+      %{image: image_fixture()}
+    end
+
+    test "returns a Scrivener page ordered newest first by default", %{image: image} do
+      c1 = comment_at(image, 1)
+      c2 = comment_at(image, 2)
+      c3 = comment_at(image, 3)
+
+      page = Comments.paginate_image_comments(nil, image, page: 1, page_size: 25)
+
+      assert %Scrivener.Page{} = page
+      assert Enum.map(page.entries, & &1.id) == [c3.id, c2.id, c1.id]
+    end
+
+    test "orders oldest first for a user who reads oldest first", %{image: image} do
+      c1 = comment_at(image, 1)
+      c2 = comment_at(image, 2)
+      c3 = comment_at(image, 3)
+
+      page = Comments.paginate_image_comments(oldest_first_user(), image, page: 1, page_size: 25)
+
+      assert Enum.map(page.entries, & &1.id) == [c1.id, c2.id, c3.id]
+    end
+
+    test "an anonymous viewer sees only approved, non-destroyed comments", %{image: image} do
+      approved = comment_fixture(image, confirmed_user_fixture())
+      _pending = pending_comment(image)
+      _destroyed = destroyed_comment(image)
+
+      page = Comments.paginate_image_comments(nil, image, page: 1, page_size: 25)
+
+      assert Enum.map(page.entries, & &1.id) == [approved.id]
+    end
+
+    test "a signed-in non-staff user additionally sees their own non-approved comments",
+         %{image: image} do
+      author = confirmed_user_fixture()
+      approved = comment_fixture(image, confirmed_user_fixture())
+      own_pending = pending_comment(image, author)
+      others_pending = pending_comment(image)
+
+      page = Comments.paginate_image_comments(author, image, page: 1, page_size: 25)
+      ids = Enum.map(page.entries, & &1.id)
+
+      assert approved.id in ids
+      assert own_pending.id in ids
+      refute others_pending.id in ids
+    end
+
+    test "staff see destroyed and non-approved comments", %{image: image} do
+      approved = comment_fixture(image, confirmed_user_fixture())
+      pending = pending_comment(image)
+      destroyed = destroyed_comment(image)
+
+      page =
+        Comments.paginate_image_comments(moderator_user_fixture(), image, page: 1, page_size: 25)
+
+      ids = Enum.map(page.entries, & &1.id)
+
+      assert approved.id in ids
+      assert pending.id in ids
+      assert destroyed.id in ids
+    end
+  end
+
+  describe "find_comment_page/4" do
+    setup do
+      image = image_fixture()
+
+      %{
+        image: image,
+        c1: comment_at(image, 1),
+        c2: comment_at(image, 2),
+        c3: comment_at(image, 3)
+      }
+    end
+
+    test "returns the page a comment falls on for a newest-first reader",
+         %{image: image, c1: c1, c2: c2, c3: c3} do
+      # Newest first, page size 2: c3 and c2 share page 1, c1 falls to page 2.
+      assert Comments.find_comment_page(nil, image, c3.id, page_size: 2) == 1
+      assert Comments.find_comment_page(nil, image, c2.id, page_size: 2) == 1
+      assert Comments.find_comment_page(nil, image, c1.id, page_size: 2) == 2
+    end
+
+    test "honors an oldest-first reader's direction", %{image: image, c1: c1, c2: c2, c3: c3} do
+      user = oldest_first_user()
+
+      # Oldest first, page size 2: c1 and c2 share page 1, c3 falls to page 2.
+      assert Comments.find_comment_page(user, image, c1.id, page_size: 2) == 1
+      assert Comments.find_comment_page(user, image, c2.id, page_size: 2) == 1
+      assert Comments.find_comment_page(user, image, c3.id, page_size: 2) == 2
+    end
+
+    test "raises when the comment does not belong to the image", %{image: image} do
+      foreign = comment_fixture(image_fixture(), confirmed_user_fixture())
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Comments.find_comment_page(nil, image, foreign.id, page_size: 2)
+      end
+    end
+  end
+
+  describe "last_comment_page/3" do
+    test "returns the last page of a populated listing" do
+      image = image_fixture()
+      for offset <- 1..3, do: comment_at(image, offset)
+
+      assert Comments.last_comment_page(nil, image, page_size: 2) == 2
+    end
+
+    test "returns page 1 for an empty listing" do
+      assert Comments.last_comment_page(nil, image_fixture(), page_size: 2) == 1
+    end
+
+    test "counts only the comments visible to the viewer" do
+      image = image_fixture()
+      comment_fixture(image, confirmed_user_fixture())
+      pending_comment(image)
+
+      # The anonymous viewer does not count the non-approved comment, so it
+      # lands a page earlier than staff, who count both.
+      assert Comments.last_comment_page(nil, image, page_size: 1) == 2
+      assert Comments.last_comment_page(moderator_user_fixture(), image, page_size: 1) == 3
+    end
+  end
 end

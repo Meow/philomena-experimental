@@ -175,12 +175,12 @@ defmodule Philomena.Comments do
   # tags; non-staff additionally hide deleted and non-approved comments (a
   # signed-in user still sees their own non-approved comments). Staff see the
   # hidden and non-approved comments the extra filters would exclude.
-  defp comment_filters(user, filter) do
-    staff? = staff?(user)
+  defp comment_filters(user, filter), do: comment_filters(user, filter, staff?(user))
 
+  defp comment_filters(user, filter, show_hidden?) do
     [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
-    |> hide_deleted(staff?)
-    |> hide_non_approved(user, staff?)
+    |> hide_deleted(show_hidden?)
+    |> hide_non_approved(user, show_hidden?)
   end
 
   defp staff?(%{role: role}) when role in ~W(assistant moderator admin), do: true
@@ -214,6 +214,155 @@ defmodule Philomena.Comments do
       %{term: %{"image.approved" => false}}
       | filters
     ]
+
+  @doc """
+  Builds an unexecuted comment search definition for `user`, excluding
+  comments the viewer's `filter` hides.
+
+  `body` is one or more compiled query clauses. Options: `:pagination` sets
+  the result window; `:show_hidden` (default `true`) lets staff viewers see
+  deleted and non-approved comments — pass `false` for listings that stay
+  clean regardless of who is looking. Results sort newest first.
+
+  The definition is meant for batching into
+  `PhilomenaQuery.Search.msearch_records/2` alongside other page content;
+  execute it directly for a standalone listing.
+
+  ## Examples
+
+      iex> comment_search_definition(user, filter, %{term: %{author_id: 1}})
+      %{module: Comment, ...}
+
+  """
+  @spec comment_search_definition(User.t() | nil, Filter.t(), map() | [map()], Keyword.t()) ::
+          PhilomenaQuery.Search.search_definition()
+  def comment_search_definition(user, filter, body, opts \\ []) do
+    pagination = Keyword.get(opts, :pagination, %{})
+    show_hidden? = Keyword.get(opts, :show_hidden, true) and staff?(user)
+
+    Search.search_definition(
+      Comment,
+      %{
+        query: %{
+          bool: %{
+            must: body,
+            must_not: comment_filters(user, filter, show_hidden?)
+          }
+        },
+        sort: %{created_at: :desc}
+      },
+      pagination
+    )
+  end
+
+  @doc """
+  Loads a page of `image`'s comments for `user`.
+
+  `scrivener` is the `page`/`page_size` keyword list. Comments order by
+  creation time, oldest first for users who read oldest-first and newest
+  first otherwise. Staff see destroyed and non-approved comments; a
+  signed-in user still sees their own non-approved ones.
+
+  ## Examples
+
+      iex> paginate_image_comments(user, image, page: 1, page_size: 25)
+      %Scrivener.Page{}
+
+  """
+  @spec paginate_image_comments(User.t() | nil, Image.t(), Keyword.t()) :: Scrivener.Page.t()
+  def paginate_image_comments(user, image, scrivener) do
+    direction = load_direction(user)
+
+    visible_image_comments(user, image)
+    |> order_by([{^direction, :created_at}])
+    |> preload([:image, :deleted_by, user: [awards: :badge]])
+    |> Repo.paginate(scrivener)
+  end
+
+  @doc """
+  Returns the page number on which `comment_id` appears in `image`'s comment
+  listing for `user`, honoring the viewer's reading direction.
+
+  Raises `Ecto.NoResultsError` when the comment does not belong to the image.
+
+  ## Examples
+
+      iex> find_comment_page(user, image, comment.id, page_size: 25)
+      3
+
+  """
+  @spec find_comment_page(User.t() | nil, Image.t(), integer(), Keyword.t()) :: pos_integer()
+  def find_comment_page(user, image, comment_id, scrivener) do
+    comment =
+      Comment
+      |> where(image_id: ^image.id)
+      |> where(id: ^comment_id)
+      |> Repo.one!()
+
+    offset =
+      visible_image_comments(user, image)
+      |> filter_direction(comment.created_at, user)
+      |> Repo.aggregate(:count, :id)
+
+    page_size = scrivener[:page_size]
+
+    # Pagination starts at page 1
+    div(offset, page_size) + 1
+  end
+
+  @doc """
+  Returns the number of the last page of `image`'s comment listing for
+  `user`.
+
+  ## Examples
+
+      iex> last_comment_page(user, image, page_size: 25)
+      4
+
+  """
+  @spec last_comment_page(User.t() | nil, Image.t(), Keyword.t()) :: pos_integer()
+  def last_comment_page(user, image, scrivener) do
+    offset =
+      visible_image_comments(user, image)
+      |> Repo.aggregate(:count, :id)
+
+    page_size = scrivener[:page_size]
+
+    # Pagination starts at page 1
+    div(offset, page_size) + 1
+  end
+
+  defp visible_image_comments(user, image) do
+    show_hidden? = staff?(user)
+
+    Comment
+    |> where(image_id: ^image.id)
+    |> filter_destroyed(show_hidden?)
+    |> filter_non_approved(user, show_hidden?)
+  end
+
+  defp load_direction(%{comments_newest_first: false}), do: :asc
+  defp load_direction(_user), do: :desc
+
+  defp filter_destroyed(query, true), do: query
+  defp filter_destroyed(query, _show_hidden?), do: where(query, [c], not c.destroyed_content)
+
+  defp filter_non_approved(query, _user, true), do: query
+
+  defp filter_non_approved(query, %{id: user_id}, _show_hidden?),
+    do: where(query, [c], c.approved or c.user_id == ^user_id)
+
+  defp filter_non_approved(query, _user, _show_hidden?),
+    do: where(query, [c], c.approved)
+
+  # The offset counts only the comments rendered ahead of the target in
+  # the viewer's reading direction; counting the target itself would push
+  # a comment sitting exactly on a page boundary onto the next page.
+  defp filter_direction(query, time, %{comments_newest_first: false}),
+    do: where(query, [c], c.created_at < ^time)
+
+  defp filter_direction(query, time, _user),
+    do: where(query, [c], c.created_at > ^time)
 
   @doc """
   Loads the image named by the raw request `image_id` for the comment `action`
