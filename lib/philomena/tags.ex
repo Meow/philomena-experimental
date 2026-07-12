@@ -323,6 +323,62 @@ defmodule Philomena.Tags do
     end
   end
 
+  @doc """
+  Assembles the tag usage detail page for the tag named by `slug`, on behalf of
+  `actor`.
+
+  Authorizes `:edit` on tags first, so an unprivileged actor is
+  `{:error, :unauthorized}` even for an unknown slug; a permitted actor gets
+  `{:error, :not_found}` for an unknown slug. On success the result carries the
+  tag, the filters that spoiler it, the filters that hide it, and the users
+  watching it.
+
+  Returns `{:ok, %{tag:, filters_spoilering:, filters_hiding:, users_watching:}}`,
+  `{:error, :not_found}`, or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> tag_detail(moderator, "safe")
+      {:ok, %{tag: %Tag{}, filters_spoilering: [], filters_hiding: [], users_watching: []}}
+
+  """
+  @spec tag_detail(User.t() | nil, String.t()) ::
+          {:ok, map()} | {:error, :not_found | :unauthorized}
+  def tag_detail(actor, slug) do
+    with :ok <- authorize(actor, :edit, %Tag{}) do
+      case tag_by_slug(slug, []) do
+        nil ->
+          {:error, :not_found}
+
+        tag ->
+          filters_spoilering =
+            Filter
+            |> where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
+            |> preload(:user)
+            |> Repo.all()
+
+          filters_hiding =
+            Filter
+            |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
+            |> preload(:user)
+            |> Repo.all()
+
+          users_watching =
+            User
+            |> where([u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
+            |> Repo.all()
+
+          {:ok,
+           %{
+             tag: tag,
+             filters_spoilering: filters_spoilering,
+             filters_hiding: filters_hiding,
+             users_watching: users_watching
+           }}
+      end
+    end
+  end
+
   defp tag_by_slug(slug, preloads) do
     Tag
     |> preload(^preloads)
