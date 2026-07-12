@@ -1,17 +1,23 @@
 defmodule Philomena.ForumsTest do
   @moduledoc """
-  Context-level tests for the actor-first forum subscription API on
-  `Philomena.Forums`: `subscribe/2` and `unsubscribe/2`.
+  Context-level tests for the actor-first forum APIs on `Philomena.Forums`: the
+  subscription toggle (`subscribe/2`, `unsubscribe/2`) and the admin management
+  functions (`authorize_admin/1`, `new_forum/1`, `create_forum/2`,
+  `load_forum_for_edit/2`, `update_forum/3`).
 
   These pin the authorization matrix (anonymous / user / moderator / admin),
-  the unknown-forum divergence between the two actions, and the idempotent
-  success paths. The corresponding controller characterization tests pin the
-  HTTP behavior on top of these results.
+  the unknown-forum divergence between the subscription actions, the idempotent
+  subscription success paths, and - for the admin functions - the admin-only
+  restriction (a plain moderator is rejected, so restricted-forum existence
+  does not leak) plus the unknown-short-name split (not_found for an authorized
+  admin, unauthorized for everyone else). The corresponding controller
+  characterization tests pin the HTTP behavior on top of these results.
 
   The actor here is a plain `User.t()` or `nil`, matching what the controller
   hands in as `conn.assigns.current_user`. Unlike the topic API, the forum
   functions load only a forum by short name, so there is no separate
-  not-found surface: a missing forum is authorized as a `nil` subject.
+  not-found surface on the subscription side: a missing forum is authorized as
+  a `nil` subject.
   """
 
   use Philomena.DataCase, async: true
@@ -23,6 +29,7 @@ defmodule Philomena.ForumsTest do
 
   alias Philomena.Repo
   alias Philomena.Forums
+  alias Philomena.Forums.Forum
   alias Philomena.Forums.Subscription
 
   defp subscribed?(forum, user) do
@@ -173,5 +180,157 @@ defmodule Philomena.ForumsTest do
 
       assert Forums.unsubscribe(user, forum.short_name) == {:error, :unauthorized}
     end
+  end
+
+  describe "authorize_admin/1" do
+    test "an admin is authorized" do
+      assert Forums.authorize_admin(admin_user_fixture()) == :ok
+    end
+
+    test "a plain moderator is not authorized" do
+      assert Forums.authorize_admin(moderator_user_fixture()) == {:error, :unauthorized}
+    end
+
+    test "a regular user is not authorized" do
+      assert Forums.authorize_admin(confirmed_user_fixture()) == {:error, :unauthorized}
+    end
+
+    test "an anonymous visitor is not authorized" do
+      assert Forums.authorize_admin(nil) == {:error, :unauthorized}
+    end
+  end
+
+  describe "new_forum/1" do
+    test "an admin gets a changeset" do
+      assert {:ok, %Ecto.Changeset{}} = Forums.new_forum(admin_user_fixture())
+    end
+
+    test "a plain moderator is not authorized" do
+      assert Forums.new_forum(moderator_user_fixture()) == {:error, :unauthorized}
+    end
+
+    test "a regular user is not authorized" do
+      assert Forums.new_forum(confirmed_user_fixture()) == {:error, :unauthorized}
+    end
+
+    test "an anonymous visitor is not authorized" do
+      assert Forums.new_forum(nil) == {:error, :unauthorized}
+    end
+  end
+
+  describe "create_forum/2" do
+    test "an admin creates a forum" do
+      assert {:ok, %Forum{} = forum} = Forums.create_forum(admin_user_fixture(), valid_attrs())
+      assert Repo.get(Forum, forum.id)
+    end
+
+    test "invalid attributes return a changeset" do
+      assert {:error, %Ecto.Changeset{}} =
+               Forums.create_forum(admin_user_fixture(), %{valid_attrs() | "name" => ""})
+    end
+
+    test "a plain moderator is not authorized and creates nothing" do
+      assert Forums.create_forum(moderator_user_fixture(), valid_attrs()) ==
+               {:error, :unauthorized}
+    end
+
+    test "a regular user is not authorized" do
+      assert Forums.create_forum(confirmed_user_fixture(), valid_attrs()) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous visitor is not authorized" do
+      assert Forums.create_forum(nil, valid_attrs()) == {:error, :unauthorized}
+    end
+  end
+
+  describe "load_forum_for_edit/2" do
+    test "an admin loads a forum by short name" do
+      forum = forum_fixture()
+
+      assert {:ok, {loaded, %Ecto.Changeset{}}} =
+               Forums.load_forum_for_edit(admin_user_fixture(), forum.short_name)
+
+      assert loaded.id == forum.id
+    end
+
+    test "an unknown short name is not found for an admin" do
+      assert Forums.load_forum_for_edit(admin_user_fixture(), "nonexistent") ==
+               {:error, :not_found}
+    end
+
+    test "an unknown short name is unauthorized for a plain moderator" do
+      # Authorization runs before the load, so an unprivileged actor cannot
+      # tell a missing forum from a real one.
+      assert Forums.load_forum_for_edit(moderator_user_fixture(), "nonexistent") ==
+               {:error, :unauthorized}
+    end
+
+    test "a real forum is unauthorized for a plain moderator" do
+      forum = forum_fixture()
+
+      assert Forums.load_forum_for_edit(moderator_user_fixture(), forum.short_name) ==
+               {:error, :unauthorized}
+    end
+
+    test "a regular user is not authorized" do
+      forum = forum_fixture()
+
+      assert Forums.load_forum_for_edit(confirmed_user_fixture(), forum.short_name) ==
+               {:error, :unauthorized}
+    end
+  end
+
+  describe "update_forum/3" do
+    test "an admin updates a forum" do
+      forum = forum_fixture()
+
+      assert {:ok, updated} =
+               Forums.update_forum(admin_user_fixture(), forum.short_name, %{"name" => "Renamed"})
+
+      assert updated.name == "Renamed"
+    end
+
+    test "invalid attributes return a changeset" do
+      forum = forum_fixture()
+
+      assert {:error, %Ecto.Changeset{}} =
+               Forums.update_forum(admin_user_fixture(), forum.short_name, %{"name" => ""})
+    end
+
+    test "an unknown short name is not found for an admin" do
+      assert Forums.update_forum(admin_user_fixture(), "nonexistent", %{"name" => "x"}) ==
+               {:error, :not_found}
+    end
+
+    test "an unknown short name is unauthorized for a plain moderator" do
+      assert Forums.update_forum(moderator_user_fixture(), "nonexistent", %{"name" => "x"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "a real forum is unauthorized for a plain moderator" do
+      forum = forum_fixture()
+
+      assert Forums.update_forum(moderator_user_fixture(), forum.short_name, %{"name" => "x"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "a regular user is not authorized" do
+      forum = forum_fixture()
+
+      assert Forums.update_forum(confirmed_user_fixture(), forum.short_name, %{"name" => "x"}) ==
+               {:error, :unauthorized}
+    end
+  end
+
+  # Controller-shaped attrs (string keys) a forum insert requires; the short
+  # name must be lowercase letters only.
+  defp valid_attrs do
+    %{
+      "name" => "Admin Test Forum",
+      "short_name" => unique_forum_short_name(),
+      "description" => "A forum created in an admin test",
+      "access_level" => "normal"
+    }
   end
 end

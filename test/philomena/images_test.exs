@@ -31,6 +31,7 @@ defmodule Philomena.ImagesTest do
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
   import Philomena.GalleriesFixtures
+  import Philomena.TagsFixtures
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to verify_write_access.
@@ -40,7 +41,18 @@ defmodule Philomena.ImagesTest do
     generated_ban_id: "U123456",
     type: "User"
   }
+
+  @approval_pagination %{page_number: 1, page_size: 25}
+
   import Philomena.SourceChangesFixtures
+
+  defp image_tag_names(image) do
+    Image
+    |> Repo.get(image.id)
+    |> Repo.preload(:tags)
+    |> Map.fetch!(:tags)
+    |> Enum.map(& &1.name)
+  end
 
   defp comment_notification?(image, user) do
     Repo.exists?(
@@ -4071,6 +4083,144 @@ defmodule Philomena.ImagesTest do
 
       assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
                {:error, :ban}
+    end
+  end
+
+  describe "load_approval_queue/2" do
+    test "a moderator gets the unapproved images, oldest first, with tags preloaded" do
+      approved = image_fixture(approved: true)
+      first = image_fixture(approved: false)
+      second = image_fixture(approved: false)
+
+      assert {:ok, page} =
+               Images.load_approval_queue(moderator_user_fixture(), @approval_pagination)
+
+      assert %Scrivener.Page{} = page
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert first.id in ids
+      assert second.id in ids
+      refute approved.id in ids
+
+      # Oldest first: the ids come back ascending.
+      assert ids == Enum.sort(ids)
+
+      entry = Enum.find(page.entries, &(&1.id == first.id))
+      assert Ecto.assoc_loaded?(entry.tags)
+    end
+
+    test "an admin gets the approval queue" do
+      image = image_fixture(approved: false)
+
+      assert {:ok, page} = Images.load_approval_queue(admin_user_fixture(), @approval_pagination)
+      assert image.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "a regular user is not authorized" do
+      assert Images.load_approval_queue(confirmed_user_fixture(), @approval_pagination) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous visitor is not authorized" do
+      assert Images.load_approval_queue(nil, @approval_pagination) == {:error, :unauthorized}
+    end
+  end
+
+  describe "batch_update_tags/3" do
+    test "an admin adds a tag to matched images and logs against their own profile" do
+      # A letters-only name keeps the profile subject_path identical to
+      # "/profiles/<slug>" with no percent-encoding.
+      admin = admin_user_fixture(%{name: "batchtagger"})
+      actor = actor(admin)
+      tag_fixture(%{name: "batchadd"})
+      image = image_fixture(tags: "safe")
+
+      assert {:ok, result} = Images.batch_update_tags(actor, "batchadd", [image.id])
+      assert result.succeeded == [image.id]
+      assert result.failed == []
+      assert result.added == ["batchadd"]
+      assert result.removed == []
+      assert "batchadd" in image_tag_names(image)
+
+      log = only_moderation_log!()
+      assert log.user_id == admin.id
+      assert log.type == "Admin.Batch.Tag:update"
+      assert log.subject_path == "/profiles/#{admin.slug}"
+      assert log.body == "Batch tagged 'batchadd' on 1 images"
+    end
+
+    test "an admin removes a tag from matched images" do
+      actor = actor(admin_user_fixture())
+      image = image_fixture(tags: "safe, removeme")
+
+      assert {:ok, result} = Images.batch_update_tags(actor, "-removeme", [image.id])
+      assert result.succeeded == [image.id]
+      assert result.removed == ["removeme"]
+      assert result.added == []
+      refute "removeme" in image_tag_names(image)
+    end
+
+    test "a moderator with a Tag batch_update grant is authorized" do
+      user = %{confirmed_user_fixture() | role_map: %{"Tag" => %{"batch_update" => []}}}
+      tag_fixture(%{name: "batchadd"})
+      image = image_fixture(tags: "safe")
+
+      assert {:ok, result} = Images.batch_update_tags(actor(user), "batchadd", [image.id])
+      assert result.succeeded == [image.id]
+    end
+
+    test "a plain moderator is not authorized" do
+      image = image_fixture(tags: "safe")
+
+      assert Images.batch_update_tags(actor(moderator_user_fixture()), "batchadd", [image.id]) ==
+               {:error, :unauthorized}
+    end
+
+    test "a regular user is not authorized" do
+      image = image_fixture(tags: "safe")
+
+      assert Images.batch_update_tags(actor(confirmed_user_fixture()), "batchadd", [image.id]) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor is not authorized" do
+      image = image_fixture(tags: "safe")
+
+      assert Images.batch_update_tags(actor(nil), "batchadd", [image.id]) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown-but-castable id lands in failed, not succeeded" do
+      actor = actor(admin_user_fixture())
+      tag_fixture(%{name: "batchadd"})
+      image = image_fixture(tags: "safe")
+
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, "batchadd", [image.id, 2_147_483_647])
+
+      assert result.succeeded == [image.id]
+      assert result.failed == [2_147_483_647]
+    end
+
+    test "a non-castable id lands in failed without crashing the batch" do
+      actor = actor(admin_user_fixture())
+      tag_fixture(%{name: "batchadd"})
+      image = image_fixture(tags: "safe")
+
+      assert {:ok, result} = Images.batch_update_tags(actor, "batchadd", [image.id, "abc"])
+      assert result.succeeded == [image.id]
+      assert result.failed == ["abc"]
+    end
+
+    test "the log counts only the images the batch matched" do
+      actor = actor(admin_user_fixture())
+      tag_fixture(%{name: "batchadd"})
+      image = image_fixture(tags: "safe")
+
+      assert {:ok, _} = Images.batch_update_tags(actor, "batchadd", [image.id, "abc"])
+
+      log = only_moderation_log!()
+      assert log.body == "Batch tagged 'batchadd' on 1 images"
     end
   end
 
