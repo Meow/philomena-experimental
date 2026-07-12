@@ -4,6 +4,7 @@ defmodule Philomena.Tags do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
   alias Ecto.Multi
   alias Philomena.Repo
 
@@ -15,9 +16,15 @@ defmodule Philomena.Tags do
   alias Philomena.TagDeleteWorker
   alias Philomena.Tags.Implication
   alias Philomena.Tags.Tag
+  alias Philomena.Tags.TagPage
   alias Philomena.Tags.Uploader
   alias Philomena.Images
   alias Philomena.Images.Image
+  alias Philomena.Images.Search, as: ImageSearch
+  alias Philomena.Images.Search.Scope
+  alias Philomena.Interactions
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.Users.User
   alias Philomena.Filters
   alias Philomena.Filters.Filter
@@ -150,6 +157,189 @@ defmodule Philomena.Tags do
     |> Enum.uniq_by(& &1.id)
   end
 
+  # Associations the tag show, edit, and CRUD pages display.
+  @show_preloads [
+    :aliases,
+    :aliased_tag,
+    :implied_tags,
+    :implied_by_tags,
+    :dnp_entries,
+    :channels,
+    public_links: :user,
+    hidden_links: :user
+  ]
+
+  @doc """
+  Runs the tag listing search the `"tq"` parameter describes.
+
+  Compiles `params["tq"]` (defaulting to `*`) against the tag search index and
+  returns the matching tags ordered by image count then name. The window is
+  fixed to 250 tags regardless of the requested page size.
+
+  Returns `{:ok, tags}`, or the compiler's `{:error, msg}` for a malformed
+  query.
+
+  ## Examples
+
+      iex> search_tags(%{"tq" => "artist:*"}, pagination)
+      {:ok, [%Tag{}, ...]}
+
+      iex> search_tags(%{"tq" => "("}, pagination)
+      {:error, "There was an error parsing your query."}
+
+  """
+  @spec search_tags(map(), map()) :: {:ok, [Tag.t()]} | {:error, String.t()}
+  def search_tags(params, pagination) do
+    query_string = params["tq"] || "*"
+
+    with {:ok, query} <- Philomena.Tags.Query.compile(query_string) do
+      tags =
+        Tag
+        |> Search.search_definition(
+          %{
+            query: query,
+            size: 250,
+            sort: [%{images: :desc}, %{name: :asc}]
+          },
+          %{pagination | page_size: 250}
+        )
+        |> Search.search_records(Tag)
+
+      {:ok, tags}
+    end
+  end
+
+  @doc """
+  Assembles the tag show page for the viewer described by `scope`, loading the
+  tag named by `slug`.
+
+  Loads the tag with its display preloads and authorizes `:show`. An unknown
+  slug the viewer may act on (an admin) is `{:error, :not_found}`; otherwise it
+  is `{:error, :unauthorized}`. A tag that is aliased into another is
+  `{:aliased_to, tag}`, its `:aliased_tag` association carrying the target the
+  caller redirects to. Otherwise the page carries the tag, the executed page of
+  images tagged with it, the viewer's interactions, and the escaped search
+  query for the tag.
+
+  Returns `{:ok, %TagPage{}}`, `{:aliased_to, tag}`, `{:error, :not_found}`,
+  or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_tag_page(scope, "safe")
+      {:ok, %TagPage{}}
+
+      iex> load_tag_page(scope, "artist-colon-somebody")
+      {:aliased_to, %Tag{}}
+
+  """
+  @spec load_tag_page(Scope.t(), String.t()) ::
+          {:ok, TagPage.t()} | {:aliased_to, Tag.t()} | {:error, :not_found | :unauthorized}
+  def load_tag_page(%Scope{} = scope, slug) do
+    tag = tag_by_slug(slug, @show_preloads)
+
+    with :ok <- authorize(scope.user, :show, tag),
+         %Tag{} <- tag do
+      case tag do
+        %{aliased_tag: %Tag{}} ->
+          {:aliased_to, tag}
+
+        _tag ->
+          {images, _tags} = ImageSearch.query(scope, %{term: %{"tags" => tag.name}})
+          images = ImageSearch.execute(images)
+
+          {:ok,
+           %TagPage{
+             tag: tag,
+             images: images,
+             interactions: Interactions.user_interactions(images, scope.user),
+             search_query: maybe_escape_name(tag)
+           }}
+      end
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads the tag named by `slug` for editing on behalf of `actor`.
+
+  Authorizes `:edit`. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
+
+  Returns `{:ok, {tag, changeset}}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_tag_for_edit(moderator, "safe")
+      {:ok, {%Tag{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_tag_for_edit(User.t() | nil, String.t()) ::
+          {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
+  def load_tag_for_edit(actor, slug) do
+    tag = tag_by_slug(slug, @show_preloads)
+
+    with :ok <- authorize(actor, :edit, tag),
+         %Tag{} <- tag do
+      {:ok, {tag, change_tag(tag)}}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp tag_by_slug(slug, preloads) do
+    Tag
+    |> preload(^preloads)
+    |> Repo.get_by(slug: slug)
+  end
+
+  # Computes the search query that lists the tag's images. A tag whose name
+  # compiles back to itself is used verbatim; anything else is escaped so the
+  # search parser does not reinterpret it.
+  defp maybe_escape_name(%{name: name}) do
+    name =
+      name
+      |> String.replace(~r/\s+/, " ")
+      |> String.trim()
+      |> String.downcase()
+
+    case Images.Query.compile(name) do
+      {:ok, %{term: %{"tags" => ^name}}} ->
+        name
+
+      _error ->
+        escape_name(name)
+    end
+  end
+
+  defp escape_name(name) do
+    if String.contains?(name, "(") or String.contains?(name, ")") do
+      # \ * ? " should be escaped, wrap in quotes so parser doesn't
+      # choke on parens.
+      name =
+        name
+        |> String.replace("\\", "\\\\")
+        |> String.replace("*", "\\*")
+        |> String.replace("?", "\\?")
+        |> String.replace("\"", "\\\"")
+
+      "\"#{name}\""
+    else
+      # \ * ? - ! " all must be escaped.
+      name
+      |> String.replace(~r/\A-/, "\\-")
+      |> String.replace(~r/\A!/, "\\!")
+      |> String.replace("\\", "\\\\")
+      |> String.replace("*", "\\*")
+      |> String.replace("?", "\\?")
+      |> String.replace("\"", "\\\"")
+    end
+  end
+
   @doc """
   Gets a single tag.
 
@@ -223,6 +413,47 @@ defmodule Philomena.Tags do
     %Tag{}
     |> Tag.creation_changeset(attrs)
     |> Repo.insert()
+  end
+
+  @doc """
+  Updates the tag named by `slug` on behalf of `actor`.
+
+  Authorizes `:edit` first. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
+  a moderation log is written attributing the update to `actor`.
+
+  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
+  or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> update_tag(moderator, "safe", %{"category" => "rating"})
+      {:ok, %Tag{}}
+
+  """
+  @spec update_tag(User.t() | nil, String.t(), map()) ::
+          {:ok, Tag.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized}
+  def update_tag(actor, slug, attrs) do
+    tag = tag_by_slug(slug, @show_preloads)
+
+    with :ok <- authorize(actor, :edit, tag),
+         %Tag{} <- tag,
+         {:ok, tag} <- update_tag(tag, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Tag:update",
+        Paths.tag_path(tag),
+        "Updated details on tag '#{tag.name}'"
+      )
+
+      {:ok, tag}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
   end
 
   @doc """
@@ -336,6 +567,44 @@ defmodule Philomena.Tags do
     Exq.enqueue(Exq, "indexing", TagDeleteWorker, [tag.id])
 
     {:ok, tag}
+  end
+
+  @doc """
+  Queues the tag named by `slug` for deletion on behalf of `actor`.
+
+  Authorizes `:delete` first. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
+  a moderation log is written attributing the deletion to `actor`.
+
+  Returns `{:ok, tag}`, `{:error, :not_found}`, or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> delete_tag(admin, "garbage-tag")
+      {:ok, %Tag{}}
+
+  """
+  @spec delete_tag(User.t() | nil, String.t()) ::
+          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+  def delete_tag(actor, slug) do
+    tag = tag_by_slug(slug, @show_preloads)
+
+    with :ok <- authorize(actor, :delete, tag),
+         %Tag{} <- tag do
+      {:ok, tag} = delete_tag(tag)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Tag:delete",
+        Paths.tag_path(tag),
+        "Deleted tag '#{tag.name}'"
+      )
+
+      {:ok, tag}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
   end
 
   @doc """
