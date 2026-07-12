@@ -214,8 +214,6 @@ defmodule Philomena.ArtistLinksTest do
       tag = artist_tag_fixture()
       link = artist_link_fixture(user, tag)
 
-      # The edit path resolves the tag by name, so the form always carries a
-      # "tag_name"; omitting it crashes in Tags.get_tag_or_alias_by_name/1.
       assert {:ok, {loaded_user, updated}} =
                ArtistLinks.update_artist_link(
                  moderator_user_fixture(),
@@ -239,6 +237,23 @@ defmodule Philomena.ArtistLinksTest do
                "#{link.id}",
                %{"uri" => "https://example.com/updated-gallery"}
              ) == {:error, :unauthorized}
+    end
+
+    # A missing "tag_name" resolves to no tag, same as a name that matches
+    # nothing, and the edit clears the link's tag.
+    test "an update without a tag name clears the tag" do
+      user = confirmed_user_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, {_loaded_user, updated}} =
+               ArtistLinks.update_artist_link(
+                 moderator_user_fixture(),
+                 user.slug,
+                 "#{link.id}",
+                 %{"uri" => "https://example.com/updated-gallery"}
+               )
+
+      assert updated.tag_id == nil
     end
   end
 end

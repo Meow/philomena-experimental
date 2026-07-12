@@ -508,6 +508,8 @@ defmodule Philomena.Tags do
       nil
 
   """
+  def get_tag_or_alias_by_name(nil), do: nil
+
   def get_tag_or_alias_by_name(name) do
     Tag
     |> where(name: ^name)
