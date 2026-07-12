@@ -1178,6 +1178,27 @@ defmodule Philomena.Users do
     end
   end
 
+  @doc """
+  Unlocks the user named by `slug`, on behalf of `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success the account is unlocked, reindexed, and a
+  moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_unlock_user(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_unlock_user(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      {:ok, user} = unlock_user(user)
+      log_managed_user(actor, user, "Admin.User.Unlock:create", "Unlocked #{user.name}")
+
+      {:ok, user}
+    end
+  end
+
   defp user_by_slug_with_roles(slug) do
     User
     |> Repo.get_by(slug: slug)
