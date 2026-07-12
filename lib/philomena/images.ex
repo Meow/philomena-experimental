@@ -2650,6 +2650,101 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Applies a batch tag edit to `image_ids` on behalf of `actor`, an
+  `m:Philomena.Attribution.Actor`.
+
+  Authorizes `:batch_update` against the tag model, parses the tag list into the
+  added and removed tags (resolving aliases and implications for additions),
+  splits the raw ids into castable integers and unparsable leftovers, and runs
+  the batch through `batch_update/4`. Batch tagging is a staff surface and is
+  not rate-limited. Writes an `"Admin.Batch.Tag:update"` moderation log, whose
+  subject is the acting user's own profile, on success.
+
+  On success returns `{:ok, result}` where `result` is a map with:
+
+    * `:succeeded` - ids the batch matched (existing, non-hidden images);
+    * `:failed` - ids that matched no such image plus the unparsable ids;
+    * `:added` / `:removed` - the resolved tag names, for the firehose broadcast.
+
+  Returns `{:error, :unauthorized}` when `actor` may not batch-tag, or
+  `{:error, {:batch_failed, failed_ids}}` (every castable id plus the
+  unparsable ids) when the batch transaction does not commit.
+  """
+  @spec batch_update_tags(Actor.t(), String.t(), [any()]) ::
+          {:ok,
+           %{succeeded: [integer()], failed: [any()], added: [String.t()], removed: [String.t()]}}
+          | {:error, :unauthorized | {:batch_failed, [any()]}}
+  def batch_update_tags(%Actor{} = actor, tag_list, image_ids) do
+    with :ok <- authorize(actor, :batch_update, Tag) do
+      tags = Tag.parse_tag_list(tag_list)
+
+      added_tag_names = Enum.reject(tags, &String.starts_with?(&1, "-"))
+
+      removed_tag_names =
+        tags
+        |> Enum.filter(&String.starts_with?(&1, "-"))
+        |> Enum.map(&String.replace_leading(&1, "-", ""))
+
+      added_tags =
+        Tag
+        |> where([t], t.name in ^added_tag_names)
+        |> preload([:implied_tags, aliased_tag: :implied_tags])
+        |> Repo.all()
+        |> Enum.map(&(&1.aliased_tag || &1))
+        |> Enum.flat_map(&[&1 | &1.implied_tags])
+
+      removed_tags =
+        Tag
+        |> where([t], t.name in ^removed_tag_names)
+        |> Repo.all()
+
+      attributes = %{
+        ip: actor.ip,
+        fingerprint: actor.fingerprint,
+        user_id: actor.user.id
+      }
+
+      {image_ids, unparsable_ids} = partition_image_ids(image_ids)
+
+      case batch_update(image_ids, added_tags, removed_tags, attributes) do
+        {:ok, matched_ids} ->
+          # Ids which parsed but matched no existing, non-hidden image were
+          # never touched by the batch, so they are reported as failed.
+          unmatched_ids = image_ids -- matched_ids
+
+          ModerationLogs.create_moderation_log(
+            actor.user,
+            "Admin.Batch.Tag:update",
+            Paths.profile_path(actor.user),
+            "Batch tagged '#{tag_list}' on #{Enum.count(matched_ids)} images"
+          )
+
+          {:ok,
+           %{
+             succeeded: matched_ids,
+             failed: unmatched_ids ++ unparsable_ids,
+             added: Enum.map(added_tags, & &1.name),
+             removed: Enum.map(removed_tags, & &1.name)
+           }}
+
+        _error ->
+          {:error, {:batch_failed, image_ids ++ unparsable_ids}}
+      end
+    end
+  end
+
+  # An id that is not an integer cannot name an image, so it is reported as
+  # failed rather than crashing the whole batch.
+  defp partition_image_ids(image_ids) do
+    {parsed, unparsable} =
+      image_ids
+      |> Enum.map(&{&1, IntegerId.parse(&1)})
+      |> Enum.split_with(&match?({_id, {:ok, _int}}, &1))
+
+    {Enum.map(parsed, fn {_id, {:ok, int}} -> int end), Enum.map(unparsable, &elem(&1, 0))}
+  end
+
+  @doc """
   Performs a batch update on multiple images, adding and removing tags.
 
   This function efficiently updates tags for multiple images at once,
