@@ -129,6 +129,87 @@ defmodule Philomena.Forums do
   end
 
   @doc """
+  Authorizes `actor` to manage forums through the admin interface.
+
+  Forum administration is admin-only (`:edit` on the forum model). Returns `:ok`
+  or `{:error, :unauthorized}`; gates the admin listing, which renders the forum
+  list assembled by the request pipeline.
+  """
+  @spec authorize_admin(User.t() | nil) :: :ok | {:error, :unauthorized}
+  def authorize_admin(actor) do
+    authorize(actor, :edit, Forum)
+  end
+
+  @doc """
+  Builds the changeset backing the new-forum form, on behalf of `actor`.
+
+  Authorizes forum administration. Returns `{:ok, changeset}` or
+  `{:error, :unauthorized}`.
+  """
+  @spec new_forum(User.t() | nil) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_forum(actor) do
+    with :ok <- authorize_admin(actor) do
+      {:ok, change_forum(%Forum{})}
+    end
+  end
+
+  @doc """
+  Creates a forum on behalf of `actor`.
+
+  Authorizes forum administration, then inserts the forum through
+  `create_forum/1`. Returns `{:ok, forum}`, `{:error, :unauthorized}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec create_forum(User.t() | nil, map()) ::
+          {:ok, Forum.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_forum(actor, attrs) do
+    with :ok <- authorize_admin(actor) do
+      create_forum(attrs)
+    end
+  end
+
+  @doc """
+  Loads the forum named by `short_name` for editing, on behalf of `actor`,
+  pairing it with the changeset backing the edit form.
+
+  Authorizes forum administration, then loads the forum by its short name.
+  Returns `{:ok, {forum, changeset}}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}` for an unknown short name.
+  """
+  @spec load_forum_for_edit(User.t() | nil, any()) ::
+          {:ok, {Forum.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+  def load_forum_for_edit(actor, short_name) do
+    with :ok <- authorize_admin(actor),
+         {:ok, forum} <- fetch_forum(short_name) do
+      {:ok, {forum, change_forum(forum)}}
+    end
+  end
+
+  @doc """
+  Updates the forum named by `short_name`, on behalf of `actor`.
+
+  Authorizes forum administration, loads the forum by its short name, then
+  applies the update through `update_forum/2`. Returns `{:ok, forum}`,
+  `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_forum(User.t() | nil, any(), map()) ::
+          {:ok, Forum.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_forum(actor, short_name, attrs) do
+    with :ok <- authorize_admin(actor),
+         {:ok, forum} <- fetch_forum(short_name) do
+      update_forum(forum, attrs)
+    end
+  end
+
+  defp fetch_forum(short_name) do
+    case Repo.get_by(Forum, short_name: to_string(short_name)) do
+      nil -> {:error, :not_found}
+      forum -> {:ok, forum}
+    end
+  end
+
+  @doc """
   Updates a forum.
 
   ## Examples
