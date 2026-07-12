@@ -169,6 +169,9 @@ defmodule Philomena.Tags do
     hidden_links: :user
   ]
 
+  # Associations the tag alias and reindex pages need.
+  @alias_preloads [:implied_tags, :aliased_tag]
+
   @doc """
   Runs the tag listing search the `"tq"` parameter describes.
 
@@ -283,6 +286,35 @@ defmodule Philomena.Tags do
     tag = tag_by_slug(slug, @show_preloads)
 
     with :ok <- authorize(actor, :edit, tag),
+         %Tag{} <- tag do
+      {:ok, {tag, change_tag(tag)}}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads the tag named by `slug` for editing its aliasing, on behalf of `actor`.
+
+  Authorizes `:alias`. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
+
+  Returns `{:ok, {tag, changeset}}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_tag_alias_for_edit(admin, "safe")
+      {:ok, {%Tag{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_tag_alias_for_edit(User.t() | nil, String.t()) ::
+          {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
+  def load_tag_alias_for_edit(actor, slug) do
+    tag = tag_by_slug(slug, @alias_preloads)
+
+    with :ok <- authorize(actor, :alias, tag),
          %Tag{} <- tag do
       {:ok, {tag, change_tag(tag)}}
     else
@@ -674,6 +706,47 @@ defmodule Philomena.Tags do
   end
 
   @doc """
+  Aliases the tag named by `slug` on behalf of `actor`.
+
+  Authorizes `:alias` first. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
+  a moderation log is written attributing the alias to `actor`.
+
+  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
+  or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> alias_tag(admin, "artist-colon-somebody", %{"target_tag" => "somebody"})
+      {:ok, %Tag{}}
+
+  """
+  @spec alias_tag(User.t() | nil, String.t(), map()) ::
+          {:ok, Tag.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized}
+  def alias_tag(actor, slug, attrs) do
+    tag = tag_by_slug(slug, @alias_preloads)
+
+    with :ok <- authorize(actor, :alias, tag),
+         %Tag{} <- tag,
+         {:ok, tag} <- alias_tag(tag, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Tag.Alias:update",
+        Paths.tag_path(tag),
+        "Aliased tag '#{tag.name}' into '#{tag.aliased_tag.name}'"
+      )
+
+      {:ok, tag}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+      {:error, %Ecto.Changeset{}} = error -> error
+    end
+  end
+
+  @doc """
   Performs the actual tag aliasing operation.
 
   Transfers all associations from the source tag to the target tag,
@@ -812,6 +885,44 @@ defmodule Philomena.Tags do
     Exq.enqueue(Exq, "indexing", TagUnaliasWorker, [tag.id])
 
     {:ok, tag}
+  end
+
+  @doc """
+  Queues removal of the alias on the tag named by `slug`, on behalf of `actor`.
+
+  Authorizes `:alias` first. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
+  a moderation log is written attributing the dealias to `actor`.
+
+  Returns `{:ok, tag}`, `{:error, :not_found}`, or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> unalias_tag(admin, "artist-colon-somebody")
+      {:ok, %Tag{}}
+
+  """
+  @spec unalias_tag(User.t() | nil, String.t()) ::
+          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+  def unalias_tag(actor, slug) do
+    tag = tag_by_slug(slug, @alias_preloads)
+
+    with :ok <- authorize(actor, :alias, tag),
+         %Tag{} <- tag do
+      {:ok, tag} = unalias_tag(tag)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Tag.Alias:delete",
+        Paths.tag_path(tag),
+        "Dealiased tag '#{tag.name}'"
+      )
+
+      {:ok, tag}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
   end
 
   @doc """
