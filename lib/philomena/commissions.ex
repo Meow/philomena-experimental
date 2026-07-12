@@ -314,6 +314,44 @@ defmodule Philomena.Commissions do
   end
 
   @doc """
+  Runs the commission directory search for the given `params` and `pagination`.
+
+  Returns `{commissions, changeset}`: a `m:Scrivener.Page` of matching
+  commissions with a fresh search changeset on success, or an empty page with the
+  invalid search changeset when the parameters are rejected. The empty page keeps
+  the results partial (which paginates whatever it is given) from receiving a
+  bare list.
+  """
+  @spec search_directory(map(), map() | keyword()) :: {Scrivener.Page.t(), Ecto.Changeset.t()}
+  def search_directory(params, pagination) do
+    case execute_search_query(params) do
+      {:ok, commissions} ->
+        {Repo.paginate(commissions, pagination), change_search_query(%SearchQuery{})}
+
+      {:error, changeset} ->
+        {empty_page(pagination), changeset}
+    end
+  end
+
+  defp empty_page(pagination) do
+    %Scrivener.Page{
+      entries: [],
+      page_number: Keyword.get(pagination, :page, 1),
+      page_size: Keyword.get(pagination, :page_size, 25),
+      total_entries: 0,
+      total_pages: 1
+    }
+  end
+
+  @doc """
+  Preloads the commission of `user` (the current viewer, possibly `nil`) for
+  display in the directory chrome.
+  """
+  @spec preload_commission(User.t() | nil) :: User.t() | nil
+  def preload_commission(nil), do: nil
+  def preload_commission(%User{} = user), do: Repo.preload(user, :commission)
+
+  @doc """
   Returns an `%Ecto.Changeset{}` for tracking search query changes.
 
   ## Examples
