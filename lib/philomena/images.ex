@@ -379,6 +379,72 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc """
+  Loads images related to the one `image_id` names - sharing its
+  lowest-population tags, weighted towards its most distinctive ones and the
+  favers it has in common - on behalf of the scope's viewer.
+
+  Loading and authorization follow `find_consecutive_image/2`; the image
+  carries the faves, sources, and tags the scoring reads.
+
+  Returns `{:ok, {image, images}}` with the related images scored best-first.
+
+  ## Examples
+
+      iex> related_images(scope, "42")
+      {:ok, {%Image{}, %Scrivener.Page{}}}
+
+  """
+  @spec related_images(Scope.t(), any()) ::
+          {:ok, {Image.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
+  def related_images(scope, image_id) do
+    with {:ok, image} <-
+           load_image_for_navigation(scope.user, image_id, [:faves, :sources, tags: :aliases]) do
+      tags_to_match =
+        image.tags
+        |> Enum.reject(&(&1.category == "rating"))
+        |> Enum.sort_by(& &1.images_count)
+        |> Enum.take(10)
+        |> Enum.map(& &1.id)
+
+      low_count_tags =
+        tags_to_match
+        |> Enum.take(5)
+        |> Enum.map(&%{term: %{tag_ids: &1}})
+
+      high_count_tags =
+        tags_to_match
+        |> Enum.take(-5)
+        |> Enum.map(&%{term: %{tag_ids: &1}})
+
+      favs_to_match =
+        image.faves
+        |> Enum.take(11)
+        |> Enum.map(&%{term: %{favourited_by_user_ids: &1.user_id}})
+
+      query = %{
+        bool: %{
+          must: [
+            %{bool: %{should: low_count_tags, boost: 2}},
+            %{bool: %{should: high_count_tags, boost: 3, minimum_should_match: "5%"}},
+            %{bool: %{should: favs_to_match, boost: 0.2, minimum_should_match: "5%"}}
+          ],
+          must_not: %{term: %{id: image.id}}
+        }
+      }
+
+      {definition, _tags} =
+        ImageSearch.query(
+          scope,
+          query,
+          sorts: &%{query: &1, sorts: [%{_score: :desc}]},
+          pagination: %{scope.pagination | page_number: 1}
+        )
+
+      {:ok, {image, ImageSearch.execute(definition)}}
+    end
+  end
+
   defp load_image_for_navigation(user, image_id, preloads \\ []) do
     with {:ok, id} <- IntegerId.parse(image_id),
          image = Repo.get(preload(Image, ^preloads), id),
