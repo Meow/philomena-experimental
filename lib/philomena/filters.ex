@@ -647,6 +647,34 @@ defmodule Philomena.Filters do
     end
   end
 
+  @doc """
+  Adds the tag named by `tag_slug` to `current_filter`'s spoilered tags on
+  behalf of `actor`. Same authorization and return shapes as `hide_tag/3`.
+  """
+  @spec spoiler_tag(Actor.t(), Filter.t(), any()) ::
+          {:ok, Filter.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :not_found | :unauthorized}
+  def spoiler_tag(%Actor{} = actor, current_filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, current_filter, tag_slug) do
+      spoiler_tag(current_filter, tag)
+    end
+  end
+
+  @doc """
+  Removes the tag named by `tag_slug` from `current_filter`'s spoilered tags on
+  behalf of `actor`. Same authorization and return shapes as `hide_tag/3`.
+  """
+  @spec unspoiler_tag(Actor.t(), Filter.t(), any()) ::
+          {:ok, Filter.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :not_found | :unauthorized}
+  def unspoiler_tag(%Actor{} = actor, current_filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, current_filter, tag_slug) do
+      unspoiler_tag(current_filter, tag)
+    end
+  end
+
   # Ban check, then filter-edit authorization, then tag load - the order the
   # filter tag toggles are guarded in.
   defp authorize_filter_tag(actor, current_filter, tag_slug) do
