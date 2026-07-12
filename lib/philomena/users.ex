@@ -21,6 +21,8 @@ defmodule Philomena.Users do
   alias Philomena.Topics
   alias Philomena.Roles.Role
   alias Philomena.ModNotes.ModNote
+  alias Philomena.UserIps.UserIp
+  alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserNameChanges.UserNameChange
   alias Philomena.Images
   alias Philomena.Comments
@@ -752,6 +754,73 @@ defmodule Philomena.Users do
       {:error, :unauthorized} -> {:error, :unauthorized}
       nil -> {:error, :not_found}
     end
+  end
+
+  @doc """
+  Loads the potential aliases of the user named by the profile `slug`, on behalf
+  of `actor`: other users who share one of the subject's IP addresses, one of
+  its fingerprints, or both.
+
+  The subject is loaded by slug and authorized for `:show_details`; an unknown
+  slug authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
+  cover `nil`).
+
+  Returns `{:ok, %{user: user, both_matches: [...], ip_matches: [...],
+  fp_matches: [...]}}` with each match list carrying the matched users and their
+  bans.
+  """
+  @spec load_alias_matches(User.t() | nil, String.t()) ::
+          {:ok, map()} | {:error, :unauthorized | :not_found}
+  def load_alias_matches(actor, slug) do
+    user = Repo.get_by(User, slug: slug)
+
+    with :ok <- authorize(actor, :show_details, user),
+         %User{} <- user do
+      {:ok, alias_matches(user)}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp alias_matches(user) do
+    # N.B.: subquery runs faster and is easier to read
+    # than the equivalent join, but Ecto doesn't support
+    # that for some reason (and ActiveRecord does??)
+
+    ip_matches =
+      User
+      |> join(:inner, [u], _ in assoc(u, :user_ips))
+      |> join(:left, [u, ui1], ui2 in UserIp, on: ui1.ip == ui2.ip)
+      |> where([u, _ui1, ui2], u.id != ^user.id and ui2.user_id == ^user.id)
+      |> select([u, _ui1, _ui2], u)
+      |> preload(:bans)
+      |> Repo.all()
+      |> Map.new(&{&1.id, &1})
+
+    fp_matches =
+      User
+      |> join(:inner, [u], _ in assoc(u, :user_fingerprints))
+      |> join(:left, [u, uf1], uf2 in UserFingerprint, on: uf1.fingerprint == uf2.fingerprint)
+      |> where([u, _uf1, uf2], u.id != ^user.id and uf2.user_id == ^user.id)
+      |> select([u, _uf1, _uf2], u)
+      |> preload(:bans)
+      |> Repo.all()
+      |> Map.new(&{&1.id, &1})
+
+    both_matches = Map.take(ip_matches, Map.keys(fp_matches))
+
+    ip_matches = Map.drop(ip_matches, Map.keys(both_matches))
+
+    fp_matches = Map.drop(fp_matches, Map.keys(both_matches))
+
+    %{
+      user: user,
+      both_matches: Map.values(both_matches),
+      ip_matches: Map.values(ip_matches),
+      fp_matches: Map.values(fp_matches)
+    }
   end
 
   @doc """
