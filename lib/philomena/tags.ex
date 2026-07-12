@@ -189,13 +189,13 @@ defmodule Philomena.Tags do
   ## Examples
 
       iex> search_tags(%{"tq" => "artist:*"}, pagination)
-      {:ok, [%Tag{}, ...]}
+      {:ok, %Scrivener.Page{}}
 
       iex> search_tags(%{"tq" => "("}, pagination)
       {:error, "There was an error parsing your query."}
 
   """
-  @spec search_tags(map(), map()) :: {:ok, [Tag.t()]} | {:error, String.t()}
+  @spec search_tags(map(), map()) :: {:ok, Scrivener.Page.t()} | {:error, String.t()}
   def search_tags(params, pagination) do
     query_string = params["tq"] || "*"
 

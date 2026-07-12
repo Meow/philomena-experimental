@@ -5,6 +5,8 @@ defmodule Philomena.Badges.Award do
   alias Philomena.Badges.Badge
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "badge_awards" do
     belongs_to :user, User
     belongs_to :awarded_by, User

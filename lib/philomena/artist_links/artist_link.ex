@@ -5,6 +5,8 @@ defmodule Philomena.ArtistLinks.ArtistLink do
   alias Philomena.Users.User
   alias Philomena.Tags.Tag
 
+  @type t :: %__MODULE__{}
+
   schema "artist_links" do
     belongs_to :user, User
     belongs_to :verified_by_user, User

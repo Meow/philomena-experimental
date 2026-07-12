@@ -5,6 +5,8 @@ defmodule Philomena.Commissions.Item do
   alias Philomena.Commissions.Commission
   alias Philomena.Images.Image
 
+  @type t :: %__MODULE__{}
+
   schema "commission_items" do
     belongs_to :commission, Commission
     belongs_to :example_image, Image
