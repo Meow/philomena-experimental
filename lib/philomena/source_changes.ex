@@ -167,6 +167,35 @@ defmodule Philomena.SourceChanges do
     end
   end
 
+  @doc """
+  Lists the source changes attributed to `fingerprint`, newest first, on behalf
+  of `actor` (the current viewer).
+
+  Listing is staff-only: a viewer who may not see IP addresses gets
+  `{:error, :unauthorized}`. The fingerprint is matched as a raw string, so any
+  value returns a (possibly empty) listing. `params["added"]` narrows to
+  additions (`"1"`) or removals (`"0"`); `pagination` is passed to
+  `Repo.paginate/2`.
+
+  Returns `{:ok, source_changes}`, a paginated set with its user and image
+  associations preloaded for rendering.
+  """
+  @spec fingerprint_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def fingerprint_source_changes(actor, fingerprint, params, pagination) do
+    with :ok <- authorize(actor, :show, :ip_address) do
+      source_changes =
+        SourceChange
+        |> where(fingerprint: ^fingerprint)
+        |> added_filter(params)
+        |> order_by(desc: :id)
+        |> preload([:user, image: [:user, :sources, tags: :aliases]])
+        |> Repo.paginate(pagination)
+
+      {:ok, source_changes}
+    end
+  end
+
   defp cast_ip(ip) do
     case EctoNetwork.INET.cast(ip) do
       {:ok, ip} -> {:ok, ip}
