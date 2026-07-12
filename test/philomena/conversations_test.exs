@@ -1,0 +1,434 @@
+defmodule Philomena.ConversationsTest do
+  @moduledoc """
+  Context-level tests for the controller-facing `Philomena.Conversations`
+  functions.
+
+  These pin the participant/moderator/admin authorization matrix on the show,
+  read, hide, and message paths (a non-participant regular user is
+  unauthorized, an unknown slug is unauthorized for a user and not-found for an
+  admin), the write-access checks on the create paths (banned and
+  missing-fingerprint actors), the `ConversationPage` struct and its
+  mark-read side effect, and the moderation log `approve_message/2` writes.
+  """
+
+  use Philomena.DataCase, async: true
+
+  import Philomena.ConversationsFixtures
+  import Philomena.RulesFixtures
+  import Philomena.AttributionFixtures
+  import Philomena.UsersFixtures
+
+  alias Philomena.Conversations
+  alias Philomena.Conversations.Conversation
+  alias Philomena.Conversations.ConversationPage
+  alias Philomena.Conversations.Message
+  alias Philomena.ModerationLogs.ModerationLog
+  alias Philomena.Repo
+
+  # A truthy ban value in the shape production passes (the result of
+  # Philomena.Bans.find/3); only its presence matters to the write-access and
+  # not-banned checks the write paths run first.
+  @ban %{
+    reason: "Rule #0",
+    valid_until: ~U[3000-01-01 00:00:00Z],
+    generated_ban_id: "U123456",
+    type: "User"
+  }
+
+  @pagination %{page_number: 1, page_size: 25}
+
+  # A message body whose markdown image embed causes an untrusted sender's
+  # message to be withheld from approval. Posting it files a system report
+  # against the "Approval" rule, which must exist.
+  @spam_body "look ![here](http://spam.example/x.png)"
+
+  defp only_moderation_log!, do: Repo.one!(ModerationLog)
+
+  # Builds a conversation with a single unapproved reply, returning the reply.
+  defp unapproved_message(from, to) do
+    _rule = rule_fixture(name: "Approval")
+    conversation = conversation_fixture(from, to)
+    message = message_fixture(conversation, from, %{"body" => @spam_body})
+    refute Repo.reload!(message).approved
+    {conversation, message}
+  end
+
+  describe "list_conversations/3" do
+    test "lists the user's sent and received conversations but not unrelated ones" do
+      user = confirmed_user_fixture()
+      received = conversation_fixture(confirmed_user_fixture(), user)
+      sent = conversation_fixture(user, confirmed_user_fixture())
+      unrelated = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+
+      page = Conversations.list_conversations(user, %{}, @pagination)
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert received.id in ids
+      assert sent.id in ids
+      refute unrelated.id in ids
+    end
+
+    test "does not list conversations the user has hidden" do
+      user = confirmed_user_fixture()
+      hidden = conversation_fixture(confirmed_user_fixture(), user)
+      {:ok, _} = Conversations.mark_conversation_hidden(hidden, user)
+
+      page = Conversations.list_conversations(user, %{}, @pagination)
+      refute hidden.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "a with filter restricts the list to the named partner" do
+      user = confirmed_user_fixture()
+      partner = confirmed_user_fixture()
+      with_partner = conversation_fixture(partner, user)
+      other = conversation_fixture(confirmed_user_fixture(), user)
+
+      page = Conversations.list_conversations(user, %{"with" => "#{partner.id}"}, @pagination)
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert with_partner.id in ids
+      refute other.id in ids
+    end
+
+    test "a non-numeric with value raises a cast error" do
+      user = confirmed_user_fixture()
+
+      assert_raise Ecto.Query.CastError, fn ->
+        Conversations.list_conversations(user, %{"with" => "not-a-number"}, @pagination)
+      end
+    end
+  end
+
+  describe "load_conversation_page/3" do
+    test "the recipient loads the page, its messages, and marks their side read" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+      refute conversation.to_read
+
+      assert {:ok, %ConversationPage{} = page} =
+               Conversations.load_conversation_page(recipient, conversation.slug, @pagination)
+
+      assert page.conversation.id == conversation.id
+      assert %Ecto.Changeset{data: %Message{}} = page.changeset
+      assert Enum.any?(page.messages.entries, &(&1.body == "Test message body"))
+
+      # The recipient's side of the conversation is marked read as a side effect.
+      assert Repo.reload!(conversation).to_read
+    end
+
+    test "a non-participant moderator loads the page" do
+      conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+
+      assert {:ok, %ConversationPage{}} =
+               Conversations.load_conversation_page(
+                 moderator_user_fixture(),
+                 conversation.slug,
+                 @pagination
+               )
+    end
+
+    test "a non-participant regular user is unauthorized" do
+      conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+
+      assert Conversations.load_conversation_page(
+               confirmed_user_fixture(),
+               conversation.slug,
+               @pagination
+             ) == {:error, :unauthorized}
+    end
+
+    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+      assert Conversations.load_conversation_page(
+               confirmed_user_fixture(),
+               "no-such-slug",
+               @pagination
+             ) == {:error, :unauthorized}
+
+      assert Conversations.load_conversation_page(
+               admin_user_fixture(),
+               "no-such-slug",
+               @pagination
+             ) == {:error, :not_found}
+    end
+  end
+
+  describe "load_new_conversation/2" do
+    test "a signed-in actor gets a changeset prefilled with the recipient" do
+      recipient = confirmed_user_fixture()
+
+      assert {:ok, %Ecto.Changeset{data: %Conversation{recipient: recipient_name}}} =
+               Conversations.load_new_conversation(
+                 actor(confirmed_user_fixture()),
+                 recipient.name
+               )
+
+      assert recipient_name == recipient.name
+    end
+
+    test "a banned actor is rejected even while carrying a fingerprint" do
+      # This is a GET-guarded action, so it runs verify_not_banned: the ban is
+      # decided before the fingerprint requirement.
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Conversations.load_new_conversation(actor, "anyone") == {:error, :ban}
+    end
+  end
+
+  describe "create_conversation/2" do
+    test "a signed-in actor creates a conversation and its first message" do
+      user = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+
+      params = %{
+        "recipient" => recipient.name,
+        "title" => "Hello there",
+        "messages" => %{"0" => %{"body" => "A fine day to you"}}
+      }
+
+      assert {:ok, %Conversation{} = conversation} =
+               Conversations.create_conversation(actor(user), params)
+
+      assert conversation.from_id == user.id
+      assert conversation.to_id == recipient.id
+      assert conversation.title == "Hello there"
+    end
+
+    test "an unknown recipient is a rejected changeset" do
+      params = %{
+        "recipient" => "nobody by this name",
+        "title" => "Hello there",
+        "messages" => %{"0" => %{"body" => "A fine day to you"}}
+      }
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Conversations.create_conversation(actor(confirmed_user_fixture()), params)
+
+      refute changeset.valid?
+    end
+
+    test "a banned actor is rejected" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Conversations.create_conversation(actor, %{"recipient" => "anyone"}) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Conversations.create_conversation(actor, %{"recipient" => "anyone"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "the ban wins over a missing fingerprint" do
+      actor = actor(confirmed_user_fixture(), ban: @ban, fingerprint: nil)
+
+      assert Conversations.create_conversation(actor, %{"recipient" => "anyone"}) ==
+               {:error, :ban}
+    end
+  end
+
+  describe "set_conversation_read/2 and set_conversation_read/3" do
+    test "the recipient marks their conversation read then unread" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_read(recipient, conversation.slug)
+
+      assert Repo.reload!(conversation).to_read
+
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_read(recipient, conversation.slug, false)
+
+      refute Repo.reload!(conversation).to_read
+    end
+
+    test "a non-participant moderator succeeds without changing either read flag" do
+      # The moderator is authorized for :show but is not a participant, so the
+      # read flag is set for neither side.
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_read(moderator_user_fixture(), conversation.slug)
+
+      reloaded = Repo.reload!(conversation)
+      refute reloaded.to_read
+      assert reloaded.from_read
+    end
+
+    test "a non-participant regular user is unauthorized" do
+      conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+
+      assert Conversations.set_conversation_read(confirmed_user_fixture(), conversation.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+      assert Conversations.set_conversation_read(confirmed_user_fixture(), "no-such-slug") ==
+               {:error, :unauthorized}
+
+      assert Conversations.set_conversation_read(admin_user_fixture(), "no-such-slug") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "set_conversation_hidden/2 and set_conversation_hidden/3" do
+    test "the recipient hides then restores their conversation" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_hidden(recipient, conversation.slug)
+
+      assert Repo.reload!(conversation).to_hidden
+
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_hidden(recipient, conversation.slug, false)
+
+      refute Repo.reload!(conversation).to_hidden
+    end
+
+    test "a non-participant regular user is unauthorized" do
+      conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+
+      assert Conversations.set_conversation_hidden(confirmed_user_fixture(), conversation.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+      assert Conversations.set_conversation_hidden(confirmed_user_fixture(), "no-such-slug") ==
+               {:error, :unauthorized}
+
+      assert Conversations.set_conversation_hidden(admin_user_fixture(), "no-such-slug") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "create_message/3" do
+    test "a participant posts a reply and both sides are marked unread" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+      # The recipient reads the conversation, clearing their unread flag.
+      {:ok, _} = Conversations.mark_conversation_read(conversation, recipient)
+
+      assert {:ok, {%Conversation{}, %Message{} = message}} =
+               Conversations.create_message(actor(recipient), conversation.slug, %{
+                 "body" => "a reply from the recipient"
+               })
+
+      assert message.body == "a reply from the recipient"
+
+      # Posting a message marks both sides unread again.
+      reloaded = Repo.reload!(conversation)
+      refute reloaded.to_read
+      refute reloaded.from_read
+    end
+
+    test "a blank body is a message failure carrying the conversation" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+
+      assert {:error, {:message_failed, %Conversation{} = returned}} =
+               Conversations.create_message(actor(recipient), conversation.slug, %{"body" => ""})
+
+      assert returned.id == conversation.id
+    end
+
+    test "a non-participant regular user is unauthorized" do
+      conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+
+      assert Conversations.create_message(actor(confirmed_user_fixture()), conversation.slug, %{
+               "body" => "intruding"
+             }) == {:error, :unauthorized}
+    end
+
+    test "a banned participant is rejected before any loading" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+      actor = actor(recipient, ban: @ban)
+
+      assert Conversations.create_message(actor, conversation.slug, %{"body" => "hi"}) ==
+               {:error, :ban}
+    end
+
+    test "a participant with no fingerprint is unauthorized" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(sender, recipient)
+      actor = actor(recipient, fingerprint: nil)
+
+      assert Conversations.create_message(actor, conversation.slug, %{"body" => "hi"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+      assert Conversations.create_message(actor(confirmed_user_fixture()), "no-such-slug", %{
+               "body" => "hi"
+             }) == {:error, :unauthorized}
+
+      assert Conversations.create_message(actor(admin_user_fixture()), "no-such-slug", %{
+               "body" => "hi"
+             }) == {:error, :not_found}
+    end
+  end
+
+  describe "approve_message/2" do
+    test "a moderator approves a withheld message and a moderation log is written" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      {conversation, message} = unapproved_message(sender, recipient)
+      moderator = moderator_user_fixture()
+
+      assert {:ok, %Message{} = approved} =
+               Conversations.approve_message(moderator, "#{message.id}")
+
+      assert approved.id == message.id
+      assert Repo.reload!(message).approved
+
+      log = only_moderation_log!()
+      assert log.user_id == moderator.id
+      assert log.type == "Conversation.Message.Approve:create"
+      assert log.subject_path == "/"
+      assert log.body == "Approved private message in conversation ##{conversation.id}"
+    end
+
+    test "an admin approves a withheld message" do
+      sender = confirmed_user_fixture()
+      recipient = confirmed_user_fixture()
+      {_conversation, message} = unapproved_message(sender, recipient)
+
+      assert {:ok, %Message{}} =
+               Conversations.approve_message(admin_user_fixture(), "#{message.id}")
+
+      assert Repo.reload!(message).approved
+    end
+
+    test "a non-integer message id is not-found" do
+      assert Conversations.approve_message(moderator_user_fixture(), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "a well-formed id naming no row is unauthorized for a moderator" do
+      # The moderator's :approve grant is on a Message struct; a nil load matches
+      # no rule, so it is unauthorized rather than not-found.
+      assert Conversations.approve_message(moderator_user_fixture(), "999999999") ==
+               {:error, :unauthorized}
+    end
+
+    test "a well-formed id naming no row is not-found for an admin" do
+      # The admin's blanket grant authorizes the nil load; the struct guard then
+      # reports the missing row.
+      assert Conversations.approve_message(admin_user_fixture(), "999999999") ==
+               {:error, :not_found}
+    end
+  end
+end

@@ -11,12 +11,14 @@ defmodule Philomena.ReportsTest do
 
   import Philomena.AttributionFixtures
   import Philomena.CommissionsFixtures
+  import Philomena.ConversationsFixtures
   import Philomena.GalleriesFixtures
   import Philomena.ImagesFixtures
   import Philomena.ReportsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Commissions.Commission
+  alias Philomena.Conversations.Conversation
   alias Philomena.Galleries.Gallery
   alias Philomena.Images.Image
   alias Philomena.ModerationLogs.ModerationLog
@@ -518,6 +520,110 @@ defmodule Philomena.ReportsTest do
 
       assert Reports.load_commission_for_report_creation(actor(nil), user.slug) ==
                {:error, :not_found}
+    end
+  end
+
+  describe "load_conversation_for_report/2" do
+    # Backs the conversation report form (a GET-guarded action): the not-banned
+    # check runs first, then the conversation is loaded by slug and authorized
+    # for :show (participants, moderators, and admins).
+
+    setup do
+      from = confirmed_user_fixture()
+      to = confirmed_user_fixture()
+      %{conversation: conversation_fixture(from, to), from: from, to: to}
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage slug" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_conversation_for_report(actor, "no-such-slug") == {:error, :ban}
+    end
+
+    test "a participant loads the report form for their conversation", %{
+      conversation: conversation,
+      to: to
+    } do
+      assert {:ok, {%Conversation{} = loaded, %Ecto.Changeset{} = changeset}} =
+               Reports.load_conversation_for_report(actor(to), conversation.slug)
+
+      assert loaded.id == conversation.id
+
+      # The changeset is over a Report addressed at this conversation.
+      assert %Report{} = changeset.data
+      assert changeset.data.reportable_type == "Conversation"
+      assert changeset.data.reportable_id == conversation.id
+    end
+
+    test "a non-participant regular user is unauthorized", %{conversation: conversation} do
+      assert Reports.load_conversation_for_report(
+               actor(confirmed_user_fixture()),
+               conversation.slug
+             ) == {:error, :unauthorized}
+    end
+
+    # An unknown slug authorizes nil; no ordinary rule permits it, so a
+    # non-participant is unauthorized, while an admin sees not-found.
+    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+      assert Reports.load_conversation_for_report(actor(confirmed_user_fixture()), "no-such-slug") ==
+               {:error, :unauthorized}
+
+      assert Reports.load_conversation_for_report(actor(admin_user_fixture()), "no-such-slug") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_conversation_for_report_creation/2" do
+    # Backs the conversation report submission (a write): the write-access check
+    # runs first, then the same conversation load-and-authorize chain as the
+    # report form.
+
+    setup do
+      from = confirmed_user_fixture()
+      to = confirmed_user_fixture()
+      %{conversation: conversation_fixture(from, to), from: from, to: to}
+    end
+
+    test "a banned actor is rejected even while carrying a fingerprint" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_conversation_for_report_creation(actor, "no-such-slug") ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading", %{
+      conversation: conversation
+    } do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Reports.load_conversation_for_report_creation(actor, conversation.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "a participant loads their conversation", %{conversation: conversation, to: to} do
+      assert {:ok, %Conversation{} = loaded} =
+               Reports.load_conversation_for_report_creation(actor(to), conversation.slug)
+
+      assert loaded.id == conversation.id
+    end
+
+    test "a non-participant regular user is unauthorized", %{conversation: conversation} do
+      assert Reports.load_conversation_for_report_creation(
+               actor(confirmed_user_fixture()),
+               conversation.slug
+             ) == {:error, :unauthorized}
+    end
+
+    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+      assert Reports.load_conversation_for_report_creation(
+               actor(confirmed_user_fixture()),
+               "no-such-slug"
+             ) == {:error, :unauthorized}
+
+      assert Reports.load_conversation_for_report_creation(
+               actor(admin_user_fixture()),
+               "no-such-slug"
+             ) == {:error, :not_found}
     end
   end
 end
