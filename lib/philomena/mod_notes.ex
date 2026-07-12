@@ -4,10 +4,13 @@ defmodule Philomena.ModNotes do
   """
 
   import Ecto.Query, warn: false
-  alias Philomena.Repo
+  import Philomena.Authorization, only: [authorize: 3]
 
+  alias Philomena.Repo
+  alias Philomena.IntegerId
   alias Philomena.ModNotes.ModNote
   alias Philomena.Polymorphic
+  alias Philomena.Users.User
 
   @doc """
   Returns a list of 2-tuples of mod notes and rendered output for the notable type and id.
@@ -103,6 +106,56 @@ defmodule Philomena.ModNotes do
   end
 
   @doc """
+  Assembles the admin mod-note listing, on behalf of `actor`, rendering each
+  note's body with `collection_renderer` and paginating with `pagination`.
+
+  Authorizes `:index` against the mod-note model first, so a viewer without
+  mod-note access is `{:error, :unauthorized}`. When `params` carries both
+  `"notable_type"` and `"notable_id"` the list is filtered to that notable;
+  otherwise all notes are listed newest first.
+
+  Returns `{:ok, mod_notes}` as a `m:Scrivener.Page` of `{note, rendered}`
+  2-tuples, or `{:error, :unauthorized}`.
+  """
+  @spec load_mod_note_index(User.t() | nil, map(), (list() -> list()), map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def load_mod_note_index(actor, params, collection_renderer, pagination) do
+    with :ok <- authorize(actor, :index, ModNote) do
+      mod_notes =
+        case params do
+          %{"notable_type" => type, "notable_id" => id} ->
+            list_mod_notes_by_notable_type_and_id(type, id, collection_renderer, pagination)
+
+          _ ->
+            list_mod_notes(collection_renderer, pagination)
+        end
+
+      {:ok, mod_notes}
+    end
+  end
+
+  @doc """
+  Builds the changeset backing the new-mod-note form, on behalf of `actor`,
+  seeded with the `"notable_type"` and `"notable_id"` from `params`.
+
+  Authorizes `:new` against the mod-note model. Returns `{:ok, changeset}` or
+  `{:error, :unauthorized}`.
+  """
+  @spec new_mod_note(User.t() | nil, map()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_mod_note(actor, params) do
+    with :ok <- authorize(actor, :new, ModNote) do
+      changeset =
+        change_mod_note(%ModNote{
+          notable_type: params["notable_type"],
+          notable_id: params["notable_id"]
+        })
+
+      {:ok, changeset}
+    end
+  end
+
+  @doc """
   Gets a single mod_note.
 
   Raises `Ecto.NoResultsError` if the Mod note does not exist.
@@ -119,21 +172,65 @@ defmodule Philomena.ModNotes do
   def get_mod_note!(id), do: Repo.get!(ModNote, id)
 
   @doc """
-  Creates a mod_note.
+  Creates a mod note on behalf of `actor`, who becomes its moderator.
+
+  Authorizes `:create` against the mod-note model, then inserts the note.
+  Returns `{:ok, mod_note}`, `{:error, :unauthorized}`, or
+  `{:error, %Ecto.Changeset{}}`.
 
   ## Examples
 
-      iex> create_mod_note(%{field: value})
+      iex> create_mod_note(moderator, %{field: value})
       {:ok, %ModNote{}}
 
-      iex> create_mod_note(%{field: bad_value})
+      iex> create_mod_note(moderator, %{field: bad_value})
       {:error, %Ecto.Changeset{}}
 
   """
-  def create_mod_note(creator, attrs \\ %{}) do
-    %ModNote{moderator_id: creator.id}
-    |> ModNote.changeset(attrs)
-    |> Repo.insert()
+  @spec create_mod_note(User.t() | nil, map()) ::
+          {:ok, ModNote.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_mod_note(actor, attrs \\ %{}) do
+    with :ok <- authorize(actor, :create, ModNote) do
+      %ModNote{moderator_id: actor.id}
+      |> ModNote.changeset(attrs)
+      |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Loads the mod note named by the raw request `id` for editing, on behalf of
+  `actor`, pairing it with the changeset backing the edit form.
+
+  Authorizes `:edit` against the loaded note: a non-castable id is
+  `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
+  which no ordinary rule permits, so it is `{:error, :unauthorized}`
+  (`{:error, :not_found}` for admins). A moderator may only touch their own
+  notes.
+
+  Returns `{:ok, {mod_note, changeset}}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}`.
+  """
+  @spec load_mod_note_for_edit(User.t() | nil, any()) ::
+          {:ok, {ModNote.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+  def load_mod_note_for_edit(actor, id) do
+    with {:ok, mod_note} <- load_mod_note(actor, id, :edit) do
+      {:ok, {mod_note, change_mod_note(mod_note)}}
+    end
+  end
+
+  @doc """
+  Updates the mod note named by the raw request `id`, on behalf of `actor`.
+
+  Loading and authorization follow `load_mod_note_for_edit/2`, authorizing
+  `:update`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`,
+  `{:error, :not_found}`, or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_mod_note(User.t() | nil, any(), map()) ::
+          {:ok, ModNote.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_mod_note(actor, id, attrs) do
+    with {:ok, mod_note} <- load_mod_note(actor, id, :update) do
+      update_mod_note(mod_note, attrs)
+    end
   end
 
   @doc """
@@ -155,6 +252,21 @@ defmodule Philomena.ModNotes do
   end
 
   @doc """
+  Deletes the mod note named by the raw request `id`, on behalf of `actor`.
+
+  Loading and authorization follow `load_mod_note_for_edit/2`, authorizing
+  `:delete`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}`.
+  """
+  @spec delete_mod_note(User.t() | nil, any()) ::
+          {:ok, ModNote.t()} | {:error, :unauthorized | :not_found}
+  def delete_mod_note(actor, id) do
+    with {:ok, mod_note} <- load_mod_note(actor, id, :delete) do
+      delete_mod_note(mod_note)
+    end
+  end
+
+  @doc """
   Deletes a ModNote.
 
   ## Examples
@@ -168,6 +280,22 @@ defmodule Philomena.ModNotes do
   """
   def delete_mod_note(%ModNote{} = mod_note) do
     Repo.delete(mod_note)
+  end
+
+  # Loads the mod note named by the raw request `id` and authorizes `action`
+  # against it: a non-castable id or a `nil` load the actor was permitted to act
+  # on (an admin) is `{:error, :not_found}`, while a `nil` or real note the
+  # actor may not act on is `{:error, :unauthorized}`.
+  defp load_mod_note(actor, id, action) do
+    with {:ok, id} <- IntegerId.parse(id),
+         mod_note = Repo.get(ModNote, id),
+         :ok <- authorize(actor, action, mod_note),
+         %ModNote{} <- mod_note do
+      {:ok, mod_note}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc """

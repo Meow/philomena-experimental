@@ -2,35 +2,28 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.MarkdownRenderer
-  alias Philomena.ModNotes.ModNote
   alias Philomena.ModNotes
 
-  plug :load_and_authorize_resource, model: ModNote
+  action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    pagination = conn.assigns.scrivener
     renderer = &MarkdownRenderer.render_collection(&1, conn)
 
-    mod_notes =
-      case params do
-        %{"notable_type" => type, "notable_id" => id} ->
-          ModNotes.list_mod_notes_by_notable_type_and_id(type, id, renderer, pagination)
-
-        _ ->
-          ModNotes.list_mod_notes(renderer, pagination)
-      end
-
-    render(conn, "index.html", title: "Admin - Mod Notes", mod_notes: mod_notes)
+    with {:ok, mod_notes} <-
+           ModNotes.load_mod_note_index(
+             conn.assigns.current_user,
+             params,
+             renderer,
+             conn.assigns.scrivener
+           ) do
+      render(conn, "index.html", title: "Admin - Mod Notes", mod_notes: mod_notes)
+    end
   end
 
   def new(conn, params) do
-    changeset =
-      ModNotes.change_mod_note(%ModNote{
-        notable_type: params["notable_type"],
-        notable_id: params["notable_id"]
-      })
-
-    render(conn, "new.html", title: "New Mod Note", changeset: changeset)
+    with {:ok, changeset} <- ModNotes.new_mod_note(conn.assigns.current_user, params) do
+      render(conn, "new.html", title: "New Mod Note", changeset: changeset)
+    end
   end
 
   def create(conn, %{"mod_note" => mod_note_params}) do
@@ -40,33 +33,45 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
         |> put_flash(:info, "Successfully created mod note.")
         |> redirect(to: ~p"/admin/mod_notes")
 
-      {:error, changeset} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  def edit(conn, _params) do
-    changeset = ModNotes.change_mod_note(conn.assigns.mod_note)
-    render(conn, "edit.html", title: "Editing Mod Note", changeset: changeset)
+  def edit(conn, %{"id" => id}) do
+    with {:ok, {mod_note, changeset}} <-
+           ModNotes.load_mod_note_for_edit(conn.assigns.current_user, id) do
+      render(conn, "edit.html",
+        title: "Editing Mod Note",
+        mod_note: mod_note,
+        changeset: changeset
+      )
+    end
   end
 
-  def update(conn, %{"mod_note" => mod_note_params}) do
-    case ModNotes.update_mod_note(conn.assigns.mod_note, mod_note_params) do
+  def update(conn, %{"id" => id, "mod_note" => mod_note_params}) do
+    case ModNotes.update_mod_note(conn.assigns.current_user, id, mod_note_params) do
       {:ok, _mod_note} ->
         conn
         |> put_flash(:info, "Successfully updated mod note.")
         |> redirect(to: ~p"/admin/mod_notes")
 
-      {:error, changeset} ->
-        render(conn, "edit.html", changeset: changeset)
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "edit.html", mod_note: changeset.data, changeset: changeset)
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  def delete(conn, _params) do
-    {:ok, _mod_note} = ModNotes.delete_mod_note(conn.assigns.mod_note)
-
-    conn
-    |> put_flash(:info, "Successfully deleted mod note.")
-    |> redirect(to: ~p"/admin/mod_notes")
+  def delete(conn, %{"id" => id}) do
+    with {:ok, _mod_note} <- ModNotes.delete_mod_note(conn.assigns.current_user, id) do
+      conn
+      |> put_flash(:info, "Successfully deleted mod note.")
+      |> redirect(to: ~p"/admin/mod_notes")
+    end
   end
 end

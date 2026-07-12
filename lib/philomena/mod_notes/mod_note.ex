@@ -4,6 +4,8 @@ defmodule Philomena.ModNotes.ModNote do
 
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "mod_notes" do
     belongs_to :moderator, User
 
