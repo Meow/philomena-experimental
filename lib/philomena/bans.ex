@@ -229,6 +229,180 @@ defmodule Philomena.Bans do
   end
 
   @doc """
+  Returns the paginated subnet bans for the admin listing, on behalf of `actor`.
+
+  Authorizes `:index` against the subnet-ban model, then filters by the `"bq"`
+  full-text search or by the `"ip"` branch (subnet bans containing the address)
+  when either is present, newest first. Returns `{:ok, subnet_bans}` as a
+  `m:Scrivener.Page`, `{:error, :unauthorized}`, or `{:error, {:invalid_ip, ip}}`
+  when the `"ip"` branch value is not a valid address or CIDR range.
+  """
+  @spec admin_subnet_bans(Users.User.t() | nil, map(), map() | keyword()) ::
+          {:ok, Scrivener.Page.t()}
+          | {:error, :unauthorized | {:invalid_ip, String.t()}}
+  def admin_subnet_bans(actor, params, pagination) do
+    with :ok <- authorize(actor, :index, Subnet),
+         {:ok, query} <- subnet_bans_query(params) do
+      subnet_bans =
+        query
+        |> order_by(desc: :created_at)
+        |> preload(:banning_user)
+        |> Repo.paginate(pagination)
+
+      {:ok, subnet_bans}
+    end
+  end
+
+  defp subnet_bans_query(%{"bq" => q}) when is_binary(q) do
+    query =
+      where(
+        Subnet,
+        [sb],
+        sb.generated_ban_id == ^q or
+          fragment("to_tsvector(?) @@ plainto_tsquery(?)", sb.reason, ^q) or
+          fragment("to_tsvector(?) @@ plainto_tsquery(?)", sb.note, ^q)
+      )
+
+    {:ok, query}
+  end
+
+  defp subnet_bans_query(%{"ip" => ip}) when is_binary(ip) do
+    case EctoNetwork.INET.cast(ip) do
+      {:ok, ip} ->
+        {:ok, where(Subnet, [sb], fragment("? >>= ?", sb.specification, ^ip))}
+
+      _error ->
+        {:error, {:invalid_ip, ip}}
+    end
+  end
+
+  defp subnet_bans_query(_params), do: {:ok, Subnet}
+
+  @doc """
+  Builds the new-subnet-ban form for `actor`, prefilling the specification from
+  the raw `specification` param (which may be `nil`).
+
+  Authorizes `:new` against the subnet-ban model, then casts the specification.
+  Returns `{:ok, %Subnet{}}` (blank, or with the parsed specification),
+  `{:error, :unauthorized}`, or `{:error, {:invalid_ip, ip}}` when the
+  specification is not a valid address or CIDR range.
+  """
+  @spec new_subnet_ban(Users.User.t() | nil, any()) ::
+          {:ok, Subnet.t()} | {:error, :unauthorized | {:invalid_ip, String.t()}}
+  def new_subnet_ban(actor, specification) do
+    with :ok <- authorize(actor, :new, Subnet) do
+      new_subnet_from_specification(specification)
+    end
+  end
+
+  defp new_subnet_from_specification(ip) when is_binary(ip) do
+    case EctoNetwork.INET.cast(ip) do
+      {:ok, ip} -> {:ok, %Subnet{specification: ip}}
+      _error -> {:error, {:invalid_ip, ip}}
+    end
+  end
+
+  defp new_subnet_from_specification(_specification), do: {:ok, %Subnet{}}
+
+  @doc """
+  Creates a subnet ban on behalf of `actor`.
+
+  Authorizes `:create` against the subnet-ban model, inserts the ban through
+  `create_subnet/2`, and writes an `"Admin.SubnetBan:create"` moderation log on
+  success.
+
+  Returns `{:ok, subnet_ban}`, `{:error, :unauthorized}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec create_subnet_ban(Users.User.t() | nil, map()) ::
+          {:ok, Subnet.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_subnet_ban(actor, attrs) do
+    with :ok <- authorize(actor, :create, Subnet),
+         {:ok, subnet_ban} <- create_subnet(actor, attrs) do
+      log_subnet_ban(actor, "Admin.SubnetBan:create", subnet_ban, "Created")
+      {:ok, subnet_ban}
+    end
+  end
+
+  @doc """
+  Loads the subnet ban named by the raw request `id` for editing, on behalf of
+  `actor`, pairing it with the changeset backing the edit form.
+
+  Authorizes `:edit` against the subnet-ban model, then loads the ban. Returns
+  `{:ok, {subnet_ban, changeset}}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}` for a non-castable or unknown id.
+  """
+  @spec load_subnet_ban_for_edit(Users.User.t() | nil, any()) ::
+          {:ok, {Subnet.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+  def load_subnet_ban_for_edit(actor, id) do
+    with :ok <- authorize(actor, :edit, Subnet),
+         {:ok, subnet_ban} <- load_subnet_ban(id) do
+      {:ok, {subnet_ban, change_subnet(subnet_ban)}}
+    end
+  end
+
+  @doc """
+  Updates the subnet ban named by the raw request `id`, on behalf of `actor`.
+
+  Authorizes `:update` against the subnet-ban model, loads the ban, applies the
+  update through `update_subnet/2`, and writes an `"Admin.SubnetBan:update"`
+  moderation log on success.
+
+  Returns `{:ok, subnet_ban}`, `{:error, :unauthorized}`, `{:error, :not_found}`,
+  or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_subnet_ban(Users.User.t() | nil, any(), map()) ::
+          {:ok, Subnet.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_subnet_ban(actor, id, attrs) do
+    with :ok <- authorize(actor, :update, Subnet),
+         {:ok, subnet_ban} <- load_subnet_ban(id),
+         {:ok, subnet_ban} <- update_subnet(subnet_ban, attrs) do
+      log_subnet_ban(actor, "Admin.SubnetBan:update", subnet_ban, "Updated")
+      {:ok, subnet_ban}
+    end
+  end
+
+  @doc """
+  Deletes the subnet ban named by the raw request `id`, on behalf of `actor`.
+
+  Authorizes `:delete` against the subnet-ban model, loads the ban, and requires
+  `actor` to be an admin. Writes an `"Admin.SubnetBan:delete"` moderation log on
+  success.
+
+  Returns `{:ok, subnet_ban}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}`.
+  """
+  @spec delete_subnet_ban(Users.User.t() | nil, any()) ::
+          {:ok, Subnet.t()} | {:error, :unauthorized | :not_found}
+  def delete_subnet_ban(actor, id) do
+    with :ok <- authorize(actor, :delete, Subnet),
+         {:ok, subnet_ban} <- load_subnet_ban(id),
+         :ok <- verify_can_delete(actor) do
+      {:ok, subnet_ban} = delete_subnet(subnet_ban)
+      log_subnet_ban(actor, "Admin.SubnetBan:delete", subnet_ban, "Deleted")
+      {:ok, subnet_ban}
+    end
+  end
+
+  defp load_subnet_ban(id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         %Subnet{} = subnet_ban <- Repo.get(Subnet, id) do
+      {:ok, subnet_ban}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp log_subnet_ban(actor, type, ban, verb) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      type,
+      "/admin/subnet_bans",
+      "#{verb} a subnet ban #{ban.generated_ban_id}"
+    )
+  end
+
+  @doc """
   Returns the list of user bans.
 
   ## Examples
