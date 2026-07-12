@@ -536,6 +536,30 @@ defmodule Philomena.Users do
   end
 
   @doc """
+  Consumes a second-factor token for the given user during sign-in.
+
+  Accepts the controller-shaped `params` (with the `"user"` / `"twofactor_token"`
+  keys), validating the token against the user's TOTP secret or, failing that,
+  its remaining backup codes. A matching TOTP code records the consumed timestep;
+  a matching backup code removes it from the list.
+
+  Returns `{:ok, user}` when the token is accepted, or
+  `{:error, %Ecto.Changeset{}}` when it is not.
+
+  ## Examples
+
+      iex> consume_totp_token(user, %{"user" => %{"twofactor_token" => "123456"}})
+      {:ok, %User{}}
+
+  """
+  @spec consume_totp_token(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def consume_totp_token(%User{} = user, params) do
+    user
+    |> User.consume_totp_token_changeset(params)
+    |> Repo.update()
+  end
+
+  @doc """
   Gets the user with the given signed token.
   """
   def get_user_by_session_token(token) do

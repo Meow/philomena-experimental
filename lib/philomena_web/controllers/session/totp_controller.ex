@@ -3,9 +3,7 @@ defmodule PhilomenaWeb.Session.TotpController do
 
   alias PhilomenaWeb.LayoutView
   alias PhilomenaWeb.UserAuth
-  alias Philomena.Users.User
   alias Philomena.Users
-  alias Philomena.Repo
 
   def new(conn, _params) do
     changeset = Users.change_user(conn.assigns.current_user)
@@ -14,15 +12,12 @@ defmodule PhilomenaWeb.Session.TotpController do
   end
 
   def create(conn, %{"user" => user_params} = params) when is_map(user_params) do
-    conn.assigns.current_user
-    |> User.consume_totp_token_changeset(params)
-    |> Repo.update()
-    |> case do
-      {:error, _changeset} ->
-        invalid_token(conn)
-
+    case Users.consume_totp_token(conn.assigns.current_user, params) do
       {:ok, user} ->
         UserAuth.totp_auth_user(conn, user, user_params)
+
+      {:error, _changeset} ->
+        invalid_token(conn)
     end
   end
 
