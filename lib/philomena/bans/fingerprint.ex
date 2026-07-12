@@ -5,6 +5,8 @@ defmodule Philomena.Bans.Fingerprint do
 
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "fingerprint_bans" do
     belongs_to :banning_user, User
 

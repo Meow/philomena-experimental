@@ -28,6 +28,17 @@ defmodule Philomena.Bans do
   end
 
   @doc """
+  Returns the fingerprint bans matching `fingerprint`, newest first.
+  """
+  @spec fingerprint_bans_for(String.t()) :: [Fingerprint.t()]
+  def fingerprint_bans_for(fingerprint) do
+    Fingerprint
+    |> where(fingerprint: ^fingerprint)
+    |> order_by(desc: :created_at)
+    |> Repo.all()
+  end
+
+  @doc """
   Returns the subnet bans whose specification contains `ip`, newest first.
   """
   @spec subnet_bans_for_ip(Postgrex.INET.t()) :: [Subnet.t()]

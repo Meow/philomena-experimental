@@ -4,6 +4,8 @@ defmodule Philomena.UserFingerprints.UserFingerprint do
 
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "user_fingerprints" do
     belongs_to :user, User
 
