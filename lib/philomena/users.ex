@@ -457,6 +457,64 @@ defmodule Philomena.Users do
     end
   end
 
+  ## Two-factor authentication
+
+  @doc """
+  Generates and stores a fresh TOTP secret for the user's account.
+
+  Backs the first visit to the 2FA setup form, where the secret must exist
+  before its QR code and confirmation field can be shown. Does not reindex.
+
+  ## Examples
+
+      iex> setup_totp_secret(user)
+      {:ok, %User{}}
+
+  """
+  @spec setup_totp_secret(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def setup_totp_secret(%User{} = user) do
+    user
+    |> User.create_totp_secret_changeset()
+    |> Repo.update()
+  end
+
+  @doc """
+  Enables or disables two-factor authentication for the user's account.
+
+  Accepts the controller-shaped `params` carrying the current password and
+  second-factor token. When TOTP is off and the password and token check out it
+  is enabled and a fresh set of backup codes is generated; when TOTP is on it is
+  disabled. On success the user is reindexed.
+
+  Returns `{:ok, user, backup_codes}` - the plaintext backup codes are returned
+  for one-time display and are always freshly generated, even when disabling -
+  or `{:error, %Ecto.Changeset{}}` when the password or token is rejected.
+
+  ## Examples
+
+      iex> update_totp(user, %{"user" => %{"current_password" => "...", "twofactor_token" => "..."}})
+      {:ok, %User{}, ["a1b2c3d4e5f6", ...]}
+
+  """
+  @spec update_totp(User.t(), map()) ::
+          {:ok, User.t(), [String.t()]} | {:error, Ecto.Changeset.t()}
+  def update_totp(%User{} = user, params) do
+    backup_codes = User.random_backup_codes()
+
+    user
+    |> User.totp_changeset(params, backup_codes)
+    |> Repo.update()
+    |> case do
+      {:ok, user} ->
+        reindex_user(user)
+
+        {:ok, user, backup_codes}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
   ## Session
 
   @doc """
