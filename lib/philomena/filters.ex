@@ -421,6 +421,33 @@ defmodule Philomena.Filters do
   end
 
   @doc """
+  Makes the filter named by `id` public on behalf of `user`.
+
+  Loads the filter, authorizes `:edit` (its owner only), then makes it public.
+  A non-castable `id` is `{:error, :not_found}`; a well-formed unknown `id` the
+  actor may act on (an admin) is `{:error, :not_found}`, otherwise
+  `{:error, :unauthorized}`.
+
+  Returns `{:ok, %Filter{}}`, `{:error, %Ecto.Changeset{}}`,
+  `{:error, :not_found}`, or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> make_filter_public(user, "1")
+      {:ok, %Filter{}}
+
+  """
+  @spec make_filter_public(User.t() | nil, any()) ::
+          {:ok, Filter.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized}
+  def make_filter_public(user, id) do
+    with {:ok, filter} <- load_and_authorize_filter(user, id, :edit) do
+      make_filter_public(filter)
+    end
+  end
+
+  @doc """
   Deletes a Filter.
 
   ## Examples
