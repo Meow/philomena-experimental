@@ -1199,6 +1199,60 @@ defmodule Philomena.Users do
     end
   end
 
+  @doc """
+  Grants verification to the user named by `slug`, on behalf of `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success verification is granted, the account
+  reindexed, and a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_verify_user(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_verify_user(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      {:ok, user} = verify_user(user)
+
+      log_managed_user(
+        actor,
+        user,
+        "Admin.User.Verification:create",
+        "Granted verification to #{user.name}"
+      )
+
+      {:ok, user}
+    end
+  end
+
+  @doc """
+  Revokes verification from the user named by `slug`, on behalf of `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success verification is revoked, the account
+  reindexed, and a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_unverify_user(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_unverify_user(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      {:ok, user} = unverify_user(user)
+
+      log_managed_user(
+        actor,
+        user,
+        "Admin.User.Verification:delete",
+        "Revoked verification from #{user.name}"
+      )
+
+      {:ok, user}
+    end
+  end
+
   defp user_by_slug_with_roles(slug) do
     User
     |> Repo.get_by(slug: slug)
