@@ -12,9 +12,11 @@
 
 alias Philomena.{Repo, Forums.Forum, Users, Users.User}
 alias Philomena.Comments
+alias Philomena.Comments.Comment
 alias Philomena.Images
 alias Philomena.Topics
 alias Philomena.Posts
+alias Philomena.Posts.Post
 alias Philomena.Tags
 
 {:ok, ip} = EctoNetwork.INET.cast({203, 0, 113, 0})
@@ -43,6 +45,12 @@ request_attributes = [
   user_id: pleb.id,
   user: pleb
 ]
+pleb_actor = %Philomena.Attribution.Actor{
+  user: pleb,
+  ip: ip,
+  fingerprint: "c1836832948",
+  ban: nil
+}
 
 IO.puts "---- Generating images"
 for image_def <- resources["remote_images"] do
@@ -84,12 +92,12 @@ for comment_body <- resources["comments"] do
   image = Images.get_image!(1)
 
   Comments.create_comment(
+    pleb_actor,
     image,
-    request_attributes,
     %{"body" => comment_body}
   )
   |> case do
-    {:ok, %{comment: comment}} ->
+    {:ok, %Comment{} = comment} ->
       Comments.approve_comment(comment, pleb)
       Comments.reindex_comment(comment)
       Images.reindex_image(image)
@@ -105,8 +113,8 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
 
   for %{"title" => topic_name, "posts" => [first_post | posts]} <- topics do
     Topics.create_topic(
-      forum,
-      request_attributes,
+      pleb_actor,
+      forum.short_name,
       %{
         "title" => topic_name,
         "posts" => %{
@@ -120,8 +128,9 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
       {:ok, %{topic: topic}} ->
         for post <- posts do
           Posts.create_post(
-            topic,
-            request_attributes,
+            pleb_actor,
+            forum.short_name,
+            topic.slug,
             %{"body" => post}
           )
           |> case do
