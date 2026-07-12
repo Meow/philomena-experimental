@@ -939,10 +939,67 @@ defmodule Philomena.Users do
     end
   end
 
+  @doc """
+  Reactivates the deactivated user named by `slug`, on behalf of `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success the account is reactivated, reindexed, and
+  a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_reactivate_user(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_reactivate_user(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      {:ok, user} = reactivate_user(user)
+      log_managed_user(actor, user, "Admin.User.Activation:create", "Reactivated #{user.name}")
+
+      {:ok, user}
+    end
+  end
+
+  @doc """
+  Deactivates the user named by `slug`, on behalf of `actor`, recording `actor`
+  as the deactivator.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success the account is deactivated, reindexed, and
+  a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_deactivate_user(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_deactivate_user(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      {:ok, user} = deactivate_user(actor, user)
+      log_managed_user(actor, user, "Admin.User.Activation:delete", "Deactivated #{user.name}")
+
+      {:ok, user}
+    end
+  end
+
   defp user_by_slug_with_roles(slug) do
     User
     |> Repo.get_by(slug: slug)
     |> Repo.preload([:roles])
+  end
+
+  # Authorizes `actor` for `:edit` against the user schema, matching the gate on
+  # the staff user-management surfaces, then loads the target by slug. An
+  # unauthorized actor is rejected before the load; a well-formed slug naming no
+  # row is `{:error, :not_found}`.
+  defp load_managed_user(actor, slug) do
+    with :ok <- authorize(actor, :edit, %User{}),
+         %User{} = user <- Repo.get_by(User, slug: slug) do
+      {:ok, user}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
   end
 
   defp log_managed_user(actor, user, type, body) do
