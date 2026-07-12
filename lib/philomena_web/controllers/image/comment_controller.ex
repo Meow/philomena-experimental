@@ -1,7 +1,6 @@
 defmodule PhilomenaWeb.Image.CommentController do
   use PhilomenaWeb, :controller
 
-  alias PhilomenaWeb.CommentLoader
   alias PhilomenaWeb.MarkdownRenderer
   alias Philomena.Comments
 
@@ -18,13 +17,24 @@ defmodule PhilomenaWeb.Image.CommentController do
   plug PhilomenaWeb.FilterForcedUsersPlug when action in [:create, :edit, :update]
 
   def index(conn, %{"comment_id" => comment_id}) do
-    page = CommentLoader.find_page(conn, conn.assigns.image, comment_id)
+    page =
+      Comments.find_comment_page(
+        conn.assigns.current_user,
+        conn.assigns.image,
+        comment_id,
+        conn.assigns.comment_scrivener
+      )
 
     redirect(conn, to: ~p"/images/#{conn.assigns.image}/comments?#{[page: page]}")
   end
 
   def index(conn, _params) do
-    comments = CommentLoader.load_comments(conn, conn.assigns.image)
+    comments =
+      Comments.paginate_image_comments(
+        conn.assigns.current_user,
+        conn.assigns.image,
+        conn.assigns.comment_scrivener
+      )
 
     rendered = MarkdownRenderer.render_collection(comments.entries, conn)
 
