@@ -109,6 +109,37 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Returns the paginated approval queue for `actor`: unapproved images, oldest
+  first, with the listing preloads.
+
+  Authorizes `:approve` against the image model. Returns `{:ok, images}` as a
+  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_approval_queue(moderator, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_approval_queue(user, pagination)
+      {:error, :unauthorized}
+
+  """
+  @spec load_approval_queue(User.t() | nil, map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def load_approval_queue(actor, pagination) do
+    with :ok <- authorize(actor, :approve, %Image{}) do
+      images =
+        Image
+        |> where(approved: false)
+        |> order_by(asc: :id)
+        |> preload([:user, :sources, tags: [:aliases, :aliased_tag]])
+        |> Repo.paginate(pagination)
+
+      {:ok, images}
+    end
+  end
+
+  @doc """
   Runs the search the scope's "q" parameter describes for the viewer.
 
   Compiles "q" against the viewer's filter and display switches and executes
