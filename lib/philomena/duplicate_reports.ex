@@ -550,7 +550,7 @@ defmodule Philomena.DuplicateReports do
 
     Multi.new()
     |> Multi.run(:reject_duplicate_report, fn _, %{} ->
-      reject_duplicate_report(duplicate_report, user)
+      reject_report(duplicate_report, user)
     end)
     |> accept_report_multi(new_report, user)
   end
@@ -637,17 +637,47 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Rejects a duplicate report.
+  Rejects the duplicate report named by `id`, on behalf of `actor` (the acting
+  user).
 
-  Updates the duplicate report's state to rejected and records the user who rejected it.
+  The report is authorized for `:edit` after being loaded by id (with its images
+  preloaded for the log), with the same not-found/unauthorized shapes as
+  `accept_duplicate_report/2`. The report is marked rejected by the actor and a
+  moderation log is written on success.
+
+  Returns `{:ok, duplicate_report}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
 
   ## Examples
 
-      iex> reject_duplicate_report(duplicate_report, user)
+      iex> reject_duplicate_report(moderator, "42")
       {:ok, %DuplicateReport{}}
 
   """
-  def reject_duplicate_report(%DuplicateReport{} = duplicate_report, user) do
+  @spec reject_duplicate_report(User.t() | nil, String.t() | integer()) ::
+          {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
+  def reject_duplicate_report(actor, id) do
+    with {:ok, report_id} <- IntegerId.parse(id),
+         report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
+         :ok <- authorize(actor, :edit, report),
+         %DuplicateReport{} <- report do
+      {:ok, report} = reject_report(report, actor)
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "DuplicateReport.Reject:create",
+        "/duplicate_reports",
+        "Rejected duplicate report (#{report.image.id} -> #{report.duplicate_of_image.id})"
+      )
+
+      {:ok, report}
+    else
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
+  end
+
+  defp reject_report(%DuplicateReport{} = duplicate_report, user) do
     duplicate_report
     |> DuplicateReport.reject_changeset(user)
     |> Repo.update()
