@@ -135,6 +135,162 @@ defmodule Philomena.Bans do
   end
 
   @doc """
+  Returns the paginated fingerprint bans for the admin listing, on behalf of
+  `actor`.
+
+  Authorizes `:index` against the fingerprint-ban model, then filters by the
+  `"bq"` full-text search or the exact `"fingerprint"` branch when either is
+  present, newest first. Returns `{:ok, fingerprint_bans}` as a
+  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  """
+  @spec admin_fingerprint_bans(Users.User.t() | nil, map(), map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def admin_fingerprint_bans(actor, params, pagination) do
+    with :ok <- authorize(actor, :index, Fingerprint) do
+      fingerprint_bans =
+        params
+        |> fingerprint_bans_query()
+        |> order_by(desc: :created_at)
+        |> preload(:banning_user)
+        |> Repo.paginate(pagination)
+
+      {:ok, fingerprint_bans}
+    end
+  end
+
+  defp fingerprint_bans_query(%{"bq" => q}) when is_binary(q) do
+    where(
+      Fingerprint,
+      [fb],
+      ilike(fb.fingerprint, ^"%#{q}%") or
+        fb.generated_ban_id == ^q or
+        fragment("to_tsvector(?) @@ plainto_tsquery(?)", fb.reason, ^q) or
+        fragment("to_tsvector(?) @@ plainto_tsquery(?)", fb.note, ^q)
+    )
+  end
+
+  defp fingerprint_bans_query(%{"fingerprint" => fingerprint}) when is_binary(fingerprint) do
+    where(Fingerprint, fingerprint: ^fingerprint)
+  end
+
+  defp fingerprint_bans_query(_params), do: Fingerprint
+
+  @doc """
+  Builds the new-fingerprint-ban form for `actor`, prefilling the fingerprint
+  from the raw `fingerprint` param (which may be `nil`).
+
+  Authorizes `:new` against the fingerprint-ban model. Returns
+  `{:ok, changeset}` or `{:error, :unauthorized}`.
+  """
+  @spec new_fingerprint_ban(Users.User.t() | nil, any()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_fingerprint_ban(actor, fingerprint) do
+    with :ok <- authorize(actor, :new, Fingerprint) do
+      {:ok, change_fingerprint(%Fingerprint{fingerprint: fingerprint})}
+    end
+  end
+
+  @doc """
+  Creates a fingerprint ban on behalf of `actor`.
+
+  Authorizes `:create` against the fingerprint-ban model, inserts the ban
+  through `create_fingerprint/2`, and writes an `"Admin.FingerprintBan:create"`
+  moderation log on success.
+
+  Returns `{:ok, fingerprint_ban}`, `{:error, :unauthorized}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec create_fingerprint_ban(Users.User.t() | nil, map()) ::
+          {:ok, Fingerprint.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_fingerprint_ban(actor, attrs) do
+    with :ok <- authorize(actor, :create, Fingerprint),
+         {:ok, fingerprint_ban} <- create_fingerprint(actor, attrs) do
+      log_fingerprint_ban(actor, "Admin.FingerprintBan:create", fingerprint_ban, "Created")
+      {:ok, fingerprint_ban}
+    end
+  end
+
+  @doc """
+  Loads the fingerprint ban named by the raw request `id` for editing, on behalf
+  of `actor`, pairing it with the changeset backing the edit form.
+
+  Authorizes `:edit` against the fingerprint-ban model, then loads the ban.
+  Returns `{:ok, {fingerprint_ban, changeset}}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}` for a non-castable or unknown id.
+  """
+  @spec load_fingerprint_ban_for_edit(Users.User.t() | nil, any()) ::
+          {:ok, {Fingerprint.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+  def load_fingerprint_ban_for_edit(actor, id) do
+    with :ok <- authorize(actor, :edit, Fingerprint),
+         {:ok, fingerprint_ban} <- load_fingerprint_ban(id) do
+      {:ok, {fingerprint_ban, change_fingerprint(fingerprint_ban)}}
+    end
+  end
+
+  @doc """
+  Updates the fingerprint ban named by the raw request `id`, on behalf of
+  `actor`.
+
+  Authorizes `:update` against the fingerprint-ban model, loads the ban, applies
+  the update through `update_fingerprint/2`, and writes an
+  `"Admin.FingerprintBan:update"` moderation log on success.
+
+  Returns `{:ok, fingerprint_ban}`, `{:error, :unauthorized}`,
+  `{:error, :not_found}`, or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_fingerprint_ban(Users.User.t() | nil, any(), map()) ::
+          {:ok, Fingerprint.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_fingerprint_ban(actor, id, attrs) do
+    with :ok <- authorize(actor, :update, Fingerprint),
+         {:ok, fingerprint_ban} <- load_fingerprint_ban(id),
+         {:ok, fingerprint_ban} <- update_fingerprint(fingerprint_ban, attrs) do
+      log_fingerprint_ban(actor, "Admin.FingerprintBan:update", fingerprint_ban, "Updated")
+      {:ok, fingerprint_ban}
+    end
+  end
+
+  @doc """
+  Deletes the fingerprint ban named by the raw request `id`, on behalf of
+  `actor`.
+
+  Authorizes `:delete` against the fingerprint-ban model, loads the ban, and
+  requires `actor` to be an admin. Writes an `"Admin.FingerprintBan:delete"`
+  moderation log on success.
+
+  Returns `{:ok, fingerprint_ban}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}`.
+  """
+  @spec delete_fingerprint_ban(Users.User.t() | nil, any()) ::
+          {:ok, Fingerprint.t()} | {:error, :unauthorized | :not_found}
+  def delete_fingerprint_ban(actor, id) do
+    with :ok <- authorize(actor, :delete, Fingerprint),
+         {:ok, fingerprint_ban} <- load_fingerprint_ban(id),
+         :ok <- verify_can_delete(actor) do
+      {:ok, fingerprint_ban} = delete_fingerprint(fingerprint_ban)
+      log_fingerprint_ban(actor, "Admin.FingerprintBan:delete", fingerprint_ban, "Deleted")
+      {:ok, fingerprint_ban}
+    end
+  end
+
+  defp load_fingerprint_ban(id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         %Fingerprint{} = fingerprint_ban <- Repo.get(Fingerprint, id) do
+      {:ok, fingerprint_ban}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp log_fingerprint_ban(actor, type, ban, verb) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      type,
+      "/admin/fingerprint_bans",
+      "#{verb} a fingerprint ban #{ban.generated_ban_id}"
+    )
+  end
+
+  @doc """
   Returns the list of subnet bans.
 
   ## Examples
