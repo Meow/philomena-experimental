@@ -1,14 +1,23 @@
 defmodule Philomena.UsersTest do
-  use Philomena.DataCase, async: true
+  use Philomena.DataCase, async: false
+
+  @moduletag :search
 
   alias Philomena.Users
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
   import Philomena.UserIpsFixtures
   import Philomena.UserFingerprintsFixtures
+  import Philomena.FiltersFixtures
   alias Philomena.Users.{User, UserToken}
+  alias Philomena.Roles.Role
+  alias Philomena.ModerationLogs.{ModerationLog, Paths}
+  alias PhilomenaQuery.Search
+  alias PhilomenaQuery.SearchHelpers
 
   @png_fixture Path.absname("test/support/fixtures/files/upload-test.png")
+
+  @pagination %{page_number: 1, page_size: 25}
 
   # A truthy ban value in the shape production passes; only its presence matters
   # to the write-access and not-banned checks the profile loaders run first.
@@ -63,6 +72,23 @@ defmodule Philomena.UsersTest do
     confirmed_user_fixture()
     |> Ecto.Changeset.change(last_renamed_at: DateTime.utc_now(:second))
     |> Repo.update!()
+  end
+
+  # A confirmed user with a slug-clean name, used as the target of the staff
+  # user-management functions so subject paths and log bodies read predictably.
+  defp managed_target(name \\ "managed_target_#{System.unique_integer([:positive])}") do
+    confirmed_user_fixture(%{name: name})
+  end
+
+  # A moderator carrying the "User" admin role_map grant. The user-management
+  # ability keys on the "moderator" sub-grant instead, so this actor is
+  # authorized for :index but rejected for :edit/:update - the almost-privileged
+  # role.
+  defp user_admin_moderator, do: role_moderator_fixture("User")
+
+  # The most recently written moderation log row.
+  defp last_moderation_log do
+    ModerationLog |> order_by(desc: :id) |> limit(1) |> Repo.one()
   end
 
   describe "get_user_by_email/1" do
@@ -1261,6 +1287,669 @@ defmodule Philomena.UsersTest do
                })
 
       assert %{twofactor_token: ["Invalid token"]} = errors_on(changeset)
+    end
+  end
+
+  describe "search_users/3" do
+    setup do
+      Search.clear_index!(User)
+      :ok
+    end
+
+    test "an anonymous viewer is rejected before any search" do
+      assert Users.search_users(nil, %{}, @pagination) == {:error, :unauthorized}
+    end
+
+    test "a regular user is rejected" do
+      assert Users.search_users(confirmed_user_fixture(), %{}, @pagination) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator sees a user in the default view" do
+      target = confirmed_user_fixture()
+      SearchHelpers.reindex_all!(User)
+
+      assert {:ok, page} = Users.search_users(moderator_user_fixture(), %{}, @pagination)
+      assert target.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "an admin sees a user in the default view" do
+      target = confirmed_user_fixture()
+      SearchHelpers.reindex_all!(User)
+
+      assert {:ok, page} = Users.search_users(admin_user_fixture(), %{}, @pagination)
+      assert target.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "a blank uq searches everything" do
+      target = confirmed_user_fixture()
+      SearchHelpers.reindex_all!(User)
+
+      assert {:ok, page} = Users.search_users(admin_user_fixture(), %{"uq" => ""}, @pagination)
+      assert target.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "the uq param filters by name" do
+      target = confirmed_user_fixture(%{name: "search_target_needle"})
+      _other = confirmed_user_fixture(%{name: "search_other_haystack"})
+      SearchHelpers.reindex_all!(User)
+
+      assert {:ok, page} =
+               Users.search_users(
+                 admin_user_fixture(),
+                 %{"uq" => "name:search_target_needle"},
+                 @pagination
+               )
+
+      assert target.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "an unparsable query returns the parser's message string" do
+      assert {:error, msg} = Users.search_users(admin_user_fixture(), %{"uq" => "("}, @pagination)
+      assert is_binary(msg)
+    end
+  end
+
+  describe "list_roles/0" do
+    test "returns every role row" do
+      role = Repo.insert!(%Role{name: "admin", resource_type: "User"})
+      assert Enum.any?(Users.list_roles(), &(&1.id == role.id))
+    end
+  end
+
+  describe "load_user_for_edit/2" do
+    test "an admin loads the user with roles preloaded" do
+      target = managed_target()
+
+      assert {:ok, user} = Users.load_user_for_edit(admin_user_fixture(), target.slug)
+      assert user.id == target.id
+      assert is_list(user.roles)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.load_user_for_edit(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "a User-admin role_map moderator is rejected" do
+      target = managed_target()
+
+      assert Users.load_user_for_edit(user_admin_moderator(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor is rejected" do
+      target = managed_target()
+
+      assert Users.load_user_for_edit(nil, target.slug) == {:error, :unauthorized}
+    end
+
+    test "an unknown slug is not-found for an admin, unauthorized for a moderator" do
+      assert Users.load_user_for_edit(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+
+      assert Users.load_user_for_edit(moderator_user_fixture(), "no-such-user") ==
+               {:error, :unauthorized}
+    end
+  end
+
+  describe "update_user_details/3" do
+    test "an admin updates the user and writes the update log" do
+      target = managed_target()
+
+      assert {:ok, updated} =
+               Users.update_user_details(admin_user_fixture(), target.slug, %{
+                 "name" => target.name,
+                 "email" => target.email,
+                 "role" => "assistant"
+               })
+
+      assert updated.role == "assistant"
+      assert Users.get_user!(target.id).role == "assistant"
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User:update"
+      assert log.body == "Updated user details for #{target.name}"
+      assert log.subject_path == Paths.profile_path(updated)
+    end
+
+    test "an invalid role is a rejected changeset whose data has roles preloaded" do
+      target = managed_target()
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Users.update_user_details(admin_user_fixture(), target.slug, %{
+                 "name" => target.name,
+                 "email" => target.email,
+                 "role" => "not-a-role"
+               })
+
+      assert is_list(changeset.data.roles)
+      assert Users.get_user!(target.id).role == "user"
+    end
+
+    test "a plain moderator may not update a user" do
+      target = managed_target()
+
+      assert Users.update_user_details(moderator_user_fixture(), target.slug, %{
+               "name" => target.name,
+               "email" => target.email,
+               "role" => "assistant"
+             }) == {:error, :unauthorized}
+    end
+
+    test "a User-admin role_map moderator may not update a user" do
+      target = managed_target()
+
+      assert Users.update_user_details(user_admin_moderator(), target.slug, %{
+               "name" => target.name,
+               "email" => target.email,
+               "role" => "assistant"
+             }) == {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.update_user_details(admin_user_fixture(), "no-such-user", %{}) ==
+               {:error, :not_found}
+    end
+  end
+
+  # The staff child-write functions all authorize :edit against a bare %User{}
+  # via a shared loader before the slug is looked up, so the same authorization
+  # outcomes hold for every one of them. This matrix pins that gate once, using
+  # admin_unlock_user as the representative; the per-function describes below
+  # then pin each action's effect, log, and unknown-slug behavior.
+  describe "staff user-management authorization gate" do
+    test "an anonymous actor is rejected regardless of the slug" do
+      assert Users.admin_unlock_user(nil, "no-such-user") == {:error, :unauthorized}
+    end
+
+    test "a regular user is rejected" do
+      target = managed_target()
+
+      assert Users.admin_unlock_user(confirmed_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_unlock_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "a User-admin role_map moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_unlock_user(user_admin_moderator(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin is permitted" do
+      target = managed_target()
+
+      assert {:ok, _user} = Users.admin_unlock_user(admin_user_fixture(), target.slug)
+    end
+  end
+
+  describe "admin_reactivate_user/2" do
+    test "an admin reactivates a deactivated user and logs it" do
+      target = deactivated_user_fixture()
+
+      assert {:ok, user} = Users.admin_reactivate_user(admin_user_fixture(), target.slug)
+      refute user.deleted_at
+      refute Users.get_user!(target.id).deleted_at
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Activation:create"
+      assert log.body == "Reactivated #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = deactivated_user_fixture()
+
+      assert Users.admin_reactivate_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_reactivate_user(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_deactivate_user/2" do
+    test "an admin deactivates a user, recording the actor, and logs it" do
+      target = managed_target()
+      admin = admin_user_fixture()
+
+      assert {:ok, user} = Users.admin_deactivate_user(admin, target.slug)
+      assert user.deleted_at
+      assert user.deleted_by_user_id == admin.id
+      assert Users.get_user!(target.id).deleted_at
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Activation:delete"
+      assert log.body == "Deactivated #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_deactivate_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_deactivate_user(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_reset_api_key/2" do
+    test "an admin resets the API token and logs it" do
+      target = managed_target()
+      old_token = target.authentication_token
+
+      assert {:ok, user} = Users.admin_reset_api_key(admin_user_fixture(), target.slug)
+      assert user.authentication_token != old_token
+      assert Users.get_user!(target.id).authentication_token == user.authentication_token
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.ApiKey:delete"
+      assert log.body == "Reset API key for #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_reset_api_key(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_reset_api_key(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_remove_avatar/2" do
+    test "an admin removes the avatar and logs it" do
+      target =
+        user_with_avatar_fixture(%{name: "avatar_target_#{System.unique_integer([:positive])}"})
+
+      assert {:ok, user} = Users.admin_remove_avatar(admin_user_fixture(), target.slug)
+      refute user.avatar
+      refute Users.get_user!(target.id).avatar
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Avatar:delete"
+      assert log.body == "Removed avatar for #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = user_with_avatar_fixture()
+
+      assert Users.admin_remove_avatar(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_remove_avatar(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_wipe_downvotes/2" do
+    test "an admin starts the downvote wipe and logs it" do
+      target = managed_target()
+
+      assert {:ok, user} = Users.admin_wipe_downvotes(admin_user_fixture(), target.slug)
+      assert user.id == target.id
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Downvote:delete"
+      assert log.body == "Wiped downvotes for #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_wipe_downvotes(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_wipe_downvotes(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_wipe_votes/2" do
+    test "an admin starts the vote and fave wipe and logs it" do
+      target = managed_target()
+
+      assert {:ok, user} = Users.admin_wipe_votes(admin_user_fixture(), target.slug)
+      assert user.id == target.id
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Vote:delete"
+      assert log.body == "Wiped votes and faves for #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_wipe_votes(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_wipe_votes(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_wipe_user/2" do
+    test "an admin queues the PII wipe and logs it" do
+      target = managed_target()
+
+      assert {:ok, user} = Users.admin_wipe_user(admin_user_fixture(), target.slug)
+      assert user.id == target.id
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Wipe:create"
+      assert log.body == "Wiped PII for #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_wipe_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_wipe_user(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_unlock_user/2" do
+    test "an admin unlocks a locked user and logs it" do
+      target = locked_user_fixture(%{name: "unlock_target_#{System.unique_integer([:positive])}"})
+
+      assert {:ok, user} = Users.admin_unlock_user(admin_user_fixture(), target.slug)
+      refute user.locked_at
+      refute Users.get_user!(target.id).locked_at
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Unlock:create"
+      assert log.body == "Unlocked #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = locked_user_fixture()
+
+      assert Users.admin_unlock_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_unlock_user(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_verify_user/2" do
+    test "an admin grants verification and logs it" do
+      target = managed_target()
+
+      assert {:ok, user} = Users.admin_verify_user(admin_user_fixture(), target.slug)
+      assert user.verified
+      assert Users.get_user!(target.id).verified
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Verification:create"
+      assert log.body == "Granted verification to #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_verify_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_verify_user(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_unverify_user/2" do
+    test "an admin revokes verification and logs it" do
+      target =
+        verified_user_fixture(%{name: "unverify_target_#{System.unique_integer([:positive])}"})
+
+      assert {:ok, user} = Users.admin_unverify_user(admin_user_fixture(), target.slug)
+      refute user.verified
+      refute Users.get_user!(target.id).verified
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Verification:delete"
+      assert log.body == "Revoked verification from #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = verified_user_fixture()
+
+      assert Users.admin_unverify_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_unverify_user(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_user_for_force_filter/2" do
+    test "an admin loads the target user" do
+      target = managed_target()
+
+      assert {:ok, user} = Users.load_user_for_force_filter(admin_user_fixture(), target.slug)
+      assert user.id == target.id
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.load_user_for_force_filter(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.load_user_for_force_filter(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_force_filter/3" do
+    test "an admin forces a filter and logs it" do
+      target = managed_target()
+      filter = filter_fixture(confirmed_user_fixture())
+
+      assert {:ok, user} =
+               Users.admin_force_filter(admin_user_fixture(), target.slug, %{
+                 "forced_filter_id" => filter.id
+               })
+
+      assert user.forced_filter_id == filter.id
+      assert Users.get_user!(target.id).forced_filter_id == filter.id
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.ForceFilter:create"
+      assert log.body == "Forced filter #{filter.id} for #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    # A forced_filter_id naming no filter fails the FK constraint
+    # (users_forced_filter_id_fkey), which the surrounding {:ok, _} = match
+    # turns into a MatchError.
+    test "a nonexistent forced_filter_id raises MatchError" do
+      target = managed_target()
+
+      assert_raise MatchError, ~r/no match of right hand side value/, fn ->
+        Users.admin_force_filter(admin_user_fixture(), target.slug, %{
+          "forced_filter_id" => 2_000_000_000
+        })
+      end
+    end
+
+    test "a plain moderator is rejected before the filter is applied" do
+      target = managed_target()
+      filter = filter_fixture(confirmed_user_fixture())
+
+      assert Users.admin_force_filter(moderator_user_fixture(), target.slug, %{
+               "forced_filter_id" => filter.id
+             }) == {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_force_filter(admin_user_fixture(), "no-such-user", %{}) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "admin_unforce_filter/2" do
+    test "an admin clears a forced filter and logs it" do
+      target = managed_target()
+      filter = filter_fixture(confirmed_user_fixture())
+      {:ok, _} = Users.force_filter(target, %{"forced_filter_id" => filter.id})
+
+      assert {:ok, user} = Users.admin_unforce_filter(admin_user_fixture(), target.slug)
+      refute user.forced_filter_id
+      refute Users.get_user!(target.id).forced_filter_id
+
+      log = last_moderation_log()
+      assert log.type == "Admin.User.ForceFilter:delete"
+      assert log.body == "Removed forced filter for #{target.name}"
+      assert log.subject_path == Paths.profile_path(user)
+    end
+
+    test "a plain moderator is rejected" do
+      target = managed_target()
+
+      assert Users.admin_unforce_filter(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an admin naming an unknown slug gets not-found" do
+      assert Users.admin_unforce_filter(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_user_for_erase/2" do
+    test "an admin loads an ordinary unverified user with roles preloaded" do
+      target = managed_target()
+
+      assert {:ok, user} = Users.load_user_for_erase(admin_user_fixture(), target.slug)
+      assert user.id == target.id
+      assert is_list(user.roles)
+    end
+
+    test "an unauthorized actor is rejected before the eligibility guards" do
+      assert Users.load_user_for_erase(moderator_user_fixture(), "no-such-user") ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown slug is not-erasable" do
+      assert Users.load_user_for_erase(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_erasable}
+    end
+
+    test "a privileged target is rejected" do
+      target = assistant_user_fixture()
+
+      assert {:error, {:privileged, user}} =
+               Users.load_user_for_erase(admin_user_fixture(), target.slug)
+
+      assert user.id == target.id
+    end
+
+    test "a verified target is rejected" do
+      target = verified_user_fixture()
+
+      assert {:error, {:verified, user}} =
+               Users.load_user_for_erase(admin_user_fixture(), target.slug)
+
+      assert user.id == target.id
+    end
+  end
+
+  describe "admin_erase_user/2" do
+    test "an admin erases the user, renaming and deactivating the account, and logs it" do
+      target = managed_target()
+      original_name = target.name
+
+      assert {:ok, erased} = Users.admin_erase_user(admin_user_fixture(), target.slug)
+      assert erased.name =~ ~r/^deactivated_/
+      assert erased.name != original_name
+      assert erased.deleted_at
+
+      reloaded = Users.get_user!(target.id)
+      assert reloaded.name == erased.name
+      assert reloaded.deleted_at
+
+      # The log body names the original account; the subject path points at the
+      # renamed account.
+      log = last_moderation_log()
+      assert log.type == "Admin.User.Erase:create"
+      assert log.body == "Erased #{original_name}"
+      assert log.subject_path == Paths.profile_path(erased)
+    end
+
+    test "an unauthorized actor is rejected" do
+      target = managed_target()
+
+      assert Users.admin_erase_user(moderator_user_fixture(), target.slug) ==
+               {:error, :unauthorized}
+    end
+
+    test "an unknown slug is not-erasable" do
+      assert Users.admin_erase_user(admin_user_fixture(), "no-such-user") ==
+               {:error, :not_erasable}
+    end
+
+    test "a privileged target is rejected without erasing" do
+      target = assistant_user_fixture()
+
+      assert {:error, {:privileged, _user}} =
+               Users.admin_erase_user(admin_user_fixture(), target.slug)
+
+      assert Users.get_user!(target.id).role == "assistant"
+    end
+
+    test "a verified target is rejected without erasing" do
+      target = verified_user_fixture()
+
+      assert {:error, {:verified, _user}} =
+               Users.admin_erase_user(admin_user_fixture(), target.slug)
+
+      refute Users.get_user!(target.id).deleted_at
     end
   end
 end
