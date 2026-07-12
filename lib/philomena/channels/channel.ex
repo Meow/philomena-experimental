@@ -4,6 +4,8 @@ defmodule Philomena.Channels.Channel do
 
   alias Philomena.Tags.Tag
 
+  @type t :: %__MODULE__{}
+
   schema "channels" do
     belongs_to :associated_artist_tag, Tag
 
