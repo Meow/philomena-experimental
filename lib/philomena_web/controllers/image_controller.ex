@@ -1,27 +1,13 @@
 defmodule PhilomenaWeb.ImageController do
   use PhilomenaWeb, :controller
 
-  alias PhilomenaWeb.ImageLoader
-  alias PhilomenaWeb.CommentLoader
+  alias PhilomenaWeb.ImageScope
   alias PhilomenaWeb.NotificationCountPlug
   alias PhilomenaWeb.MarkdownRenderer
-  alias PhilomenaWeb.ImageScope
-
-  alias Philomena.{
-    Images,
-    Images.Image,
-    Images.Source,
-    Comments.Comment,
-    Galleries.Gallery,
-    TagChanges.TagChange,
-    SourceChanges.SourceChange
-  }
-
-  alias PhilomenaQuery.Search
+  alias Philomena.Images
   alias Philomena.Interactions
-  alias Philomena.Comments
-  alias Philomena.Repo
-  import Ecto.Query
+
+  action_fallback PhilomenaWeb.FallbackController
 
   plug PhilomenaWeb.LimitPlug,
        [time: 5, error: "You may only upload images once every 5 seconds."]
@@ -29,8 +15,7 @@ defmodule PhilomenaWeb.ImageController do
 
   plug :load_image when action in [:show]
 
-  plug PhilomenaWeb.FilterBannedUsersPlug when action in [:new, :create]
-  plug PhilomenaWeb.UserAttributionPlug when action in [:create]
+  plug PhilomenaWeb.UserAttributionPlug when action in [:new, :create]
   plug PhilomenaWeb.CaptchaPlug when action in [:new, :show, :create]
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
 
@@ -40,9 +25,7 @@ defmodule PhilomenaWeb.ImageController do
   plug PhilomenaWeb.AdvertPlug when action in [:show]
 
   def index(conn, _params) do
-    {images, _tags} = ImageLoader.default_query(conn)
-
-    images = Search.search_records(images, preload(Image, [:sources, tags: :aliases]))
+    images = Images.load_image_index(ImageScope.search_scope(conn))
 
     interactions = Interactions.user_interactions(images, conn.assigns.current_user)
 
@@ -57,48 +40,32 @@ defmodule PhilomenaWeb.ImageController do
 
   def show(conn, %{"id" => _id}) do
     image = conn.assigns.image
-    user = conn.assigns.current_user
 
-    Images.clear_image_notification(image, user)
+    page =
+      Images.load_image_page(
+        conn.assigns.current_user,
+        image,
+        conn.assigns.comment_scrivener
+      )
 
-    # Update the notification ticker in the header
+    # The page load clears the image notification, so the header ticker must
+    # be re-read afterwards.
     conn = NotificationCountPlug.call(conn)
 
-    conn = maybe_skip_to_last_comment_page(conn, image, user)
+    rendered = MarkdownRenderer.render_collection(page.comments.entries, conn)
+    comments = %{page.comments | entries: Enum.zip(page.comments.entries, rendered)}
 
-    comments = CommentLoader.load_comments(conn, image)
-
-    rendered = MarkdownRenderer.render_collection(comments.entries, conn)
-
-    comments = %{comments | entries: Enum.zip(comments.entries, rendered)}
-
-    description =
-      %{body: image.description}
-      |> MarkdownRenderer.render_one(conn)
-
-    interactions = Interactions.user_interactions([image], conn.assigns.current_user)
-
-    comment_changeset =
-      %Comment{}
-      |> Comments.change_comment()
-
-    image_changeset =
-      %{image | sources: sources_for_edit(image.sources)}
-      |> Images.change_image()
-
-    watching = Images.subscribed?(image, conn.assigns.current_user)
-
-    user_galleries = user_galleries(image, conn.assigns.current_user)
+    description = MarkdownRenderer.render_one(%{body: image.description}, conn)
 
     assigns = [
       image: image,
       comments: comments,
-      image_changeset: image_changeset,
-      comment_changeset: comment_changeset,
-      user_galleries: user_galleries,
+      image_changeset: page.image_changeset,
+      comment_changeset: page.comment_changeset,
+      user_galleries: page.user_galleries,
       description: description,
-      interactions: interactions,
-      watching: watching,
+      interactions: page.interactions,
+      watching: page.watching,
       layout_class: "layout--wide",
       title: "##{image.id} - #{Images.tag_list(image)}"
     ]
@@ -111,17 +78,13 @@ defmodule PhilomenaWeb.ImageController do
   end
 
   def new(conn, _params) do
-    changeset =
-      %Image{sources: sources_for_edit()}
-      |> Images.change_image()
-
-    render(conn, "new.html", title: "New Image", changeset: changeset)
+    with {:ok, changeset} <- Images.load_new_image(conn.assigns.actor) do
+      render(conn, "new.html", title: "New Image", changeset: changeset)
+    end
   end
 
-  def create(conn, %{"image" => image_params}) do
-    attributes = conn.assigns.attributes
-
-    case Images.create_image(attributes, image_params) do
+  def create(conn, params) do
+    case Images.upload_image(conn.assigns.actor, params["image"]) do
       {:ok, %{image: image}} ->
         PhilomenaWeb.Endpoint.broadcast!(
           "firehose",
@@ -134,96 +97,23 @@ defmodule PhilomenaWeb.ImageController do
         |> redirect(to: ~p"/images/#{image}")
 
       {:error, :image, changeset, _} ->
+        render(conn, "new.html", changeset: changeset)
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp load_image(conn, _opts) do
+    case Images.load_image_for_show(conn.assigns.current_user, conn.params["id"]) do
+      {:ok, %{image: image} = loaded} ->
         conn
-        |> render("new.html", changeset: changeset)
-    end
-  end
+        |> assign(:image, image)
+        |> assign(:tag_change_count, loaded.tag_change_count)
+        |> assign(:tag_change_tag_count, loaded.tag_change_tag_count)
+        |> assign(:source_change_count, loaded.source_change_count)
 
-  defp maybe_skip_to_last_comment_page(conn, image, %{
-         comments_newest_first: false,
-         comments_always_jump_to_last: true
-       }) do
-    page = CommentLoader.last_page(conn, image)
-
-    conn
-    |> assign(:comment_scrivener, Keyword.merge(conn.assigns.comment_scrivener, page: page))
-  end
-
-  defp maybe_skip_to_last_comment_page(conn, _image, _user), do: conn
-
-  defp user_galleries(_image, nil), do: []
-
-  defp user_galleries(image, user) do
-    Gallery
-    |> where(user_id: ^user.id)
-    |> join(
-      :inner_lateral,
-      [g],
-      _ in fragment(
-        "SELECT EXISTS(SELECT 1 FROM gallery_interactions gi WHERE gi.image_id = ? AND gi.gallery_id = ?)",
-        ^image.id,
-        g.id
-      ),
-      on: true
-    )
-    |> select([g, e], {g, e.exists})
-    |> order_by(desc: :updated_at)
-    |> Repo.all()
-  end
-
-  defp load_image(conn, opts) do
-    case PhilomenaWeb.IntegerId.parse(conn.params["id"]) do
-      {:ok, id} -> do_load_image(conn, id, opts)
-      :error -> PhilomenaWeb.NotFoundPlug.call(conn)
-    end
-  end
-
-  defp do_load_image(conn, id, _opts) do
-    {image, tag_changes, tag_changes_tags, source_changes} =
-      Image
-      |> from(as: :image)
-      |> where(id: ^id)
-      |> join(
-        :inner_lateral,
-        [],
-        subquery(
-          TagChange
-          |> where(image_id: parent_as(:image).id)
-          |> join(:left, [c], t in assoc(c, :tags))
-          |> select([c, t], %{
-            change_count: count(c, :distinct),
-            tag_count: count(t)
-          })
-        ),
-        on: true
-      )
-      |> join(
-        :inner_lateral,
-        [],
-        subquery(
-          SourceChange
-          |> where(image_id: parent_as(:image).id)
-          |> select(%{count: count()})
-        ),
-        on: true
-      )
-      |> preload([:deleter, :locked_tags, :sources, user: [awards: :badge], tags: :aliases])
-      |> select([i, t, s], {i, t.change_count, t.tag_count, s.count})
-      |> Repo.one()
-      |> case do
-        nil ->
-          {nil, nil, nil, nil}
-
-        result ->
-          result
-      end
-
-    cond do
-      is_nil(image) ->
-        PhilomenaWeb.NotFoundPlug.call(conn)
-
-      not is_nil(image.duplicate_id) and
-          not Canada.Can.can?(conn.assigns.current_user, :show, image) ->
+      {:duplicate_of, image} ->
         conn
         |> put_flash(
           :info,
@@ -232,17 +122,10 @@ defmodule PhilomenaWeb.ImageController do
         |> redirect(to: ~p"/images/#{image.duplicate_id}")
         |> halt()
 
-      true ->
+      {:error, :not_found} = error ->
         conn
-        |> assign(:image, image)
-        |> assign(:tag_change_count, tag_changes)
-        |> assign(:tag_change_tag_count, tag_changes_tags)
-        |> assign(:source_change_count, source_changes)
+        |> PhilomenaWeb.FallbackController.call(error)
+        |> halt()
     end
   end
-
-  # TODO: this is duplicated in Image.SourceController
-  defp sources_for_edit(), do: [%Source{}]
-  defp sources_for_edit([]), do: sources_for_edit()
-  defp sources_for_edit(sources), do: sources
 end

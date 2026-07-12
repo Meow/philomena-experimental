@@ -15,6 +15,8 @@ defmodule Philomena.Galleries do
   alias Philomena.GalleryReorderWorker
   alias Philomena.Notifications
   alias Philomena.Images
+  alias Philomena.Images.Image
+  alias Philomena.Users.User
 
   use Philomena.Subscriptions,
     on_delete: :clear_gallery_notification,
@@ -119,6 +121,42 @@ defmodule Philomena.Galleries do
   """
   def change_gallery(%Gallery{} = gallery) do
     Gallery.changeset(gallery, %{})
+  end
+
+  @doc """
+  Lists `user`'s galleries, most recently updated first, pairing each with
+  whether it already contains `image`.
+
+  Anonymous viewers have no galleries.
+
+  ## Examples
+
+      iex> user_image_galleries(user, image)
+      [{%Gallery{}, true}, {%Gallery{}, false}]
+
+      iex> user_image_galleries(nil, image)
+      []
+
+  """
+  @spec user_image_galleries(User.t() | nil, Image.t()) :: [{Gallery.t(), boolean()}]
+  def user_image_galleries(nil, _image), do: []
+
+  def user_image_galleries(user, image) do
+    Gallery
+    |> where(user_id: ^user.id)
+    |> join(
+      :inner_lateral,
+      [g],
+      _ in fragment(
+        "SELECT EXISTS(SELECT 1 FROM gallery_interactions gi WHERE gi.image_id = ? AND gi.gallery_id = ?)",
+        ^image.id,
+        g.id
+      ),
+      on: true
+    )
+    |> select([g, e], {g, e.exists})
+    |> order_by(desc: :updated_at)
+    |> Repo.all()
   end
 
   @doc """

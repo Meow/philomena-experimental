@@ -18,11 +18,18 @@ defmodule Philomena.ImagesTest do
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.TagChanges.Limits
   alias Philomena.TagChanges.TagChange
+  alias Philomena.Images.Image
+  alias Philomena.Images.ImagePage
+  alias Philomena.Images.Search.Scope
+  alias Philomena.Galleries
+  alias PhilomenaQuery.Search
+  alias PhilomenaQuery.SearchHelpers
 
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
+  import Philomena.GalleriesFixtures
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to verify_write_access.
@@ -3747,6 +3754,350 @@ defmodule Philomena.ImagesTest do
                "99999999999999999999",
                tag_attrs("safe", "safe, a, b")
              ) == {:error, :not_found}
+    end
+  end
+
+  # Records one tag change against `image` (adding two tags), returning the
+  # image. Produces a single tag_changes row carrying two tag_change_tags.
+  defp record_tag_change(image) do
+    user = confirmed_user_fixture()
+    reset_tag_change_limits()
+
+    {:ok, _} =
+      Images.update_tags(actor(user), to_string(image.id), tag_attrs("safe", "safe, alpha, beta"))
+
+    image
+  end
+
+  # The compiled filter body the web layer produces for a viewer with no active
+  # filter: an empty tag_ids exclusion plus a pair of match_none clauses, so it
+  # excludes nothing.
+  defp default_filter do
+    %{
+      bool: %{
+        should: [
+          %{terms: %{tag_ids: []}},
+          %{bool: %{should: [%{match_none: %{}}, %{match_none: %{}}]}}
+        ]
+      }
+    }
+  end
+
+  defp index_scope(user \\ nil) do
+    %Scope{user: user, filter: default_filter()}
+  end
+
+  defp minutes_ago(minutes) do
+    DateTime.utc_now()
+    |> DateTime.add(-minutes * 60, :second)
+    |> DateTime.truncate(:second)
+  end
+
+  # Waits for the background upload process a successful upload spawns to exit.
+  # It shares the test process's sandbox connection, so letting it outlive the
+  # test leaves it retrying against a dead owner. The spawned process is our
+  # direct child.
+  defp await_async_upload do
+    test_pid = self()
+
+    for pid <- Process.list(), Process.info(pid, :parent) == {:parent, test_pid} do
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+      after
+        5_000 -> raise "async upload process #{inspect(pid)} did not exit"
+      end
+    end
+
+    :ok
+  end
+
+  describe "load_image_for_show/2" do
+    test "an anonymous viewer loads a visible image with zero change counts" do
+      image = image_fixture()
+
+      assert {:ok, result} = Images.load_image_for_show(nil, to_string(image.id))
+      assert result.image.id == image.id
+      assert result.tag_change_count == 0
+      assert result.tag_change_tag_count == 0
+      assert result.source_change_count == 0
+    end
+
+    test "the change counts reflect recorded tag and source changes" do
+      image = image_fixture()
+      record_tag_change(image)
+      source_change_fixture(image)
+      source_change_fixture(image)
+
+      assert {:ok, result} = Images.load_image_for_show(nil, to_string(image.id))
+      assert result.tag_change_count == 1
+      assert result.tag_change_tag_count == 2
+      assert result.source_change_count == 2
+    end
+
+    test "the show preloads are populated on the loaded image" do
+      image = image_fixture(sources: ["https://example.com/a"])
+
+      assert {:ok, %{image: loaded}} = Images.load_image_for_show(nil, to_string(image.id))
+      assert Ecto.assoc_loaded?(loaded.tags)
+      assert Ecto.assoc_loaded?(loaded.sources)
+      assert Ecto.assoc_loaded?(loaded.locked_tags)
+    end
+
+    test "accepts an integer id" do
+      image = image_fixture()
+
+      assert {:ok, %{image: loaded}} = Images.load_image_for_show(nil, image.id)
+      assert loaded.id == image.id
+    end
+
+    test "a hidden image still loads for an anonymous viewer" do
+      # Viewing carries no authorization here; a hidden image renders its
+      # deleted notice rather than being withheld.
+      image = image_fixture(hidden_from_users: true)
+
+      assert {:ok, %{image: loaded}} = Images.load_image_for_show(nil, to_string(image.id))
+      assert loaded.id == image.id
+    end
+
+    test "a hidden duplicate is redirected for an anonymous viewer" do
+      # A merged image is hidden from users; a viewer who cannot :show the
+      # hidden image is redirected to its duplicate rather than shown the notice.
+      original = image_fixture()
+      duplicate = image_fixture(duplicate_id: original.id, hidden_from_users: true)
+
+      assert {:duplicate_of, loaded} = Images.load_image_for_show(nil, to_string(duplicate.id))
+      assert loaded.id == duplicate.id
+      assert loaded.duplicate_id == original.id
+    end
+
+    test "a non-hidden duplicate is shown to an anonymous viewer" do
+      # The duplicate branch only fires when the viewer cannot :show the image;
+      # a duplicate that is not hidden is still viewable, so it loads normally.
+      original = image_fixture()
+      duplicate = image_fixture(duplicate_id: original.id)
+
+      assert {:ok, %{image: loaded}} = Images.load_image_for_show(nil, to_string(duplicate.id))
+      assert loaded.id == duplicate.id
+    end
+
+    test "a hidden duplicate loads normally for a moderator who can show it" do
+      moderator = moderator_user_fixture()
+      original = image_fixture()
+      duplicate = image_fixture(duplicate_id: original.id, hidden_from_users: true)
+
+      assert {:ok, %{image: loaded}} =
+               Images.load_image_for_show(moderator, to_string(duplicate.id))
+
+      assert loaded.id == duplicate.id
+    end
+
+    test "an unknown well-formed id is not found for an anonymous viewer" do
+      # There is no authorization on this loader, so a missing image is a plain
+      # not found for every actor rather than an unauthorized.
+      assert Images.load_image_for_show(nil, "2147483647") == {:error, :not_found}
+    end
+
+    test "an unknown well-formed id is not found for an admin" do
+      assert Images.load_image_for_show(admin_user_fixture(), "2147483647") ==
+               {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      assert Images.load_image_for_show(nil, "not-a-number") == {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      assert Images.load_image_for_show(nil, "99999999999999999999") == {:error, :not_found}
+    end
+  end
+
+  describe "load_image_page/3" do
+    test "assembles the page struct for a signed-in viewer" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      page = Images.load_image_page(user, image, page: 1, page_size: 25)
+
+      assert %ImagePage{} = page
+      assert page.image.id == image.id
+      assert %Scrivener.Page{} = page.comments
+      assert is_boolean(page.watching)
+      assert is_list(page.user_galleries)
+      assert is_list(page.interactions)
+      assert %Ecto.Changeset{} = page.comment_changeset
+      assert %Ecto.Changeset{} = page.image_changeset
+    end
+
+    test "assembles the page struct for an anonymous viewer" do
+      image = image_fixture()
+
+      page = Images.load_image_page(nil, image, page: 1, page_size: 25)
+
+      assert %ImagePage{} = page
+      refute page.watching
+      assert page.user_galleries == []
+      assert page.interactions == []
+    end
+
+    test "watching is true once the viewer is subscribed" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      {:ok, _} = Images.create_subscription(image, user)
+
+      page = Images.load_image_page(user, image, page: 1, page_size: 25)
+
+      assert page.watching
+    end
+
+    test "user_galleries pairs each of the viewer's galleries with image membership" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      containing = gallery_fixture(user)
+      empty = gallery_fixture(user)
+      {:ok, _} = Galleries.add_image_to_gallery(containing, image)
+
+      page = Images.load_image_page(user, image, page: 1, page_size: 25)
+
+      memberships =
+        Map.new(page.user_galleries, fn {gallery, member?} -> {gallery.id, member?} end)
+
+      assert memberships[containing.id] == true
+      assert memberships[empty.id] == false
+    end
+
+    test "loading the page clears the viewer's image notification" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      arrange_comment_notification(image, user)
+      assert comment_notification?(image, user)
+
+      Images.load_image_page(user, image, page: 1, page_size: 25)
+
+      refute comment_notification?(image, user)
+    end
+
+    test "an oldest-first jump-to-last viewer lands on the final comment page" do
+      user =
+        confirmed_user_fixture()
+        |> Ecto.Changeset.change(comments_newest_first: false, comments_always_jump_to_last: true)
+        |> Repo.update!()
+
+      image = image_fixture()
+      author = confirmed_user_fixture()
+      for _ <- 1..3, do: comment_fixture(image, author)
+
+      page = Images.load_image_page(user, image, page: 1, page_size: 2)
+
+      # Three comments over a page size of two put the newest on the second page.
+      assert page.comments.page_number == 2
+    end
+
+    test "a viewer without the jump preference stays on the requested page" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      author = confirmed_user_fixture()
+      for _ <- 1..3, do: comment_fixture(image, author)
+
+      page = Images.load_image_page(user, image, page: 1, page_size: 2)
+
+      assert page.comments.page_number == 1
+    end
+  end
+
+  describe "load_new_image/1" do
+    test "a normal actor gets the upload form changeset" do
+      assert {:ok, %Ecto.Changeset{}} = Images.load_new_image(actor(confirmed_user_fixture()))
+    end
+
+    test "an anonymous actor gets the upload form changeset" do
+      assert {:ok, %Ecto.Changeset{}} = Images.load_new_image(actor(nil))
+    end
+
+    test "a banned actor may not reach the form" do
+      assert Images.load_new_image(actor(confirmed_user_fixture(), ban: @ban)) == {:error, :ban}
+    end
+
+    test "a banned actor is rejected even with a fingerprint" do
+      # load_new_image only checks the ban, so a fingerprint does not rescue a
+      # banned actor.
+      actor = actor(confirmed_user_fixture(), ban: @ban, fingerprint: "d015c342859dde3")
+
+      assert Images.load_new_image(actor) == {:error, :ban}
+    end
+  end
+
+  describe "upload_image/2" do
+    test "a normal actor uploads an image and the row exists" do
+      actor = actor(confirmed_user_fixture())
+
+      assert {:ok, %{image: %Image{} = image, upload_pid: pid}} =
+               Images.upload_image(actor, %{
+                 "image" => png_upload(),
+                 "tag_input" => "safe, solo, pony"
+               })
+
+      # The background upload process finishes the persist/repair work against
+      # the Repo; in an async case it owns no sandbox connection, so grant it the
+      # test's before awaiting its exit.
+      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
+
+      assert Repo.get(Image, image.id)
+      await_async_upload()
+    end
+
+    test "a banned actor may not upload" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
+               {:error, :ban}
+    end
+
+    test "an actor with no fingerprint may not upload" do
+      actor = actor(confirmed_user_fixture(), fingerprint: nil)
+
+      assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
+               {:error, :unauthorized}
+    end
+
+    test "a ban outranks a missing fingerprint" do
+      actor = actor(confirmed_user_fixture(), ban: @ban, fingerprint: nil)
+
+      assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
+               {:error, :ban}
+    end
+  end
+
+  describe "load_image_index/1" do
+    @describetag :search
+
+    setup do
+      Search.clear_index!(Image)
+      :ok
+    end
+
+    test "a visible older image appears for an anonymous scope, with tags preloaded" do
+      image = image_fixture(created_at: minutes_ago(4))
+      SearchHelpers.reindex_all!(Image)
+
+      page = Images.load_image_index(index_scope())
+
+      assert %Scrivener.Page{} = page
+      ids = Enum.map(page.entries, & &1.id)
+      assert image.id in ids
+
+      entry = Enum.find(page.entries, &(&1.id == image.id))
+      assert Ecto.assoc_loaded?(entry.tags)
+    end
+
+    test "a recent image is held back by the front-page upload delay" do
+      image = image_fixture(created_at: minutes_ago(1))
+      SearchHelpers.reindex_all!(Image)
+
+      page = Images.load_image_index(index_scope())
+
+      refute image.id in Enum.map(page.entries, & &1.id)
     end
   end
 end

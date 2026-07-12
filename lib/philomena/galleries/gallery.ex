@@ -7,6 +7,8 @@ defmodule Philomena.Galleries.Gallery do
   alias Philomena.Galleries.Interaction
   alias Philomena.Galleries.Subscription
 
+  @type t :: %__MODULE__{}
+
   schema "galleries" do
     belongs_to :thumbnail, Image, source: :thumbnail_id
     belongs_to :user, User

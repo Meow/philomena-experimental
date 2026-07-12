@@ -5,7 +5,9 @@ defmodule Philomena.Images do
 
   import Ecto.Query, warn: false
 
-  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+
   require Logger
 
   alias Ecto.Multi
@@ -44,8 +46,13 @@ defmodule Philomena.Images do
   alias Philomena.Interactions
   alias Philomena.Reports
   alias Philomena.Comments
+  alias Philomena.Comments.Comment
+  alias Philomena.Galleries
   alias Philomena.Galleries.Gallery
   alias Philomena.Galleries.Interaction
+  alias Philomena.Images.ImagePage
+  alias Philomena.Images.Search, as: ImageSearch
+  alias Philomena.Images.Search.Scope
   alias Philomena.Users.User
   alias Philomena.Users
 
@@ -79,6 +86,214 @@ defmodule Philomena.Images do
     |> Tag.display_order()
     |> Enum.map_join(", ", & &1.name)
   end
+
+  @doc """
+  Loads the default image listing page for the viewer's search `scope`.
+
+  Applies the front-page upload delay, the scope's filter and display
+  switches, and the parameter-driven sort, then runs the search. Returns the
+  record page with the standard listing preloads.
+
+  ## Examples
+
+      iex> load_image_index(scope)
+      %Scrivener.Page{}
+
+  """
+  @spec load_image_index(Scope.t()) :: Scrivener.Page.t()
+  def load_image_index(scope) do
+    {definition, _tags} = ImageSearch.default_query(scope)
+
+    ImageSearch.execute(definition)
+  end
+
+  @doc """
+  Loads the image `id` names for its show page, on behalf of `user` (`nil`
+  for an anonymous visitor).
+
+  The image carries the show page's preloads plus the counts its header
+  displays: distinct tag changes, tags touched by those changes, and source
+  changes. Viewing needs no permission - a hidden image renders its deleted
+  notice - but an image merged into a duplicate is only shown to viewers
+  permitted to `:show` it; anyone else gets `{:duplicate_of, image}` so the
+  caller can redirect to `image.duplicate_id`. A malformed or unknown id is
+  `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> load_image_for_show(user, "1")
+      {:ok, %{image: %Image{}, tag_change_count: 2, tag_change_tag_count: 5, source_change_count: 1}}
+
+      iex> load_image_for_show(nil, "bad")
+      {:error, :not_found}
+
+  """
+  @spec load_image_for_show(User.t() | nil, any()) ::
+          {:ok,
+           %{
+             image: Image.t(),
+             tag_change_count: non_neg_integer(),
+             tag_change_tag_count: non_neg_integer(),
+             source_change_count: non_neg_integer()
+           }}
+          | {:duplicate_of, Image.t()}
+          | {:error, :not_found}
+  def load_image_for_show(user, id) do
+    case IntegerId.parse(id) do
+      {:ok, id} -> fetch_image_for_show(user, id)
+      :error -> {:error, :not_found}
+    end
+  end
+
+  defp fetch_image_for_show(user, id) do
+    Image
+    |> from(as: :image)
+    |> where(id: ^id)
+    |> join(
+      :inner_lateral,
+      [],
+      subquery(
+        TagChange
+        |> where(image_id: parent_as(:image).id)
+        |> join(:left, [c], t in assoc(c, :tags))
+        |> select([c, t], %{
+          change_count: count(c, :distinct),
+          tag_count: count(t)
+        })
+      ),
+      on: true
+    )
+    |> join(
+      :inner_lateral,
+      [],
+      subquery(
+        SourceChange
+        |> where(image_id: parent_as(:image).id)
+        |> select(%{count: count()})
+      ),
+      on: true
+    )
+    |> preload([:deleter, :locked_tags, :sources, user: [awards: :badge], tags: :aliases])
+    |> select([i, t, s], {i, t.change_count, t.tag_count, s.count})
+    |> Repo.one()
+    |> case do
+      nil ->
+        {:error, :not_found}
+
+      {image, tag_change_count, tag_change_tag_count, source_change_count} ->
+        if not is_nil(image.duplicate_id) and not Canada.Can.can?(user, :show, image) do
+          {:duplicate_of, image}
+        else
+          {:ok,
+           %{
+             image: image,
+             tag_change_count: tag_change_count,
+             tag_change_tag_count: tag_change_tag_count,
+             source_change_count: source_change_count
+           }}
+        end
+    end
+  end
+
+  @doc """
+  Assembles the image show page for `user`: the visible page of comments,
+  the viewer's subscription state, their galleries paired with membership of
+  this image, their interactions, and the comment and metadata-edit form
+  changesets.
+
+  Clears the viewer's notification for the image as a side effect, so the
+  caller must read any notification counts afterwards. `comment_scrivener`
+  is the `page`/`page_size` keyword list; viewers who read oldest-first and
+  prefer jumping to the newest comments land on the last page unless they
+  asked for a specific one.
+
+  ## Examples
+
+      iex> load_image_page(user, image, page: 1, page_size: 25)
+      %ImagePage{}
+
+  """
+  @spec load_image_page(User.t() | nil, Image.t(), Keyword.t()) :: ImagePage.t()
+  def load_image_page(user, %Image{} = image, comment_scrivener) do
+    clear_image_notification(image, user)
+
+    comment_scrivener = maybe_jump_to_last_page(user, image, comment_scrivener)
+
+    %ImagePage{
+      image: image,
+      comments: Comments.paginate_image_comments(user, image, comment_scrivener),
+      watching: subscribed?(image, user),
+      user_galleries: Galleries.user_image_galleries(user, image),
+      interactions: Interactions.user_interactions([image], user),
+      comment_changeset: Comments.change_comment(%Comment{}),
+      image_changeset: change_image(%{image | sources: sources_for_edit(image.sources)})
+    }
+  end
+
+  defp maybe_jump_to_last_page(
+         %{comments_newest_first: false, comments_always_jump_to_last: true} = user,
+         image,
+         scrivener
+       ) do
+    Keyword.merge(scrivener, page: Comments.last_comment_page(user, image, scrivener))
+  end
+
+  defp maybe_jump_to_last_page(_user, _image, scrivener), do: scrivener
+
+  defp sources_for_edit([]), do: [%Source{}]
+  defp sources_for_edit(sources), do: sources
+
+  @doc """
+  Builds the changeset backing the upload form, on behalf of `actor`.
+
+  Banned actors may not reach the form; everyone else may.
+
+  ## Examples
+
+      iex> load_new_image(actor)
+      {:ok, %Ecto.Changeset{}}
+
+      iex> load_new_image(banned_actor)
+      {:error, :ban}
+
+  """
+  @spec load_new_image(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :ban}
+  def load_new_image(%Actor{} = actor) do
+    with :ok <- verify_not_banned(actor) do
+      {:ok, change_image(%Image{sources: [%Source{}]})}
+    end
+  end
+
+  @doc """
+  Uploads a new image on behalf of `actor`, who must pass the write-access
+  check: banned actors get `{:error, :ban}` and actors without a fingerprint
+  `{:error, :unauthorized}`.
+
+  On success the image row exists and processing continues in the
+  background; see `create_image/2` for the result shape and failure tuples.
+
+  ## Examples
+
+      iex> upload_image(actor, %{"image" => upload, "tag_input" => "safe"})
+      {:ok, %{image: %Image{}, upload_pid: pid}}
+
+      iex> upload_image(banned_actor, params)
+      {:error, :ban}
+
+  """
+  @spec upload_image(Actor.t(), map() | nil) ::
+          {:ok, image_upload()}
+          | {:error, :ban}
+          | {:error, :unauthorized}
+          | Ecto.Multi.failure()
+  def upload_image(%Actor{} = actor, params) do
+    with :ok <- verify_write_access(actor) do
+      create_image(actor_attributes(actor), params)
+    end
+  end
+
+  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
+    do: [ip: ip, fingerprint: fingerprint, user: user]
 
   @typedoc """
   Result of the `create_image/3` function. The image was created in a DB but an
