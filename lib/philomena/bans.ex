@@ -4,6 +4,8 @@ defmodule Philomena.Bans do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias Ecto.Multi
   alias Philomena.Repo
 
@@ -12,6 +14,8 @@ defmodule Philomena.Bans do
   alias Philomena.Bans.SubnetCreator
   alias Philomena.Bans.Subnet
   alias Philomena.Bans.User
+  alias Philomena.IntegerId
+  alias Philomena.ModerationLogs
   alias Philomena.Users
 
   @doc """
@@ -353,9 +357,191 @@ defmodule Philomena.Bans do
   end
 
   @doc """
+  Returns the paginated user bans for the admin listing, on behalf of `actor`.
+
+  Authorizes `:index` against the user-ban model, then filters by the `"bq"`
+  full-text search or the `"user_id"` branch when either is present, newest
+  first. Returns `{:ok, user_bans}` as a `m:Scrivener.Page` or
+  `{:error, :unauthorized}`.
+  """
+  @spec admin_user_bans(Users.User.t() | nil, map(), map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def admin_user_bans(actor, params, pagination) do
+    with :ok <- authorize(actor, :index, User) do
+      user_bans =
+        params
+        |> user_bans_query()
+        |> order_by(desc: :created_at)
+        |> preload([:user, :banning_user])
+        |> Repo.paginate(pagination)
+
+      {:ok, user_bans}
+    end
+  end
+
+  defp user_bans_query(%{"bq" => q}) when is_binary(q) do
+    like_q = "%#{q}%"
+
+    User
+    |> join(:inner, [ub], _ in assoc(ub, :user))
+    |> where(
+      [ub, u],
+      ilike(u.name, ^like_q) or
+        ub.generated_ban_id == ^q or
+        fragment("to_tsvector(?) @@ plainto_tsquery(?)", ub.reason, ^q) or
+        fragment("to_tsvector(?) @@ plainto_tsquery(?)", ub.note, ^q)
+    )
+  end
+
+  defp user_bans_query(%{"user_id" => user_id}) when is_binary(user_id) do
+    where(User, user_id: ^user_id)
+  end
+
+  defp user_bans_query(_params), do: User
+
+  @doc """
+  Looks up the user a ban is being created against, by raw request `id`.
+
+  Used by the new-ban form and the create error path to name the target on the
+  form. Returns the `m:Philomena.Users.User`, or `nil` when `id` is non-castable
+  or names no user.
+  """
+  @spec target_user(any()) :: Users.User.t() | nil
+  def target_user(id) do
+    case IntegerId.parse(id) do
+      {:ok, id} -> Repo.get(Users.User, id)
+      :error -> nil
+    end
+  end
+
+  @doc """
+  Builds the new-user-ban form for `actor`, targeting the user named by the raw
+  `user_id` (which may be `nil`).
+
+  Authorizes `:new` against the user-ban model, then resolves the target user.
+  Returns `{:ok, {target_user, changeset}}`, `{:error, :unauthorized}`, or
+  `{:error, :no_target}` when `user_id` names no user (a ban must have a target).
+  """
+  @spec new_user_ban(Users.User.t() | nil, any()) ::
+          {:ok, {Users.User.t(), Ecto.Changeset.t()}}
+          | {:error, :unauthorized | :no_target}
+  def new_user_ban(actor, user_id) do
+    with :ok <- authorize(actor, :new, User) do
+      case target_user(user_id) do
+        nil -> {:error, :no_target}
+        target -> {:ok, {target, change_user(Ecto.build_assoc(target, :bans))}}
+      end
+    end
+  end
+
+  @doc """
+  Creates a user ban on behalf of `actor`.
+
+  Authorizes `:create` against the user-ban model, inserts the ban and its
+  automatic subnet ban through `create_user/2`, and writes an
+  `"Admin.UserBan:create"` moderation log on success.
+
+  Returns `{:ok, user_ban}`, `{:error, :unauthorized}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec create_user_ban(Users.User.t() | nil, map()) ::
+          {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_user_ban(actor, attrs) do
+    with :ok <- authorize(actor, :create, User),
+         {:ok, user_ban} <- create_user(actor, attrs) do
+      log_user_ban(actor, "Admin.UserBan:create", user_ban, "Created")
+      {:ok, user_ban}
+    end
+  end
+
+  @doc """
+  Loads the user ban named by the raw request `id` for editing, on behalf of
+  `actor`, pairing it (with the banned user preloaded so the form can name them)
+  with the changeset backing the edit form.
+
+  Authorizes `:edit` against the user-ban model, then loads the ban. Returns
+  `{:ok, {user_ban, changeset}}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}` for a non-castable or unknown id.
+  """
+  @spec load_user_ban_for_edit(Users.User.t() | nil, any()) ::
+          {:ok, {User.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+  def load_user_ban_for_edit(actor, id) do
+    with :ok <- authorize(actor, :edit, User),
+         {:ok, user_ban} <- load_user_ban(id, [:user]) do
+      {:ok, {user_ban, change_user(user_ban)}}
+    end
+  end
+
+  @doc """
+  Updates the user ban named by the raw request `id`, on behalf of `actor`.
+
+  Authorizes `:update` against the user-ban model, loads the ban, applies the
+  update through `update_user/2`, and writes an `"Admin.UserBan:update"`
+  moderation log on success.
+
+  Returns `{:ok, user_ban}`, `{:error, :unauthorized}`, `{:error, :not_found}`,
+  or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_user_ban(Users.User.t() | nil, any(), map()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_user_ban(actor, id, attrs) do
+    with :ok <- authorize(actor, :update, User),
+         {:ok, user_ban} <- load_user_ban(id, [:user]),
+         {:ok, user_ban} <- update_user(user_ban, attrs) do
+      log_user_ban(actor, "Admin.UserBan:update", user_ban, "Updated")
+      {:ok, user_ban}
+    end
+  end
+
+  @doc """
+  Deletes the user ban named by the raw request `id`, on behalf of `actor`.
+
+  Authorizes `:delete` against the user-ban model, loads the ban, and requires
+  `actor` to be an admin: a moderator may create and edit bans but not delete
+  them. Writes an `"Admin.UserBan:delete"` moderation log on success.
+
+  Returns `{:ok, user_ban}`, `{:error, :unauthorized}`, or
+  `{:error, :not_found}`.
+  """
+  @spec delete_user_ban(Users.User.t() | nil, any()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def delete_user_ban(actor, id) do
+    with :ok <- authorize(actor, :delete, User),
+         {:ok, user_ban} <- load_user_ban(id, []),
+         :ok <- verify_can_delete(actor) do
+      {:ok, user_ban} = delete_user(user_ban)
+      log_user_ban(actor, "Admin.UserBan:delete", user_ban, "Deleted")
+      {:ok, user_ban}
+    end
+  end
+
+  defp load_user_ban(id, preloads) do
+    with {:ok, id} <- IntegerId.parse(id),
+         %User{} = user_ban <- Repo.get(User, id) do
+      {:ok, Repo.preload(user_ban, preloads)}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp log_user_ban(actor, type, ban, verb) do
+    ModerationLogs.create_moderation_log(
+      actor,
+      type,
+      "/admin/user_bans",
+      "#{verb} a user ban #{ban.generated_ban_id}"
+    )
+  end
+
+  @doc """
   Returns the first ban, if any, that matches the specified request attributes.
   """
   def find(user, ip, fingerprint) do
     Finder.find(user, ip, fingerprint)
   end
+
+  # Deleting any ban is restricted to admins; other management actions are open
+  # to moderators.
+  defp verify_can_delete(%Users.User{role: "admin"}), do: :ok
+  defp verify_can_delete(_actor), do: {:error, :unauthorized}
 end
