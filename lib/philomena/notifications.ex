@@ -70,6 +70,31 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
+  Maps a category route parameter to its notification category, defaulting any
+  unrecognized value to `:forum_post`.
+
+  ## Examples
+
+      iex> category_for_param("image_comment")
+      :image_comment
+
+      iex> category_for_param("bogus")
+      :forum_post
+
+  """
+  @spec category_for_param(any()) :: Category.t()
+  def category_for_param(param) do
+    case param do
+      "channel_live" -> :channel_live
+      "gallery_image" -> :gallery_image
+      "image_comment" -> :image_comment
+      "image_merge" -> :image_merge
+      "forum_topic" -> :forum_topic
+      _ -> :forum_post
+    end
+  end
+
+  @doc """
   Creates a channel live notification, returning the number of affected users.
 
   ## Examples
