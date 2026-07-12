@@ -1,19 +1,16 @@
 defmodule PhilomenaWeb.Gallery.OrderController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Galleries.Gallery
   alias Philomena.Galleries
 
-  plug PhilomenaWeb.FilterBannedUsersPlug
+  action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.CanaryMapPlug, update: :edit
-  plug :load_and_authorize_resource, model: Gallery, id_name: "gallery_id", persisted: true
+  plug PhilomenaWeb.UserAttributionPlug
 
-  def update(conn, %{"image_ids" => image_ids}) when is_list(image_ids) do
-    gallery = conn.assigns.gallery
-
-    Galleries.reorder_gallery(gallery, image_ids)
-
-    json(conn, %{})
+  def update(conn, %{"gallery_id" => gallery_id, "image_ids" => image_ids})
+      when is_list(image_ids) do
+    with {:ok, _gallery} <- Galleries.reorder_gallery(conn.assigns.actor, gallery_id, image_ids) do
+      json(conn, %{})
+    end
   end
 end
