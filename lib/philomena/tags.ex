@@ -1005,6 +1005,38 @@ defmodule Philomena.Tags do
   end
 
   @doc """
+  Enqueues reindexing of the tag named by `slug` and its images, on behalf of
+  `actor`.
+
+  Authorizes `:alias` first. An unknown slug the actor may act on (an admin) is
+  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
+
+  Returns `{:ok, tag}`, `{:error, :not_found}`, or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> reindex_tag_by_slug(admin, "safe")
+      {:ok, %Tag{}}
+
+  """
+  @spec reindex_tag_by_slug(User.t() | nil, String.t()) ::
+          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+  def reindex_tag_by_slug(actor, slug) do
+    tag = tag_by_slug(slug, @alias_preloads)
+
+    with :ok <- authorize(actor, :alias, tag),
+         %Tag{} <- tag do
+      {:ok, tag} = reindex_tag_images(tag)
+      reindex_tag(tag)
+
+      {:ok, tag}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Performs reindexing of all images associated with a tag.
 
   Updates the tag's image count to reflect the current number of non-hidden images,
