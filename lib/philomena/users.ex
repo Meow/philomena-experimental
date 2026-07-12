@@ -32,6 +32,8 @@ defmodule Philomena.Users do
   alias Philomena.Filters
   alias Philomena.TagChanges
   alias Philomena.Filters.Filter
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.IndexWorker
   alias Philomena.UserEraseWorker
   alias Philomena.UserRenameWorker
@@ -792,6 +794,160 @@ defmodule Philomena.Users do
 
   defp clean_roles(nil), do: []
   defp clean_roles(roles), do: Enum.filter(roles, &("" != &1))
+
+  ## Administration
+
+  @user_search_fields ~W(
+    name
+    confirmed_at
+    updated_at
+    deleted_at
+    images_count
+    image_faves_count
+    comments_count
+    image_votes_count
+    metadata_updates_count
+    posts_count
+    topics_count
+    _score
+  )
+
+  @doc """
+  Runs the staff user search on behalf of `viewer`, from the controller-shaped
+  request `params` and `pagination`.
+
+  Reading the user listing requires the user-index permission, so a viewer
+  without it is `{:error, :unauthorized}`. The `"uq"` param supplies the query
+  (blank or missing searches everything), and `"sf"`/`"sd"` select the sort
+  field and direction from the user-domain fields.
+
+  Returns `{:ok, users}` with a `m:Scrivener.Page` of matching users, or
+  `{:error, message}` carrying the parser's message string when the query cannot
+  be compiled.
+  """
+  @spec search_users(User.t() | nil, map(), map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized | String.t()}
+  def search_users(viewer, params, pagination) do
+    with :ok <- authorize(viewer, :index, User) do
+      query_string =
+        case params["uq"] do
+          nil -> "*"
+          "" -> "*"
+          query_string -> query_string
+        end
+
+      case Users.Query.compile(query_string) do
+        {:ok, query} ->
+          users =
+            User
+            |> Search.search_definition(
+              %{query: query, sort: user_search_sort(params)},
+              pagination
+            )
+            |> Search.search_records(User)
+
+          {:ok, users}
+
+        {:error, msg} ->
+          {:error, msg}
+      end
+    end
+  end
+
+  defp user_search_sort(params) do
+    direction = user_search_direction(params)
+
+    case params do
+      %{"sf" => sf} when sf in @user_search_fields ->
+        [%{sf => direction}, %{"id" => direction}]
+
+      _ ->
+        [%{"id" => direction}]
+    end
+  end
+
+  defp user_search_direction(%{"sd" => sd}) when sd in ~W(asc desc), do: sd
+  defp user_search_direction(_params), do: "desc"
+
+  @doc """
+  Returns every assignable role for the staff user-edit form.
+
+  ## Examples
+
+      iex> list_roles()
+      [%Role{}, ...]
+
+  """
+  @spec list_roles() :: [Role.t()]
+  def list_roles do
+    Repo.all(Role)
+  end
+
+  @doc """
+  Loads the user named by `slug` for the staff user-edit form, on behalf of
+  `actor`.
+
+  The user is loaded by slug and authorized for `:edit`; an unknown slug
+  authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}` (`{:error, :not_found}` for actors whose grants
+  cover `nil`). The returned user has its roles preloaded for the form.
+
+  Returns `{:ok, user}`.
+  """
+  @spec load_user_for_edit(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def load_user_for_edit(actor, slug) do
+    target = user_by_slug_with_roles(slug)
+
+    with :ok <- authorize(actor, :edit, target),
+         %User{} = user <- target do
+      {:ok, user}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Updates the details of the user named by `slug`, on behalf of `actor`, from
+  the controller-shaped `params`.
+
+  The user is loaded by slug and authorized for `:update`; an unknown slug
+  authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}` (`{:error, :not_found}` for actors whose grants
+  cover `nil`). On success the user is updated, reindexed, unsubscribed from any
+  now-restricted forums, and a moderation log is written.
+
+  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
+  rejected.
+  """
+  @spec update_user_details(User.t() | nil, String.t(), map()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_user_details(actor, slug, params) do
+    target = user_by_slug_with_roles(slug)
+
+    with :ok <- authorize(actor, :update, target),
+         %User{} = user <- target,
+         {:ok, user} <- update_user(user, params) do
+      log_managed_user(actor, user, "Admin.User:update", "Updated user details for #{user.name}")
+
+      {:ok, user}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
+    end
+  end
+
+  defp user_by_slug_with_roles(slug) do
+    User
+    |> Repo.get_by(slug: slug)
+    |> Repo.preload([:roles])
+  end
+
+  defp log_managed_user(actor, user, type, body) do
+    ModerationLogs.create_moderation_log(actor, type, Paths.profile_path(user), body)
+  end
 
   @doc """
   Updates a user's spoiler type settings.
