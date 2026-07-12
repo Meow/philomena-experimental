@@ -556,33 +556,84 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Claims a duplicate report for review by a user.
+  Claims the duplicate report named by `id` for review, on behalf of `actor`
+  (the acting user).
+
+  The report is authorized for `:edit` after being loaded by id, with the same
+  not-found/unauthorized shapes as `accept_duplicate_report/2`. The report is
+  marked claimed by the actor and a moderation log is written on success.
+
+  Returns `{:ok, duplicate_report}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
 
   ## Examples
 
-      iex> claim_duplicate_report(duplicate_report, user)
+      iex> claim_duplicate_report(moderator, "42")
       {:ok, %DuplicateReport{}}
 
   """
-  def claim_duplicate_report(%DuplicateReport{} = duplicate_report, user) do
-    duplicate_report
-    |> DuplicateReport.claim_changeset(user)
-    |> Repo.update()
+  @spec claim_duplicate_report(User.t() | nil, String.t() | integer()) ::
+          {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
+  def claim_duplicate_report(actor, id) do
+    with {:ok, report_id} <- IntegerId.parse(id),
+         report = Repo.get(DuplicateReport, report_id),
+         :ok <- authorize(actor, :edit, report),
+         %DuplicateReport{} <- report do
+      {:ok, report} = Repo.update(DuplicateReport.claim_changeset(report, actor))
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "DuplicateReport.Claim:create",
+        "/duplicate_reports",
+        "Claimed a duplicate report"
+      )
+
+      {:ok, report}
+    else
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
   end
 
   @doc """
-  Removes a user's claim on a duplicate report.
+  Removes the claim on the duplicate report named by `id`, on behalf of `actor`
+  (the acting user).
+
+  The report is authorized for `:edit` after being loaded by id, with the same
+  not-found/unauthorized shapes as `claim_duplicate_report/2`. The report is
+  returned to the open, unclaimed state and a moderation log is written on
+  success.
+
+  Returns `{:ok, duplicate_report}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
 
   ## Examples
 
-      iex> unclaim_duplicate_report(duplicate_report)
+      iex> unclaim_duplicate_report(moderator, "42")
       {:ok, %DuplicateReport{}}
 
   """
-  def unclaim_duplicate_report(%DuplicateReport{} = duplicate_report) do
-    duplicate_report
-    |> DuplicateReport.unclaim_changeset()
-    |> Repo.update()
+  @spec unclaim_duplicate_report(User.t() | nil, String.t() | integer()) ::
+          {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
+  def unclaim_duplicate_report(actor, id) do
+    with {:ok, report_id} <- IntegerId.parse(id),
+         report = Repo.get(DuplicateReport, report_id),
+         :ok <- authorize(actor, :edit, report),
+         %DuplicateReport{} <- report do
+      {:ok, report} = Repo.update(DuplicateReport.unclaim_changeset(report))
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "DuplicateReport.Claim:delete",
+        "/duplicate_reports",
+        "Released a duplicate report"
+      )
+
+      {:ok, report}
+    else
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+    end
   end
 
   @doc """
