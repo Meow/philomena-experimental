@@ -14,6 +14,7 @@ defmodule Philomena.Reports do
   alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
   alias Philomena.Commissions.Commission
+  alias Philomena.Conversations.Conversation
   alias Philomena.Galleries.Gallery
   alias Philomena.Images.Image
   alias Philomena.IntegerId
@@ -375,6 +376,79 @@ defmodule Philomena.Reports do
       nil -> {:error, :not_found}
       %User{commission: nil} -> {:error, :not_found}
       %User{commission: commission} -> {:ok, {user, commission}}
+    end
+  end
+
+  @doc """
+  Loads the conversation named by the raw request `slug` for the report form,
+  on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
+  `nil`).
+
+  Banned actors are rejected first with `{:error, :ban}`. The conversation is
+  then loaded by slug and authorized for `:show`: it is visible to its
+  participants, moderators, and admins, so a non-participant is
+  `{:error, :unauthorized}`, and a slug naming no row authorizes `nil`, which no
+  ordinary rule permits, so it is `{:error, :unauthorized}` (`{:error, :not_found}`
+  for admins).
+
+  Returns `{:ok, {conversation, changeset}}` with the changeset backing the
+  report form.
+
+  ## Examples
+
+      iex> load_conversation_for_report(actor, "slug")
+      {:ok, {%Conversation{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_conversation_for_report(Actor.t(), String.t()) ::
+          {:ok, {Conversation.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_conversation_for_report(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, conversation} <- load_reportable_conversation(actor.user, slug) do
+      changeset =
+        change_report(%Report{reportable_type: "Conversation", reportable_id: conversation.id})
+
+      {:ok, {conversation, changeset}}
+    end
+  end
+
+  @doc """
+  Loads the conversation named by the raw request `slug` for report submission,
+  on behalf of `actor`.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. Lookup and authorization follow
+  `load_conversation_for_report/2`.
+
+  ## Examples
+
+      iex> load_conversation_for_report_creation(actor, "slug")
+      {:ok, %Conversation{}}
+
+  """
+  @spec load_conversation_for_report_creation(Actor.t(), String.t()) ::
+          {:ok, Conversation.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_conversation_for_report_creation(%Actor{} = actor, slug) do
+    with :ok <- verify_write_access(actor) do
+      load_reportable_conversation(actor.user, slug)
+    end
+  end
+
+  defp load_reportable_conversation(user, slug) do
+    conversation =
+      Conversation
+      |> where(slug: ^slug)
+      |> preload([:from, :to])
+      |> Repo.one()
+
+    with :ok <- authorize(user, :show, conversation),
+         %Conversation{} <- conversation do
+      {:ok, conversation}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
     end
   end
 
