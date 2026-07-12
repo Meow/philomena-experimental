@@ -1,33 +1,15 @@
 defmodule PhilomenaWeb.Conversation.Message.ApproveController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Conversations.Message
   alias Philomena.Conversations
 
-  plug PhilomenaWeb.CanaryMapPlug, create: :approve
+  action_fallback PhilomenaWeb.FallbackController
 
-  plug :load_and_authorize_resource,
-    model: Message,
-    id_name: "message_id",
-    persisted: true,
-    preload: [:conversation]
-
-  def create(conn, _params) do
-    message = conn.assigns.message
-
-    {:ok, _message} =
-      Conversations.approve_message(message, conn.assigns.current_user)
-
-    conn
-    |> put_flash(:info, "Conversation message approved.")
-    |> moderation_log(details: &log_details/2, data: message)
-    |> redirect(to: "/")
-  end
-
-  defp log_details(_action, message) do
-    %{
-      body: "Approved private message in conversation ##{message.conversation_id}",
-      subject_path: "/"
-    }
+  def create(conn, %{"message_id" => message_id}) do
+    with {:ok, _message} <- Conversations.approve_message(conn.assigns.current_user, message_id) do
+      conn
+      |> put_flash(:info, "Conversation message approved.")
+      |> redirect(to: "/")
+    end
   end
 end

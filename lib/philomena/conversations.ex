@@ -504,8 +504,12 @@ defmodule Philomena.Conversations do
           |> preload(:conversation)
           |> Repo.get(id)
 
-        with :ok <- authorize(actor, :approve, message) do
+        with :ok <- authorize(actor, :approve, message),
+             %Message{} <- message do
           approve_loaded_message(actor, message)
+        else
+          {:error, :unauthorized} -> {:error, :unauthorized}
+          nil -> {:error, :not_found}
         end
 
       :error ->
