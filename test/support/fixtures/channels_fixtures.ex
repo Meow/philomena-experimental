@@ -25,4 +25,25 @@ defmodule Philomena.ChannelsFixtures do
 
     channel
   end
+
+  @doc """
+  Creates a channel the fetcher has stamped, so it appears on the livestreams
+  index (`Channels.list_channels/3` lists only channels with `last_fetched_at`
+  set).
+
+  `create_attrs` are string-keyed the way the admin channel controller submits
+  them (`"type"`, `"short_name"`, `"artist_tag"`). `state_attrs` are the atom-keyed
+  fetcher-managed fields (`:title`, `:is_live`, `:nsfw`, `:viewers`,
+  `:thumbnail_url`, `:last_fetched_at`); `:last_fetched_at` defaults to now.
+  """
+  def listed_channel_fixture(create_attrs \\ %{}, state_attrs \\ %{}) do
+    state_attrs = Enum.into(state_attrs, %{last_fetched_at: DateTime.utc_now(:second)})
+
+    {:ok, channel} =
+      create_attrs
+      |> channel_fixture()
+      |> Channels.update_channel_state(state_attrs)
+
+    channel
+  end
 end
