@@ -4,13 +4,14 @@ defmodule Philomena.Filters do
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
   alias Philomena.Repo
 
   alias Philomena.Filters.Filter
   alias Philomena.Filters.FilterPage
   alias Philomena.Filters.Query
   alias Philomena.Filters
+  alias Philomena.Attribution.Actor
   alias Philomena.IntegerId
   alias Philomena.Schema.TagList
   alias Philomena.Tags.Tag
@@ -609,6 +610,57 @@ defmodule Philomena.Filters do
     |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
     |> Repo.update()
     |> reindex_after_update()
+  end
+
+  @doc """
+  Adds the tag named by `tag_slug` to `current_filter`'s hidden tags on behalf
+  of `actor`.
+
+  Rejects a banned actor (`{:error, :ban}`) or one without a fingerprint
+  (`{:error, :unauthorized}`), then authorizes `:edit` on `current_filter` (its
+  owner only). An unknown `tag_slug` is `{:error, :not_found}`.
+
+  Returns `{:ok, %Filter{}}`, `{:error, %Ecto.Changeset{}}`, `{:error, :ban}`,
+  `{:error, :not_found}`, or `{:error, :unauthorized}`.
+  """
+  @spec hide_tag(Actor.t(), Filter.t(), any()) ::
+          {:ok, Filter.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :not_found | :unauthorized}
+  def hide_tag(%Actor{} = actor, current_filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, current_filter, tag_slug) do
+      hide_tag(current_filter, tag)
+    end
+  end
+
+  @doc """
+  Removes the tag named by `tag_slug` from `current_filter`'s hidden tags on
+  behalf of `actor`. Same authorization and return shapes as `hide_tag/3`.
+  """
+  @spec unhide_tag(Actor.t(), Filter.t(), any()) ::
+          {:ok, Filter.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :not_found | :unauthorized}
+  def unhide_tag(%Actor{} = actor, current_filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, current_filter, tag_slug) do
+      unhide_tag(current_filter, tag)
+    end
+  end
+
+  # Ban check, then filter-edit authorization, then tag load - the order the
+  # filter tag toggles are guarded in.
+  defp authorize_filter_tag(actor, current_filter, tag_slug) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :edit, current_filter) do
+      fetch_tag_by_slug(tag_slug)
+    end
+  end
+
+  defp fetch_tag_by_slug(slug) do
+    case Repo.get_by(Tag, slug: slug) do
+      nil -> {:error, :not_found}
+      %Tag{} = tag -> {:ok, tag}
+    end
   end
 
   # Parses the id, loads the filter, and authorizes `action` on it. A
