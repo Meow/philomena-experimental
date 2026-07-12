@@ -13,8 +13,11 @@ defmodule Philomena.Reports do
   alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
+  alias Philomena.Commissions.Commission
+  alias Philomena.Galleries.Gallery
   alias Philomena.Images.Image
   alias Philomena.IntegerId
+  alias Philomena.Users.User
   alias Philomena.Reports.Report
   alias Philomena.Reports
   alias Philomena.IndexWorker
@@ -161,6 +164,217 @@ defmodule Philomena.Reports do
 
       :error ->
         {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads the gallery named by the raw request `gallery_id` for the report form,
+  on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
+  `nil`).
+
+  Banned actors are rejected first with `{:error, :ban}`. The gallery is then
+  loaded and authorized for `:show`: a non-castable id is
+  `{:error, :not_found}`, and a well-formed id that names no row authorizes
+  `nil`, which no ordinary rule permits, so it is `{:error, :unauthorized}`
+  (`{:error, :not_found}` for viewers whose grants cover `nil`).
+
+  Returns `{:ok, {gallery, changeset}}` with the changeset backing the report
+  form.
+
+  ## Examples
+
+      iex> load_gallery_for_report(actor, "1")
+      {:ok, {%Gallery{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_gallery_for_report(Actor.t(), any()) ::
+          {:ok, {Gallery.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_gallery_for_report(%Actor{} = actor, gallery_id) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, gallery} <- load_reportable_gallery(actor.user, gallery_id) do
+      changeset = change_report(%Report{reportable_type: "Gallery", reportable_id: gallery.id})
+      {:ok, {gallery, changeset}}
+    end
+  end
+
+  @doc """
+  Loads the gallery named by the raw request `gallery_id` for report
+  submission, on behalf of `actor`.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. Lookup and authorization follow
+  `load_gallery_for_report/2`.
+
+  ## Examples
+
+      iex> load_gallery_for_report_creation(actor, "1")
+      {:ok, %Gallery{}}
+
+  """
+  @spec load_gallery_for_report_creation(Actor.t(), any()) ::
+          {:ok, Gallery.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_gallery_for_report_creation(%Actor{} = actor, gallery_id) do
+    with :ok <- verify_write_access(actor) do
+      load_reportable_gallery(actor.user, gallery_id)
+    end
+  end
+
+  defp load_reportable_gallery(user, gallery_id) do
+    case IntegerId.parse(gallery_id) do
+      {:ok, id} ->
+        gallery = Repo.get(Gallery, id)
+
+        with :ok <- authorize(user, :show, gallery),
+             %Gallery{} <- gallery do
+          {:ok, gallery}
+        else
+          {:error, :unauthorized} -> {:error, :unauthorized}
+          nil -> {:error, :not_found}
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads the user named by the raw request profile `slug` for the report form,
+  on behalf of `actor`.
+
+  Banned actors are rejected first with `{:error, :ban}`. The user is then
+  loaded by slug and authorized for `:show`; an unknown slug authorizes `nil`,
+  which no ordinary rule permits, so it is `{:error, :unauthorized}`
+  (`{:error, :not_found}` for viewers whose grants cover `nil`).
+
+  Returns `{:ok, {user, changeset}}` with the changeset backing the report
+  form.
+
+  ## Examples
+
+      iex> load_user_for_report(actor, "administrator")
+      {:ok, {%User{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_user_for_report(Actor.t(), String.t()) ::
+          {:ok, {User.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_user_for_report(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, user} <- load_reportable_user(actor.user, slug) do
+      changeset = change_report(%Report{reportable_type: "User", reportable_id: user.id})
+      {:ok, {user, changeset}}
+    end
+  end
+
+  @doc """
+  Loads the user named by the raw request profile `slug` for report
+  submission, on behalf of `actor`.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. Lookup and authorization follow
+  `load_user_for_report/2`.
+
+  ## Examples
+
+      iex> load_user_for_report_creation(actor, "administrator")
+      {:ok, %User{}}
+
+  """
+  @spec load_user_for_report_creation(Actor.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
+  def load_user_for_report_creation(%Actor{} = actor, slug) do
+    with :ok <- verify_write_access(actor) do
+      load_reportable_user(actor.user, slug)
+    end
+  end
+
+  defp load_reportable_user(user, slug) do
+    reported = Repo.get_by(User, slug: slug)
+
+    with :ok <- authorize(user, :show, reported),
+         %User{} <- reported do
+      {:ok, reported}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads the user named by the raw request profile `slug` together with their
+  commission for the report form, on behalf of `actor`.
+
+  Banned actors are rejected first with `{:error, :ban}`. Viewing a commission
+  report form needs no permission, so an unknown slug and a user without a
+  commission are both `{:error, :not_found}`. The commission carries the
+  preloads its report page renders.
+
+  Returns `{:ok, {user, commission, changeset}}` with the changeset backing
+  the report form.
+
+  ## Examples
+
+      iex> load_commission_for_report(actor, "artist")
+      {:ok, {%User{}, %Commission{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_commission_for_report(Actor.t(), String.t()) ::
+          {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :not_found}
+  def load_commission_for_report(%Actor{} = actor, slug) do
+    with :ok <- verify_not_banned(actor),
+         {:ok, {user, commission}} <- load_reportable_commission(slug) do
+      changeset =
+        change_report(%Report{reportable_type: "Commission", reportable_id: commission.id})
+
+      {:ok, {user, commission, changeset}}
+    end
+  end
+
+  @doc """
+  Loads the user named by the raw request profile `slug` together with their
+  commission for report submission, on behalf of `actor`.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. Lookup follows `load_commission_for_report/2`.
+
+  ## Examples
+
+      iex> load_commission_for_report_creation(actor, "artist")
+      {:ok, {%User{}, %Commission{}}}
+
+  """
+  @spec load_commission_for_report_creation(Actor.t(), String.t()) ::
+          {:ok, {User.t(), Commission.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
+  def load_commission_for_report_creation(%Actor{} = actor, slug) do
+    with :ok <- verify_write_access(actor) do
+      load_reportable_commission(slug)
+    end
+  end
+
+  defp load_reportable_commission(slug) do
+    user =
+      User
+      |> where(slug: ^slug)
+      |> preload([
+        :verified_links,
+        commission: [
+          sheet_image: [:sources, tags: :aliases],
+          user: [awards: :badge],
+          items: [example_image: [:sources, tags: :aliases]]
+        ]
+      ])
+      |> Repo.one()
+
+    case user do
+      nil -> {:error, :not_found}
+      %User{commission: nil} -> {:error, :not_found}
+      %User{commission: commission} -> {:ok, {user, commission}}
     end
   end
 

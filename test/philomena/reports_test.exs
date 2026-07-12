@@ -10,15 +10,20 @@ defmodule Philomena.ReportsTest do
   use Philomena.DataCase, async: true
 
   import Philomena.AttributionFixtures
+  import Philomena.CommissionsFixtures
+  import Philomena.GalleriesFixtures
   import Philomena.ImagesFixtures
   import Philomena.ReportsFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Commissions.Commission
+  alias Philomena.Galleries.Gallery
   alias Philomena.Images.Image
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Reports
   alias Philomena.Reports.Report
   alias Philomena.Repo
+  alias Philomena.Users.User
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to the write-access and
@@ -241,6 +246,277 @@ defmodule Philomena.ReportsTest do
 
     test "an id that cannot name a row is not found" do
       assert Reports.load_image_for_report_creation(actor(confirmed_user_fixture()), "abc") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_gallery_for_report/2" do
+    # Backs the report form (a GET-guarded action): the not-banned check runs
+    # first, then the gallery is loaded and authorized for :show.
+
+    setup do
+      %{gallery: gallery_fixture(confirmed_user_fixture())}
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage id" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_gallery_for_report(actor, "abc") == {:error, :ban}
+    end
+
+    test "an anonymous actor loads the report form for a gallery", %{gallery: gallery} do
+      assert {:ok, {%Gallery{} = loaded, %Ecto.Changeset{} = changeset}} =
+               Reports.load_gallery_for_report(actor(nil), "#{gallery.id}")
+
+      assert loaded.id == gallery.id
+
+      # The changeset is over a Report addressed at this gallery.
+      assert %Report{} = changeset.data
+      assert changeset.data.reportable_type == "Gallery"
+      assert changeset.data.reportable_id == gallery.id
+    end
+
+    # A well-formed id naming no row authorizes nil; no ordinary rule permits it,
+    # so an anonymous actor is unauthorized, while an admin (whose grant covers
+    # nil) instead sees the missing row as not-found.
+    test "a well-formed id naming no row is unauthorized for anonymous, not-found for admin" do
+      assert Reports.load_gallery_for_report(actor(nil), "999999999") == {:error, :unauthorized}
+
+      assert Reports.load_gallery_for_report(actor(admin_user_fixture()), "999999999") ==
+               {:error, :not_found}
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Reports.load_gallery_for_report(actor(confirmed_user_fixture()), "abc") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_gallery_for_report_creation/2" do
+    # Backs the report submission (a write): the write-access check runs first
+    # (ban -> :ban, missing fingerprint -> :unauthorized), then the same gallery
+    # load-and-authorize chain as the report form.
+
+    setup do
+      %{gallery: gallery_fixture(confirmed_user_fixture())}
+    end
+
+    test "a banned actor is rejected even while carrying a fingerprint" do
+      # The ban is decided before the fingerprint requirement, so a banned actor
+      # with a fingerprint is still {:error, :ban}.
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_gallery_for_report_creation(actor, "abc") == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading, signed in or not" do
+      signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
+      anonymous = actor(nil, fingerprint: nil)
+
+      assert Reports.load_gallery_for_report_creation(signed_in, "abc") == {:error, :unauthorized}
+      assert Reports.load_gallery_for_report_creation(anonymous, "abc") == {:error, :unauthorized}
+    end
+
+    test "a valid anonymous fingerprinted actor loads a gallery", %{gallery: gallery} do
+      assert {:ok, %Gallery{} = loaded} =
+               Reports.load_gallery_for_report_creation(actor(nil), "#{gallery.id}")
+
+      assert loaded.id == gallery.id
+    end
+
+    test "a well-formed id naming no row is unauthorized for anonymous, not-found for admin" do
+      assert Reports.load_gallery_for_report_creation(actor(nil), "999999999") ==
+               {:error, :unauthorized}
+
+      assert Reports.load_gallery_for_report_creation(actor(admin_user_fixture()), "999999999") ==
+               {:error, :not_found}
+    end
+
+    test "an id that cannot name a row is not found" do
+      assert Reports.load_gallery_for_report_creation(actor(confirmed_user_fixture()), "abc") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_user_for_report/2" do
+    # Backs the profile report form (a GET-guarded action): the not-banned check
+    # runs first, then the user is looked up by slug and authorized for :show.
+
+    setup do
+      %{reported: confirmed_user_fixture()}
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage slug" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_user_for_report(actor, "no-such-user") == {:error, :ban}
+    end
+
+    test "an anonymous actor loads the report form for a user", %{reported: reported} do
+      assert {:ok, {%User{} = loaded, %Ecto.Changeset{} = changeset}} =
+               Reports.load_user_for_report(actor(nil), reported.slug)
+
+      assert loaded.id == reported.id
+
+      # The changeset is over a Report addressed at this user.
+      assert %Report{} = changeset.data
+      assert changeset.data.reportable_type == "User"
+      assert changeset.data.reportable_id == reported.id
+    end
+
+    # An unknown slug authorizes nil; no ordinary rule permits it, so an
+    # anonymous actor is unauthorized, while an admin sees not-found.
+    test "an unknown slug is unauthorized for anonymous, not-found for admin" do
+      assert Reports.load_user_for_report(actor(nil), "no-such-user") == {:error, :unauthorized}
+
+      assert Reports.load_user_for_report(actor(admin_user_fixture()), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_user_for_report_creation/2" do
+    # Backs the profile report submission (a write): the write-access check runs
+    # first, then the same user lookup and authorization as the report form.
+
+    setup do
+      %{reported: confirmed_user_fixture()}
+    end
+
+    test "a banned actor is rejected even while carrying a fingerprint" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_user_for_report_creation(actor, "no-such-user") == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading, signed in or not" do
+      signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
+      anonymous = actor(nil, fingerprint: nil)
+
+      assert Reports.load_user_for_report_creation(signed_in, "no-such-user") ==
+               {:error, :unauthorized}
+
+      assert Reports.load_user_for_report_creation(anonymous, "no-such-user") ==
+               {:error, :unauthorized}
+    end
+
+    test "a valid anonymous fingerprinted actor loads a user", %{reported: reported} do
+      assert {:ok, %User{} = loaded} =
+               Reports.load_user_for_report_creation(actor(nil), reported.slug)
+
+      assert loaded.id == reported.id
+    end
+
+    test "an unknown slug is unauthorized for anonymous, not-found for admin" do
+      assert Reports.load_user_for_report_creation(actor(nil), "no-such-user") ==
+               {:error, :unauthorized}
+
+      assert Reports.load_user_for_report_creation(actor(admin_user_fixture()), "no-such-user") ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "load_commission_for_report/2" do
+    # Backs the commission report form (a GET-guarded action): the not-banned
+    # check runs first, then the user and their commission are looked up by slug.
+    # Viewing the commission report form needs no permission, so the lookup runs
+    # no authorization.
+
+    setup do
+      user = confirmed_user_fixture()
+      commission = commission_fixture(user)
+      commission_item_fixture(commission)
+      %{user: user, commission: commission}
+    end
+
+    test "a banned actor is rejected before any loading, even with a garbage slug" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_commission_for_report(actor, "no-such-user") == {:error, :ban}
+    end
+
+    test "an anonymous actor loads the report form for a commission", %{
+      user: user,
+      commission: commission
+    } do
+      assert {:ok, {%User{} = loaded_user, %Commission{} = loaded, %Ecto.Changeset{} = changeset}} =
+               Reports.load_commission_for_report(actor(nil), user.slug)
+
+      assert loaded_user.id == user.id
+      assert loaded.id == commission.id
+
+      # The commission carries the preloads its report page renders.
+      assert is_list(loaded.items)
+
+      # The changeset is over a Report addressed at this commission.
+      assert %Report{} = changeset.data
+      assert changeset.data.reportable_type == "Commission"
+      assert changeset.data.reportable_id == commission.id
+    end
+
+    # The lookup runs no authorization, so an unknown slug is not-found for every
+    # actor, anonymous or admin alike.
+    test "an unknown slug is not found for anonymous and for admin" do
+      assert Reports.load_commission_for_report(actor(nil), "no-such-user") ==
+               {:error, :not_found}
+
+      assert Reports.load_commission_for_report(actor(admin_user_fixture()), "no-such-user") ==
+               {:error, :not_found}
+    end
+
+    test "a known user without a commission is not found" do
+      user = confirmed_user_fixture()
+
+      assert Reports.load_commission_for_report(actor(nil), user.slug) == {:error, :not_found}
+    end
+  end
+
+  describe "load_commission_for_report_creation/2" do
+    # Backs the commission report submission (a write): the write-access check
+    # runs first, then the same user and commission lookup as the report form.
+
+    setup do
+      user = confirmed_user_fixture()
+      commission = commission_fixture(user)
+      commission_item_fixture(commission)
+      %{user: user, commission: commission}
+    end
+
+    test "a banned actor is rejected even while carrying a fingerprint" do
+      actor = actor(confirmed_user_fixture(), ban: @ban)
+
+      assert Reports.load_commission_for_report_creation(actor, "no-such-user") == {:error, :ban}
+    end
+
+    test "an actor with no fingerprint is unauthorized before any loading, signed in or not" do
+      signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
+      anonymous = actor(nil, fingerprint: nil)
+
+      assert Reports.load_commission_for_report_creation(signed_in, "no-such-user") ==
+               {:error, :unauthorized}
+
+      assert Reports.load_commission_for_report_creation(anonymous, "no-such-user") ==
+               {:error, :unauthorized}
+    end
+
+    test "a valid anonymous fingerprinted actor loads a user and commission", %{
+      user: user,
+      commission: commission
+    } do
+      assert {:ok, {%User{} = loaded_user, %Commission{} = loaded}} =
+               Reports.load_commission_for_report_creation(actor(nil), user.slug)
+
+      assert loaded_user.id == user.id
+      assert loaded.id == commission.id
+      assert is_list(loaded.items)
+    end
+
+    test "an unknown slug and a user without a commission are both not found" do
+      user = confirmed_user_fixture()
+
+      assert Reports.load_commission_for_report_creation(actor(nil), "no-such-user") ==
+               {:error, :not_found}
+
+      assert Reports.load_commission_for_report_creation(actor(nil), user.slug) ==
                {:error, :not_found}
     end
   end
