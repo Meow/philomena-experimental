@@ -1,4 +1,10 @@
 defmodule PhilomenaWeb.ImageScope do
+  alias Philomena.Images.Search.Scope
+
+  @doc """
+  Extracts the image listing parameters worth carrying across page
+  transitions into a keyword list for URL building.
+  """
   def scope(conn) do
     []
     |> scope(conn, "q", :q)
@@ -7,6 +13,19 @@ defmodule PhilomenaWeb.ImageScope do
     |> scope(conn, "del", :del)
     |> scope(conn, "sort", :sort)
     |> scope(conn, "hidden", :hidden)
+  end
+
+  @doc """
+  Builds the viewer's `Philomena.Images.Search.Scope` from the request:
+  current user, compiled filter, raw params, and the image pagination window.
+  """
+  def search_scope(conn) do
+    %Scope{
+      user: conn.assigns.current_user,
+      filter: conn.assigns.compiled_filter,
+      params: conn.params,
+      pagination: conn.assigns.image_pagination
+    }
   end
 
   defp scope(list, conn, key, key_atom) do
