@@ -1105,6 +1105,79 @@ defmodule Philomena.Users do
     end
   end
 
+  @doc """
+  Loads the user named by `slug` for the force-filter form, on behalf of
+  `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`.
+
+  Returns `{:ok, user}`.
+  """
+  @spec load_user_for_force_filter(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def load_user_for_force_filter(actor, slug) do
+    load_managed_user(actor, slug)
+  end
+
+  @doc """
+  Forces a filter on the user named by `slug`, on behalf of `actor`, from the
+  controller-shaped `params`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success the filter is forced, the account
+  reindexed, and a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_force_filter(User.t() | nil, String.t(), map()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_force_filter(actor, slug, params) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      # A `forced_filter_id` naming no filter fails the foreign-key constraint;
+      # the raise on that mismatch is pinned.
+      {:ok, user} = force_filter(user, params)
+
+      log_managed_user(
+        actor,
+        user,
+        "Admin.User.ForceFilter:create",
+        "Forced filter #{user.forced_filter_id} for #{user.name}"
+      )
+
+      {:ok, user}
+    end
+  end
+
+  @doc """
+  Removes the forced filter from the user named by `slug`, on behalf of `actor`.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  rejected before the target is loaded; a well-formed slug naming no user is
+  `{:error, :not_found}`. On success the forced filter is cleared, the account
+  reindexed, and a moderation log is written.
+
+  Returns `{:ok, user}`.
+  """
+  @spec admin_unforce_filter(User.t() | nil, String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def admin_unforce_filter(actor, slug) do
+    with {:ok, user} <- load_managed_user(actor, slug) do
+      {:ok, user} = unforce_filter(user)
+
+      log_managed_user(
+        actor,
+        user,
+        "Admin.User.ForceFilter:delete",
+        "Removed forced filter for #{user.name}"
+      )
+
+      {:ok, user}
+    end
+  end
+
   defp user_by_slug_with_roles(slug) do
     User
     |> Repo.get_by(slug: slug)
