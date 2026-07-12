@@ -81,6 +81,56 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
+  Assembles the admin Do-Not-Post listing, on behalf of `actor`, for the given
+  raw request `params` and `pagination`, newest update first.
+
+  Authorizes `:index` against the DNP entry model first, so a viewer without DNP
+  access is `{:error, :unauthorized}`. A list `"states"` param restricts to
+  those states; a string `"eq"` param filters by requesting user, tag, reason,
+  conditions, or instructions; otherwise the active states (requested, claimed,
+  rescinded, acknowledged) are listed.
+
+  Returns `{:ok, dnp_entries}` as a `m:Scrivener.Page` of entries with their
+  tag, requesting user, and modifying user preloaded, or
+  `{:error, :unauthorized}`.
+  """
+  @spec load_admin_dnp_entries(User.t() | nil, map(), map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def load_admin_dnp_entries(actor, params, pagination) do
+    with :ok <- authorize(actor, :index, DnpEntry) do
+      entries =
+        params
+        |> admin_dnp_entries_query()
+        |> preload([:tag, :requesting_user, :modifying_user])
+        |> order_by(desc: :updated_at)
+        |> Repo.paginate(pagination)
+
+      {:ok, entries}
+    end
+  end
+
+  defp admin_dnp_entries_query(%{"states" => states}) when is_list(states) do
+    where(DnpEntry, [d], d.aasm_state in ^states)
+  end
+
+  defp admin_dnp_entries_query(%{"eq" => q}) when is_binary(q) do
+    q = "%" <> q <> "%"
+
+    DnpEntry
+    |> join(:inner, [d], _ in assoc(d, :tag))
+    |> join(:inner, [d, _t], _ in assoc(d, :requesting_user))
+    |> where(
+      [d, t, u],
+      ilike(u.name, ^q) or ilike(t.name, ^q) or ilike(d.reason, ^q) or ilike(d.conditions, ^q) or
+        ilike(d.instructions, ^q)
+    )
+  end
+
+  defp admin_dnp_entries_query(_params) do
+    where(DnpEntry, [d], d.aasm_state in ["requested", "claimed", "rescinded", "acknowledged"])
+  end
+
+  @doc """
   Loads a single DNP entry for `user` (the current viewer, possibly `nil`) to be
   shown.
 
