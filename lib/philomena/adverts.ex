@@ -328,6 +328,34 @@ defmodule Philomena.Adverts do
     end
   end
 
+  @doc """
+  Updates the image of the advert named by the raw request `id`, on behalf of
+  `actor`, running the image upload pipeline.
+
+  Authorizes advert administration, then loads and authorizes the advert for
+  `:update`. A non-castable or unknown id is `{:error, :not_found}`; a load a
+  moderator may not act on is `{:error, :unauthorized}`. On success a moderation
+  log attributing the change to `actor` is written. Returns `{:ok, advert}`,
+  `{:error, :unauthorized}`, `{:error, :not_found}`, or
+  `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec update_advert_image(User.t() | nil, any(), map()) ::
+          {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_advert_image(actor, id, attrs) do
+    with :ok <- authorize(actor, :index, Advert),
+         {:ok, advert} <- authorized_advert(actor, :update, id),
+         {:ok, advert} <- update_advert_image(advert, attrs) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Admin.Advert.Image:update",
+        "/admin/adverts",
+        "Updated image for advert #{advert.id}"
+      )
+
+      {:ok, advert}
+    end
+  end
+
   # Loads an advert by a raw request id and authorizes `action` against it: a
   # non-castable or unknown id is `{:error, :not_found}`, and a load the actor
   # may not act on is `{:error, :unauthorized}` (an admin, who may act on the
