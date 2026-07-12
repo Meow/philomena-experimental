@@ -5,6 +5,8 @@ defmodule Philomena.DnpEntries.DnpEntry do
   alias Philomena.Tags.Tag
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "dnp_entries" do
     belongs_to :requesting_user, User
     belongs_to :modifying_user, User

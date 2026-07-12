@@ -26,7 +26,7 @@ defmodule Philomena.DnpEntriesFixtures do
         "conditions" => "Test DNP conditions"
       })
 
-    {:ok, dnp_entry} = DnpEntries.create_dnp_entry(user, [tag], attrs)
+    {:ok, dnp_entry} = DnpEntries.insert_dnp_entry(user, [tag], attrs)
 
     case state do
       nil ->
