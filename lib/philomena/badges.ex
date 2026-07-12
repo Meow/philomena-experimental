@@ -281,6 +281,30 @@ defmodule Philomena.Badges do
     end
   end
 
+  @doc """
+  Loads the badge named by the raw request `id` together with the users who hold
+  it, on behalf of `actor`, paginated and ordered by name.
+
+  Authorizes badge administration, then loads the badge by id. A non-castable or
+  unknown id is `{:error, :not_found}`. Returns `{:ok, {badge, users}}` (the
+  users as a `m:Scrivener.Page`) or `{:error, :unauthorized | :not_found}`.
+  """
+  @spec load_badge_users(User.t() | nil, any(), map() | keyword()) ::
+          {:ok, {Badge.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
+  def load_badge_users(actor, id, pagination) do
+    with :ok <- authorize(actor, :index, Badge),
+         {:ok, badge} <- fetch_badge(id) do
+      users =
+        User
+        |> join(:inner, [u], _ in assoc(u, :awards))
+        |> where([_u, a], a.badge_id == ^badge.id)
+        |> order_by([u, _a], asc: u.name)
+        |> Repo.paginate(pagination)
+
+      {:ok, {badge, users}}
+    end
+  end
+
   # Loads a badge by a raw request id. A non-castable or unknown id is
   # `{:error, :not_found}`.
   defp fetch_badge(id) do
