@@ -4,10 +4,17 @@ defmodule Philomena.Filters do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
   alias Philomena.Repo
 
   alias Philomena.Filters.Filter
+  alias Philomena.Filters.FilterPage
+  alias Philomena.Filters.Query
   alias Philomena.Filters
+  alias Philomena.IntegerId
+  alias Philomena.Schema.TagList
+  alias Philomena.Tags.Tag
+  alias Philomena.Users.User
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
 
@@ -40,6 +47,211 @@ defmodule Philomena.Filters do
   end
 
   @doc """
+  Returns the filters shown on the index for `user`: the viewer's own filters
+  (empty for an anonymous visitor) and the system filters, each with `:user`
+  preloaded.
+
+  ## Examples
+
+      iex> index_filters(user)
+      {[%Filter{}, ...], [%Filter{}, ...]}
+
+  """
+  @spec index_filters(User.t() | nil) :: {[Filter.t()], [Filter.t()]}
+  def index_filters(user) do
+    my_filters =
+      if user do
+        Filter
+        |> where(user_id: ^user.id)
+        |> preload(:user)
+        |> Repo.all()
+      else
+        []
+      end
+
+    system_filters =
+      Filter
+      |> where(system: true)
+      |> preload(:user)
+      |> Repo.all()
+
+    {my_filters, system_filters}
+  end
+
+  @doc """
+  Runs the filter search that `query_string` describes on behalf of `user`.
+
+  Compiles `query_string` against the filter search index (the `my` field is
+  available only to a signed-in `user`) and restricts results to filters the
+  viewer may see: public filters, system filters, and the viewer's own.
+  Results are sorted by name then descending id, paginated by `pagination`, and
+  loaded with `:user` preloaded.
+
+  Returns `{:ok, %Scrivener.Page{}}`, or the compiler's `{:error, msg}` for a
+  malformed query.
+
+  ## Examples
+
+      iex> search_filters(user, "name:test", pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> search_filters(user, "name:(", pagination)
+      {:error, "There was an error parsing your query."}
+
+  """
+  @spec search_filters(User.t() | nil, String.t(), map()) ::
+          {:ok, Scrivener.Page.t()} | {:error, String.t()}
+  def search_filters(user, query_string, pagination) do
+    with {:ok, query} <- Query.compile(query_string, user: user) do
+      filters =
+        Filter
+        |> Search.search_definition(
+          %{
+            query: %{
+              bool: %{
+                must: [query | visibility_filters(user)]
+              }
+            },
+            sort: [
+              %{name: :asc},
+              %{id: :desc}
+            ]
+          },
+          pagination
+        )
+        |> Search.search_records(preload(Filter, [:user]))
+
+      {:ok, filters}
+    end
+  end
+
+  defp visibility_filters(user),
+    do: [%{bool: %{should: visibility_shoulds(user)}}]
+
+  defp visibility_shoulds(nil),
+    do: [%{term: %{public: true}}, %{term: %{system: true}}]
+
+  defp visibility_shoulds(user),
+    do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
+
+  @doc """
+  Assembles the filter show page named by `id` for `user`.
+
+  Loads the filter with `:user` preloaded and authorizes `:show` (public and
+  system filters are visible to everyone; private filters only to their owner).
+  Loads the filter's spoilered and hidden tags, each ordered by name. A
+  non-castable `id` is `{:error, :not_found}`; a well-formed unknown `id` the
+  actor may act on (an admin) is `{:error, :not_found}`, otherwise
+  `{:error, :unauthorized}`.
+
+  Returns `{:ok, %FilterPage{}}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_filter_page(user, "1")
+      {:ok, %FilterPage{}}
+
+  """
+  @spec load_filter_page(User.t() | nil, any()) ::
+          {:ok, FilterPage.t()} | {:error, :not_found | :unauthorized}
+  def load_filter_page(user, id) do
+    with {:ok, filter} <- load_and_authorize_filter(user, id, :show, [:user]) do
+      {:ok,
+       %FilterPage{
+         filter: filter,
+         spoilered_tags: tags_by_ids(filter.spoilered_tag_ids),
+         hidden_tags: tags_by_ids(filter.hidden_tag_ids)
+       }}
+    end
+  end
+
+  defp tags_by_ids(ids) do
+    Tag
+    |> where([t], t.id in ^ids)
+    |> order_by(asc: :name)
+    |> Repo.all()
+  end
+
+  @doc """
+  Builds the changeset for a new filter on behalf of `user`.
+
+  Authorizes `:create` (permitted for any signed-in user). When `based_on` names
+  a filter the viewer may see (public, system, or their own), the new filter is
+  prefilled from it as an unpersisted record; an unknown or omitted `based_on`
+  yields a blank form.
+
+  Returns `{:ok, %Ecto.Changeset{}}` or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> new_filter(user, nil)
+      {:ok, %Ecto.Changeset{}}
+
+      iex> new_filter(user, "1")
+      {:ok, %Ecto.Changeset{}}
+
+  """
+  @spec new_filter(User.t() | nil, any()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_filter(user, based_on) do
+    with :ok <- authorize(user, :new, Filter) do
+      {:ok, change_filter(base_filter(user, based_on))}
+    end
+  end
+
+  defp base_filter(_user, nil), do: %Filter{}
+
+  defp base_filter(user, based_on) do
+    visible_source_filter(user, based_on)
+    |> Kernel.||(%Filter{})
+    |> TagList.assign_tag_list(:spoilered_tag_ids, :spoilered_tag_list)
+    |> TagList.assign_tag_list(:hidden_tag_ids, :hidden_tag_list)
+    |> Map.put(:__meta__, %Ecto.Schema.Metadata{
+      state: :built,
+      source: "filters",
+      schema: Filter
+    })
+  end
+
+  defp visible_source_filter(user, based_on) do
+    Filter
+    |> where(id: ^based_on)
+    |> where([f], f.system == true or f.public == true or f.user_id == ^user.id)
+    |> Repo.one()
+  end
+
+  @doc """
+  Loads the filter named by `id` for editing on behalf of `user`.
+
+  Authorizes `:edit` (its owner only) and assigns the spoilered and hidden tag
+  lists onto the filter for the form. A non-castable `id` is
+  `{:error, :not_found}`; a well-formed unknown `id` the actor may act on (an
+  admin) is `{:error, :not_found}`, otherwise `{:error, :unauthorized}`.
+
+  Returns `{:ok, {%Filter{}, %Ecto.Changeset{}}}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_filter_for_edit(user, "1")
+      {:ok, {%Filter{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_filter_for_edit(User.t() | nil, any()) ::
+          {:ok, {Filter.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
+  def load_filter_for_edit(user, id) do
+    with {:ok, filter} <- load_and_authorize_filter(user, id, :edit) do
+      filter =
+        filter
+        |> TagList.assign_tag_list(:spoilered_tag_ids, :spoilered_tag_list)
+        |> TagList.assign_tag_list(:hidden_tag_ids, :hidden_tag_list)
+
+      {:ok, {filter, change_filter(filter)}}
+    end
+  end
+
+  @doc """
   Gets a single filter.
 
   Raises `Ecto.NoResultsError` if the Filter does not exist.
@@ -56,22 +268,32 @@ defmodule Philomena.Filters do
   def get_filter!(id), do: Repo.get!(Filter, id)
 
   @doc """
-  Creates a filter.
+  Creates a filter owned by `user`.
+
+  Authorizes `:create` (permitted for any signed-in user), then inserts the
+  filter and queues it for reindexing.
+
+  Returns `{:ok, %Filter{}}`, `{:error, %Ecto.Changeset{}}` on invalid input, or
+  `{:error, :unauthorized}` for an anonymous actor.
 
   ## Examples
 
-      iex> create_filter(%{field: value})
+      iex> create_filter(user, %{field: value})
       {:ok, %Filter{}}
 
-      iex> create_filter(%{field: bad_value})
+      iex> create_filter(user, %{field: bad_value})
       {:error, %Ecto.Changeset{}}
 
   """
+  @spec create_filter(User.t() | nil, map()) ::
+          {:ok, Filter.t()} | {:error, Ecto.Changeset.t()} | {:error, :unauthorized}
   def create_filter(user, attrs \\ %{}) do
-    %Filter{user_id: user.id}
-    |> Filter.creation_changeset(attrs)
-    |> Repo.insert()
-    |> reindex_after_update()
+    with :ok <- authorize(user, :create, Filter) do
+      %Filter{user_id: user.id}
+      |> Filter.creation_changeset(attrs)
+      |> Repo.insert()
+      |> reindex_after_update()
+    end
   end
 
   @doc """
@@ -91,6 +313,33 @@ defmodule Philomena.Filters do
     |> Filter.update_changeset(attrs)
     |> Repo.update()
     |> reindex_after_update()
+  end
+
+  @doc """
+  Updates the filter named by `id` on behalf of `user`.
+
+  Loads the filter, authorizes `:update` (its owner only), then applies `attrs`.
+  A non-castable `id` is `{:error, :not_found}`; a well-formed unknown `id` the
+  actor may act on (an admin) is `{:error, :not_found}`, otherwise
+  `{:error, :unauthorized}`.
+
+  Returns `{:ok, %Filter{}}`, `{:error, %Ecto.Changeset{}}` on invalid input,
+  `{:error, :not_found}`, or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> update_filter(user, "1", %{"name" => "Renamed"})
+      {:ok, %Filter{}}
+
+  """
+  @spec update_filter(User.t() | nil, any(), map()) ::
+          {:ok, Filter.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized}
+  def update_filter(user, id, attrs) do
+    with {:ok, filter} <- load_and_authorize_filter(user, id, :update) do
+      update_filter(filter, attrs)
+    end
   end
 
   @doc """
@@ -135,6 +384,35 @@ defmodule Philomena.Filters do
 
       error ->
         error
+    end
+  end
+
+  @doc """
+  Deletes the filter named by `id` on behalf of `user`.
+
+  Loads the filter, authorizes `:delete` (its owner only), then deletes it.
+  A filter still referenced as a current filter fails the foreign-key
+  constraint and comes back `{:error, %Ecto.Changeset{}}`, its `data` carrying
+  the filter. A non-castable `id` is `{:error, :not_found}`; a well-formed
+  unknown `id` the actor may act on (an admin) is `{:error, :not_found}`,
+  otherwise `{:error, :unauthorized}`.
+
+  Returns `{:ok, %Filter{}}`, `{:error, %Ecto.Changeset{}}`,
+  `{:error, :not_found}`, or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> delete_filter(user, "1")
+      {:ok, %Filter{}}
+
+  """
+  @spec delete_filter(User.t() | nil, any()) ::
+          {:ok, Filter.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized}
+  def delete_filter(user, id) do
+    with {:ok, filter} <- load_and_authorize_filter(user, id, :delete) do
+      delete_filter(filter)
     end
   end
 
@@ -272,6 +550,27 @@ defmodule Philomena.Filters do
     |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
     |> Repo.update()
     |> reindex_after_update()
+  end
+
+  # Parses the id, loads the filter, and authorizes `action` on it. A
+  # non-castable id is not-found; a well-formed unknown id is authorized as a
+  # nil load, so an admin sees not-found and everyone else unauthorized.
+  defp load_and_authorize_filter(user, id, action, preloads \\ []) do
+    case IntegerId.parse(id) do
+      :error ->
+        {:error, :not_found}
+
+      {:ok, id} ->
+        filter = Filter |> preload(^preloads) |> Repo.get(id)
+
+        with :ok <- authorize(user, action, filter),
+             %Filter{} <- filter do
+          {:ok, filter}
+        else
+          {:error, :unauthorized} -> {:error, :unauthorized}
+          nil -> {:error, :not_found}
+        end
+    end
   end
 
   defp reindex_after_update(result) do
