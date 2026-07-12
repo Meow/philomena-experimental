@@ -4,6 +4,8 @@ defmodule Philomena.SiteNotices.SiteNotice do
 
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "site_notices" do
     belongs_to :user, User
 
