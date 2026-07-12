@@ -76,6 +76,71 @@ defmodule Philomena.SourceChanges do
   end
 
   @doc """
+  Lists the source changes made by the user named by the profile `slug`, newest
+  first, on behalf of `actor` (a user, or `nil` for an anonymous visitor).
+
+  The user is loaded by slug and authorized for `:show`; an unknown slug
+  authorizes `nil`, which no ordinary rule permits, so it is
+  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
+  cover `nil`). Changes to the user's own anonymous uploads are excluded.
+  `params["added"]` narrows to additions (`"1"`) or removals (`"0"`);
+  `pagination` is Scrivener pagination data passed through to `Repo.paginate/2`.
+
+  Returns `{:ok, {user, source_changes, image_count}}` where `source_changes` is
+  a paginated set with its user and image associations preloaded for rendering
+  and `image_count` is the number of distinct images touched.
+
+  ## Examples
+
+      iex> user_source_changes(actor, "artist", %{}, page: 1, page_size: 25)
+      {:ok, {%User{}, %Scrivener.Page{}, 3}}
+
+  """
+  @spec user_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
+          {:ok, {User.t(), Scrivener.Page.t(), non_neg_integer()}}
+          | {:error, :unauthorized | :not_found}
+  def user_source_changes(actor, slug, params, pagination) do
+    user = Repo.get_by(User, slug: slug)
+
+    with :ok <- authorize(actor, :show, user),
+         %User{} <- user do
+      common_query =
+        SourceChange
+        |> join(:inner, [sc], i in Image, on: sc.image_id == i.id)
+        |> where(
+          [sc, i],
+          sc.user_id == ^user.id and not (i.user_id == ^user.id and i.anonymous == true)
+        )
+        |> added_filter(params)
+
+      source_changes =
+        common_query
+        |> preload([:user, image: [:user, :sources, tags: :aliases]])
+        |> order_by(desc: :id)
+        |> Repo.paginate(pagination)
+
+      image_count =
+        common_query
+        |> select([_, i], count(i.id, :distinct))
+        |> Repo.one()
+
+      {:ok, {user, source_changes, image_count}}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp added_filter(query, %{"added" => "1"}),
+    do: where(query, added: true)
+
+  defp added_filter(query, %{"added" => "0"}),
+    do: where(query, added: false)
+
+  defp added_filter(query, _params),
+    do: query
+
+  @doc """
   Gets a single source_change.
 
   Raises `Ecto.NoResultsError` if the Source change does not exist.
