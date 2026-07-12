@@ -1016,16 +1016,43 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Updates a user's avatar with the provided file.
+  Loads the avatar form changeset for the acting user's own account, on behalf
+  of `actor`.
 
-  Handles file analysis and persistence.
-
-  ## Examples
-
-      iex> update_avatar(user, %{"avatar" => upload})
-      {:ok, %User{}}
-
+  A banned actor is rejected with `{:error, :ban}`; otherwise returns
+  `{:ok, %Ecto.Changeset{}}`.
   """
+  @spec load_user_for_avatar_edit(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :ban}
+  def load_user_for_avatar_edit(%Actor{user: user} = actor) do
+    with :ok <- verify_not_banned(actor) do
+      {:ok, change_user(user)}
+    end
+  end
+
+  @doc """
+  Updates the acting user's own avatar from the controller-shaped `attrs`, on
+  behalf of `actor`.
+
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`. On success the uploaded file is analyzed, persisted,
+  and the user reindexed.
+
+  Given a `%User{}` instead, updates that user's avatar directly with no
+  write-access check, handling file analysis and persistence.
+
+  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when analysis or the
+  update is rejected.
+  """
+  @spec update_avatar(Actor.t(), map()) ::
+          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
+  @spec update_avatar(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def update_avatar(%Actor{user: user} = actor, attrs) do
+    with :ok <- verify_write_access(actor) do
+      update_avatar(user, attrs)
+    end
+  end
+
   def update_avatar(%User{} = user, attrs) do
     user
     |> Uploader.analyze_upload(attrs)
@@ -1045,14 +1072,25 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Removes a user's avatar.
+  Removes the acting user's own avatar, on behalf of `actor`.
 
-  ## Examples
+  This backs a write, so the actor's write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint
+  `{:error, :unauthorized}`.
 
-      iex> remove_avatar(user)
-      {:ok, %User{}}
+  Given a `%User{}` instead, removes that user's avatar directly with no
+  write-access check.
 
+  Returns `{:ok, user}`.
   """
+  @spec remove_avatar(Actor.t()) :: {:ok, User.t()} | {:error, :ban | :unauthorized}
+  @spec remove_avatar(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def remove_avatar(%Actor{user: user} = actor) do
+    with :ok <- verify_write_access(actor) do
+      remove_avatar(user)
+    end
+  end
+
   def remove_avatar(%User{} = user) do
     user
     |> User.remove_avatar_changeset()
