@@ -1052,6 +1052,59 @@ defmodule Philomena.Users do
     end
   end
 
+  @doc """
+  Loads the user named by `slug` for the erase confirmation form, on behalf of
+  `actor`, applying the eligibility guards.
+
+  Managing a user requires the user-edit permission, so an actor without it is
+  `{:error, :unauthorized}`. Only ordinary, unverified accounts may be erased:
+
+    * a slug naming no user is `{:error, :not_erasable}`;
+    * a privileged (non-`"user"` role) target is `{:error, {:privileged, user}}`;
+    * a verified target is `{:error, {:verified, user}}`.
+
+  Returns `{:ok, user}` for an erasable user, with its roles preloaded.
+  """
+  @spec load_user_for_erase(User.t() | nil, String.t()) ::
+          {:ok, User.t()}
+          | {:error,
+             :unauthorized | :not_erasable | {:privileged, User.t()} | {:verified, User.t()}}
+  def load_user_for_erase(actor, slug) do
+    with :ok <- authorize(actor, :edit, %User{}) do
+      user = user_by_slug_with_roles(slug)
+
+      cond do
+        is_nil(user) -> {:error, :not_erasable}
+        user.role != "user" -> {:error, {:privileged, user}}
+        user.verified -> {:error, {:verified, user}}
+        true -> {:ok, user}
+      end
+    end
+  end
+
+  @doc """
+  Erases the user named by `slug`, on behalf of `actor`.
+
+  The target is loaded and guarded following `load_user_for_erase/2`. On success
+  the account is deactivated, renamed to a random handle, enqueued for the
+  remaining data deletion, and a moderation log is written naming the original
+  account.
+
+  Returns `{:ok, user}` with the renamed account.
+  """
+  @spec admin_erase_user(User.t() | nil, String.t()) ::
+          {:ok, User.t()}
+          | {:error,
+             :unauthorized | :not_erasable | {:privileged, User.t()} | {:verified, User.t()}}
+  def admin_erase_user(actor, slug) do
+    with {:ok, user} <- load_user_for_erase(actor, slug),
+         {:ok, erased} <- erase_user(user, actor) do
+      log_managed_user(actor, erased, "Admin.User.Erase:create", "Erased #{user.name}")
+
+      {:ok, erased}
+    end
+  end
+
   defp user_by_slug_with_roles(slug) do
     User
     |> Repo.get_by(slug: slug)
