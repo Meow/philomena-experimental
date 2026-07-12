@@ -19,6 +19,8 @@ defmodule Philomena.DuplicateReports do
   alias Philomena.ImageIntensities.ImageIntensity
   alias Philomena.Images.Image
   alias Philomena.Images
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.Users.User
 
   @valid_states ~w(open rejected accepted claimed)
@@ -379,21 +381,69 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Accepts a duplicate report and merges the duplicate image into the target image.
+  Accepts the duplicate report named by `id` and merges the duplicate image into
+  the target, on behalf of `actor` (the acting user).
 
-  Takes an optional Ecto.Multi, the duplicate report to accept, and the user accepting the report.
-  Handles rejecting any other duplicate reports between the same images and merges the images.
+  The report is authorized for `:edit` after being loaded by id. A non-castable
+  id, and a well-formed unknown id an admin is otherwise permitted to act on, are
+  `{:error, :not_found}`; an unknown id for a non-admin actor is
+  `{:error, :unauthorized}`. Any other duplicate reports between the same two
+  images are rejected, the images are merged, and a moderation log is written on
+  success. A merge that cannot complete (such as a report already accepted by
+  someone else) is `{:error, :report_failed}`.
+
+  Returns `{:ok, results}` (the transaction result map), `{:error, :not_found}`,
+  `{:error, :unauthorized}`, or `{:error, :report_failed}`.
 
   ## Examples
 
-      iex> accept_duplicate_report(nil, duplicate_report, user)
+      iex> accept_duplicate_report(moderator, "42")
       {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
 
-      iex> accept_duplicate_report(existing_multi, duplicate_report, user)
+  """
+  @spec accept_duplicate_report(User.t() | nil, String.t() | integer()) ::
+          {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
+  def accept_duplicate_report(actor, id) do
+    with {:ok, report_id} <- IntegerId.parse(id),
+         report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
+         :ok <- authorize(actor, :edit, report),
+         %DuplicateReport{} <- report,
+         {:ok, results} <- accept_report_multi(report, actor) do
+      report = results.duplicate_report
+
+      ModerationLogs.create_moderation_log(
+        actor,
+        "DuplicateReport.Accept:create",
+        Paths.image_path(report.image),
+        "Accepted duplicate report, merged #{report.image.id} into #{report.duplicate_of_image.id}"
+      )
+
+      {:ok, results}
+    else
+      shape when shape in [:error, nil] -> {:error, :not_found}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _ -> {:error, :report_failed}
+    end
+  end
+
+  @doc """
+  Merges the duplicate image of `duplicate_report` into its target image.
+
+  Takes an optional `Ecto.Multi`, the duplicate report to accept, and the user
+  accepting the report. Rejects any other duplicate reports between the same two
+  images and merges the images. Runs the transaction unless composed into a
+  larger multi.
+
+  ## Examples
+
+      iex> accept_report_multi(nil, duplicate_report, user)
+      {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
+
+      iex> accept_report_multi(existing_multi, duplicate_report, user)
       %Ecto.Multi{}
 
   """
-  def accept_duplicate_report(multi \\ nil, %DuplicateReport{} = duplicate_report, user) do
+  def accept_report_multi(multi \\ nil, %DuplicateReport{} = duplicate_report, user) do
     duplicate_report = Repo.preload(duplicate_report, [:image, :duplicate_of_image])
 
     other_duplicate_reports =
@@ -456,7 +506,7 @@ defmodule Philomena.DuplicateReports do
     |> Multi.run(:reject_duplicate_report, fn _, %{} ->
       reject_duplicate_report(duplicate_report, user)
     end)
-    |> accept_duplicate_report(new_report, user)
+    |> accept_report_multi(new_report, user)
   end
 
   @doc """
