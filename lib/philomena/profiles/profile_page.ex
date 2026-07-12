@@ -44,9 +44,9 @@ defmodule Philomena.Profiles.ProfilePage do
 
   @type t :: %__MODULE__{
           user: User.t(),
-          recent_uploads: list(),
-          recent_faves: list(),
-          recent_artwork: list(),
+          recent_uploads: Scrivener.Page.t(),
+          recent_faves: Scrivener.Page.t(),
+          recent_artwork: Scrivener.Page.t(),
           recent_comments: list(),
           recent_posts: list(),
           recent_galleries: list(),
