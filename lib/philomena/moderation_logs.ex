@@ -4,9 +4,26 @@ defmodule Philomena.ModerationLogs do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias Philomena.Repo
 
   alias Philomena.ModerationLogs.ModerationLog
+  alias Philomena.Users.User
+
+  @doc """
+  Returns the paginated moderation logs for `user` (the current viewer).
+
+  The log is staff-only. Returns `{:error, :unauthorized}` when the viewer may
+  not read it, otherwise `{:ok, moderation_logs}` as a `m:Scrivener.Page`.
+  """
+  @spec load_moderation_logs(User.t() | nil, map() | keyword()) ::
+          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+  def load_moderation_logs(user, pagination) do
+    with :ok <- authorize(user, :index, ModerationLog) do
+      {:ok, list_moderation_logs(pagination)}
+    end
+  end
 
   @doc """
   Returns a paginated list of moderation logs as a `m:Scrivener.Page`.
