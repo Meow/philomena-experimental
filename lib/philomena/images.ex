@@ -445,6 +445,44 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc """
+  Picks a random image id from the listing the scope's "q" parameter
+  describes (everything when absent), respecting the scope's filter and
+  display switches.
+
+  Returns the id, or `nil` when nothing matches or the query is malformed.
+
+  ## Examples
+
+      iex> random_image_id(scope)
+      42
+
+  """
+  @spec random_image_id(Scope.t()) :: integer() | nil
+  def random_image_id(scope) do
+    result =
+      ImageSearch.search_string(
+        scope,
+        Map.get(scope.params, "q", "*"),
+        pagination: %{page_size: 1},
+        sorts: &ImageSearch.parse_sort(%{"sf" => "random"}, &1)
+      )
+
+    case result do
+      {:ok, {definition, _tags}} ->
+        definition
+        |> ImageSearch.execute(queryable: Image)
+        |> Enum.to_list()
+        |> case do
+          [image] -> image.id
+          [] -> nil
+        end
+
+      _error ->
+        nil
+    end
+  end
+
   defp load_image_for_navigation(user, image_id, preloads \\ []) do
     with {:ok, id} <- IntegerId.parse(image_id),
          image = Repo.get(preload(Image, ^preloads), id),
