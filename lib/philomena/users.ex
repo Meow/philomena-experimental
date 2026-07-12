@@ -182,6 +182,59 @@ defmodule Philomena.Users do
   def preload_awards(nil), do: nil
   def preload_awards(%User{} = user), do: Repo.preload(user, awards: :badge)
 
+  @doc """
+  Returns the site staff grouped into the categories the staff page displays,
+  as a keyword list of `{category, [%User{}]}` in display order.
+
+  Staff are the users whose role is `"admin"`, `"moderator"`, or `"assistant"`,
+  ordered by name. A staff member who hides their default role and carries no
+  distinguishing secondary role matches no category and is omitted.
+
+  ## Examples
+
+      iex> staff_categories()
+      [Administrators: [%User{}], "Technical Team": [], ...]
+
+  """
+  @spec staff_categories() :: keyword([User.t()])
+  def staff_categories do
+    users =
+      User
+      |> where([u], u.role in ["admin", "moderator", "assistant"])
+      |> order_by(asc: :name)
+      |> Repo.all()
+
+    [
+      Administrators: Enum.filter(users, &(&1.role == "admin" and &1.hide_default_role == false)),
+      "Technical Team":
+        Enum.filter(
+          users,
+          &(&1.role != "admin" and &1.secondary_role in ["Site Developer", "Devops"])
+        ),
+      "Public Relations":
+        Enum.filter(users, &(&1.role != "admin" and &1.secondary_role == "Public Relations")),
+      Moderators:
+        Enum.filter(
+          users,
+          &(&1.role == "moderator" and &1.secondary_role in [nil, ""] and
+              &1.hide_default_role == false)
+        ),
+      Assistants:
+        Enum.filter(
+          users,
+          &(&1.role == "assistant" and &1.secondary_role in [nil, ""] and
+              &1.hide_default_role == false)
+        ),
+      Others:
+        Enum.filter(
+          users,
+          &(&1.role != "user" and
+              &1.secondary_role not in [nil, "", "Site Developer", "Devops", "Public Relations"] and
+              &1.hide_default_role == true)
+        )
+    ]
+  end
+
   ## User registration
 
   @doc """
