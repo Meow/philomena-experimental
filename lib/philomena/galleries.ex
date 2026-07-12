@@ -577,6 +577,34 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
+  Adds the image named by the raw request `image_id` to the gallery named by
+  `gallery_id`, on behalf of `actor`.
+
+  The actor's write access is verified first (banned actors get
+  `{:error, :ban}`, actors without a fingerprint `{:error, :unauthorized}`),
+  then the gallery is loaded and `:edit` is authorized and the image is loaded
+  and `:show` is authorized, each following the unknown-id rules of
+  `update_gallery/3`. On success the image is added at the last position.
+
+  ## Examples
+
+      iex> add_image_to_gallery(actor, "1", "42")
+      {:ok, %{gallery: %Gallery{}, ...}}
+
+  """
+  @spec add_image_to_gallery(Actor.t(), any(), any()) ::
+          {:ok, map()}
+          | {:error, :ban | :unauthorized | :not_found}
+          | Ecto.Multi.failure()
+  def add_image_to_gallery(%Actor{} = actor, gallery_id, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :edit),
+         {:ok, image} <- load_authorized_image(actor, image_id) do
+      add_image_to_gallery(gallery, image)
+    end
+  end
+
+  @doc """
   Adds the specified image to the gallery, updates image count, triggers
   notifications, and performs necessary reindexing.
 
@@ -633,6 +661,31 @@ defmodule Philomena.Galleries do
 
       error ->
         error
+    end
+  end
+
+  @doc """
+  Removes the image named by the raw request `image_id` from the gallery named
+  by `gallery_id`, on behalf of `actor`.
+
+  Loading and authorization follow `add_image_to_gallery/3`. Removal is
+  idempotent: an image not in the gallery is a clean success.
+
+  ## Examples
+
+      iex> remove_image_from_gallery(actor, "1", "42")
+      {:ok, %{gallery: %Gallery{}, ...}}
+
+  """
+  @spec remove_image_from_gallery(Actor.t(), any(), any()) ::
+          {:ok, map()}
+          | {:error, :ban | :unauthorized | :not_found}
+          | Ecto.Multi.failure()
+  def remove_image_from_gallery(%Actor{} = actor, gallery_id, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :edit),
+         {:ok, image} <- load_authorized_image(actor, image_id) do
+      remove_image_from_gallery(gallery, image)
     end
   end
 
@@ -701,6 +754,30 @@ defmodule Philomena.Galleries do
     Interaction
     |> where(gallery_id: ^gallery_id)
     |> Repo.aggregate(:max, :position)
+  end
+
+  @doc """
+  Queues a reorder of the gallery named by the raw request `gallery_id` to the
+  order given by `image_ids`, on behalf of `actor`.
+
+  The actor's write access is verified first (banned actors get
+  `{:error, :ban}`, actors without a fingerprint `{:error, :unauthorized}`),
+  then the gallery is loaded and `:edit` is authorized following the
+  unknown-id rules of `update_gallery/3`. On success the reorder is enqueued.
+
+  ## Examples
+
+      iex> reorder_gallery(actor, "1", [3, 1, 2])
+      {:ok, %Gallery{}}
+
+  """
+  @spec reorder_gallery(Actor.t(), any(), [integer()]) ::
+          {:ok, Gallery.t()} | {:error, :ban | :unauthorized | :not_found}
+  def reorder_gallery(%Actor{} = actor, gallery_id, image_ids) do
+    with :ok <- verify_write_access(actor),
+         {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :edit) do
+      {:ok, reorder_gallery(gallery, image_ids)}
+    end
   end
 
   @doc """
@@ -800,6 +877,86 @@ defmodule Philomena.Galleries do
   defp position_order(_gallery), do: [desc: :position]
 
   @doc """
+  Clears `user`'s unread notifications for the gallery named by the raw request
+  `gallery_id`.
+
+  The gallery is loaded by id with no authorization: any authenticated user may
+  mark any gallery read. A non-castable or unknown id is `{:error, :not_found}`.
+
+  Returns `{:ok, gallery}` after clearing `user`'s gallery image notifications
+  for it.
+
+  ## Examples
+
+      iex> mark_gallery_read(user, "1")
+      {:ok, %Gallery{}}
+
+      iex> mark_gallery_read(user, "nonexistent")
+      {:error, :not_found}
+
+  """
+  @spec mark_gallery_read(User.t(), any()) :: {:ok, Gallery.t()} | {:error, :not_found}
+  def mark_gallery_read(user, gallery_id) do
+    with {:ok, id} <- IntegerId.parse(gallery_id),
+         %Gallery{} = gallery <- Repo.get(Gallery, id) do
+      clear_gallery_notification(gallery, user)
+      {:ok, gallery}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Subscribes `user` to the gallery named by the raw request `gallery_id`.
+
+  The gallery is loaded by id and authorized for `:show`: a non-castable id is
+  `{:error, :not_found}`, and an unknown id authorizes `nil`, which comes back
+  `{:error, :unauthorized}` for a non-admin.
+
+  Returns `{:ok, gallery}` (the gallery is needed to render the subscription
+  partial), or `{:error, %Ecto.Changeset{}}` if the subscription insert is
+  rejected.
+
+  ## Examples
+
+      iex> subscribe_gallery(user, "1")
+      {:ok, %Gallery{}}
+
+  """
+  @spec subscribe_gallery(User.t() | nil, any()) ::
+          {:ok, Gallery.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def subscribe_gallery(user, gallery_id) do
+    with {:ok, gallery} <- load_authorized_gallery(user, gallery_id, :show),
+         {:ok, _subscription} <- create_subscription(gallery, user) do
+      {:ok, gallery}
+    end
+  end
+
+  @doc """
+  Unsubscribes `user` from the gallery named by the raw request `gallery_id`.
+
+  Loading and authorization mirror `subscribe_gallery/2`. Unsubscribing is
+  idempotent and cannot fail, so there is no changeset error shape.
+
+  Returns `{:ok, gallery}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> unsubscribe_gallery(user, "1")
+      {:ok, %Gallery{}}
+
+  """
+  @spec unsubscribe_gallery(User.t() | nil, any()) ::
+          {:ok, Gallery.t()} | {:error, :unauthorized | :not_found}
+  def unsubscribe_gallery(user, gallery_id) do
+    with {:ok, gallery} <- load_authorized_gallery(user, gallery_id, :show) do
+      # Deletion is idempotent and cannot fail; the hard match crashes if it does.
+      {:ok, _subscription} = delete_subscription(gallery, user)
+      {:ok, gallery}
+    end
+  end
+
+  @doc """
   Removes all gallery notifications for a given gallery and user.
 
   ## Examples
@@ -811,5 +968,23 @@ defmodule Philomena.Galleries do
   def clear_gallery_notification(%Gallery{} = gallery, user) do
     Notifications.clear_gallery_image_notification(gallery, user)
     :ok
+  end
+
+  defp load_authorized_image(actor, image_id) do
+    case IntegerId.parse(image_id) do
+      {:ok, id} ->
+        image = Repo.get(Image, id)
+
+        with :ok <- authorize(actor, :show, image),
+             %Image{} <- image do
+          {:ok, image}
+        else
+          {:error, :unauthorized} -> {:error, :unauthorized}
+          nil -> {:error, :not_found}
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
   end
 end

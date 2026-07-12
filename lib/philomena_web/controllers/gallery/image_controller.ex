@@ -1,39 +1,28 @@
 defmodule PhilomenaWeb.Gallery.ImageController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Galleries.Gallery
   alias Philomena.Galleries
-  alias Philomena.Images.Image
 
-  plug PhilomenaWeb.FilterBannedUsersPlug
+  action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.CanaryMapPlug, create: :edit, delete: :edit
-  plug :load_and_authorize_resource, model: Gallery, id_name: "gallery_id", persisted: true
+  plug PhilomenaWeb.UserAttributionPlug
 
-  plug PhilomenaWeb.CanaryMapPlug, create: :show, delete: :show
-  plug :load_and_authorize_resource, model: Image, id_name: "image_id", persisted: true
-
-  def create(conn, _params) do
-    case Galleries.add_image_to_gallery(conn.assigns.gallery, conn.assigns.image) do
-      {:ok, _gallery} ->
-        json(conn, %{})
-
-      _error ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{})
-    end
+  def create(conn, params) do
+    conn.assigns.actor
+    |> Galleries.add_image_to_gallery(params["gallery_id"], params["image_id"])
+    |> respond(conn)
   end
 
-  def delete(conn, _params) do
-    case Galleries.remove_image_from_gallery(conn.assigns.gallery, conn.assigns.image) do
-      {:ok, _gallery} ->
-        json(conn, %{})
-
-      _error ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{})
-    end
+  def delete(conn, params) do
+    conn.assigns.actor
+    |> Galleries.remove_image_from_gallery(params["gallery_id"], params["image_id"])
+    |> respond(conn)
   end
+
+  defp respond({:ok, _result}, conn), do: json(conn, %{})
+
+  defp respond({:error, reason}, _conn) when reason in [:ban, :unauthorized, :not_found],
+    do: {:error, reason}
+
+  defp respond(_error, conn), do: conn |> put_status(:bad_request) |> json(%{})
 end
