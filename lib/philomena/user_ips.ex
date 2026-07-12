@@ -4,9 +4,54 @@ defmodule Philomena.UserIps do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias Philomena.Repo
 
+  alias Philomena.Bans
   alias Philomena.UserIps.UserIp
+  alias Philomena.UserIps.IpProfile
+  alias Philomena.Users.User
+
+  @doc """
+  Assembles the IP profile page for `user` (the current viewer) from the raw
+  address string `ip`.
+
+  The profile is staff-only: a viewer who may not see IP addresses gets
+  `{:error, :unauthorized}` before the address is parsed, matching the order the
+  authorization gate runs in. An unparsable address is `{:error, :not_found}`.
+
+  Returns `{:ok, %IpProfile{}}` carrying the users seen on the address and the
+  subnet bans covering it.
+  """
+  @spec load_ip_profile(User.t() | nil, String.t()) ::
+          {:ok, IpProfile.t()} | {:error, :unauthorized | :not_found}
+  def load_ip_profile(user, ip) do
+    with :ok <- authorize(user, :show, :ip_address),
+         {:ok, ip} <- cast_ip(ip) do
+      {:ok,
+       %IpProfile{
+         ip: ip,
+         user_ips: user_ips_for(ip),
+         subnet_bans: Bans.subnet_bans_for_ip(ip)
+       }}
+    end
+  end
+
+  defp user_ips_for(ip) do
+    UserIp
+    |> where(fragment("? >>= ip", ^ip))
+    |> order_by(desc: :updated_at)
+    |> preload(:user)
+    |> Repo.all()
+  end
+
+  defp cast_ip(ip) do
+    case EctoNetwork.INET.cast(ip) do
+      {:ok, ip} -> {:ok, ip}
+      _error -> {:error, :not_found}
+    end
+  end
 
   @doc """
   Gets a single user_ip.

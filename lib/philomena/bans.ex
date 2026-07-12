@@ -28,6 +28,17 @@ defmodule Philomena.Bans do
   end
 
   @doc """
+  Returns the subnet bans whose specification contains `ip`, newest first.
+  """
+  @spec subnet_bans_for_ip(Postgrex.INET.t()) :: [Subnet.t()]
+  def subnet_bans_for_ip(ip) do
+    Subnet
+    |> where([s], fragment("? >>= ?", s.specification, ^ip))
+    |> order_by(desc: :created_at)
+    |> Repo.all()
+  end
+
+  @doc """
   Gets a single fingerprint ban.
 
   Raises `Ecto.NoResultsError` if the fingerprint ban does not exist.

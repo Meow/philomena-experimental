@@ -5,6 +5,8 @@ defmodule Philomena.Bans.Subnet do
 
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "subnet_bans" do
     belongs_to :banning_user, User
 

@@ -4,6 +4,8 @@ defmodule Philomena.UserIps.UserIp do
 
   alias Philomena.Users.User
 
+  @type t :: %__MODULE__{}
+
   schema "user_ips" do
     belongs_to :user, User
 
