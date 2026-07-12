@@ -33,7 +33,7 @@ defmodule Philomena.DnpEntriesFixtures do
         dnp_entry
 
       state ->
-        {:ok, dnp_entry} = DnpEntries.transition_dnp_entry(dnp_entry, user, state)
+        {:ok, dnp_entry} = DnpEntries.transition_loaded_dnp_entry(dnp_entry, user, state)
         dnp_entry
     end
   end

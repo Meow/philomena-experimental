@@ -8,6 +8,8 @@ defmodule Philomena.DnpEntries do
 
   alias Philomena.Attribution.Actor
   alias Philomena.DnpEntries.{DnpEntry, DnpListing}
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
   alias Philomena.ModNotes
   alias Philomena.ModNotes.ModNote
   alias Philomena.Tags.Tag
@@ -260,21 +262,67 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
+  Transitions the DNP entry named by the raw request `id` to `new_state`, on
+  behalf of `actor` (the acting staff user), and writes a moderation log on
+  success.
+
+  Authorizes `:index` against the DNP entry model first, so a viewer without DNP
+  access is `{:error, :unauthorized}`. The entry is then loaded (with its tag) by
+  id; a non-castable id or a well-formed id naming no row is `{:error, :not_found}`.
+
+  Returns `{:ok, dnp_entry}`, `{:error, :unauthorized}`, `{:error, :not_found}`,
+  or `{:error, %Ecto.Changeset{}}` when the target state is invalid.
+
+  ## Examples
+
+      iex> transition_dnp_entry(moderator, "1", "acknowledged")
+      {:ok, %DnpEntry{}}
+
+  """
+  @spec transition_dnp_entry(User.t() | nil, any(), String.t()) ::
+          {:ok, DnpEntry.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def transition_dnp_entry(actor, id, new_state) do
+    with :ok <- authorize(actor, :index, DnpEntry),
+         {:ok, dnp_entry} <- load_required_dnp_entry(id),
+         {:ok, dnp_entry} <- transition_loaded_dnp_entry(dnp_entry, actor, new_state) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "Admin.DnpEntry.Transition:create",
+        Paths.dnp_entry_path(dnp_entry),
+        "#{String.capitalize(dnp_entry.aasm_state)} DNP entry #{dnp_entry.id} on #{dnp_entry.tag.name}"
+      )
+
+      {:ok, dnp_entry}
+    end
+  end
+
+  @doc """
   Transitions a DNP entry to a new state.
 
   ## Examples
 
-      iex> transition_dnp_entry(dnp_entry, user, "acknowledged")
+      iex> transition_loaded_dnp_entry(dnp_entry, user, "acknowledged")
       {:ok, %DnpEntry{}}
 
-      iex> transition_dnp_entry(dnp_entry, user, "invalid_state")
+      iex> transition_loaded_dnp_entry(dnp_entry, user, "invalid_state")
       {:error, %Ecto.Changeset{}}
 
   """
-  def transition_dnp_entry(%DnpEntry{} = dnp_entry, user, new_state) do
+  def transition_loaded_dnp_entry(%DnpEntry{} = dnp_entry, user, new_state) do
     dnp_entry
     |> DnpEntry.transition_changeset(user, new_state)
     |> Repo.update()
+  end
+
+  # Loads the DNP entry named by the raw request `id` with its tag preloaded,
+  # answering `{:error, :not_found}` for a non-castable id or an id naming no row.
+  defp load_required_dnp_entry(id) do
+    with {:ok, id} <- Philomena.IntegerId.parse(id),
+         %DnpEntry{} = dnp_entry <- DnpEntry |> preload(:tag) |> Repo.get(id) do
+      {:ok, dnp_entry}
+    else
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc """
