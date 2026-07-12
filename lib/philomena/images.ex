@@ -51,6 +51,7 @@ defmodule Philomena.Images do
   alias Philomena.Galleries.Gallery
   alias Philomena.Galleries.Interaction
   alias Philomena.Images.ImagePage
+  alias Philomena.Images.Query, as: ImageQuery
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
   alias Philomena.Users.User
@@ -294,6 +295,102 @@ defmodule Philomena.Images do
 
   defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
     do: [ip: ip, fingerprint: fingerprint, user: user]
+
+  @doc """
+  Finds the image adjacent to the one `image_id` names in the listing the
+  scope's parameters describe, for prev/next navigation on behalf of the
+  scope's viewer.
+
+  The image is loaded by id and authorized for `:show`: a non-castable id is
+  `{:error, :not_found}`, and an unknown id authorizes `nil`, which no
+  ordinary rule permits, so it is `{:error, :unauthorized}`. The scope's "q"
+  parameter (blank means everything) is compiled for the viewer; a malformed
+  query crashes, as a navigation link never carries one.
+
+  Returns `{:ok, {image, {adjacent, hit}}}` - the hit carries the sort cursor
+  for the redirect - or `{:ok, {image, nil}}` at the end of the sequence.
+
+  ## Examples
+
+      iex> find_consecutive_image(scope, "42")
+      {:ok, {%Image{}, {%Image{}, %{"sort" => [...]}}}}
+
+  """
+  @spec find_consecutive_image(Scope.t(), any()) ::
+          {:ok, {Image.t(), {Image.t(), map()} | nil}}
+          | {:error, :unauthorized | :not_found}
+  def find_consecutive_image(scope, image_id) do
+    with {:ok, image} <- load_image_for_navigation(scope.user, image_id) do
+      {:ok, {image, ImageSearch.find_consecutive(scope, image, navigation_query(scope))}}
+    end
+  end
+
+  @doc """
+  Returns the 1-based page number (as a string) on which the image `image_id`
+  names appears when all images are listed by descending id, on behalf of the
+  scope's viewer.
+
+  Loading and authorization follow `find_consecutive_image/2`.
+
+  ## Examples
+
+      iex> find_image_index_page(scope, "42")
+      {:ok, "3"}
+
+  """
+  @spec find_image_index_page(Scope.t(), any()) ::
+          {:ok, String.t()} | {:error, :unauthorized | :not_found}
+  def find_image_index_page(scope, image_id) do
+    with {:ok, image} <- load_image_for_navigation(scope.user, image_id) do
+      pagination = %{scope.pagination | page_number: 1}
+
+      {definition, _tags} =
+        ImageSearch.query(scope, %{range: %{id: %{gt: image.id}}}, pagination: pagination)
+
+      images = ImageSearch.execute(definition, queryable: Image)
+
+      {:ok, page_for_offset(pagination.page_size, images.total_entries)}
+    end
+  end
+
+  defp page_for_offset(per_page, offset) do
+    offset
+    |> div(per_page)
+    |> Kernel.+(1)
+    |> to_string()
+  end
+
+  defp navigation_query(scope) do
+    {:ok, query} =
+      scope.params["q"]
+      |> match_all_if_blank()
+      |> ImageQuery.compile(user: scope.user)
+
+    query
+  end
+
+  defp match_all_if_blank(nil), do: "*"
+
+  defp match_all_if_blank(input) do
+    if String.trim(input) == "" do
+      "*"
+    else
+      input
+    end
+  end
+
+  defp load_image_for_navigation(user, image_id, preloads \\ []) do
+    with {:ok, id} <- IntegerId.parse(image_id),
+         image = Repo.get(preload(Image, ^preloads), id),
+         :ok <- authorize(user, :show, image),
+         %Image{} <- image do
+      {:ok, image}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      # Non-castable id, or a `nil` load the viewer was permitted to see.
+      shape when shape in [:error, nil] -> {:error, :not_found}
+    end
+  end
 
   @typedoc """
   Result of the `create_image/3` function. The image was created in a DB but an
