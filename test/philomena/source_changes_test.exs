@@ -257,4 +257,138 @@ defmodule Philomena.SourceChangesTest do
       assert SourceChanges.count_for_image(image.id) == 0
     end
   end
+
+  describe "ip_source_changes/4" do
+    test "a moderator lists the changes attributed to an address, newest first" do
+      image = image_fixture()
+      older = source_change_fixture(image, ip: "203.0.113.5")
+      newer = source_change_fixture(image, ip: "203.0.113.5")
+
+      assert {:ok, {%Postgrex.INET{} = ip, %Postgrex.INET{} = range, page}} =
+               SourceChanges.ip_source_changes(
+                 moderator_user_fixture(),
+                 "203.0.113.5",
+                 %{},
+                 @pagination
+               )
+
+      assert ip == range
+      assert Enum.map(page.entries, & &1.id) == [newer.id, older.id]
+    end
+
+    test "the mask param widens the query to a subnet" do
+      image = image_fixture()
+      change = source_change_fixture(image, ip: "203.0.113.5")
+
+      assert {:ok, {_ip, range, page}} =
+               SourceChanges.ip_source_changes(
+                 admin_user_fixture(),
+                 "203.0.113.5",
+                 %{"mask" => "24"},
+                 @pagination
+               )
+
+      assert range.netmask == 24
+      assert change.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "the added filter narrows to additions" do
+      image = image_fixture()
+      added = source_change_fixture(image, ip: "203.0.113.6", added: true)
+      source_change_fixture(image, ip: "203.0.113.6", added: false)
+
+      assert {:ok, {_ip, _range, page}} =
+               SourceChanges.ip_source_changes(
+                 moderator_user_fixture(),
+                 "203.0.113.6",
+                 %{"added" => "1"},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [added.id]
+    end
+
+    test "a staffer submitting an unparsable address is not-found" do
+      assert SourceChanges.ip_source_changes(
+               moderator_user_fixture(),
+               "not-an-ip",
+               %{},
+               @pagination
+             ) == {:error, :not_found}
+    end
+
+    test "a regular user is unauthorized before the address is parsed" do
+      assert SourceChanges.ip_source_changes(
+               confirmed_user_fixture(),
+               "garbage",
+               %{},
+               @pagination
+             ) == {:error, :unauthorized}
+    end
+
+    test "an anonymous viewer is unauthorized" do
+      assert SourceChanges.ip_source_changes(nil, "203.0.113.5", %{}, @pagination) ==
+               {:error, :unauthorized}
+    end
+  end
+
+  describe "fingerprint_source_changes/4" do
+    test "a moderator lists the changes attributed to a fingerprint, newest first" do
+      image = image_fixture()
+      older = source_change_fixture(image, fingerprint: "abc123")
+      newer = source_change_fixture(image, fingerprint: "abc123")
+
+      assert {:ok, page} =
+               SourceChanges.fingerprint_source_changes(
+                 moderator_user_fixture(),
+                 "abc123",
+                 %{},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [newer.id, older.id]
+    end
+
+    test "any raw string is accepted and returns a possibly-empty page" do
+      assert {:ok, page} =
+               SourceChanges.fingerprint_source_changes(
+                 admin_user_fixture(),
+                 "no-such-fingerprint",
+                 %{},
+                 @pagination
+               )
+
+      assert page.entries == []
+    end
+
+    test "the added filter narrows to removals" do
+      image = image_fixture()
+      source_change_fixture(image, fingerprint: "def456", added: true)
+      removed = source_change_fixture(image, fingerprint: "def456", added: false)
+
+      assert {:ok, page} =
+               SourceChanges.fingerprint_source_changes(
+                 moderator_user_fixture(),
+                 "def456",
+                 %{"added" => "0"},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [removed.id]
+    end
+
+    test "a regular user is unauthorized" do
+      assert SourceChanges.fingerprint_source_changes(
+               confirmed_user_fixture(),
+               "abc123",
+               %{},
+               @pagination
+             ) == {:error, :unauthorized}
+    end
+
+    test "an anonymous viewer is unauthorized" do
+      assert SourceChanges.fingerprint_source_changes(nil, "abc123", %{}, @pagination) ==
+               {:error, :unauthorized}
+    end
+  end
 end

@@ -16,6 +16,7 @@ defmodule Philomena.CommissionsTest do
   import Philomena.ArtistLinksFixtures
   import Philomena.CommissionsFixtures
   import Philomena.TagsFixtures
+  import Philomena.UserIpsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Commissions
@@ -274,6 +275,54 @@ defmodule Philomena.CommissionsTest do
       assert {:ok, loaded_user} = Commissions.delete_item(actor(user), user.slug, "#{item.id}")
       assert loaded_user.id == user.id
       assert Repo.get(Item, item.id) == nil
+    end
+  end
+
+  describe "search_directory/2" do
+    @pagination [page: 1, page_size: 25]
+
+    # A commission the directory query surfaces: open, with an item, whose owner
+    # has recent IP activity (the query excludes artists idle over two weeks).
+    defp directory_commission do
+      user = verified_user_with_link()
+      commission = commission_fixture(user)
+      commission_item_fixture(commission)
+      user_ip_fixture(user)
+      {user, commission}
+    end
+
+    test "an empty search returns a page and a fresh search changeset" do
+      {_user, commission} = directory_commission()
+
+      assert {%Scrivener.Page{} = page, %Ecto.Changeset{}} =
+               Commissions.search_directory(%{}, @pagination)
+
+      assert commission.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "an invalid search returns an empty page and the invalid changeset" do
+      directory_commission()
+
+      assert {%Scrivener.Page{entries: []} = page, %Ecto.Changeset{} = changeset} =
+               Commissions.search_directory(%{"price_min" => "not-a-number"}, @pagination)
+
+      assert page.total_entries == 0
+      refute changeset.valid?
+    end
+  end
+
+  describe "preload_commission/1" do
+    test "preloads the commission of a user" do
+      user = confirmed_user_fixture()
+      commission_fixture(user)
+
+      loaded = Commissions.preload_commission(user)
+      refute match?(%Ecto.Association.NotLoaded{}, loaded.commission)
+      assert loaded.commission.user_id == user.id
+    end
+
+    test "returns nil for nil" do
+      assert Commissions.preload_commission(nil) == nil
     end
   end
 end
