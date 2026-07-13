@@ -64,7 +64,19 @@ function up {
   if [[ "${DEVCONTAINER:-0}" == "1" ]]; then
     step docker compose build "${services[@]}"
     step docker compose up --wait "${services[@]}"
-    step run-development
+
+    # A container created without DEVCONTAINER=1 in its environment (e.g. by
+    # a host-side `docker compose up`) already runs the dev server as PID 1
+    # (see docker/app/run); starting a second one would fail to bind its
+    # ports. The stack is fully served by PID 1 in that case, so just skip.
+    if [[ -f /.dockerenv ]] && [[ "$(tr '\0' ' ' < /proc/1/cmdline)" == *run-development* ]]; then
+      warn "PID 1 of this container is already running the dev server, skipping run-development."
+      warn "For the intended devcontainer flow (server logs in this terminal), rebuild the"
+      warn "container so it gets the devcontainer environment: VS Code -> 'Dev Containers:"
+      warn "Rebuild Container'."
+    else
+      step run-development
+    fi
   else
     step docker compose up --build --no-log-prefix
   fi
