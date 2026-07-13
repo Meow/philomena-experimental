@@ -237,6 +237,39 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Loads the non-hidden image `id` for the oembed endpoint.
+
+  `id` is the raw id string extracted from the request URL, or `nil` when the
+  URL named no image. A well-formed id out of the valid range, an unknown id,
+  and a hidden image all resolve to `nil`; the image carries the oembed view's
+  preloads.
+
+  ## Examples
+
+      iex> api_oembed_image("1")
+      %Image{}
+
+      iex> api_oembed_image(nil)
+      nil
+
+  """
+  @spec api_oembed_image(String.t() | nil) :: Image.t() | nil
+  def api_oembed_image(nil), do: nil
+
+  def api_oembed_image(id) when is_binary(id) do
+    case IntegerId.parse(id) do
+      {:ok, id} ->
+        Image
+        |> where(id: ^id, hidden_from_users: false)
+        |> preload([:user, :sources, tags: :aliases])
+        |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  @doc """
   Loads the image `id` names for its show page, on behalf of `user` (`nil`
   for an anonymous visitor).
 
