@@ -270,6 +270,37 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Runs the search the JSON API search endpoint describes for the viewer.
+
+  Compiles the `query_string` against the viewer scope, executes it with the
+  API view's preloads, and returns the record page paired with the raw sidebar
+  tags. Returns `{:ok, {page, tags}}`, or the compiler's `{:error, msg}` for a
+  malformed query.
+
+  ## Examples
+
+      iex> api_search_images(scope, "safe")
+      {:ok, {%Scrivener.Page{}, [%Tag{}]}}
+
+      iex> api_search_images(scope, "(")
+      {:error, "There was an error parsing your query."}
+
+  """
+  @spec api_search_images(Scope.t(), String.t() | nil) ::
+          {:ok, {Scrivener.Page.t(), [Tag.t()]}} | {:error, String.t()}
+  def api_search_images(scope, query_string) do
+    with {:ok, {definition, tags}} <- ImageSearch.search_string(scope, query_string) do
+      page =
+        Search.search_records(
+          definition,
+          preload(Image, [:user, :intensity, :sources, tags: :aliases])
+        )
+
+      {:ok, {page, tags}}
+    end
+  end
+
+  @doc """
   Loads the image `id` names for its show page, on behalf of `user` (`nil`
   for an anonymous visitor).
 
