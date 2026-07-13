@@ -9,6 +9,7 @@ defmodule Philomena.Forums do
   alias Philomena.Repo
 
   alias Philomena.Forums.Forum
+  alias Philomena.Topics.Topic
   alias Philomena.Users.User
 
   use Philomena.Subscriptions,
@@ -109,6 +110,54 @@ defmodule Philomena.Forums do
 
   """
   def get_forum!(id), do: Repo.get!(Forum, id)
+
+  @doc """
+  Assembles the forum index for `user`.
+
+  Returns `{forums, topic_count}`: every forum `user` may `:show`, ordered by
+  name with each forum's last post preloaded, and the total topic count summed
+  across all forums.
+  """
+  @spec load_forum_index(User.t() | nil) :: {[Forum.t()], integer() | nil}
+  def load_forum_index(user) do
+    forums =
+      Forum
+      |> order_by(asc: :name)
+      |> preload(last_post: [:user, topic: :forum])
+      |> Repo.all()
+      |> Enum.filter(&(authorize(user, :show, &1) == :ok))
+
+    topic_count = Repo.aggregate(Forum, :sum, :topic_count)
+
+    {forums, topic_count}
+  end
+
+  @doc """
+  Assembles the forum show page named by `short_name` for `user`.
+
+  The forum is loaded by its short name and authorized for `:show`, so an
+  unknown or restricted forum is `{:error, :unauthorized}`. On success returns
+  `{:ok, {forum, topics, watching}}`: the forum, its visible topics paginated
+  with `pagination` (ordered sticky first, then most recently replied to), and
+  whether `user` subscribes to the forum.
+  """
+  @spec load_forum_show(User.t() | nil, String.t(), map()) ::
+          {:ok, {Forum.t(), Scrivener.Page.t(), boolean()}} | {:error, :unauthorized}
+  def load_forum_show(user, short_name, pagination) do
+    forum = Repo.get_by(Forum, short_name: short_name)
+
+    with :ok <- authorize(user, :show, forum) do
+      topics =
+        Topic
+        |> where(forum_id: ^forum.id)
+        |> where(hidden_from_users: false)
+        |> order_by(desc: :sticky, desc: :last_replied_to_at)
+        |> preload([:poll, :forum, :user, last_post: :user])
+        |> Repo.paginate(pagination)
+
+      {:ok, {forum, topics, subscribed?(forum, user)}}
+    end
+  end
 
   @doc """
   Lists the forums exposed by the public API, paginated with `pagination`.
