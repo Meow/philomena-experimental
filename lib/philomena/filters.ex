@@ -81,6 +81,46 @@ defmodule Philomena.Filters do
   end
 
   @doc """
+  Loads the filter named by `id` for the JSON API on behalf of `user`.
+
+  Parses `id`, loads the matching filter with `:user` preloaded, and authorizes
+  `:show` (public and system filters are visible to everyone; private filters
+  only to their owner). Every lookup and authorization failure collapses to
+  `{:error, :not_found}`, so a non-castable `id`, an unknown `id`, and a filter
+  the viewer may not see are indistinguishable.
+
+  Returns `{:ok, %Filter{}}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_show_filter(user, "1")
+      {:ok, %Filter{}}
+
+      iex> api_show_filter(user, "not-a-number")
+      {:error, :not_found}
+
+  """
+  @spec api_show_filter(User.t() | nil, any()) :: {:ok, Filter.t()} | {:error, :not_found}
+  def api_show_filter(user, id) do
+    case IntegerId.parse(id) do
+      :error ->
+        {:error, :not_found}
+
+      {:ok, id} ->
+        filter =
+          Filter
+          |> where(id: ^id)
+          |> preload(:user)
+          |> Repo.one()
+
+        case authorize(user, :show, filter) do
+          :ok -> {:ok, filter}
+          _error -> {:error, :not_found}
+        end
+    end
+  end
+
+  @doc """
   Runs the filter search that `query_string` describes on behalf of `user`.
 
   Compiles `query_string` against the filter search index (the `my` field is
