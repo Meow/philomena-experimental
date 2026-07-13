@@ -48,6 +48,119 @@ defmodule Philomena.Posts do
   def get_post!(id), do: Repo.get!(Post, id)
 
   @doc """
+  Lists the posts of a topic for the public API, on behalf of any requester.
+
+  The topic is loaded by its `topic_slug` within the forum named by
+  `forum_short_name`, requiring the topic to be visible (not hidden from users)
+  and the forum's access level to be `"normal"` - for every requester alike, so
+  restricted forums are never exposed here. When the topic cannot be found under
+  those constraints, `{:error, :not_found}` is returned.
+
+  Otherwise the topic's posts are windowed by `pagination`'s page number and
+  size over their `topic_position`, ordered ascending, with authors preloaded.
+  Posts with destroyed content are excluded; posts merely hidden from users stay
+  in the list (their body is nulled at render time). Each returned post carries
+  the loaded topic so callers can read its post count for the response total.
+
+  Returns `{:ok, {topic, posts}}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_list_topic_posts("dis", "some-topic", pagination)
+      {:ok, {%Topic{}, [%Post{}, ...]}}
+
+      iex> api_list_topic_posts("dis", "nonexistent", pagination)
+      {:error, :not_found}
+
+  """
+  @spec api_list_topic_posts(String.t(), String.t(), map()) ::
+          {:ok, {Topic.t(), [Post.t()]}} | {:error, :not_found}
+  def api_list_topic_posts(forum_short_name, topic_slug, pagination) do
+    case api_load_topic(forum_short_name, topic_slug) do
+      nil ->
+        {:error, :not_found}
+
+      topic ->
+        %{page_number: page, page_size: page_size} = pagination
+
+        posts =
+          Post
+          |> where(topic_id: ^topic.id)
+          |> where(destroyed_content: false)
+          |> where(
+            [p],
+            p.topic_position >= ^(page_size * (page - 1)) and
+              p.topic_position < ^(page_size * page)
+          )
+          |> order_by(asc: :topic_position)
+          |> preload(:user)
+          |> Repo.all()
+          |> Enum.map(&%{&1 | topic: topic})
+
+        {:ok, {topic, posts}}
+    end
+  end
+
+  @doc """
+  Fetches a single post of a topic for the public API, on behalf of any
+  requester.
+
+  `post_id` is integer-guarded first, so a non-integer id is reported as missing
+  before any query runs. The post is then loaded by id within the topic named by
+  `topic_slug` and the forum named by `forum_short_name`, requiring the post to
+  have non-destroyed content, the topic to be visible (not hidden from users),
+  and the forum's access level to be `"normal"` - for every requester alike. The
+  author and topic are preloaded. A hidden topic, a restricted forum, a slug
+  under the wrong forum, a destroyed post, and an unknown id are all reported as
+  missing.
+
+  Returns `{:ok, post}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_show_topic_post("dis", "some-topic", "1")
+      {:ok, %Post{}}
+
+      iex> api_show_topic_post("dis", "some-topic", "not-a-number")
+      {:error, :not_found}
+
+  """
+  @spec api_show_topic_post(String.t(), String.t(), any()) ::
+          {:ok, Post.t()} | {:error, :not_found}
+  def api_show_topic_post(forum_short_name, topic_slug, post_id) do
+    case IntegerId.parse(post_id) do
+      {:ok, post_id} ->
+        Post
+        |> join(:inner, [p], _ in assoc(p, :topic))
+        |> join(:inner, [_p, t], _ in assoc(t, :forum))
+        |> where(id: ^post_id)
+        |> where(destroyed_content: false)
+        |> where([_p, t], t.hidden_from_users == false and t.slug == ^topic_slug)
+        |> where([_p, _t, f], f.access_level == "normal" and f.short_name == ^forum_short_name)
+        |> preload([:user, :topic])
+        |> Repo.one()
+        |> case do
+          nil -> {:error, :not_found}
+          post -> {:ok, post}
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  # Loads a topic by slug within the named forum for the public API, requiring
+  # the topic to be visible and the forum's access level to be `"normal"`.
+  # Returns the topic or `nil`.
+  defp api_load_topic(forum_short_name, topic_slug) do
+    Topic
+    |> join(:inner, [t], _ in assoc(t, :forum))
+    |> where([t], t.hidden_from_users == false and t.slug == ^topic_slug)
+    |> where([_t, f], f.access_level == "normal" and f.short_name == ^forum_short_name)
+    |> Repo.one()
+  end
+
+  @doc """
   Creates a post.
 
   ## Examples
