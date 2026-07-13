@@ -111,6 +111,58 @@ defmodule Philomena.Forums do
   def get_forum!(id), do: Repo.get!(Forum, id)
 
   @doc """
+  Lists the forums exposed by the public API, paginated with `pagination`.
+
+  Only forums whose access level is `"normal"` are returned, for every
+  requester alike; restricted forums are never listed here. Results are ordered
+  by name.
+
+  Returns a `Scrivener.Page` of forums.
+
+  ## Examples
+
+      iex> api_list_forums(pagination)
+      %Scrivener.Page{}
+
+  """
+  @spec api_list_forums(map()) :: Scrivener.Page.t()
+  def api_list_forums(pagination) do
+    Forum
+    |> where(access_level: "normal")
+    |> order_by(asc: :name)
+    |> Repo.paginate(pagination)
+  end
+
+  @doc """
+  Fetches a single forum for the public API by its `short_name`.
+
+  Only a forum whose access level is `"normal"` is returned, for every requester
+  alike; a restricted or nonexistent forum is reported as missing.
+
+  Returns `{:ok, forum}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_show_forum("dis")
+      {:ok, %Forum{}}
+
+      iex> api_show_forum("staff")
+      {:error, :not_found}
+
+  """
+  @spec api_show_forum(String.t()) :: {:ok, Forum.t()} | {:error, :not_found}
+  def api_show_forum(short_name) do
+    Forum
+    |> where(short_name: ^short_name)
+    |> where(access_level: "normal")
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      forum -> {:ok, forum}
+    end
+  end
+
+  @doc """
   Creates a forum.
 
   ## Examples

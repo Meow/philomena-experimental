@@ -1,32 +1,19 @@
 defmodule PhilomenaWeb.Api.Json.ForumController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Forums.Forum
-  alias Philomena.Repo
-  import Ecto.Query
+  alias Philomena.Forums
   import PhilomenaWeb.Api.Json.NotFound
 
   def index(conn, _params) do
-    forums =
-      Forum
-      |> where(access_level: "normal")
-      |> order_by(asc: :name)
-      |> Repo.paginate(conn.assigns.scrivener)
+    forums = Forums.api_list_forums(conn.assigns.scrivener)
 
     render(conn, forums: forums, total: forums.total_entries)
   end
 
   def show(conn, %{"id" => id}) do
-    forum =
-      Forum
-      |> where(short_name: ^id)
-      |> where(access_level: "normal")
-      |> Repo.one()
-
-    if is_nil(forum) do
-      not_found(conn)
-    else
-      render(conn, forum: forum)
+    case Forums.api_show_forum(id) do
+      {:ok, forum} -> render(conn, forum: forum)
+      {:error, :not_found} -> not_found(conn)
     end
   end
 end
