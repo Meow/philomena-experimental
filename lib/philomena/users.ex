@@ -169,6 +169,40 @@ defmodule Philomena.Users do
   def get_user!(id), do: Repo.get!(User, id)
 
   @doc """
+  Loads the user named by the raw request `id` for public API profile display,
+  with their public links and badge awards preloaded.
+
+  An unknown or deactivated user is `{:error, :not_found}`.
+
+  Returns `{:ok, user}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_show_profile("1")
+      {:ok, %User{}}
+
+      iex> api_show_profile("999999999")
+      {:error, :not_found}
+
+  """
+  @spec api_show_profile(any()) :: {:ok, User.t()} | {:error, :not_found}
+  def api_show_profile(id) do
+    # The id is interpolated without casting, so a non-integer id raises
+    # Ecto.Query.CastError.
+    user =
+      User
+      |> where(id: ^id)
+      |> preload(public_links: :tag, awards: :badge)
+      |> Repo.one()
+
+    if is_nil(user) or user.deleted_at do
+      {:error, :not_found}
+    else
+      {:ok, user}
+    end
+  end
+
+  @doc """
   Preloads a user's awards and their badges for display.
 
   Returns `nil` when given `nil`.
