@@ -1,11 +1,8 @@
 defmodule PhilomenaWeb.Api.Json.ImageController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Images.Image
   alias Philomena.Images
   alias Philomena.Interactions
-  alias Philomena.Repo
-  import Ecto.Query
   import PhilomenaWeb.Api.Json.NotFound
 
   plug PhilomenaWeb.ScraperCachePlug
@@ -16,22 +13,14 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
        [params_name: "image", params_key: "image"] when action in [:create]
 
   def show(conn, %{"id" => id}) do
-    user = conn.assigns.current_user
-
-    image =
-      Image
-      |> where(id: ^id)
-      |> preload([:user, :intensity, :sources, tags: :aliases])
-      |> Repo.one()
-
-    case image do
-      nil ->
-        not_found(conn)
-
-      _ ->
-        interactions = Interactions.user_interactions([image], user)
+    case Images.api_show_image(id) do
+      {:ok, image} ->
+        interactions = Interactions.user_interactions([image], conn.assigns.current_user)
 
         render(conn, "show.json", image: image, interactions: interactions)
+
+      {:error, :not_found} ->
+        not_found(conn)
     end
   end
 
@@ -40,7 +29,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
 
     case Images.create_image(attributes, image_params) do
       {:ok, %{image: image}} ->
-        image = Repo.preload(image, tags: :aliases)
+        image = Images.preload_created_image(image)
 
         PhilomenaWeb.Endpoint.broadcast!(
           "firehose",

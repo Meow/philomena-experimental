@@ -176,6 +176,36 @@ defmodule Philomena.Images do
   defp custom_ordering?(_scope), do: false
 
   @doc """
+  Loads the image `id` for the JSON API image endpoint.
+
+  The image carries the API view's preloads. A hidden image is still returned;
+  the view reduces it to a stub. Returns `{:ok, image}`, or `{:error, :not_found}`
+  when no row matches.
+
+  ## Examples
+
+      iex> api_show_image("1")
+      {:ok, %Image{}}
+
+      iex> api_show_image("0")
+      {:error, :not_found}
+
+  """
+  @spec api_show_image(any()) :: {:ok, Image.t()} | {:error, :not_found}
+  def api_show_image(id) do
+    # The id is interpolated without parsing, so a non-integer value raises
+    # Ecto.Query.CastError.
+    Image
+    |> where(id: ^id)
+    |> preload([:user, :intensity, :sources, tags: :aliases])
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      image -> {:ok, image}
+    end
+  end
+
+  @doc """
   Loads the image `id` names for its show page, on behalf of `user` (`nil`
   for an anonymous visitor).
 
@@ -626,6 +656,20 @@ defmodule Philomena.Images do
       result ->
         result
     end
+  end
+
+  @doc """
+  Preloads the tag aliases on a freshly created image for the JSON API view.
+
+  ## Examples
+
+      iex> preload_created_image(image)
+      %Image{}
+
+  """
+  @spec preload_created_image(Image.t()) :: Image.t()
+  def preload_created_image(image) do
+    Repo.preload(image, tags: :aliases)
   end
 
   defp async_upload(image, plug_upload) do
