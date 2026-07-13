@@ -7,6 +7,32 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 
+# All `docker compose` commands go to the host daemon through the mounted
+# socket, so bind mount sources in docker-compose.yml must resolve to host
+# paths. When this script runs inside the app container, HOST_WORKSPACE must
+# therefore point at the repo's path on the host; shells that enter the
+# container without the devcontainer environment (e.g. `docker exec`) lack it,
+# so derive it from this container's own mounts rather than trusting the
+# environment. Without it, `${HOST_WORKSPACE:-.}` in docker-compose.yml would
+# resolve to a path that does not exist on the host, and the daemon would
+# recreate `opensearch`/`web` with broken auto-created mount sources.
+if [[ -f /.dockerenv ]]; then
+  if [[ -z "${HOST_WORKSPACE:-}" ]]; then
+    HOST_WORKSPACE=$(
+      docker inspect "$(hostname)" \
+        --format '{{range .Mounts}}{{if eq .Destination "/srv/philomena"}}{{.Source}}{{end}}{{end}}'
+    ) || die "Running inside a container, but 'docker inspect' failed - cannot derive HOST_WORKSPACE"
+
+    if [[ -z "$HOST_WORKSPACE" ]]; then
+      die "Running inside a container without a /srv/philomena bind mount - cannot derive HOST_WORKSPACE"
+    fi
+
+    export HOST_WORKSPACE
+  fi
+
+  export DEVCONTAINER=1
+fi
+
 # Devcontainer runs in the `app` service. We must make sure this service stays
 # intact during development, so all docker compose operations that might recreate
 # or remove the containers/volumes should exclude it and its volumes.
