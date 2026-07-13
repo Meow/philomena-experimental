@@ -2,7 +2,7 @@ defmodule PhilomenaWeb.Fetch.TagController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Tags.Tag
-  alias PhilomenaWeb.IntegerId
+  alias Philomena.IntegerId
   alias Philomena.Repo
   import Ecto.Query
 
