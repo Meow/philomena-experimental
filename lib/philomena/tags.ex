@@ -217,6 +217,35 @@ defmodule Philomena.Tags do
   end
 
   @doc """
+  Loads the tag named by `slug` for public API display, with its aliases,
+  implications, and DNP entries preloaded.
+
+  Lookup is strictly by slug. An unknown slug is `{:error, :not_found}`.
+
+  Returns `{:ok, tag}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_show_tag("safe")
+      {:ok, %Tag{}}
+
+      iex> api_show_tag("nonexistent")
+      {:error, :not_found}
+
+  """
+  @spec api_show_tag(String.t()) :: {:ok, Tag.t()} | {:error, :not_found}
+  def api_show_tag(slug) do
+    Tag
+    |> where(slug: ^slug)
+    |> preload([:aliased_tag, :aliases, :implied_tags, :implied_by_tags, :dnp_entries])
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      tag -> {:ok, tag}
+    end
+  end
+
+  @doc """
   Assembles the tag show page for the viewer described by `scope`, loading the
   tag named by `slug`.
 
