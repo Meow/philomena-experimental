@@ -786,12 +786,12 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "load_image_for_scratchpad/2" do
+  describe "load_hidable_image/3" do
     test "a moderator loads a known image" do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, loaded} = Images.load_image_for_scratchpad(moderator, to_string(image.id))
+      assert {:ok, loaded} = Images.load_hidable_image(moderator, to_string(image.id))
       assert loaded.id == image.id
     end
 
@@ -799,7 +799,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture()
 
-      assert {:ok, loaded} = Images.load_image_for_scratchpad(admin, to_string(image.id))
+      assert {:ok, loaded} = Images.load_hidable_image(admin, to_string(image.id))
       assert loaded.id == image.id
     end
 
@@ -807,14 +807,14 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.load_image_for_scratchpad(user, to_string(image.id)) ==
+      assert Images.load_hidable_image(user, to_string(image.id)) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous actor cannot load the image" do
       image = image_fixture()
 
-      assert Images.load_image_for_scratchpad(nil, to_string(image.id)) ==
+      assert Images.load_hidable_image(nil, to_string(image.id)) ==
                {:error, :unauthorized}
     end
 
@@ -822,7 +822,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, loaded} = Images.load_image_for_scratchpad(moderator, image.id)
+      assert {:ok, loaded} = Images.load_hidable_image(moderator, image.id)
       assert loaded.id == image.id
     end
 
@@ -831,7 +831,7 @@ defmodule Philomena.ImagesTest do
       # missing image surfaces as unauthorized rather than not found.
       moderator = moderator_user_fixture()
 
-      assert Images.load_image_for_scratchpad(moderator, "2147483647") ==
+      assert Images.load_hidable_image(moderator, "2147483647") ==
                {:error, :unauthorized}
     end
 
@@ -840,19 +840,19 @@ defmodule Philomena.ImagesTest do
       # the image presence check fails, so the missing image is not found.
       admin = admin_user_fixture()
 
-      assert Images.load_image_for_scratchpad(admin, "2147483647") == {:error, :not_found}
+      assert Images.load_hidable_image(admin, "2147483647") == {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.load_image_for_scratchpad(moderator, "not-a-number") == {:error, :not_found}
+      assert Images.load_hidable_image(moderator, "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.load_image_for_scratchpad(moderator, "99999999999999999999") ==
+      assert Images.load_hidable_image(moderator, "99999999999999999999") ==
                {:error, :not_found}
     end
   end
@@ -1610,70 +1610,24 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "load_image_for_tag_lock/2" do
-    test "a moderator loads a known image with its locked tags preloaded" do
+  describe "load_hidable_image/3 with :preload" do
+    test "the option loads the named associations" do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, loaded} = Images.load_image_for_tag_lock(moderator, to_string(image.id))
+      assert {:ok, loaded} =
+               Images.load_hidable_image(moderator, to_string(image.id), preload: :locked_tags)
+
       assert loaded.id == image.id
       assert Ecto.assoc_loaded?(loaded.locked_tags)
     end
 
-    test "an admin loads a known image with its locked tags preloaded" do
-      admin = admin_user_fixture()
-      image = image_fixture()
-
-      assert {:ok, loaded} = Images.load_image_for_tag_lock(admin, to_string(image.id))
-      assert loaded.id == image.id
-      assert Ecto.assoc_loaded?(loaded.locked_tags)
-    end
-
-    test "accepts an integer id" do
+    test "no associations are loaded by default" do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, loaded} = Images.load_image_for_tag_lock(moderator, image.id)
-      assert loaded.id == image.id
-    end
-
-    test "a regular user cannot load the image" do
-      user = confirmed_user_fixture()
-      image = image_fixture()
-
-      assert Images.load_image_for_tag_lock(user, to_string(image.id)) ==
-               {:error, :unauthorized}
-    end
-
-    test "an anonymous actor cannot load the image" do
-      image = image_fixture()
-
-      assert Images.load_image_for_tag_lock(nil, to_string(image.id)) == {:error, :unauthorized}
-    end
-
-    test "a moderator with an unknown well-formed id is unauthorized" do
-      moderator = moderator_user_fixture()
-
-      assert Images.load_image_for_tag_lock(moderator, "2147483647") == {:error, :unauthorized}
-    end
-
-    test "an admin with an unknown well-formed id is not found" do
-      admin = admin_user_fixture()
-
-      assert Images.load_image_for_tag_lock(admin, "2147483647") == {:error, :not_found}
-    end
-
-    test "a non-castable id is not found" do
-      moderator = moderator_user_fixture()
-
-      assert Images.load_image_for_tag_lock(moderator, "not-a-number") == {:error, :not_found}
-    end
-
-    test "an out-of-range id is not found" do
-      moderator = moderator_user_fixture()
-
-      assert Images.load_image_for_tag_lock(moderator, "99999999999999999999") ==
-               {:error, :not_found}
+      assert {:ok, loaded} = Images.load_hidable_image(moderator, image.id)
+      refute Ecto.assoc_loaded?(loaded.locked_tags)
     end
   end
 

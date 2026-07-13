@@ -14,6 +14,7 @@ defmodule Philomena.Reports do
   alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
+  alias Philomena.Commissions
   alias Philomena.Commissions.Commission
   alias Philomena.Conversations.Conversation
   alias Philomena.Galleries.Gallery
@@ -454,7 +455,7 @@ defmodule Philomena.Reports do
           | {:error, :ban | :not_found}
   def load_commission_for_report(%Actor{} = actor, slug) do
     with :ok <- verify_not_banned(actor),
-         {:ok, {user, commission}} <- load_reportable_commission(slug) do
+         {:ok, {user, commission}} <- Commissions.load_commission_for_show(slug) do
       changeset =
         change_report(%Report{reportable_type: "Commission", reportable_id: commission.id})
 
@@ -481,28 +482,7 @@ defmodule Philomena.Reports do
           | {:error, :ban | :unauthorized | :not_found}
   def load_commission_for_report_creation(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor) do
-      load_reportable_commission(slug)
-    end
-  end
-
-  defp load_reportable_commission(slug) do
-    user =
-      User
-      |> where(slug: ^slug)
-      |> preload([
-        :verified_links,
-        commission: [
-          sheet_image: [:sources, tags: :aliases],
-          user: [awards: :badge],
-          items: [example_image: [:sources, tags: :aliases]]
-        ]
-      ])
-      |> Repo.one()
-
-    case user do
-      nil -> {:error, :not_found}
-      %User{commission: nil} -> {:error, :not_found}
-      %User{commission: commission} -> {:ok, {user, commission}}
+      Commissions.load_commission_for_show(slug)
     end
   end
 

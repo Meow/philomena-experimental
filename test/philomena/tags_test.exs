@@ -139,7 +139,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "load_tag_for_edit/2" do
+  describe "load_tag_for_edit/3" do
     test "a moderator loads the tag paired with its edit changeset" do
       tag = tag_fixture()
 
@@ -426,31 +426,18 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "load_tag_image_for_edit/2" do
-    test "a moderator loads the tag paired with its edit changeset" do
+  describe "load_tag_for_edit/3 with :preload" do
+    test "the option replaces the default preloads" do
       tag = tag_fixture()
 
       assert {:ok, {%Tag{} = loaded, %Ecto.Changeset{}}} =
-               Tags.load_tag_image_for_edit(moderator_user_fixture(), tag.slug)
+               Tags.load_tag_for_edit(moderator_user_fixture(), tag.slug,
+                 preload: [:implied_tags]
+               )
 
       assert loaded.id == tag.id
-    end
-
-    test "anonymous and regular users are unauthorized" do
-      tag = tag_fixture()
-
-      assert Tags.load_tag_image_for_edit(nil, tag.slug) == {:error, :unauthorized}
-
-      assert Tags.load_tag_image_for_edit(confirmed_user_fixture(), tag.slug) ==
-               {:error, :unauthorized}
-    end
-
-    test "an unknown slug is not-found for an admin, unauthorized otherwise" do
-      assert Tags.load_tag_image_for_edit(admin_user_fixture(), "nonexistent-tag") ==
-               {:error, :not_found}
-
-      assert Tags.load_tag_image_for_edit(moderator_user_fixture(), "nonexistent-tag") ==
-               {:error, :unauthorized}
+      assert Ecto.assoc_loaded?(loaded.implied_tags)
+      refute Ecto.assoc_loaded?(loaded.aliases)
     end
   end
 

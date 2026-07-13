@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.ScratchpadController do
 
   def edit(conn, params) do
     with {:ok, image} <-
-           Images.load_image_for_scratchpad(conn.assigns.current_user, params["image_id"]) do
+           Images.load_hidable_image(conn.assigns.current_user, params["image_id"]) do
       changeset = Images.change_image(image)
 
       render(conn, "edit.html",

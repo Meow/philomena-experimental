@@ -64,8 +64,7 @@ defmodule Philomena.Filters do
   def index_filters(user) do
     my_filters =
       if user do
-        Filter
-        |> where(user_id: ^user.id)
+        user_filters_query(user)
         |> preload(:user)
         |> Repo.all()
       else
@@ -73,8 +72,7 @@ defmodule Philomena.Filters do
       end
 
     system_filters =
-      Filter
-      |> where(system: true)
+      system_filters_query()
       |> preload(:user)
       |> Repo.all()
 
@@ -121,8 +119,7 @@ defmodule Philomena.Filters do
   """
   @spec system_filters(map()) :: Scrivener.Page.t()
   def system_filters(pagination) do
-    Filter
-    |> where(system: true)
+    system_filters_query()
     |> order_by(asc: :id)
     |> Repo.paginate(pagination)
   end
@@ -139,11 +136,14 @@ defmodule Philomena.Filters do
   """
   @spec user_filters(User.t(), map()) :: Scrivener.Page.t()
   def user_filters(user, pagination) do
-    Filter
-    |> where(user_id: ^user.id)
+    user_filters_query(user)
     |> order_by(asc: :id)
     |> Repo.paginate(pagination)
   end
+
+  defp system_filters_query, do: where(Filter, system: true)
+
+  defp user_filters_query(user), do: where(Filter, user_id: ^user.id)
 
   @doc """
   Runs the filter search that `query_string` describes on behalf of `user`.

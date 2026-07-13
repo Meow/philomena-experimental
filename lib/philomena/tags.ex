@@ -321,6 +321,9 @@ defmodule Philomena.Tags do
   Authorizes `:edit`. An unknown slug the actor may act on (an admin) is
   `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
 
+  The tag carries the associations named by `opts[:preload]`, defaulting to
+  the full show preloads.
+
   Returns `{:ok, {tag, changeset}}`, `{:error, :not_found}`, or
   `{:error, :unauthorized}`.
 
@@ -330,18 +333,10 @@ defmodule Philomena.Tags do
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_tag_for_edit(User.t() | nil, String.t()) ::
+  @spec load_tag_for_edit(User.t() | nil, String.t(), Keyword.t()) ::
           {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_tag_for_edit(actor, slug) do
-    tag = tag_by_slug(slug, @show_preloads)
-
-    with :ok <- authorize(actor, :edit, tag),
-         %Tag{} <- tag do
-      {:ok, {tag, change_tag(tag)}}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
+  def load_tag_for_edit(actor, slug, opts \\ []) do
+    load_tag_changeset(actor, :edit, slug, Keyword.get(opts, :preload, @show_preloads))
   end
 
   @doc """
@@ -362,39 +357,15 @@ defmodule Philomena.Tags do
   @spec load_tag_alias_for_edit(User.t() | nil, String.t()) ::
           {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
   def load_tag_alias_for_edit(actor, slug) do
-    tag = tag_by_slug(slug, @alias_preloads)
-
-    with :ok <- authorize(actor, :alias, tag),
-         %Tag{} <- tag do
-      {:ok, {tag, change_tag(tag)}}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
+    load_tag_changeset(actor, :alias, slug, @alias_preloads)
   end
 
-  @doc """
-  Loads the tag named by `slug` for editing its spoiler image, on behalf of
-  `actor`.
+  # Authorization runs before the nil check, so an unknown slug is not-found
+  # only for an actor the rule permits acting on the nil load.
+  defp load_tag_changeset(actor, action, slug, preloads) do
+    tag = tag_by_slug(slug, preloads)
 
-  Authorizes `:edit`. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
-
-  Returns `{:ok, {tag, changeset}}`, `{:error, :not_found}`, or
-  `{:error, :unauthorized}`.
-
-  ## Examples
-
-      iex> load_tag_image_for_edit(moderator, "safe")
-      {:ok, {%Tag{}, %Ecto.Changeset{}}}
-
-  """
-  @spec load_tag_image_for_edit(User.t() | nil, String.t()) ::
-          {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_tag_image_for_edit(actor, slug) do
-    tag = tag_by_slug(slug, @image_preloads)
-
-    with :ok <- authorize(actor, :edit, tag),
+    with :ok <- authorize(actor, action, tag),
          %Tag{} <- tag do
       {:ok, {tag, change_tag(tag)}}
     else

@@ -7,7 +7,9 @@ defmodule PhilomenaWeb.Image.TagLockController do
 
   def show(conn, params) do
     with {:ok, image} <-
-           Images.load_image_for_tag_lock(conn.assigns.current_user, params["image_id"]) do
+           Images.load_hidable_image(conn.assigns.current_user, params["image_id"],
+             preload: :locked_tags
+           ) do
       changeset = Images.change_image(image)
       render(conn, "show.html", title: "Locking image tags", image: image, changeset: changeset)
     end

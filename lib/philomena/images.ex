@@ -1362,8 +1362,7 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Loads the image named by `image_id` for editing its moderation notes, on
-  behalf of `actor`.
+  Loads the image named by `image_id` for moderation, on behalf of `actor`.
 
   The image is loaded by id and authorized for `:hide`. A non-castable or
   out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
@@ -1371,25 +1370,26 @@ defmodule Philomena.Images do
   `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
   gets `{:error, :not_found}`.
 
-  Returns `{:ok, image}` with the loaded image.
+  Returns `{:ok, image}` with the loaded image, carrying the associations
+  named by `opts[:preload]` (none by default).
 
   ## Examples
 
-      iex> load_image_for_scratchpad(moderator, "42")
+      iex> load_hidable_image(moderator, "42")
       {:ok, %Image{}}
 
-      iex> load_image_for_scratchpad(user, "42")
+      iex> load_hidable_image(user, "42")
       {:error, :unauthorized}
 
   """
-  @spec load_image_for_scratchpad(User.t(), String.t() | integer()) ::
+  @spec load_hidable_image(User.t(), String.t() | integer(), Keyword.t()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def load_image_for_scratchpad(actor, image_id) do
+  def load_hidable_image(actor, image_id, opts \\ []) do
     with {:ok, id} <- IntegerId.parse(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image do
-      {:ok, image}
+      {:ok, Repo.preload(image, Keyword.get(opts, :preload, []))}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
       shape when shape in [:error, nil] -> {:error, :not_found}
@@ -1927,42 +1927,6 @@ defmodule Philomena.Images do
       fingerprint: attribution[:fingerprint],
       added: added
     }
-  end
-
-  @doc """
-  Loads the image named by `image_id` for editing its locked tags, on behalf of
-  `actor`, with the `locked_tags` association preloaded.
-
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`.
-
-  Returns `{:ok, image}` with the loaded image.
-
-  ## Examples
-
-      iex> load_image_for_tag_lock(moderator, "42")
-      {:ok, %Image{}}
-
-      iex> load_image_for_tag_lock(user, "42")
-      {:error, :unauthorized}
-
-  """
-  @spec load_image_for_tag_lock(User.t(), String.t() | integer()) ::
-          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def load_image_for_tag_lock(actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
-         image = Repo.get(Image, id),
-         :ok <- authorize(actor, :hide, image),
-         %Image{} <- image do
-      {:ok, Repo.preload(image, :locked_tags)}
-    else
-      # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-    end
   end
 
   @doc """
