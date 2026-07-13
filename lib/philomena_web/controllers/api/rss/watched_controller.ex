@@ -1,15 +1,11 @@
 defmodule PhilomenaWeb.Api.Rss.WatchedController do
   use PhilomenaWeb, :controller
 
-  alias PhilomenaWeb.ImageLoader
-  alias Philomena.Images.Image
-  alias PhilomenaQuery.Search
-
-  import Ecto.Query
+  alias Philomena.Images
 
   def index(conn, _params) do
-    {:ok, {images, _tags}} = ImageLoader.search_string(conn, "my:watched")
-    images = Search.search_records(images, preload(Image, [:sources, tags: :aliases]))
+    scope = PhilomenaWeb.ImageScope.search_scope(conn)
+    images = Images.api_watched_images(scope)
 
     # NB: this is RSS, but using the RSS format causes Phoenix not to
     # escape HTML

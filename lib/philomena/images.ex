@@ -301,6 +301,25 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Runs the "my:watched" search for the viewer scope, for the watched-images RSS
+  feed.
+
+  Executes with the feed's preloads and returns the record page.
+
+  ## Examples
+
+      iex> api_watched_images(scope)
+      %Scrivener.Page{}
+
+  """
+  @spec api_watched_images(Scope.t()) :: Scrivener.Page.t()
+  def api_watched_images(scope) do
+    {:ok, {definition, _tags}} = ImageSearch.search_string(scope, "my:watched")
+
+    Search.search_records(definition, preload(Image, [:sources, tags: :aliases]))
+  end
+
+  @doc """
   Loads the image `id` names for its show page, on behalf of `user` (`nil`
   for an anonymous visitor).
 
