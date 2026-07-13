@@ -49,6 +49,49 @@ defmodule Philomena.Comments do
   def get_comment!(id), do: Repo.get!(Comment, id)
 
   @doc """
+  Loads the comment named by the raw request `id` for public API display, with
+  its image and author preloaded.
+
+  A comment that does not exist, or whose content has been destroyed, is
+  `{:error, :not_found}`. A comment whose image is hidden from users is
+  `{:error, :hidden_image}`. Otherwise the comment is returned, including comments
+  hidden from users (whose body the view nulls out).
+
+  Returns `{:ok, comment}`, `{:error, :not_found}`, or `{:error, :hidden_image}`.
+
+  ## Examples
+
+      iex> api_show_comment("1")
+      {:ok, %Comment{}}
+
+      iex> api_show_comment("999999999")
+      {:error, :not_found}
+
+  """
+  @spec api_show_comment(any()) ::
+          {:ok, Comment.t()} | {:error, :not_found} | {:error, :hidden_image}
+  def api_show_comment(id) do
+    # The id is interpolated without casting, so a non-integer id raises
+    # Ecto.Query.CastError.
+    comment =
+      Comment
+      |> where(id: ^id)
+      |> preload([:image, :user])
+      |> Repo.one()
+
+    cond do
+      is_nil(comment) or comment.destroyed_content ->
+        {:error, :not_found}
+
+      comment.image.hidden_from_users ->
+        {:error, :hidden_image}
+
+      true ->
+        {:ok, comment}
+    end
+  end
+
+  @doc """
   Loads the edit history of the comment named by the raw request `comment_id` on
   the image named by `image_id`, on behalf of `actor` (a user, or `nil` for an
   anonymous visitor). This is a public read with no ban check.
