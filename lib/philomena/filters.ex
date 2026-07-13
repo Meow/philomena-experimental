@@ -141,6 +141,26 @@ defmodule Philomena.Filters do
   end
 
   @doc """
+  Returns the page of `user`'s own filters for the JSON API.
+
+  Selects filters owned by `user`, ordered by ascending id, paginated by
+  `pagination`. System filters and other users' filters are excluded.
+
+  ## Examples
+
+      iex> api_user_filters(user, pagination)
+      %Scrivener.Page{}
+
+  """
+  @spec api_user_filters(User.t(), map()) :: Scrivener.Page.t()
+  def api_user_filters(user, pagination) do
+    Filter
+    |> where(user_id: ^user.id)
+    |> order_by(asc: :id)
+    |> Repo.paginate(pagination)
+  end
+
+  @doc """
   Runs the filter search that `query_string` describes on behalf of `user`.
 
   Compiles `query_string` against the filter search index (the `my` field is
