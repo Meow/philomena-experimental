@@ -299,7 +299,7 @@ defmodule Philomena.Comments do
 
   `body` is one or more compiled query clauses. Options: `:pagination` sets
   the result window; `:show_hidden` (default `true`) lets staff viewers see
-  deleted and non-approved comments — pass `false` for listings that stay
+  deleted and non-approved comments - pass `false` for listings that stay
   clean regardless of who is looking. Results sort newest first.
 
   The definition is meant for batching into
