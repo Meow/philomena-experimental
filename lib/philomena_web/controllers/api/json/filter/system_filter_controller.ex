@@ -1,16 +1,10 @@
 defmodule PhilomenaWeb.Api.Json.Filter.SystemFilterController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Filters.Filter
-  alias Philomena.Repo
-  import Ecto.Query
+  alias Philomena.Filters
 
   def index(conn, _params) do
-    system_filters =
-      Filter
-      |> where(system: true)
-      |> order_by(asc: :id)
-      |> Repo.paginate(conn.assigns.scrivener)
+    system_filters = Filters.api_system_filters(conn.assigns.scrivener)
 
     conn
     |> put_view(PhilomenaWeb.Api.Json.FilterView)

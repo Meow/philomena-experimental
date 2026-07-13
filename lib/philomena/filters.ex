@@ -121,6 +121,26 @@ defmodule Philomena.Filters do
   end
 
   @doc """
+  Returns the page of system filters for the JSON API.
+
+  Selects filters flagged `system: true`, ordered by ascending id, paginated by
+  `pagination`.
+
+  ## Examples
+
+      iex> api_system_filters(pagination)
+      %Scrivener.Page{}
+
+  """
+  @spec api_system_filters(map()) :: Scrivener.Page.t()
+  def api_system_filters(pagination) do
+    Filter
+    |> where(system: true)
+    |> order_by(asc: :id)
+    |> Repo.paginate(pagination)
+  end
+
+  @doc """
   Runs the filter search that `query_string` describes on behalf of `user`.
 
   Compiles `query_string` against the filter search index (the `my` field is
