@@ -3,13 +3,12 @@ defmodule Philomena.Images.Search do
   Search-backed image loading, scoped to a viewer.
 
   Builds OpenSearch definitions for image listings by combining a query with
-  the viewer's compiled filter, the deleted/hidden display switches, and the
-  requested sort order; loads the sidebar tags a tag search names; and finds
+  the viewer's compiled filter, the deleted/hidden visibility switches, and the
+  requested sort order; loads the tags a tag search names; and finds
   consecutive images for prev/next navigation.
 
   Query-building functions return `{definition, tags}`: an unexecuted search
-  definition plus the raw `Tag` records the query names (rendering their
-  descriptions is a presentation concern and happens in the web layer).
+  definition plus the raw `Tag` records the query names.
   Definitions are executed with `execute/2`, or batched by callers into
   `PhilomenaQuery.Search.msearch_records/2` alongside definitions for other
   schemas.
@@ -142,7 +141,7 @@ defmodule Philomena.Images.Search do
 
   Records are loaded with the standard listing preloads
   (`[:sources, tags: :aliases]`); pass `:queryable` to override. With
-  `hits: true` each record is paired with its raw hit, for pages that need
+  `hits: true` each record is paired with its raw hit, for listings that need
   sort cursors.
   """
   @spec execute(definition(), Keyword.t()) :: Enumerable.t()
@@ -157,7 +156,7 @@ defmodule Philomena.Images.Search do
   end
 
   @doc """
-  Maps the "sf"/"sd" request parameters onto a sort order for `query_body`.
+  Maps the "sf"/"sd" parameters onto a sort order for `query_body`.
 
   Unlisted or missing fields sort by `first_seen_at`; `random`/`random:seed`
   wrap the query in a seeded `function_score`; `gallery_id:n` sorts by the
@@ -178,7 +177,7 @@ defmodule Philomena.Images.Search do
 
   `compiled_query` is the compiled body of the listing's search query;
   `scope.params["rel"]` selects the direction and `scope.params["sort"]`
-  carries the sort cursor of the current image, when the client supplies one.
+  carries the sort cursor of the current image, when present.
 
   Returns the `{image, hit}` pair for the neighbouring image, or `nil` at
   the end of the sequence.

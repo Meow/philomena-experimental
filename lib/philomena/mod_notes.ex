@@ -7,7 +7,7 @@ defmodule Philomena.ModNotes do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
-  alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.ModNotes.ModNote
   alias Philomena.Polymorphic
   alias Philomena.Users.User
@@ -135,8 +135,8 @@ defmodule Philomena.ModNotes do
   end
 
   @doc """
-  Builds the changeset backing the new-mod-note form, on behalf of `actor`,
-  seeded with the `"notable_type"` and `"notable_id"` from `params`.
+  Builds a changeset for a new mod note, on behalf of `actor`, seeded with the
+  `"notable_type"` and `"notable_id"` from `params`.
 
   Authorizes `:new` against the mod-note model. Returns `{:ok, changeset}` or
   `{:error, :unauthorized}`.
@@ -198,8 +198,8 @@ defmodule Philomena.ModNotes do
   end
 
   @doc """
-  Loads the mod note named by the raw request `id` for editing, on behalf of
-  `actor`, pairing it with the changeset backing the edit form.
+  Loads the mod note named by `id` for editing, on behalf of `actor`, pairing
+  it with a change-tracking changeset for it.
 
   Authorizes `:edit` against the loaded note: a non-castable id is
   `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
@@ -219,7 +219,7 @@ defmodule Philomena.ModNotes do
   end
 
   @doc """
-  Updates the mod note named by the raw request `id`, on behalf of `actor`.
+  Updates the mod note named by `id`, on behalf of `actor`.
 
   Loading and authorization follow `load_mod_note_for_edit/2`, authorizing
   `:update`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`,
@@ -252,7 +252,7 @@ defmodule Philomena.ModNotes do
   end
 
   @doc """
-  Deletes the mod note named by the raw request `id`, on behalf of `actor`.
+  Deletes the mod note named by `id`, on behalf of `actor`.
 
   Loading and authorization follow `load_mod_note_for_edit/2`, authorizing
   `:delete`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`, or
@@ -282,20 +282,12 @@ defmodule Philomena.ModNotes do
     Repo.delete(mod_note)
   end
 
-  # Loads the mod note named by the raw request `id` and authorizes `action`
+  # Loads the mod note named by `id` and authorizes `action`
   # against it: a non-castable id or a `nil` load the actor was permitted to act
   # on (an admin) is `{:error, :not_found}`, while a `nil` or real note the
   # actor may not act on is `{:error, :unauthorized}`.
   defp load_mod_note(actor, id, action) do
-    with {:ok, id} <- IntegerId.parse(id),
-         mod_note = Repo.get(ModNote, id),
-         :ok <- authorize(actor, action, mod_note),
-         %ModNote{} <- mod_note do
-      {:ok, mod_note}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch_and_authorize(ModNote, actor, action, id)
   end
 
   @doc """

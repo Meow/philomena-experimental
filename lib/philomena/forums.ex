@@ -22,8 +22,8 @@ defmodule Philomena.Forums do
   unknown short name loads `nil` and no ordinary rule permits `:show` on `nil`,
   a nonexistent forum comes back `{:error, :unauthorized}`.
 
-  Returns `{:ok, forum}` (the forum is needed to render the subscription
-  partial), `{:error, :unauthorized}` when the forum is not visible to the
+  Returns `{:ok, forum}` (the forum is returned for the caller to reuse),
+  `{:error, :unauthorized}` when the forum is not visible to the
   actor, or `{:error, %Ecto.Changeset{}}` if the subscription insert is
   rejected.
 
@@ -133,7 +133,7 @@ defmodule Philomena.Forums do
   end
 
   @doc """
-  Assembles the forum show page named by `short_name` for `user`.
+  Assembles the forum named by `short_name` and its topics for `user`.
 
   The forum is loaded by its short name and authorized for `:show`, so an
   unknown or restricted forum is `{:error, :unauthorized}`. On success returns
@@ -230,11 +230,10 @@ defmodule Philomena.Forums do
   end
 
   @doc """
-  Authorizes `actor` to manage forums through the admin interface.
+  Authorizes `actor` to manage forums.
 
   Forum administration is admin-only (`:edit` on the forum model). Returns `:ok`
-  or `{:error, :unauthorized}`; gates the admin listing, which renders the forum
-  list assembled by the request pipeline.
+  or `{:error, :unauthorized}`.
   """
   @spec authorize_admin(User.t() | nil) :: :ok | {:error, :unauthorized}
   def authorize_admin(actor) do
@@ -242,7 +241,7 @@ defmodule Philomena.Forums do
   end
 
   @doc """
-  Builds the changeset backing the new-forum form, on behalf of `actor`.
+  Builds a changeset for creating a new forum, on behalf of `actor`.
 
   Authorizes forum administration. Returns `{:ok, changeset}` or
   `{:error, :unauthorized}`.
@@ -271,7 +270,7 @@ defmodule Philomena.Forums do
 
   @doc """
   Loads the forum named by `short_name` for editing, on behalf of `actor`,
-  pairing it with the changeset backing the edit form.
+  pairing it with a change-tracking changeset for it.
 
   Authorizes forum administration, then loads the forum by its short name.
   Returns `{:ok, {forum, changeset}}`, `{:error, :unauthorized}`, or

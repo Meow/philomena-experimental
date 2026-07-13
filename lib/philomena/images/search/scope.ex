@@ -1,9 +1,9 @@
 defmodule Philomena.Images.Search.Scope do
   @moduledoc """
   The viewer's image search scope: who is searching, their compiled filter,
-  the raw request parameters, and the default pagination window.
+  the search parameters, and the default pagination window.
 
-  Built once per request by the web layer and passed to every image search
+  Built once by the caller and passed to every image search
   function. `params` keeps its raw string keys; search functions read only
   the keys they understand ("q", "sf", "sd", "sort", "del", "hidden", "rel").
   `filter` is the compiled OpenSearch query body of the viewer's active

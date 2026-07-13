@@ -42,7 +42,7 @@ defmodule Philomena.SourceChanges do
   through to `Repo.paginate/2`.
 
   Returns `{:ok, {image, source_changes}}` where `source_changes` is a paginated
-  set with its user and image associations preloaded for rendering.
+  set with its user and image associations preloaded.
 
   ## Examples
 
@@ -88,7 +88,7 @@ defmodule Philomena.SourceChanges do
   `pagination` is Scrivener pagination data passed through to `Repo.paginate/2`.
 
   Returns `{:ok, {user, source_changes, image_count}}` where `source_changes` is
-  a paginated set with its user and image associations preloaded for rendering
+  a paginated set with its user and image associations preloaded
   and `image_count` is the number of distinct images touched.
 
   ## Examples
@@ -145,7 +145,7 @@ defmodule Philomena.SourceChanges do
 
   Returns `{:ok, {ip, range, source_changes}}` where `ip` is the parsed address,
   `range` is the masked address actually queried, and `source_changes` is a
-  paginated set with its user and image associations preloaded for rendering.
+  paginated set with its user and image associations preloaded.
   """
   @spec ip_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
           {:ok, {Postgrex.INET.t(), Postgrex.INET.t(), Scrivener.Page.t()}}
@@ -178,7 +178,7 @@ defmodule Philomena.SourceChanges do
   `Repo.paginate/2`.
 
   Returns `{:ok, source_changes}`, a paginated set with its user and image
-  associations preloaded for rendering.
+  associations preloaded.
   """
   @spec fingerprint_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}

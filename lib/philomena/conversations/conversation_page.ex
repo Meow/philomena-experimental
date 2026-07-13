@@ -1,9 +1,9 @@
 defmodule Philomena.Conversations.ConversationPage do
   @moduledoc """
-  Assembled data backing the conversation show page: the conversation, a
-  `m:Scrivener.Page` of its raw messages, and the changeset for the reply form.
+  Assembled data for the conversation page: the conversation, a
+  `m:Scrivener.Page` of its messages, and a changeset for a reply.
 
-  Message bodies are carried unrendered; the web layer renders their Markdown.
+  Message bodies are carried unrendered.
   """
 
   alias Philomena.Conversations.Conversation

@@ -6,6 +6,7 @@ defmodule Philomena.Filters do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias Philomena.Filters.Filter
   alias Philomena.Filters.FilterPage
@@ -49,7 +50,7 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Returns the filters shown on the index for `user`: the viewer's own filters
+  Returns the filters listed for `user`: the viewer's own filters
   (empty for an anonymous visitor) and the system filters, each with `:user`
   preloaded.
 
@@ -217,7 +218,7 @@ defmodule Philomena.Filters do
     do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
 
   @doc """
-  Assembles the filter show page named by `id` for `user`.
+  Assembles the filter page named by `id` for `user`.
 
   Loads the filter with `:user` preloaded and authorizes `:show` (public and
   system filters are visible to everyone; private filters only to their owner).
@@ -261,7 +262,7 @@ defmodule Philomena.Filters do
   Authorizes `:create` (permitted for any signed-in user). When `based_on` names
   a filter the viewer may see (public, system, or their own), the new filter is
   prefilled from it as an unpersisted record; an unknown or omitted `based_on`
-  yields a blank form.
+  yields a blank changeset.
 
   Returns `{:ok, %Ecto.Changeset{}}` or `{:error, :unauthorized}`.
 
@@ -307,7 +308,7 @@ defmodule Philomena.Filters do
   Loads the filter named by `id` for editing on behalf of `user`.
 
   Authorizes `:edit` (its owner only) and assigns the spoilered and hidden tag
-  lists onto the filter for the form. A non-castable `id` is
+  lists onto the filter. A non-castable `id` is
   `{:error, :not_found}`; a well-formed unknown `id` the actor may act on (an
   admin) is `{:error, :not_found}`, otherwise `{:error, :unauthorized}`.
 
@@ -339,7 +340,7 @@ defmodule Philomena.Filters do
   Loads the filter named by `id` and, when the viewer may not see it (a private
   filter belonging to someone else), substitutes the default filter. For a
   signed-in `user` the choice is persisted to their account; for an anonymous
-  visitor the resolved filter is returned for the caller to store in a cookie.
+  visitor the resolved filter is returned for the caller to store.
   A well-formed unknown `id` is `{:error, :not_found}`; a missing `id` reaches
   the query layer, which rejects a nil comparison.
 
@@ -802,21 +803,7 @@ defmodule Philomena.Filters do
   # non-castable id is not-found; a well-formed unknown id is authorized as a
   # nil load, so an admin sees not-found and everyone else unauthorized.
   defp load_and_authorize_filter(user, id, action, preloads \\ []) do
-    case IntegerId.parse(id) do
-      :error ->
-        {:error, :not_found}
-
-      {:ok, id} ->
-        filter = Filter |> preload(^preloads) |> Repo.get(id)
-
-        with :ok <- authorize(user, action, filter),
-             %Filter{} <- filter do
-          {:ok, filter}
-        else
-          {:error, :unauthorized} -> {:error, :unauthorized}
-          nil -> {:error, :not_found}
-        end
-    end
+    Loader.fetch_and_authorize(Filter, user, action, id, preloads)
   end
 
   defp reindex_after_update(result) do

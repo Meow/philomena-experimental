@@ -124,10 +124,10 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
-  Returns the static pages for the index on behalf of `user`.
+  Returns the static pages listing on behalf of `user`.
 
-  The index is staff-only. Returns `{:error, :unauthorized}` when the viewer may
-  not manage static pages, otherwise `{:ok, static_pages}`.
+  The listing is staff-only. Returns `{:error, :unauthorized}` when the viewer
+  may not manage static pages, otherwise `{:ok, static_pages}`.
   """
   @spec load_page_listing(User.t() | nil) :: {:ok, [StaticPage.t()]} | {:error, :unauthorized}
   def load_page_listing(user) do
@@ -177,7 +177,7 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
-  Prepares the new-page form on behalf of `user`.
+  Prepares a new static page on behalf of `user`.
 
   Returns `{:error, :unauthorized}` when the viewer may not manage static pages,
   otherwise `{:ok, changeset}`.

@@ -3,10 +3,9 @@ defmodule Philomena.Attribution.Actor do
   The typed actor/attribution passed to context functions.
 
   Context functions that act on behalf of someone take the actor first.
-  Where that actor is really an *attribution* (a user together with the
-  request's IP and browser fingerprint - e.g. image uploads,
-  tag changes, posts), this struct formalizes the shape that
-  `PhilomenaWeb.UserAttributionPlug` builds so context signatures can be typed.
+  Where that actor is really an *attribution* (a user together with the IP and
+  fingerprint attributing an action - e.g. image uploads, tag changes, posts),
+  this struct formalizes its shape so context signatures can be typed.
 
   It carries the same three values as the existing `t:Philomena.Users.principal/0`
   keyword list (`lib/philomena/users.ex`), which many contexts still consume via

@@ -61,7 +61,7 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Loads the duplicate report named by `id` for its show page.
+  Loads the duplicate report named by `id`.
 
   A non-castable or out-of-range id, and a well-formed but unknown id, are both
   `{:error, :not_found}`. The report carries its reported and claimed-duplicate
@@ -223,8 +223,8 @@ defmodule Philomena.DuplicateReports do
   Lists the duplicate reports involving the image named by `image_id`, on behalf
   of `actor` (a user, or `nil` for an anonymous visitor).
 
-  The image is loaded by id (with its sources and tags preloaded for rendering)
-  and authorized for `:show`. A non-castable or out-of-range id is
+  The image is loaded by id (with its sources and tags preloaded) and
+  authorized for `:show`. A non-castable or out-of-range id is
   `{:error, :not_found}`. A well-formed but unknown id is authorized as a `nil`
   load: an actor who may not `:show` it gets `{:error, :unauthorized}`, while an
   actor permitted to act on the `nil` load gets `{:error, :not_found}`. Reports
@@ -292,11 +292,11 @@ defmodule Philomena.DuplicateReports do
   The write is refused for a banned actor (`{:error, :ban}`) or one without a
   fingerprint (`{:error, :unauthorized}`), checked before anything else. A
   missing `duplicate_report` param, or a source `image_id` that names no image,
-  has nowhere to redirect back to and is `{:error, :not_found}`. A resolvable
+  leaves no source image to act on and is `{:error, :not_found}`. A resolvable
   source with an unresolvable `duplicate_of_image_id`, or a rejected changeset
   (such as reporting an image as a duplicate of itself), is
-  `{:error, :report_failed, source}`, carrying the source image for the caller's
-  redirect. On success the report is inserted with the actor's user recorded as
+  `{:error, :report_failed, source}`, carrying the source image for the caller
+  to reuse. On success the report is inserted with the actor's user recorded as
   the reporter.
 
   Returns `{:ok, duplicate_report}`, `{:error, :ban}`, `{:error, :unauthorized}`,
@@ -321,7 +321,7 @@ defmodule Philomena.DuplicateReports do
     end
   end
 
-  # A missing or malformed duplicate_report param has nowhere to redirect back to.
+  # A missing or malformed duplicate_report param leaves no source image to act on.
   defp submit_duplicate_report(actor, %{"duplicate_report" => report_params})
        when is_map(report_params) do
     source = load_image(report_params["image_id"])
@@ -332,7 +332,7 @@ defmodule Philomena.DuplicateReports do
 
   defp submit_duplicate_report(_actor, _params), do: {:error, :not_found}
 
-  # Without a source image there is nowhere to redirect back to.
+  # Without a source image there is nothing to report against.
   defp build_duplicate_report(_actor, nil, _target, _params), do: {:error, :not_found}
 
   defp build_duplicate_report(_actor, source, nil, _params),

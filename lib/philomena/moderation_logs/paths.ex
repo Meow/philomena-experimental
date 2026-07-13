@@ -2,16 +2,14 @@ defmodule Philomena.ModerationLogs.Paths do
   @moduledoc """
   Builders for moderation-log `subject_path` strings.
 
-  The values are data, not verified routes: `subject_path` is stored in the
-  `moderation_logs` table and rendered by the mod-log UI as an opaque `href`.
-  There is no compile-time route verification for them; they are simple, stable
-  paths.
+  The values are plain data: each `subject_path` is stored as an opaque string
+  in the `moderation_logs` table. Nothing verifies that they resolve to
+  anything; they are simple, stable paths.
 
   ## Encoding
 
   Each dynamic segment runs through `Phoenix.Param.to_param/1` and then
-  `URI.encode(segment, &URI.char_unreserved?/1)`, so the strings match Phoenix's
-  VerifiedRoutes segment encoding used elsewhere in the web layer. Slugs
+  `URI.encode(segment, &URI.char_unreserved?/1)`. Slugs
   (`Philomena.Slug.slug/1`) can contain characters that are *not* URI-unreserved
   - notably `+` (from spaces) and escaped punctuation runs like `-dot-`,
   `-fwslash-` - so those bytes are percent-encoded. Integer ids and forum short
@@ -111,9 +109,9 @@ defmodule Philomena.ModerationLogs.Paths do
     "/fingerprint_profiles/" <> encode_segment(fingerprint)
   end
 
-  # Mirrors Phoenix.VerifiedRoutes segment encoding: `Phoenix.Param.to_param/1`
-  # followed by `URI.encode(&URI.char_unreserved?/1)`. `to_string/1` is
-  # equivalent to `to_param` for the integer ids and binary slugs used here.
+  # Percent-encodes a path segment: `to_string/1` (equivalent to
+  # `Phoenix.Param.to_param/1` for the integer ids and binary slugs used here)
+  # followed by `URI.encode(&URI.char_unreserved?/1)`.
   @spec encode_segment(term()) :: String.t()
   defp encode_segment(segment) do
     segment

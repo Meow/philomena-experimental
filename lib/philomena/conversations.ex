@@ -104,15 +104,16 @@ defmodule Philomena.Conversations do
   end
 
   @doc """
-  Loads the conversation named by `slug` for its show page, on behalf of `user`.
+  Loads the conversation named by `slug` and assembles its `ConversationPage`, on
+  behalf of `user`.
 
   The conversation is loaded with both participants and authorized for `:show`
   (participants, moderators, and admins); an unknown slug authorizes `nil`,
   which no ordinary rule permits, so it is `{:error, :unauthorized}`
   (`{:error, :not_found}` for admins). `user`'s side of the conversation is
   marked read as a side effect. The returned page carries a `m:Scrivener.Page`
-  of the raw messages, ordered by `user`'s `messages_newest_first` preference,
-  and the reply-form changeset; message Markdown is rendered by the caller.
+  of the messages, ordered by `user`'s `messages_newest_first` preference,
+  and a reply changeset.
 
   ## Examples
 
@@ -173,10 +174,11 @@ defmodule Philomena.Conversations do
   end
 
   @doc """
-  Loads the changeset backing the new-conversation form, on behalf of `actor`.
+  Builds the changeset for a new conversation, on behalf of `actor`.
 
-  This is a GET-guarded action, so a banned actor is rejected with
-  `{:error, :ban}`; the changeset otherwise pre-fills the given `recipient`.
+  This is a read that precedes creating a conversation, so a banned actor is
+  rejected with `{:error, :ban}`; the changeset otherwise pre-fills the given
+  `recipient`.
 
   ## Examples
 
@@ -194,7 +196,7 @@ defmodule Philomena.Conversations do
   end
 
   @doc """
-  Creates a conversation sent by `actor`, from controller-shaped `params`.
+  Creates a conversation sent by `actor`, from `params`.
 
   This is a write, so `actor`'s write access is verified first: a banned actor
   is `{:error, :ban}` and an actor with no fingerprint `{:error, :unauthorized}`.
@@ -328,7 +330,7 @@ defmodule Philomena.Conversations do
   flag is set only for `user`'s own side, so a moderator viewing a conversation
   they are not part of succeeds without changing either flag.
 
-  Returns `{:ok, conversation}` for the redirect target.
+  Returns `{:ok, conversation}`.
 
   ## Examples
 
@@ -357,7 +359,7 @@ defmodule Philomena.Conversations do
   blanket grant turns an unknown slug into `{:error, :not_found}`). The hidden
   flag is set only for `user`'s own side.
 
-  Returns `{:ok, conversation}` for the redirect target.
+  Returns `{:ok, conversation}`.
 
   ## Examples
 
@@ -412,9 +414,9 @@ defmodule Philomena.Conversations do
   On success the message is inserted, both sides of the conversation are marked
   unread, and a system report is filed when the message is withheld from
   approval. Returns `{:ok, {conversation, message}}` so the caller can compute
-  the last-page redirect. A rejected insert (e.g. a blank body) is
+  the last page. A rejected insert (e.g. a blank body) is
   `{:error, {:message_failed, conversation}}`, carrying the conversation for the
-  error redirect.
+  caller to reuse.
 
   ## Examples
 
@@ -475,8 +477,7 @@ defmodule Philomena.Conversations do
   end
 
   @doc """
-  Approves the message named by the raw request `message_id`, on behalf of
-  `actor`.
+  Approves the message named by the `message_id`, on behalf of `actor`.
 
   The message is loaded with its conversation and authorized for `:approve`
   (moderators and admins): a non-castable id is `{:error, :not_found}`, and a

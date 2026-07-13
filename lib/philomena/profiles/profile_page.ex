@@ -1,6 +1,6 @@
 defmodule Philomena.Profiles.ProfilePage do
   @moduledoc """
-  Everything a user's public profile shows for one viewer: the user with its
+  Everything a user's public profile holds for one viewer: the user with its
   profile associations, the recent-uploads/faves/artwork image strips, the
   viewer's interactions across them, the recent comments and posts, recent
   galleries, the 90-day statistics series, watcher counts for the user's
@@ -8,7 +8,7 @@ defmodule Philomena.Profiles.ProfilePage do
 
   `recent_comments` holds only the comments whose images the viewer may see.
   Descriptions, comment bodies, and commission text are carried raw;
-  rendering them is the caller's concern.
+  processing them is the caller's concern.
   """
 
   alias Philomena.Users.User

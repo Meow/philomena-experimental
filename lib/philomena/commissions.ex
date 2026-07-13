@@ -108,13 +108,13 @@ defmodule Philomena.Commissions do
   end
 
   @doc """
-  Loads the commission of the user named by the profile `slug` for display.
+  Loads the commission of the user named by the profile `slug`.
 
   The commission sheet is public. An unknown slug, or a user without a
   commission, is `{:error, :not_found}`.
 
   Returns `{:ok, {user, commission}}` with the commission's items, sheet image,
-  and owner preloaded for rendering.
+  and owner preloaded.
   """
   @spec load_commission_for_show(String.t()) ::
           {:ok, {User.t(), Commission.t()}} | {:error, :not_found}
@@ -126,7 +126,7 @@ defmodule Philomena.Commissions do
   end
 
   @doc """
-  Loads the user named by the profile `slug` for the new commission form, on
+  Loads the user named by the profile `slug` for creating a commission, on
   behalf of `actor`.
 
   A banned actor is rejected first with `{:error, :ban}`. An unknown slug is
@@ -149,7 +149,7 @@ defmodule Philomena.Commissions do
 
   @doc """
   Creates a commission for the user named by the profile `slug`, on behalf of
-  `actor`, from the controller-shaped `attrs`.
+  `actor`, from `attrs`.
 
   The actor's write access is verified first (`{:error, :ban}` /
   `{:error, :unauthorized}`); then the same gating as
@@ -196,7 +196,7 @@ defmodule Philomena.Commissions do
 
   @doc """
   Updates the commission of the user named by the profile `slug`, on behalf of
-  `actor`, from the controller-shaped `attrs`.
+  `actor`, from `attrs`.
 
   The actor's write access is verified first (`{:error, :ban}` /
   `{:error, :unauthorized}`); then the same gating as
@@ -319,8 +319,7 @@ defmodule Philomena.Commissions do
   Returns `{commissions, changeset}`: a `m:Scrivener.Page` of matching
   commissions with a fresh search changeset on success, or an empty page with the
   invalid search changeset when the parameters are rejected. The empty page keeps
-  the results partial (which paginates whatever it is given) from receiving a
-  bare list.
+  callers that paginate the results from receiving a bare list.
   """
   @spec search_directory(map(), map() | keyword()) :: {Scrivener.Page.t(), Ecto.Changeset.t()}
   def search_directory(params, pagination) do
@@ -344,8 +343,7 @@ defmodule Philomena.Commissions do
   end
 
   @doc """
-  Preloads the commission of `user` (the current viewer, possibly `nil`) for
-  display in the directory chrome.
+  Preloads the commission of `user` (the current viewer, possibly `nil`).
   """
   @spec preload_commission(User.t() | nil) :: User.t() | nil
   def preload_commission(nil), do: nil
@@ -492,7 +490,7 @@ defmodule Philomena.Commissions do
 
   @doc """
   Adds an item to the commission of the user named by the profile `slug`, on
-  behalf of `actor`, from the controller-shaped `attrs`.
+  behalf of `actor`, from `attrs`.
 
   The actor's write access is verified first (`{:error, :ban}` /
   `{:error, :unauthorized}`); then the same gating as `load_item_for_new/2`
@@ -522,7 +520,7 @@ defmodule Philomena.Commissions do
   A banned actor is rejected first with `{:error, :ban}`. A missing commission
   (or unknown slug) is `{:error, :not_found}`, and a non-owner is
   `{:error, :unauthorized}`. An item id that does not belong to this commission
-  raises `Ecto.NoResultsError` (a 404).
+  raises `Ecto.NoResultsError`.
 
   Returns `{:ok, {user, commission, item, changeset}}`.
   """
@@ -539,7 +537,7 @@ defmodule Philomena.Commissions do
 
   @doc """
   Updates the item named by `id` under the commission of the user named by the
-  profile `slug`, on behalf of `actor`, from the controller-shaped `attrs`.
+  profile `slug`, on behalf of `actor`, from `attrs`.
 
   The actor's write access is verified first (`{:error, :ban}` /
   `{:error, :unauthorized}`); then the same gating as `load_item_for_edit/3`
@@ -586,8 +584,8 @@ defmodule Philomena.Commissions do
   end
 
   # Gates item management: the profile must exist and have a commission, and the
-  # actor must be the profile owner. Unlike commission management, item routes
-  # have no staff bypass.
+  # actor must be the profile owner. Unlike commission management, item
+  # management has no staff bypass.
   defp authorize_item(actor, slug) do
     with %User{} = user <- load_profile_user(slug),
          {:ok, commission} <- ensure_commission(user),
@@ -602,7 +600,7 @@ defmodule Philomena.Commissions do
   defp ensure_item_owner(%{id: id}, %User{id: id}), do: :ok
   defp ensure_item_owner(_current, _user), do: {:error, :unauthorized}
 
-  # Loads an item scoped to its commission, raising `Ecto.NoResultsError` (a 404)
+  # Loads an item scoped to its commission, raising `Ecto.NoResultsError`
   # when the id names no item of this commission.
   defp fetch_item!(commission, id) do
     Repo.get_by!(Item, commission_id: commission.id, id: id)

@@ -101,8 +101,8 @@ defmodule Philomena.TagChanges.Limits do
     :ok
   end
 
-  # Staff and rate-limit-bypassing users are never limited (matching
-  # PhilomenaWeb.LimitPlug); anonymous and unverified users are.
+  # Staff and rate-limit-bypassing users are never limited; anonymous and
+  # unverified users are.
   defp considered_for_limit?(nil), do: true
   defp considered_for_limit?(%{role: role}) when role in ~W(admin moderator assistant), do: false
   defp considered_for_limit?(%{bypass_rate_limits: true}), do: false

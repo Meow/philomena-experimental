@@ -213,8 +213,8 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Returns the rules `user` (the current viewer, possibly `nil`) may see for the
-  index, ordered by position.
+  Returns the rules `user` (the current viewer, possibly `nil`) may see, ordered
+  by position.
 
   A viewer who may edit rules sees every rule; everyone else sees only the
   visible (non-hidden, non-internal) rules.
@@ -235,7 +235,7 @@ defmodule Philomena.Rules do
   Returns `{:error, :not_found}` for a position no row could have,
   `{:error, :unauthorized}` when the viewer may not see the rule, and
   `{:error, :rule_hidden}` when the rule is hidden or internal and the viewer may
-  not edit it (a distinct case the controller redirects to the rules index).
+  not edit it (a distinct case from an ordinary authorization failure).
   Otherwise `{:ok, rule}`.
   """
   @spec load_rule_for_show(User.t() | nil, any()) ::
@@ -251,7 +251,7 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Prepares the new-rule form on behalf of `user`.
+  Prepares a new rule on behalf of `user`.
 
   Returns `{:error, :unauthorized}` when the viewer may not create rules,
   otherwise `{:ok, changeset}`.
@@ -303,7 +303,7 @@ defmodule Philomena.Rules do
   Returns `{:error, :not_found}` for a position no row could have,
   `{:error, :unauthorized}` when the viewer may not edit the rule,
   `{:error, {rule, changeset}}` on a validation failure (carrying the unchanged
-  rule for re-rendering the form), and `{:ok, [rule, rule_version]}` on success.
+  rule), and `{:ok, [rule, rule_version]}` on success.
   """
   @spec update_rule(User.t() | nil, any(), map()) ::
           {:ok, [Rule.t() | RuleVersion.t()]}

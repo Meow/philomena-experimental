@@ -66,7 +66,7 @@ defmodule Philomena.TagChanges do
   #
   # This is the reversion engine shared by `revert_tag_changes/2` and
   # `Philomena.TagChangeRevertWorker`; it performs no authorization and writes
-  # no moderation log, so controller-facing callers go through
+  # no moderation log, so callers needing authorization go through
   # `revert_tag_changes/2` instead.
   def mass_revert(ids, attributes) do
     tag_changes =
@@ -118,7 +118,7 @@ defmodule Philomena.TagChanges do
   Enqueues a background reversion of every tag change made by one identity,
   on behalf of `actor`.
 
-  The target is named in the raw request `params` by exactly one of
+  The target is named in `params` by exactly one of
   `"user_id"`, `"ip"`, or `"fingerprint"` (checked in that order). The
   reversion itself runs in `Philomena.TagChangeRevertWorker`; authorization
   (`:revert` on `TagChange`) and the moderation log happen here, at enqueue
@@ -342,15 +342,14 @@ defmodule Philomena.TagChanges do
   end
 
   @doc """
-  Deletes the tag change named by the raw request `id` from the history, on
+  Deletes the tag change named by `id` from the history, on
   behalf of `actor` (a user, or `nil` for an anonymous visitor).
 
   Authorization (`:delete` on the loaded record) happens here; on success the
   record's search document is removed and a moderation log is written. An id
   that cannot name a row is `{:error, :not_found}`, while a well-formed id
   that names no row authorizes `nil` - which no rule permits - and is
-  therefore `{:error, :unauthorized}`, preserving the behavior of the
-  load-then-authorize plug this replaces.
+  therefore `{:error, :unauthorized}`.
 
   ## Examples
 

@@ -1,12 +1,11 @@
 defmodule Philomena.Images.ImagePage do
   @moduledoc """
-  Everything the image page shows for one viewer: the image, the visible
+  The per-viewer data gathered for one image: the image, the visible
   page of its comments, the viewer's subscription state and interactions,
   the viewer's galleries paired with whether they already contain the image,
-  and the changesets backing the comment and metadata-edit forms.
+  and changesets for adding a comment and editing its metadata.
 
-  Comment and description bodies are carried raw; rendering them is the
-  caller's concern.
+  Comment and description bodies are carried in their raw form.
   """
 
   alias Philomena.Images.Image

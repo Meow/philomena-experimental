@@ -47,8 +47,7 @@ defmodule Philomena.ModerationLogs do
 
   This is called from within the context function that performs the logged
   action, after that action succeeds - after the transaction commits, not
-  inside it. `subject_path` is built with `Philomena.ModerationLogs.Paths` so the
-  context does not depend on `PhilomenaWeb`.
+  inside it. `subject_path` is built with `Philomena.ModerationLogs.Paths`.
 
   ## Examples
 

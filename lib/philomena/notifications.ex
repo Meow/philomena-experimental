@@ -70,7 +70,7 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Maps a category route parameter to its notification category, defaulting any
+  Maps a category parameter to its notification category, defaulting any
   unrecognized value to `:forum_post`.
 
   ## Examples

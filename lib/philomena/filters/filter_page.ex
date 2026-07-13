@@ -1,6 +1,6 @@
 defmodule Philomena.Filters.FilterPage do
   @moduledoc """
-  The assembled filter show page: the filter with its `:user` preloaded, and its
+  The assembled filter page: the filter with its `:user` preloaded, and its
   spoilered and hidden tags, each ordered by name.
   """
 

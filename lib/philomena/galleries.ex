@@ -10,6 +10,7 @@ defmodule Philomena.Galleries do
 
   alias Ecto.Multi
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
@@ -49,9 +50,9 @@ defmodule Philomena.Galleries do
   def get_gallery!(id), do: Repo.get!(Gallery, id)
 
   @doc """
-  Builds the changeset backing the new-gallery form, on behalf of `actor`.
+  Builds a change-tracking changeset for a new gallery, on behalf of `actor`.
 
-  Banned actors may not reach the form; everyone else may.
+  A banned actor gets `{:error, :ban}`; everyone else gets the changeset.
 
   ## Examples
 
@@ -107,7 +108,7 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Updates the gallery named by the raw request `gallery_id`, on behalf of
+  Updates the gallery named by `gallery_id`, on behalf of
   `actor`.
 
   The actor's write access is verified first (banned actors get
@@ -155,7 +156,7 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Deletes the gallery named by the raw request `gallery_id`, on behalf of
+  Deletes the gallery named by `gallery_id`, on behalf of
   `actor`.
 
   Loading and authorization follow `update_gallery/3`, authorizing `:delete`.
@@ -224,10 +225,10 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Loads the gallery named by the raw request `gallery_id` for editing, on
-  behalf of `actor`, pairing it with the changeset backing the edit form.
+  Loads the gallery named by `gallery_id` for editing, on
+  behalf of `actor`, pairing it with a change-tracking changeset for it.
 
-  Banned actors may not reach the form. Loading and authorization otherwise
+  A banned actor gets `{:error, :ban}`. Loading and authorization otherwise
   follow `update_gallery/3`, authorizing `:edit`.
 
   ## Examples
@@ -247,7 +248,7 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Runs the gallery listing search the request `params` describe, returning the
+  Runs the gallery listing search `params` describes, returning the
   record page with its thumbnail preloads.
 
   The title, creator, included-image, and description filters are read from
@@ -314,8 +315,8 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Assembles the gallery show page for the viewer described by `scope`, from
-  the raw request `gallery_id`.
+  Assembles the `GalleryPage` for the viewer described by `scope`, from
+  `gallery_id`.
 
   The gallery is loaded and `:show` is authorized: a non-castable id is
   `{:error, :not_found}`, and an unknown id authorizes `nil`, which comes back
@@ -614,7 +615,7 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Adds the image named by the raw request `image_id` to the gallery named by
+  Adds the image named by `image_id` to the gallery named by
   `gallery_id`, on behalf of `actor`.
 
   The actor's write access is verified first (banned actors get
@@ -702,7 +703,7 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Removes the image named by the raw request `image_id` from the gallery named
+  Removes the image named by `image_id` from the gallery named
   by `gallery_id`, on behalf of `actor`.
 
   Loading and authorization follow `add_image_to_gallery/3`. Removal is
@@ -794,7 +795,7 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Queues a reorder of the gallery named by the raw request `gallery_id` to the
+  Queues a reorder of the gallery named by `gallery_id` to the
   order given by `image_ids`, on behalf of `actor`.
 
   The actor's write access is verified first (banned actors get
@@ -914,7 +915,7 @@ defmodule Philomena.Galleries do
   defp position_order(_gallery), do: [desc: :position]
 
   @doc """
-  Clears `user`'s unread notifications for the gallery named by the raw request
+  Clears `user`'s unread notifications for the gallery named by
   `gallery_id`.
 
   The gallery is loaded by id with no authorization: any authenticated user may
@@ -944,15 +945,14 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Subscribes `user` to the gallery named by the raw request `gallery_id`.
+  Subscribes `user` to the gallery named by `gallery_id`.
 
   The gallery is loaded by id and authorized for `:show`: a non-castable id is
   `{:error, :not_found}`, and an unknown id authorizes `nil`, which comes back
   `{:error, :unauthorized}` for a non-admin.
 
-  Returns `{:ok, gallery}` (the gallery is needed to render the subscription
-  partial), or `{:error, %Ecto.Changeset{}}` if the subscription insert is
-  rejected.
+  Returns `{:ok, gallery}`, or `{:error, %Ecto.Changeset{}}` if the subscription
+  insert is rejected.
 
   ## Examples
 
@@ -970,7 +970,7 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Unsubscribes `user` from the gallery named by the raw request `gallery_id`.
+  Unsubscribes `user` from the gallery named by `gallery_id`.
 
   Loading and authorization mirror `subscribe_gallery/2`. Unsubscribing is
   idempotent and cannot fail, so there is no changeset error shape.
@@ -1008,20 +1008,6 @@ defmodule Philomena.Galleries do
   end
 
   defp load_authorized_image(actor, image_id) do
-    case IntegerId.parse(image_id) do
-      {:ok, id} ->
-        image = Repo.get(Image, id)
-
-        with :ok <- authorize(actor, :show, image),
-             %Image{} <- image do
-          {:ok, image}
-        else
-          {:error, :unauthorized} -> {:error, :unauthorized}
-          nil -> {:error, :not_found}
-        end
-
-      :error ->
-        {:error, :not_found}
-    end
+    Loader.fetch_and_authorize(Image, actor, :show, image_id)
   end
 end

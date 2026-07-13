@@ -7,7 +7,7 @@ defmodule Philomena.SiteNotices do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
-  alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.SiteNotices.SiteNotice
   alias Philomena.Users.User
 
@@ -67,7 +67,7 @@ defmodule Philomena.SiteNotices do
   end
 
   @doc """
-  Builds the changeset backing the new-site-notice form, on behalf of `actor`.
+  Builds the changeset for a new site notice, on behalf of `actor`.
 
   Authorizes `:new` against the site-notice model. Returns `{:ok, changeset}` or
   `{:error, :unauthorized}`.
@@ -107,8 +107,8 @@ defmodule Philomena.SiteNotices do
   end
 
   @doc """
-  Loads the site notice named by the raw request `id` for editing, on behalf of
-  `actor`, pairing it with the changeset backing the edit form.
+  Loads the site notice named by the `id` for editing, on behalf of
+  `actor`, pairing it with a change-tracking changeset.
 
   Authorizes `:edit` against the loaded notice: a non-castable id is
   `{:error, :not_found}`, and an unknown id authorizes `nil` and comes back
@@ -126,7 +126,7 @@ defmodule Philomena.SiteNotices do
   end
 
   @doc """
-  Updates the site notice named by the raw request `id`, on behalf of `actor`.
+  Updates the site notice named by the `id`, on behalf of `actor`.
 
   Loading and authorization follow `load_site_notice_for_edit/2`, authorizing
   `:update`. Returns `{:ok, site_notice}`, `{:error, :unauthorized}`,
@@ -159,7 +159,7 @@ defmodule Philomena.SiteNotices do
   end
 
   @doc """
-  Deletes the site notice named by the raw request `id`, on behalf of `actor`.
+  Deletes the site notice named by the `id`, on behalf of `actor`.
 
   Loading and authorization follow `load_site_notice_for_edit/2`, authorizing
   `:delete`. Returns `{:ok, site_notice}`, `{:error, :unauthorized}`, or
@@ -189,20 +189,12 @@ defmodule Philomena.SiteNotices do
     Repo.delete(site_notice)
   end
 
-  # Loads the site notice named by the raw request `id` and authorizes `action`
+  # Loads the site notice named by the `id` and authorizes `action`
   # against it: a non-castable id or a `nil` load the actor was permitted to act
   # on (an admin) is `{:error, :not_found}`, while a `nil` or real notice the
   # actor may not act on is `{:error, :unauthorized}`.
   defp load_site_notice(actor, id, action) do
-    with {:ok, id} <- IntegerId.parse(id),
-         site_notice = Repo.get(SiteNotice, id),
-         :ok <- authorize(actor, action, site_notice),
-         %SiteNotice{} <- site_notice do
-      {:ok, site_notice}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch_and_authorize(SiteNotice, actor, action, id)
   end
 
   @doc """

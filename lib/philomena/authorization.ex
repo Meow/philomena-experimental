@@ -51,8 +51,8 @@ defmodule Philomena.Authorization do
   The ban is the one looked up for the session's user, IP, and fingerprint; an
   anonymous actor with no ban passes.
 
-  GET-form actions (like `new` and `edit`) use this function alone, checking only
-  the ban; writes use `verify_write_access/1` instead.
+  Read paths that precede a write use this function alone, checking only the ban;
+  the write itself uses `verify_write_access/1` instead.
   """
   @spec verify_not_banned(actor :: Actor.t()) :: :ok | {:error, :ban}
   def verify_not_banned(%Actor{ban: nil}), do: :ok

@@ -8,6 +8,7 @@ defmodule Philomena.Bans do
 
   alias Ecto.Multi
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias Philomena.Bans.Finder
   alias Philomena.Bans.Fingerprint
@@ -176,8 +177,8 @@ defmodule Philomena.Bans do
   defp fingerprint_bans_query(_params), do: Fingerprint
 
   @doc """
-  Builds the new-fingerprint-ban form for `actor`, prefilling the fingerprint
-  from the raw `fingerprint` param (which may be `nil`).
+  Builds a changeset for a new fingerprint ban on behalf of `actor`, prefilling
+  the fingerprint from the `fingerprint` argument (which may be `nil`).
 
   Authorizes `:new` against the fingerprint-ban model. Returns
   `{:ok, changeset}` or `{:error, :unauthorized}`.
@@ -211,8 +212,8 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Loads the fingerprint ban named by the raw request `id` for editing, on behalf
-  of `actor`, pairing it with the changeset backing the edit form.
+  Loads the fingerprint ban named by `id` for editing, on behalf of `actor`,
+  pairing it with a changeset for editing it.
 
   Authorizes `:edit` against the fingerprint-ban model, then loads the ban.
   Returns `{:ok, {fingerprint_ban, changeset}}`, `{:error, :unauthorized}`, or
@@ -228,8 +229,7 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Updates the fingerprint ban named by the raw request `id`, on behalf of
-  `actor`.
+  Updates the fingerprint ban named by `id`, on behalf of `actor`.
 
   Authorizes `:update` against the fingerprint-ban model, loads the ban, applies
   the update through `update_fingerprint/2`, and writes an
@@ -250,8 +250,7 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Deletes the fingerprint ban named by the raw request `id`, on behalf of
-  `actor`.
+  Deletes the fingerprint ban named by `id`, on behalf of `actor`.
 
   Authorizes `:delete` against the fingerprint-ban model, loads the ban, and
   requires `actor` to be an admin. Writes an `"Admin.FingerprintBan:delete"`
@@ -273,12 +272,7 @@ defmodule Philomena.Bans do
   end
 
   defp load_fingerprint_ban(id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         %Fingerprint{} = fingerprint_ban <- Repo.get(Fingerprint, id) do
-      {:ok, fingerprint_ban}
-    else
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch(Fingerprint, id)
   end
 
   defp log_fingerprint_ban(actor, type, ban, verb) do
@@ -435,8 +429,8 @@ defmodule Philomena.Bans do
   defp subnet_bans_query(_params), do: {:ok, Subnet}
 
   @doc """
-  Builds the new-subnet-ban form for `actor`, prefilling the specification from
-  the raw `specification` param (which may be `nil`).
+  Prepares a new subnet ban on behalf of `actor`, prefilling the specification
+  from the `specification` argument (which may be `nil`).
 
   Authorizes `:new` against the subnet-ban model, then casts the specification.
   Returns `{:ok, %Subnet{}}` (blank, or with the parsed specification),
@@ -481,8 +475,8 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Loads the subnet ban named by the raw request `id` for editing, on behalf of
-  `actor`, pairing it with the changeset backing the edit form.
+  Loads the subnet ban named by `id` for editing, on behalf of `actor`, pairing
+  it with a changeset for editing it.
 
   Authorizes `:edit` against the subnet-ban model, then loads the ban. Returns
   `{:ok, {subnet_ban, changeset}}`, `{:error, :unauthorized}`, or
@@ -498,7 +492,7 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Updates the subnet ban named by the raw request `id`, on behalf of `actor`.
+  Updates the subnet ban named by `id`, on behalf of `actor`.
 
   Authorizes `:update` against the subnet-ban model, loads the ban, applies the
   update through `update_subnet/2`, and writes an `"Admin.SubnetBan:update"`
@@ -519,7 +513,7 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Deletes the subnet ban named by the raw request `id`, on behalf of `actor`.
+  Deletes the subnet ban named by `id`, on behalf of `actor`.
 
   Authorizes `:delete` against the subnet-ban model, loads the ban, and requires
   `actor` to be an admin. Writes an `"Admin.SubnetBan:delete"` moderation log on
@@ -541,12 +535,7 @@ defmodule Philomena.Bans do
   end
 
   defp load_subnet_ban(id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         %Subnet{} = subnet_ban <- Repo.get(Subnet, id) do
-      {:ok, subnet_ban}
-    else
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch(Subnet, id)
   end
 
   defp log_subnet_ban(actor, type, ban, verb) do
@@ -730,11 +719,10 @@ defmodule Philomena.Bans do
   defp user_bans_query(_params), do: User
 
   @doc """
-  Looks up the user a ban is being created against, by raw request `id`.
+  Looks up the user a ban is being created against, by `id`.
 
-  Used by the new-ban form and the create error path to name the target on the
-  form. Returns the `m:Philomena.Users.User`, or `nil` when `id` is non-castable
-  or names no user.
+  Returns the `m:Philomena.Users.User`, or `nil` when `id` is non-castable or
+  names no user.
   """
   @spec target_user(any()) :: Users.User.t() | nil
   def target_user(id) do
@@ -745,8 +733,8 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Builds the new-user-ban form for `actor`, targeting the user named by the raw
-  `user_id` (which may be `nil`).
+  Builds a changeset for a new user ban on behalf of `actor`, targeting the user
+  named by the `user_id` (which may be `nil`).
 
   Authorizes `:new` against the user-ban model, then resolves the target user.
   Returns `{:ok, {target_user, changeset}}`, `{:error, :unauthorized}`, or
@@ -785,9 +773,8 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Loads the user ban named by the raw request `id` for editing, on behalf of
-  `actor`, pairing it (with the banned user preloaded so the form can name them)
-  with the changeset backing the edit form.
+  Loads the user ban named by `id` for editing, on behalf of `actor`, pairing it
+  (with the banned user preloaded) with a changeset for editing it.
 
   Authorizes `:edit` against the user-ban model, then loads the ban. Returns
   `{:ok, {user_ban, changeset}}`, `{:error, :unauthorized}`, or
@@ -803,7 +790,7 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Updates the user ban named by the raw request `id`, on behalf of `actor`.
+  Updates the user ban named by `id`, on behalf of `actor`.
 
   Authorizes `:update` against the user-ban model, loads the ban, applies the
   update through `update_user/2`, and writes an `"Admin.UserBan:update"`
@@ -824,7 +811,7 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Deletes the user ban named by the raw request `id`, on behalf of `actor`.
+  Deletes the user ban named by `id`, on behalf of `actor`.
 
   Authorizes `:delete` against the user-ban model, loads the ban, and requires
   `actor` to be an admin: a moderator may create and edit bans but not delete
@@ -846,12 +833,7 @@ defmodule Philomena.Bans do
   end
 
   defp load_user_ban(id, preloads) do
-    with {:ok, id} <- IntegerId.parse(id),
-         %User{} = user_ban <- Repo.get(User, id) do
-      {:ok, Repo.preload(user_ban, preloads)}
-    else
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch(User, id, preloads)
   end
 
   defp log_user_ban(actor, type, ban, verb) do
@@ -864,7 +846,7 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Returns the first ban, if any, that matches the specified request attributes.
+  Returns the first ban, if any, matching the given user, IP, and fingerprint.
   """
   def find(user, ip, fingerprint) do
     Finder.find(user, ip, fingerprint)

@@ -10,9 +10,9 @@ defmodule Philomena.ArtistLinks do
 
   alias Ecto.Multi
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias Philomena.Attribution.Actor
-  alias Philomena.IntegerId
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.Users.User
@@ -71,12 +71,12 @@ defmodule Philomena.ArtistLinks do
 
   @doc """
   Returns the paginated artist links for the admin listing, on behalf of
-  `actor`, newest first, with the moderation-view associations preloaded.
+  `actor`, newest first, with the moderation associations preloaded.
 
   Authorizes `:index` against the artist link model. `params` selects the
   listing mode: `"all"` lists every link, `"lq"` filters by a `%term%` match on
   the profile user name or the link uri, and otherwise only links awaiting
-  moderation (`unverified`/`link_verified`/`contacted`) are shown.
+  moderation (`unverified`/`link_verified`/`contacted`) are listed.
 
   Returns `{:ok, artist_links}` as a `m:Scrivener.Page` or
   `{:error, :unauthorized}`.
@@ -118,8 +118,8 @@ defmodule Philomena.ArtistLinks do
   end
 
   @doc """
-  Loads the profile user named by `slug` for the new artist link form, on behalf
-  of `actor`.
+  Loads the profile user named by `slug` for creating a new artist link, on
+  behalf of `actor`.
 
   A banned actor is rejected first with `{:error, :ban}`. The profile user is
   then loaded by slug and authorized for `:create_links`.
@@ -138,7 +138,7 @@ defmodule Philomena.ArtistLinks do
 
   @doc """
   Submits a new artist link for the user named by the profile `slug`, on behalf
-  of `actor`, from the controller-shaped `attrs`.
+  of `actor`, from `attrs`.
 
   The actor's write access is verified first: a banned actor is `{:error, :ban}`
   and an actor with no fingerprint `{:error, :unauthorized}`. The profile user is
@@ -163,8 +163,8 @@ defmodule Philomena.ArtistLinks do
   end
 
   @doc """
-  Loads the artist link named by `id` under the profile `slug` for display, on
-  behalf of `actor`.
+  Loads the artist link named by `id` under the profile `slug`, on behalf of
+  `actor`.
 
   The link is loaded by id and authorized for `:show`; then the profile user is
   loaded by slug and authorized for `:create_links`. A non-castable or unknown
@@ -216,26 +216,14 @@ defmodule Philomena.ArtistLinks do
     end
   end
 
-  # Loads an artist link by id (with its form/display preloads) and authorizes
-  # the acting user for `action`. A non-castable id, or a `nil` load the actor
-  # was permitted to act on, is `{:error, :not_found}`.
+  # Loads an artist link by id (with its user, tag, and contacted-by preloads)
+  # and authorizes the acting user for `action`.
   defp authorized_artist_link(actor, action, id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         artist_link = load_artist_link_by_id(id),
-         :ok <- authorize(actor, action, artist_link),
-         %ArtistLink{} <- artist_link do
-      {:ok, artist_link}
-    else
-      shape when shape in [:error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-    end
-  end
-
-  defp load_artist_link_by_id(id) do
-    ArtistLink
-    |> where(id: ^id)
-    |> preload([:user, :tag, :contacted_by_user])
-    |> Repo.one()
+    Loader.fetch_and_authorize(ArtistLink, actor, action, id, [
+      :user,
+      :tag,
+      :contacted_by_user
+    ])
   end
 
   @doc """
@@ -260,7 +248,7 @@ defmodule Philomena.ArtistLinks do
 
   @doc """
   Updates the artist link named by `id` under the profile `slug`, on behalf of
-  `actor`, from the controller-shaped `attrs`.
+  `actor`, from `attrs`.
 
   The link is loaded by id and authorized for `:update`; then the profile user
   is loaded by slug and authorized for `:edit_links`. A non-castable or unknown

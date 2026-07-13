@@ -169,8 +169,8 @@ defmodule Philomena.Users do
   def get_user!(id), do: Repo.get!(User, id)
 
   @doc """
-  Loads the user named by the raw request `id` for public API profile display,
-  with their public links and badge awards preloaded.
+  Loads the user named by `id` for the public API, with their public links and
+  badge awards preloaded.
 
   An unknown or deactivated user is `{:error, :not_found}`.
 
@@ -203,7 +203,7 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Preloads a user's awards and their badges for display.
+  Preloads a user's awards and their badges.
 
   Returns `nil` when given `nil`.
 
@@ -221,8 +221,8 @@ defmodule Philomena.Users do
   def preload_awards(%User{} = user), do: Repo.preload(user, awards: :badge)
 
   @doc """
-  Returns the site staff grouped into the categories the staff page displays,
-  as a keyword list of `{category, [%User{}]}` in display order.
+  Returns the site staff grouped into categories, as a keyword list of
+  `{category, [%User{}]}` in a fixed order.
 
   Staff are the users whose role is `"admin"`, `"moderator"`, or `"assistant"`,
   ordered by name. A staff member who hides their default role and carries no
@@ -500,8 +500,8 @@ defmodule Philomena.Users do
   @doc """
   Generates and stores a fresh TOTP secret for the user's account.
 
-  Backs the first visit to the 2FA setup form, where the secret must exist
-  before its QR code and confirmation field can be shown. Does not reindex.
+  The secret must exist before two-factor authentication can be confirmed. Does
+  not reindex.
 
   ## Examples
 
@@ -519,13 +519,12 @@ defmodule Philomena.Users do
   @doc """
   Enables or disables two-factor authentication for the user's account.
 
-  Accepts the controller-shaped `params` carrying the current password and
-  second-factor token. When TOTP is off and the password and token check out it
+  Accepts the `params` carrying the current password and second-factor token. When TOTP is off and the password and token check out it
   is enabled and a fresh set of backup codes is generated; when TOTP is on it is
   disabled. On success the user is reindexed.
 
-  Returns `{:ok, user, backup_codes}` - the plaintext backup codes are returned
-  for one-time display and are always freshly generated, even when disabling -
+  Returns `{:ok, user, backup_codes}` - the plaintext backup codes cannot be
+  retrieved afterward and are always freshly generated, even when disabling -
   or `{:error, %Ecto.Changeset{}}` when the password or token is rejected.
 
   ## Examples
@@ -576,7 +575,7 @@ defmodule Philomena.Users do
   @doc """
   Consumes a second-factor token for the given user during sign-in.
 
-  Accepts the controller-shaped `params` (with the `"user"` / `"twofactor_token"`
+  Accepts the `params` (with the `"user"` / `"twofactor_token"`
   keys), validating the token against the user's TOTP secret or, failing that,
   its remaining backup codes. A matching TOTP code records the consumed timestep;
   a matching backup code removes it from the list.
@@ -849,8 +848,8 @@ defmodule Philomena.Users do
   )
 
   @doc """
-  Runs the staff user search on behalf of `viewer`, from the controller-shaped
-  request `params` and `pagination`.
+  Runs the staff user search on behalf of `viewer`, from `params` and
+  `pagination`.
 
   Reading the user listing requires the user-index permission, so a viewer
   without it is `{:error, :unauthorized}`. The `"uq"` param supplies the query
@@ -906,7 +905,7 @@ defmodule Philomena.Users do
   defp user_search_direction(_params), do: "desc"
 
   @doc """
-  Returns every assignable role for the staff user-edit form.
+  Returns every assignable role.
 
   ## Examples
 
@@ -920,13 +919,12 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads the user named by `slug` for the staff user-edit form, on behalf of
-  `actor`.
+  Loads the user named by `slug` for editing, on behalf of `actor`.
 
   The user is loaded by slug and authorized for `:edit`; an unknown slug
   authorizes `nil`, which no ordinary rule permits, so it is
   `{:error, :unauthorized}` (`{:error, :not_found}` for actors whose grants
-  cover `nil`). The returned user has its roles preloaded for the form.
+  cover `nil`). The returned user has its roles preloaded.
 
   Returns `{:ok, user}`.
   """
@@ -946,7 +944,7 @@ defmodule Philomena.Users do
 
   @doc """
   Updates the details of the user named by `slug`, on behalf of `actor`, from
-  the controller-shaped `params`.
+  `params`.
 
   The user is loaded by slug and authorized for `:update`; an unknown slug
   authorizes `nil`, which no ordinary rule permits, so it is
@@ -1088,8 +1086,8 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads the user named by `slug` for the erase confirmation form, on behalf of
-  `actor`, applying the eligibility guards.
+  Loads the user named by `slug` for erasure, on behalf of `actor`, applying the
+  eligibility guards.
 
   Managing a user requires the user-edit permission, so an actor without it is
   `{:error, :unauthorized}`. Only ordinary, unverified accounts may be erased:
@@ -1141,8 +1139,7 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads the user named by `slug` for the force-filter form, on behalf of
-  `actor`.
+  Loads the user named by `slug` for forcing a filter, on behalf of `actor`.
 
   Managing a user requires the user-edit permission, so an actor without it is
   rejected before the target is loaded; a well-formed slug naming no user is
@@ -1157,8 +1154,8 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Forces a filter on the user named by `slug`, on behalf of `actor`, from the
-  controller-shaped `params`.
+  Forces a filter on the user named by `slug`, on behalf of `actor`, from
+  `params`.
 
   Managing a user requires the user-edit permission, so an actor without it is
   rejected before the target is loaded; a well-formed slug naming no user is
@@ -1343,8 +1340,8 @@ defmodule Philomena.Users do
     |> Repo.preload([:roles])
   end
 
-  # Authorizes `actor` for `:edit` against the user schema, matching the gate on
-  # the staff user-management surfaces, then loads the target by slug. An
+  # Authorizes `actor` for `:edit` against the user schema, matching the gate
+  # shared by the staff user-management actions, then loads the target by slug. An
   # unauthorized actor is rejected before the load; a well-formed slug naming no
   # row is `{:error, :not_found}`.
   defp load_managed_user(actor, slug) do
@@ -1400,7 +1397,7 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads the user named by the profile `slug` for the description edit form, on
+  Loads the user named by the profile `slug` for editing the description, on
   behalf of `actor`.
 
   A banned actor is rejected first with `{:error, :ban}`. The user is then
@@ -1421,9 +1418,9 @@ defmodule Philomena.Users do
 
   @doc """
   Updates the description and personal title of the user named by the profile
-  `slug`, on behalf of `actor`, from the controller-shaped `attrs`.
+  `slug`, on behalf of `actor`, from `attrs`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is a write, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. The user is then loaded by slug and authorized for
   `:edit_description` following `load_profile_for_description_edit/2`. On success
@@ -1562,8 +1559,8 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads the user named by the profile `slug` for the moderation scratchpad edit
-  form, on behalf of `actor`.
+  Loads the user named by the profile `slug` for editing the moderation
+  scratchpad, on behalf of `actor`.
 
   A banned actor is rejected first with `{:error, :ban}`. Editing the scratchpad
   requires the mod-note viewing permission, so an actor without it is
@@ -1587,9 +1584,9 @@ defmodule Philomena.Users do
 
   @doc """
   Updates the moderation scratchpad of the user named by the profile `slug`, on
-  behalf of `actor`, from the controller-shaped `attrs`.
+  behalf of `actor`, from `attrs`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is a write, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. Editing the scratchpad requires the mod-note viewing
   permission, so an actor without it is `{:error, :unauthorized}`; a permitted
@@ -1666,8 +1663,8 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads the avatar form changeset for the acting user's own account, on behalf
-  of `actor`.
+  Loads the avatar changeset for the acting user's own account, on behalf of
+  `actor`.
 
   A banned actor is rejected with `{:error, :ban}`; otherwise returns
   `{:ok, %Ecto.Changeset{}}`.
@@ -1680,10 +1677,9 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Updates the acting user's own avatar from the controller-shaped `attrs`, on
-  behalf of `actor`.
+  Updates the acting user's own avatar from `attrs`, on behalf of `actor`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is a write, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. On success the uploaded file is analyzed, persisted,
   and the user reindexed.
@@ -1724,7 +1720,7 @@ defmodule Philomena.Users do
   @doc """
   Removes the acting user's own avatar, on behalf of `actor`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is a write, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`.
 
@@ -1759,8 +1755,8 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads the rename form changeset for the acting user's own account, on behalf
-  of `actor`.
+  Loads the rename changeset for the acting user's own account, on behalf of
+  `actor`.
 
   A banned actor is rejected first with `{:error, :ban}`. Renaming is authorized
   with `:change_username` against the actor's own user, which the ability rules
@@ -1779,10 +1775,10 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Updates the acting user's own name from the controller-shaped `user_params`,
-  on behalf of `actor`, recording the change in history.
+  Updates the acting user's own name from `user_params`, on behalf of `actor`,
+  recording the change in history.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is a write, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. Renaming is then authorized with
   `:change_username` against the actor's own user (the ability rules gate it on

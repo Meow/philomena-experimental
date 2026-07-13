@@ -9,6 +9,7 @@ defmodule Philomena.Reports do
     only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
 
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
@@ -17,6 +18,7 @@ defmodule Philomena.Reports do
   alias Philomena.Conversations.Conversation
   alias Philomena.Galleries.Gallery
   alias Philomena.Images.Image
+  alias Philomena.Images
   alias Philomena.IntegerId
   alias Philomena.Users.User
   alias Philomena.Reports.Report
@@ -95,8 +97,8 @@ defmodule Philomena.Reports do
   def get_report!(id), do: Repo.get!(Report, id)
 
   @doc """
-  Assembles the admin report listing, on behalf of `actor`, for the given raw
-  request `params` and `pagination`.
+  Assembles the admin report listing, on behalf of `actor`, for the given
+  `params` and `pagination`.
 
   Authorizes `:index` against the report model first, so a viewer without report
   access is `{:error, :unauthorized}`. When `params` carries an `"rq"` search
@@ -201,9 +203,8 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the report named by the raw request `id` for display, on behalf of
-  `actor`, with the admin, rule, and reporting-user associations preloaded and
-  its reportable resolved.
+  Loads the report named by `id`, on behalf of `actor`, with the admin, rule,
+  and reporting-user associations preloaded and its reportable resolved.
 
   Authorizes `:show` against the loaded report: a non-castable id is
   `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
@@ -253,19 +254,18 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the image named by the raw request `image_id` for the report form, on
-  behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for
-  an anonymous visitor).
+  Loads the image named by `image_id` for reporting, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
 
-  This backs the report form (`new`), a GET-guarded action, so a banned actor is
-  rejected with `{:error, :ban}` first; the fingerprint requirement the write
-  path enforces is skipped here. The image is then loaded and authorized for
+  This is a read that precedes a report: a banned actor is rejected with
+  `{:error, :ban}` first, but the fingerprint requirement that the write itself
+  enforces does not apply here. The image is then loaded and authorized for
   `:show`.
 
-  Returns `{:ok, {image, changeset}}` - the image builds the form action and
-  reportable link, and the changeset drives the report form - `{:error, :ban}`
-  for a banned actor, `{:error, :unauthorized}` when the image is not visible, or
-  `{:error, :not_found}` when the id cannot name a row.
+  Returns `{:ok, {image, changeset}}` - the image and a changeset for reporting
+  it - `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the
+  image is not visible, or `{:error, :not_found}` when the id cannot name a row.
 
   ## Examples
 
@@ -278,24 +278,24 @@ defmodule Philomena.Reports do
           | {:error, :ban | :unauthorized | :not_found}
   def load_image_for_report(%Actor{} = actor, image_id) do
     with :ok <- verify_not_banned(actor),
-         {:ok, image} <- load_reportable_image(actor.user, image_id) do
+         {:ok, image} <-
+           Images.load_visible_image(actor.user, image_id, [:sources, tags: :aliases]) do
       changeset = change_report(%Report{reportable_type: "Image", reportable_id: image.id})
       {:ok, {image, changeset}}
     end
   end
 
   @doc """
-  Loads the image named by the raw request `image_id` for report submission, on
-  behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+  Loads the image named by `image_id` for creating its report, on behalf of
+  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
 
-  This backs the report submission (`create`), a write, so `actor`'s write access
-  is verified first: a banned actor is `{:error, :ban}` and an actor with no
-  fingerprint is `{:error, :unauthorized}`. The image is then loaded and
-  authorized for `:show`.
+  This is the write path, so `actor`'s write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint is
+  `{:error, :unauthorized}`. The image is then loaded and authorized for
+  `:show`.
 
-  Returns `{:ok, image}` - it builds the redirect action and the report -
-  `{:error, :ban}` or `{:error, :unauthorized}` from the write-access check,
-  `{:error, :unauthorized}` when the image is not visible, or
+  Returns `{:ok, image}`, `{:error, :ban}` or `{:error, :unauthorized}` from the
+  write-access check, `{:error, :unauthorized}` when the image is not visible, or
   `{:error, :not_found}` when the id cannot name a row.
 
   ## Examples
@@ -308,32 +308,13 @@ defmodule Philomena.Reports do
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_image_for_report_creation(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor) do
-      load_reportable_image(actor.user, image_id)
-    end
-  end
-
-  # Loads the reported image by id and authorizes it for `:show`. A non-castable
-  # id is `{:error, :not_found}`; a well-formed id that names no row authorizes
-  # `nil`, which no rule permits, so it is `{:error, :unauthorized}`.
-  defp load_reportable_image(user, image_id) do
-    case IntegerId.parse(image_id) do
-      {:ok, id} ->
-        image =
-          Image
-          |> preload([:sources, tags: :aliases])
-          |> Repo.get(id)
-
-        with :ok <- authorize(user, :show, image), do: {:ok, image}
-
-      :error ->
-        {:error, :not_found}
+      Images.load_visible_image(actor.user, image_id, [:sources, tags: :aliases])
     end
   end
 
   @doc """
-  Loads the gallery named by the raw request `gallery_id` for the report form,
-  on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
-  `nil`).
+  Loads the gallery named by `gallery_id` for reporting, on behalf of `actor`
+  (a `Philomena.Attribution.Actor` whose user may be `nil`).
 
   Banned actors are rejected first with `{:error, :ban}`. The gallery is then
   loaded and authorized for `:show`: a non-castable id is
@@ -341,8 +322,7 @@ defmodule Philomena.Reports do
   `nil`, which no ordinary rule permits, so it is `{:error, :unauthorized}`
   (`{:error, :not_found}` for viewers whose grants cover `nil`).
 
-  Returns `{:ok, {gallery, changeset}}` with the changeset backing the report
-  form.
+  Returns `{:ok, {gallery, changeset}}` with a changeset for reporting it.
 
   ## Examples
 
@@ -362,10 +342,10 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the gallery named by the raw request `gallery_id` for report
-  submission, on behalf of `actor`.
+  Loads the gallery named by `gallery_id` for creating its report, on behalf of
+  `actor`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is the write path, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. Lookup and authorization follow
   `load_gallery_for_report/2`.
@@ -385,34 +365,19 @@ defmodule Philomena.Reports do
   end
 
   defp load_reportable_gallery(user, gallery_id) do
-    case IntegerId.parse(gallery_id) do
-      {:ok, id} ->
-        gallery = Repo.get(Gallery, id)
-
-        with :ok <- authorize(user, :show, gallery),
-             %Gallery{} <- gallery do
-          {:ok, gallery}
-        else
-          {:error, :unauthorized} -> {:error, :unauthorized}
-          nil -> {:error, :not_found}
-        end
-
-      :error ->
-        {:error, :not_found}
-    end
+    Loader.fetch_and_authorize(Gallery, user, :show, gallery_id)
   end
 
   @doc """
-  Loads the user named by the raw request profile `slug` for the report form,
-  on behalf of `actor`.
+  Loads the user named by the profile `slug` for reporting, on behalf of
+  `actor`.
 
   Banned actors are rejected first with `{:error, :ban}`. The user is then
   loaded by slug and authorized for `:show`; an unknown slug authorizes `nil`,
   which no ordinary rule permits, so it is `{:error, :unauthorized}`
   (`{:error, :not_found}` for viewers whose grants cover `nil`).
 
-  Returns `{:ok, {user, changeset}}` with the changeset backing the report
-  form.
+  Returns `{:ok, {user, changeset}}` with a changeset for reporting them.
 
   ## Examples
 
@@ -432,10 +397,10 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the user named by the raw request profile `slug` for report
-  submission, on behalf of `actor`.
+  Loads the user named by the profile `slug` for creating their report, on
+  behalf of `actor`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is the write path, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. Lookup and authorization follow
   `load_user_for_report/2`.
@@ -467,16 +432,16 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the user named by the raw request profile `slug` together with their
-  commission for the report form, on behalf of `actor`.
+  Loads the user named by the profile `slug` together with their commission for
+  reporting, on behalf of `actor`.
 
-  Banned actors are rejected first with `{:error, :ban}`. Viewing a commission
-  report form needs no permission, so an unknown slug and a user without a
-  commission are both `{:error, :not_found}`. The commission carries the
-  preloads its report page renders.
+  Banned actors are rejected first with `{:error, :ban}`. Reporting a commission
+  needs no permission, so an unknown slug and a user without a commission are
+  both `{:error, :not_found}`. The commission carries its sheet image, items,
+  and example images preloaded.
 
-  Returns `{:ok, {user, commission, changeset}}` with the changeset backing
-  the report form.
+  Returns `{:ok, {user, commission, changeset}}` with a changeset for reporting
+  it.
 
   ## Examples
 
@@ -498,10 +463,10 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the user named by the raw request profile `slug` together with their
-  commission for report submission, on behalf of `actor`.
+  Loads the user named by the profile `slug` together with their commission for
+  creating its report, on behalf of `actor`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is the write path, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. Lookup follows `load_commission_for_report/2`.
 
@@ -542,9 +507,8 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the conversation named by the raw request `slug` for the report form,
-  on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
-  `nil`).
+  Loads the conversation named by `slug` for reporting, on behalf of `actor`
+  (a `Philomena.Attribution.Actor` whose user may be `nil`).
 
   Banned actors are rejected first with `{:error, :ban}`. The conversation is
   then loaded by slug and authorized for `:show`: it is visible to its
@@ -553,8 +517,7 @@ defmodule Philomena.Reports do
   ordinary rule permits, so it is `{:error, :unauthorized}` (`{:error, :not_found}`
   for admins).
 
-  Returns `{:ok, {conversation, changeset}}` with the changeset backing the
-  report form.
+  Returns `{:ok, {conversation, changeset}}` with a changeset for reporting it.
 
   ## Examples
 
@@ -576,10 +539,10 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Loads the conversation named by the raw request `slug` for report submission,
-  on behalf of `actor`.
+  Loads the conversation named by `slug` for creating its report, on behalf of
+  `actor`.
 
-  This backs a write, so the actor's write access is verified first: a banned
+  This is the write path, so the actor's write access is verified first: a banned
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`. Lookup and authorization follow
   `load_conversation_for_report/2`.
@@ -836,8 +799,8 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Marks the report named by the raw request `id` as claimed by `actor`, on
-  behalf of `actor` (the acting staff user), and reindexes it.
+  Marks the report named by `id` as claimed by `actor`, on behalf of `actor`
+  (the acting staff user), and reindexes it.
 
   Authorizes `:edit` against the loaded report: a non-castable id is
   `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
@@ -865,8 +828,8 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Marks the report named by the raw request `id` as unclaimed, on behalf of
-  `actor` (the acting staff user), and reindexes it.
+  Marks the report named by `id` as unclaimed, on behalf of `actor` (the acting
+  staff user), and reindexes it.
 
   Loading and authorization follow `claim_report/2`, authorizing `:edit`.
 
@@ -891,8 +854,8 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Marks the report named by the raw request `id` as closed by `actor`, on
-  behalf of `actor` (the acting staff user), and reindexes it.
+  Marks the report named by `id` as closed by `actor`, on behalf of `actor`
+  (the acting staff user), and reindexes it.
 
   Loading and authorization follow `claim_report/2`, authorizing `:edit`.
 
@@ -916,18 +879,10 @@ defmodule Philomena.Reports do
     end
   end
 
-  # Loads the report named by the raw request `id` and authorizes `:edit`
-  # against it, matching the report claim/close controllers' resource guard.
+  # Loads the report named by `id` and authorizes `:edit` against it, the guard
+  # the claim and close actions share.
   defp load_report_for_edit(actor, id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         report = Repo.get(Report, id),
-         :ok <- authorize(actor, :edit, report),
-         %Report{} <- report do
-      {:ok, report}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch_and_authorize(Report, actor, :edit, id)
   end
 
   @doc """

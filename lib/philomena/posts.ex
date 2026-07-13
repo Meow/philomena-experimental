@@ -59,7 +59,7 @@ defmodule Philomena.Posts do
   Otherwise the topic's posts are windowed by `pagination`'s page number and
   size over their `topic_position`, ordered ascending, with authors preloaded.
   Posts with destroyed content are excluded; posts merely hidden from users stay
-  in the list (their body is nulled at render time). Each returned post carries
+  in the list. Each returned post carries
   the loaded topic so callers can read its post count for the response total.
 
   Returns `{:ok, {topic, posts}}` or `{:error, :not_found}`.
@@ -211,7 +211,7 @@ defmodule Philomena.Posts do
   restricted to posts that are not hidden from users and that belong to a forum
   whose access level is `"normal"` - for every requester alike, so hidden posts
   and posts in restricted forums are never returned or counted. Results are
-  preloaded for display. An empty or missing query string compiles to a match on
+  preloaded. An empty or missing query string compiles to a match on
   nothing, yielding an empty page rather than an error.
 
   Returns `{:ok, results}`, or `{:error, msg}` when `query_string` fails to
@@ -335,8 +335,8 @@ defmodule Philomena.Posts do
   @doc """
   Creates a reply on behalf of `actor` (a `Philomena.Attribution.Actor` whose
   user may be `nil` for an anonymous visitor) in the topic named by `topic_slug`
-  within the forum named by `forum_slug`, from `post_params` (the raw `"post"`
-  request parameter, which may be `nil` when none was submitted).
+  within the forum named by `forum_slug`, from `post_params` (which may be `nil`
+  when none was submitted).
 
   This is a write, so `actor`'s write access is verified first, before any
   loading: a banned actor is `{:error, :ban}` and an actor with no fingerprint is
@@ -350,11 +350,11 @@ defmodule Philomena.Posts do
   On a successful insert an approved post increments its author's forum post
   count and an unapproved one is reported for containing external links. The
   returned map carries the post, topic, and forum needed for the firehose
-  broadcast and the post-anchor redirect.
+  broadcast and for the caller to reuse.
 
   Returns `{:ok, %{post: post, topic: topic, forum: forum}}` on success,
   `{:error, forum, topic}` when the insert is rejected (both carry the topic
-  needed to redirect back to it with the error flash), `{:error, :ban}` or
+  for the caller to reuse), `{:error, :ban}` or
   `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
   when the forum or topic is not visible or the topic may not be posted in, or
   `{:error, :not_found}` when the topic does not exist.
@@ -380,7 +380,7 @@ defmodule Philomena.Posts do
       case create_post(topic, actor_attributes(actor), post_params || %{}) do
         {:ok, %{post: post}} ->
           record_post_creation(actor, post)
-          # The firehose broadcast renders the topic's author, so the topic
+          # The firehose broadcast needs the topic's author, so the topic
           # carries its `:user` here.
           {:ok, %{post: post, topic: Repo.preload(topic, :user), forum: forum}}
 
@@ -471,17 +471,17 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Loads the post named by the raw request `post_id` within the topic named by
+  Loads the post named by `post_id` within the topic named by
   `topic_slug` in the forum named by `forum_slug` for editing, on behalf of
   `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
 
-  This backs the edit form, a GET-guarded action, so a banned actor is rejected
-  with `{:error, :ban}` first; the fingerprint requirement the write path
-  enforces is skipped here. The forum, topic, and post are then loaded and
-  authorized (see `load_editable_post/4`).
+  This is a read that precedes an edit: a banned actor is rejected
+  with `{:error, :ban}` first, but the fingerprint requirement that the write
+  itself enforces does not apply here. The forum, topic, and post are then loaded
+  and authorized (see `load_editable_post/4`).
 
   Returns `{:ok, {post, changeset}}` - the post (with its topic, forum, and
-  author preloaded) builds the form action, the changeset drives the form -
+  author preloaded) and a change-tracking changeset for it -
   `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the forum,
   topic, or post is not visible or may not be edited, or `{:error, :not_found}`
   when the topic or post does not exist.
@@ -503,7 +503,7 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Updates the post named by the raw request `post_id` within the topic named by
+  Updates the post named by `post_id` within the topic named by
   `topic_slug` in the forum named by `forum_slug` from `post_params`, on behalf
   of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
 
@@ -515,8 +515,8 @@ defmodule Philomena.Posts do
   containing external links (an approved result is a no-op).
 
   Returns `{:ok, post}` on success (the post carries its topic and forum for the
-  post-anchor redirect), `{:error, {post, changeset}}` when the edit is rejected
-  (the post and changeset re-render the edit form), `{:error, :ban}` or
+  caller to reuse), `{:error, {post, changeset}}` when the edit is rejected,
+  `{:error, :ban}` or
   `{:error, :unauthorized}` from the
   write-access check, `{:error, :unauthorized}` when the forum, topic, or post is
   not visible or may not be edited, or `{:error, :not_found}` when the topic or
@@ -583,7 +583,7 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Hides the post named by the raw request `post_id`, recording the
+  Hides the post named by `post_id`, recording the
   `"deletion_reason"` carried in `post_params`, on behalf of `actor` (a user, or
   `nil` for an anonymous visitor).
 
@@ -592,11 +592,10 @@ defmodule Philomena.Posts do
   refreshed, the post is reindexed, and a moderation log is written attributing
   the deletion to `actor`. An id that cannot name a row is `{:error, :not_found}`,
   while a well-formed id that names no row authorizes `nil` - which no rule
-  permits - and is therefore `{:error, :unauthorized}`, preserving the behavior
-  of the load-then-authorize plug this replaces.
+  permits - and is therefore `{:error, :unauthorized}`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
-  preloaded so the caller can build the post-anchor redirect for either outcome.
+  preloaded so the caller can reuse them for either outcome.
   A rejected hide changeset (e.g. a blank deletion reason) returns
   `{:error, %Post{}}` carrying that loaded post.
 
@@ -649,7 +648,8 @@ defmodule Philomena.Posts do
 
   This is the internal hide engine shared with `hide_post/3` and
   `Philomena.Users.Eraser`; it performs no authorization and writes no
-  moderation log, so controller-facing callers go through `hide_post/3`.
+  moderation log, so callers needing authorization and a moderation log go
+  through `hide_post/3`.
 
   ## Examples
 
@@ -691,7 +691,7 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Restores the post named by the raw request `post_id`, on behalf of `actor`
+  Restores the post named by `post_id`, on behalf of `actor`
   (a user, or `nil` for an anonymous visitor).
 
   Loading and authorization mirror `hide_post/3` (`:hide` on the loaded post -
@@ -702,7 +702,7 @@ defmodule Philomena.Posts do
   authorizes `nil` and is `{:error, :unauthorized}`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
-  preloaded so the caller can build the post-anchor redirect. A rejected restore
+  preloaded so the caller can reuse them. A rejected restore
   returns `{:error, %Post{}}` carrying that loaded post.
 
   ## Examples
@@ -759,8 +759,8 @@ defmodule Philomena.Posts do
   Unhides a previously hidden post.
 
   This is the internal restore engine shared with `unhide_post/2`; it performs
-  no authorization and writes no moderation log, so controller-facing callers go
-  through `unhide_post/2`.
+  no authorization and writes no moderation log, so callers needing
+  authorization and a moderation log go through `unhide_post/2`.
 
   ## Examples
 
@@ -788,7 +788,7 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Destroys (permanently wipes the text of) the post named by the raw request
+  Destroys (permanently wipes the text of) the post named by
   `post_id`, on behalf of `actor` (a user, or `nil` for an anonymous visitor).
 
   Authorization (`:hide` on the loaded post) happens here; on success the post's
@@ -796,11 +796,10 @@ defmodule Philomena.Posts do
   post count are decremented, the post is reindexed, and a moderation log is
   written attributing the destruction to `actor`. An id that cannot name a row is
   `{:error, :not_found}`, while a well-formed id that names no row authorizes
-  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`,
-  preserving the behavior of the load-then-authorize plug this replaces.
+  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
-  preloaded so the caller can build the post-anchor redirect for either outcome.
+  preloaded so the caller can reuse them for either outcome.
   A failed destroy returns `{:error, %Post{}}` carrying that loaded post.
 
   ## Examples
@@ -861,7 +860,8 @@ defmodule Philomena.Posts do
 
   This is the internal destroy engine shared with `destroy_post/2` and
   `Philomena.Users.Eraser`; it performs no authorization and writes no
-  moderation log, so controller-facing callers go through `destroy_post/2`.
+  moderation log, so callers needing authorization and a moderation log go
+  through `destroy_post/2`.
 
   ## Examples
 
@@ -898,7 +898,7 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Approves the post named by the raw request `post_id`, on behalf of `actor`
+  Approves the post named by `post_id`, on behalf of `actor`
   (a user, or `nil` for an anonymous visitor).
 
   Authorization (`:approve` on the loaded post) happens here; on success the
@@ -906,11 +906,10 @@ defmodule Philomena.Posts do
   incremented, the post is reindexed, and a moderation log is written
   attributing the approval to `actor`. An id that cannot name a row is
   `{:error, :not_found}`, while a well-formed id that names no row authorizes
-  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`,
-  preserving the behavior of the load-then-authorize plug this replaces.
+  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
-  preloaded so the caller can build the post-anchor redirect for either
+  preloaded so the caller can reuse them for either
   outcome. A failed approval changeset returns `{:error, %Post{}}` carrying
   that loaded post.
 
@@ -967,7 +966,7 @@ defmodule Philomena.Posts do
       _error ->
         # The approval changeset sets a boolean unconditionally, so this branch
         # is not reachable today; it carries the loaded post so a caller can
-        # still redirect to the post anchor if that ever changes.
+        # still act on it if that ever changes.
         {:error, post}
     end
   end
@@ -982,7 +981,7 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Loads the edit history of the post named by the raw request `post_id` within
+  Loads the edit history of the post named by `post_id` within
   the topic named by `topic_slug` in the forum named by `forum_slug`, on behalf
   of `actor` (a user, or `nil` for an anonymous visitor). This is a public read
   with no ban check.
@@ -996,7 +995,7 @@ defmodule Philomena.Posts do
   `Ecto.Query.CastError`.
 
   On success the loaded post (with its topic, forum, and author associations
-  preloaded for rendering) is returned alongside the topic (for the page title)
+  preloaded) is returned alongside the topic
   and the last 25 versions of the post, newest first, with diffs and version
   authors resolved.
 
@@ -1024,8 +1023,8 @@ defmodule Philomena.Posts do
     end
   end
 
-  # The post is loaded by id scoped to the topic (with the topic/forum/author
-  # preloads the history page renders), a missing row is `{:error, :not_found}`,
+  # The post is loaded by id scoped to the topic (with its topic, forum, and
+  # author preloaded), a missing row is `{:error, :not_found}`,
   # and a post hidden from users is authorized for `:show` - visible to staff,
   # otherwise `{:error, :unauthorized}`.
   defp load_topic_post(actor, topic, post_id) do
@@ -1049,20 +1048,20 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Loads the post named by the raw request `post_id` within the topic named by
-  `topic_slug` in the forum named by `forum_slug` for the report form, on behalf
+  Loads the post named by `post_id` within the topic named by
+  `topic_slug` in the forum named by `forum_slug` for reporting, on behalf
   of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
   anonymous visitor).
 
-  This backs the report form (`new`), a GET-guarded action, so a banned actor is
-  rejected with `{:error, :ban}` first; the fingerprint requirement the write
-  path enforces is skipped here. The forum, topic, and post are then loaded and
-  authorized exactly as `post_history/4` does (forum `:show`, topic visibility,
-  and a hidden post visible only to actors who may `:show` it).
+  This is a read that precedes a report: a banned actor is
+  rejected with `{:error, :ban}` first, but the fingerprint requirement that the
+  write itself enforces does not apply here. The forum, topic, and post are then
+  loaded and authorized exactly as `post_history/4` does (forum `:show`, topic
+  visibility, and a hidden post visible only to actors who may `:show` it).
 
   Returns `{:ok, {topic, post, changeset}}` - the topic (with its forum
-  preloaded) and post build the form action and reportable link, and the
-  changeset drives the report form - `{:error, :ban}` for a banned actor,
+  preloaded), the post, and a changeset for reporting the post -
+  `{:error, :ban}` for a banned actor,
   `{:error, :unauthorized}` when the forum, topic, or hidden post is not visible,
   or `{:error, :not_found}` when the topic or post does not exist.
 
@@ -1085,19 +1084,17 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Loads the post named by the raw request `post_id` within the topic named by
-  `topic_slug` in the forum named by `forum_slug` for report submission, on
+  Loads the post named by `post_id` within the topic named by
+  `topic_slug` in the forum named by `forum_slug` for creating its report, on
   behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
 
-  This backs the report submission (`create`), a write, so `actor`'s write
+  This is the write path, so `actor`'s write
   access is verified first: a banned actor is `{:error, :ban}` and an actor with
-  no fingerprint is `{:error, :unauthorized}`. This ban check runs after the
-  captcha plug, which only halts anonymous requests, so a signed-in banned user
-  still sees the ban response. The forum, topic, and post are then loaded and
-  authorized exactly as `post_history/4` does.
+  no fingerprint is `{:error, :unauthorized}`. The forum, topic, and post are
+  then loaded and authorized exactly as `post_history/4` does.
 
   Returns `{:ok, {topic, post}}` - the topic (with its forum preloaded) and post
-  build the redirect action and the report - `{:error, :ban}` or
+  - `{:error, :ban}` or
   `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
   when the forum, topic, or hidden post is not visible, or `{:error, :not_found}`
   when the topic or post does not exist.
@@ -1122,8 +1119,7 @@ defmodule Philomena.Posts do
   # post hidden from users visible only to `user` when they may `:show` it).
   # Permissions are decided on the user alone, so the report loaders pass the
   # actor's user here. The post is loaded with its topic and forum preloaded, so
-  # the topic returned here carries its forum for building the report form action
-  # and redirect.
+  # the topic returned here carries its forum.
   defp load_reportable_post(user, forum_slug, topic_slug, post_id) do
     with {:ok, _forum, topic} <-
            Topics.load_forum_topic(user, forum_slug, topic_slug, show_hidden: false),

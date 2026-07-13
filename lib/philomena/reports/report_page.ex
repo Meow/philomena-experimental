@@ -1,7 +1,7 @@
 defmodule Philomena.Reports.ReportPage do
   @moduledoc """
-  The assembled admin report listing: the searched reports for the current
-  view, plus the viewing admin's own open reports and the open system reports.
+  The assembled admin report listing: the searched reports, plus the viewing
+  admin's own open reports and the open system reports.
   """
 
   alias Philomena.Reports.Report

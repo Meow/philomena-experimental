@@ -8,8 +8,8 @@ defmodule Philomena.Adverts do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
+  alias Philomena.Loader
 
-  alias Philomena.IntegerId
   alias Philomena.ModerationLogs
   alias Philomena.Users.User
   alias Philomena.Adverts.Advert
@@ -114,19 +114,14 @@ defmodule Philomena.Adverts do
   def get_advert!(id), do: Repo.get!(Advert, id)
 
   @doc """
-  Loads the advert named by the raw request `id` for a click-through redirect.
+  Loads the advert named by `id`.
 
   An id that cannot name a row - one that is not a well-formed integer, or that
   names no advert - is `{:error, :not_found}`; otherwise `{:ok, advert}`.
   """
   @spec get_advert(any()) :: {:ok, Advert.t()} | {:error, :not_found}
   def get_advert(id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         %Advert{} = advert <- Repo.get(Advert, id) do
-      {:ok, advert}
-    else
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch(Advert, id)
   end
 
   @doc """
@@ -255,7 +250,7 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Builds the changeset backing the new-advert form, on behalf of `actor`.
+  Builds the changeset for a new advert, on behalf of `actor`.
 
   Authorizes advert administration. Returns `{:ok, changeset}` or
   `{:error, :unauthorized}`.
@@ -285,8 +280,8 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Loads the advert named by the raw request `id` for editing, on behalf of
-  `actor`, pairing it with the changeset backing the edit form.
+  Loads the advert named by the `id` for editing, on behalf of
+  `actor`, pairing it with a change-tracking changeset.
 
   Authorizes advert administration, then loads and authorizes the advert for
   `:edit`. A non-castable or unknown id is `{:error, :not_found}`; a load a
@@ -303,7 +298,7 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Updates the advert named by the raw request `id` without touching its image,
+  Updates the advert named by the `id` without touching its image,
   on behalf of `actor`.
 
   Authorizes advert administration, then loads and authorizes the advert for
@@ -325,7 +320,7 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Deletes the advert named by the raw request `id`, on behalf of `actor`.
+  Deletes the advert named by the `id`, on behalf of `actor`.
 
   Authorizes advert administration, then loads and authorizes the advert for
   `:delete`. A non-castable or unknown id is `{:error, :not_found}`; a load a
@@ -345,7 +340,7 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Updates the image of the advert named by the raw request `id`, on behalf of
+  Updates the image of the advert named by the `id`, on behalf of
   `actor`, running the image upload pipeline.
 
   Authorizes advert administration, then loads and authorizes the advert for
@@ -372,20 +367,12 @@ defmodule Philomena.Adverts do
     end
   end
 
-  # Loads an advert by a raw request id and authorizes `action` against it: a
+  # Loads an advert by id and authorizes `action` against it: a
   # non-castable or unknown id is `{:error, :not_found}`, and a load the actor
   # may not act on is `{:error, :unauthorized}` (an admin, who may act on the
   # `nil` load, gets `{:error, :not_found}`).
   defp authorized_advert(actor, action, id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         advert = Repo.get(Advert, id),
-         :ok <- authorize(actor, action, advert),
-         %Advert{} <- advert do
-      {:ok, advert}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch_and_authorize(Advert, actor, action, id)
   end
 
   defp advert_log(actor, action, advert) do

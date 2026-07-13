@@ -1,13 +1,12 @@
 defmodule Philomena.Topics.TopicPage do
   @moduledoc """
-  Assembled state for rendering a single forum topic view: the forum and topic
-  being viewed, the current page of posts, the viewer's subscription and
-  poll-vote state, whether the topic's poll is currently accepting votes, and the
-  two changesets that drive the reply form and the title form.
+  Assembled state for a single forum topic: the forum and topic being viewed,
+  the current page of posts, the viewer's subscription and poll-vote state,
+  whether the topic's poll is currently accepting votes, and the two changesets
+  for replying and for editing the title.
 
-  `posts` is a `Scrivener.Page` whose entries are raw `Post` structs: their
-  bodies are rendered to HTML with the viewing user's filter by the web layer, so
-  this struct never carries rendered Markdown.
+  `posts` is a `Scrivener.Page` whose entries are raw `Post` structs; this struct
+  never carries rendered Markdown.
   """
 
   alias Philomena.Forums.Forum

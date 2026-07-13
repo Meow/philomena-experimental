@@ -42,8 +42,8 @@ defmodule Philomena.Topics do
   never revealed hidden topics, a hidden topic that the actor may not `:show`
   comes back `{:error, :unauthorized}`.
 
-  Returns `{:ok, {forum, topic}}` (both are needed to render the subscription
-  partial), `{:error, :unauthorized}` when the forum or topic is not visible to
+  Returns `{:ok, {forum, topic}}` (both are returned for the caller to reuse),
+  `{:error, :unauthorized}` when the forum or topic is not visible to
   the actor, `{:error, :not_found}` when the forum exists but the topic does
   not, or `{:error, %Ecto.Changeset{}}` if the subscription insert is rejected.
 
@@ -113,7 +113,7 @@ defmodule Philomena.Topics do
   exists but the topic does not.
 
   This is the loader that `Philomena.Polls` reuses so poll editing shares the
-  exact forum/topic visibility semantics of the topic routes.
+  exact forum/topic visibility semantics used when loading topics.
 
   ## Examples
 
@@ -212,7 +212,7 @@ defmodule Philomena.Topics do
   end
 
   @doc """
-  Assembles the page state for viewing the topic named by `topic_slug` within the
+  Assembles the `TopicPage` for the topic named by `topic_slug` within the
   forum named by `forum_slug`, on behalf of `actor` (a user, or `nil` for an
   anonymous visitor).
 
@@ -221,16 +221,16 @@ defmodule Philomena.Topics do
   As a side effect `actor`'s unread notifications for the topic are cleared, so a
   caller maintaining a notification count must refresh it after this returns.
 
-  `post_id_param` is the raw `"post_id"` request parameter (or `nil`): when it
+  `post_id_param` is the `post_id` to jump to (or `nil`): when it
   parses to an integer naming an existing post, the returned page is the one
   containing that post (by its position over the fixed page size of 25);
   otherwise `pagination`'s `:page_number` is used. The named post is looked up by
-  id alone, not scoped to this topic. `pagination` is the request pagination map;
+  id alone, not scoped to this topic. `pagination` is the pagination map;
   only its `:page_number` is read.
 
   The `posts` field is a `Scrivener.Page` of raw `Post` structs (25 per page,
-  ordered by creation, with the topic, forum, and author associations the view
-  renders preloaded); their Markdown bodies are rendered by the caller.
+  ordered by creation, with the topic, forum, and author preloaded); their
+  Markdown bodies are left raw for the caller.
 
   Returns `{:ok, %TopicPage{}}`, `{:error, :unauthorized}` when the forum or the
   topic is not visible to `actor`, or `{:error, :not_found}` when the forum
@@ -269,7 +269,7 @@ defmodule Philomena.Topics do
 
   # The requested page is the one holding the post named by `post_id_param` when
   # that parses to an integer naming an existing post; otherwise the page number
-  # carried by the request pagination.
+  # carried by `pagination`.
   defp topic_page_number(post_id_param, pagination) do
     with {post_id, _extra} <- Integer.parse(post_id_param || ""),
          [post] <- Post |> where(id: ^post_id) |> Repo.all() do
@@ -279,8 +279,8 @@ defmodule Philomena.Topics do
     end
   end
 
-  # One 25-post window of the topic, ordered by creation, with the associations
-  # the view renders preloaded. The total is taken from the topic's cached post
+  # One 25-post window of the topic, ordered by creation, with the topic, forum,
+  # and author preloaded. The total is taken from the topic's cached post
   # count rather than a separate query.
   defp load_topic_posts(topic, page) do
     entries =
@@ -385,26 +385,24 @@ defmodule Philomena.Topics do
   @doc """
   Creates a topic.
 
-  Called with a `Philomena.Attribution.Actor`, the forum's short name, and the
-  raw `"topic"` request parameter (which may be `nil`), this is the
-  controller-facing entry point. `actor`'s write access is verified first: a
+  Called with a `Philomena.Attribution.Actor`, the forum's short name, and
+  `topic_params` (which may be `nil`), this is the
+  actor-facing entry point. `actor`'s write access is verified first: a
   banned actor is `{:error, :ban}` and an actor with no fingerprint is
   `{:error, :unauthorized}`, neither having touched the forum. The forum is then
   loaded by short name and authorized for `:show`, and the topic together with
   its first post is inserted from `topic_params`, attributed to `actor`'s IP,
   fingerprint, and user. On success the returned map carries the topic, forum,
-  and first post the caller needs for the post-anchor redirect and the firehose
-  broadcast.
+  and first post the caller needs for the firehose broadcast and to reuse.
 
   Called with a `%Forum{}`, an attribution keyword list, and topic attributes,
   this is the insertion engine: it performs no authorization and inserts the
   topic, its first post, and the forum/topic bookkeeping in one transaction.
 
   Returns, for the actor form, `{:ok, %{topic: topic, forum: forum, post: post}}`
-  on success, `{:error, forum, changeset}` when the topic changeset is rejected
-  (the forum and changeset re-render the new-topic form), `{:error,
-  :creation_failed, forum}` when the insert fails for another reason (the forum
-  builds the redirect back to the new-topic form), or `{:error, :ban |
+  on success, `{:error, forum, changeset}` when the topic changeset is rejected,
+  `{:error, :creation_failed, forum}` when the insert fails for another reason,
+  or `{:error, :ban |
   :unauthorized}` from the write-access and forum checks. The engine form returns
   `{:ok, %{topic: %Topic{}}}` on success or a failed-step tuple.
 
@@ -495,17 +493,17 @@ defmodule Philomena.Topics do
     do: [ip: ip, fingerprint: fingerprint, user: user]
 
   @doc """
-  Seeds the new-topic form for `actor` (a `Philomena.Attribution.Actor` whose
+  Seeds a new-topic changeset for `actor` (a `Philomena.Attribution.Actor` whose
   user may be `nil`) in the forum named by `forum_slug`.
 
-  This backs a GET form, so a banned actor is rejected with `{:error, :ban}`
-  first; the forum is then loaded by short name and authorized for `:show`. The
-  returned changeset is seeded with an empty first post and a two-option poll so
-  the form renders those nested fields.
+  This is a read that precedes a create: a banned actor is rejected with
+  `{:error, :ban}` first; the forum is then loaded by short name and authorized
+  for `:show`. The returned changeset is seeded with an empty first post and a
+  two-option poll so those nested fields are present.
 
-  Returns `{:ok, {forum, changeset}}` (the forum builds the form action),
-  `{:error, :ban}` for a banned actor, or `{:error, :unauthorized}` when the
-  forum is not visible to `actor`.
+  Returns `{:ok, {forum, changeset}}` (the forum is returned for the caller to
+  reuse), `{:error, :ban}` for a banned actor, or `{:error, :unauthorized}` when
+  the forum is not visible to `actor`.
 
   ## Examples
 
@@ -585,10 +583,9 @@ defmodule Philomena.Topics do
   it), and the `:hide` permission on the topic is then checked. On success a
   moderation log is written attributing the stick to the actor.
 
-  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
-  to the topic), `{:error, forum, topic}` when the stick changeset is rejected
+  Returns `{:ok, {forum, topic}}` on success (both are returned for the caller to reuse), `{:error, forum, topic}` when the stick changeset is rejected
   (unreachable in practice, since the changeset has no validation, but kept so
-  the controller can still redirect back to the topic), `{:error, :unauthorized}`
+  the caller can still act on it), `{:error, :unauthorized}`
   when the actor may not see the forum/topic or stick the topic, or
   `{:error, :not_found}` when the topic does not exist.
 
@@ -609,8 +606,8 @@ defmodule Philomena.Topics do
       case stick_topic(topic) do
         {:ok, stuck_topic} ->
           # Body reads the title off the post-update topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored and
-          # displayed, so keep them exact.
+          # separately loaded forum. The log type and body strings are stored,
+          # so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Stick:create",
@@ -630,7 +627,7 @@ defmodule Philomena.Topics do
   Makes a topic sticky, appearing at the top of its forum.
 
   This is the internal stick engine shared with `stick_topic/3`; it performs no
-  authorization and writes no moderation log, so controller-facing callers go
+  authorization and writes no moderation log, so callers needing authorization and a moderation log go
   through `stick_topic/3`.
 
   ## Examples
@@ -653,7 +650,7 @@ defmodule Philomena.Topics do
   log is written.
 
   Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
-  unstick is rejected (so the controller can redirect back to the topic),
+  unstick is rejected (so the caller can act on it),
   `{:error, :unauthorized}`, or `{:error, :not_found}`.
 
   ## Examples
@@ -673,8 +670,8 @@ defmodule Philomena.Topics do
       case unstick_topic(topic) do
         {:ok, unstuck_topic} ->
           # Body reads the title off the post-unstick topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored and
-          # displayed, so keep them exact.
+          # separately loaded forum. The log type and body strings are stored,
+          # so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Stick:delete",
@@ -694,7 +691,7 @@ defmodule Philomena.Topics do
   Removes sticky status from a topic.
 
   Internal unstick engine shared with `unstick_topic/3`; it performs no
-  authorization and writes no moderation log, so controller-facing callers go
+  authorization and writes no moderation log, so callers needing authorization and a moderation log go
   through `unstick_topic/3`.
 
   ## Examples
@@ -718,10 +715,8 @@ defmodule Philomena.Topics do
   it), and the `:hide` permission on the topic is then checked. On success a
   moderation log is written attributing the lock to the actor.
 
-  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
-  to the topic), `{:error, forum, topic}` when the lock changeset is rejected
-  (e.g. a blank reason, so the controller can still redirect back to the
-  topic), `{:error, :unauthorized}` when the actor may not see the forum/topic
+  Returns `{:ok, {forum, topic}}` on success (both are returned for the caller to reuse), `{:error, forum, topic}` when the lock changeset is rejected
+  (e.g. a blank reason, so the caller can still act on it), `{:error, :unauthorized}` when the actor may not see the forum/topic
   or lock the topic, or `{:error, :not_found}` when the topic does not exist.
 
   ## Examples
@@ -746,7 +741,7 @@ defmodule Philomena.Topics do
           # The body reads the reason and title off the post-update topic, and
           # the forum name off the separately loaded forum (the loaded topic
           # carries no preloaded `:forum`). The log type and body strings are
-          # stored and displayed, so keep them exact.
+          # stored, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Lock:create",
@@ -757,7 +752,7 @@ defmodule Philomena.Topics do
           {:ok, {forum, locked_topic}}
 
         {:error, %Ecto.Changeset{}} ->
-          # Redirect target uses the pre-update topic.
+          # The pre-update topic is returned for the caller to reuse.
           {:error, forum, topic}
       end
     end
@@ -767,7 +762,7 @@ defmodule Philomena.Topics do
   Locks a topic to prevent further posting.
 
   This is the internal lock engine shared with `lock_topic/4`; it performs no
-  authorization and writes no moderation log, so controller-facing callers go
+  authorization and writes no moderation log, so callers needing authorization and a moderation log go
   through `lock_topic/4`.
 
   ## Examples
@@ -790,7 +785,7 @@ defmodule Philomena.Topics do
   log is written.
 
   Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
-  unlock is rejected (so the controller can redirect back to the topic),
+  unlock is rejected (so the caller can act on it),
   `{:error, :unauthorized}`, or `{:error, :not_found}`.
 
   ## Examples
@@ -810,8 +805,8 @@ defmodule Philomena.Topics do
       case unlock_topic(topic) do
         {:ok, unlocked_topic} ->
           # Body reads the title off the post-unlock topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored and
-          # displayed, so keep them exact.
+          # separately loaded forum. The log type and body strings are stored,
+          # so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Lock:delete",
@@ -831,7 +826,7 @@ defmodule Philomena.Topics do
   Unlocks a topic to allow posting again.
 
   Internal unlock engine shared with `unlock_topic/3`; it performs no
-  authorization and writes no moderation log, so controller-facing callers go
+  authorization and writes no moderation log, so callers needing authorization and a moderation log go
   through `unlock_topic/3`.
 
   ## Examples
@@ -855,14 +850,14 @@ defmodule Philomena.Topics do
   it), and the `:hide` permission on the topic is then checked. Only after
   authorization is the target forum id parsed and the move attempted, so an
   unprivileged actor sending a malformed target still gets unauthorized. On
-  success the NEW forum is preloaded (needed for both the redirect target and
-  the log body), post/topic counts are updated for both forums, and a
+  success the NEW forum is preloaded (needed for the log body and for the caller
+  to reuse), post/topic counts are updated for both forums, and a
   moderation log is written attributing the move to the actor.
 
-  Returns `{:ok, {new_forum, topic}}` on success (the new forum is where the
-  controller redirects), `{:error, forum, topic}` carrying the SOURCE forum and
-  topic when the move cannot happen for a reason the controller renders as a
-  flash + redirect back (a missing or non-integer target id, or a well-formed
+  Returns `{:ok, {new_forum, topic}}` on success (the new forum is returned for
+  the caller to reuse), `{:error, forum, topic}` carrying the SOURCE forum and
+  topic when the move cannot happen (a missing or non-integer target id, or a
+  well-formed
   id whose forum does not exist, caught by the `move_changeset` FK constraint
   and normalized to a changeset failure), `{:error, :unauthorized}` when the
   actor may not see the forum/topic or move the topic, or `{:error, :not_found}`
@@ -888,13 +883,13 @@ defmodule Philomena.Topics do
       # Target id parsing happens only after authorization, so an unprivileged
       # actor with a malformed target still answers unauthorized rather than the
       # bespoke failure. A missing or non-integer target and a well-formed id
-      # for a nonexistent forum all funnel to the inner else, which redirects
-      # back to the SOURCE topic - so it carries the source `forum` and `topic`.
+      # for a nonexistent forum all funnel to the inner else, which returns
+      # the SOURCE topic - so it carries the source `forum` and `topic`.
       with {:ok, target_forum_id} <- parse_target_forum_id(topic_params),
            {:ok, %{topic: moved_topic}} <- move_topic(topic, target_forum_id) do
-        # Force-preload the NEW forum off the moved topic for both the redirect
-        # target and the log body. The log type and body strings are stored and
-        # displayed, so keep them exact.
+        # Force-preload the NEW forum off the moved topic for the log body and
+        # for the caller to reuse. The log type and body strings are stored,
+        # so keep them exact.
         new_forum = Repo.preload(moved_topic, :forum, force: true).forum
 
         ModerationLogs.create_moderation_log(
@@ -923,7 +918,7 @@ defmodule Philomena.Topics do
   Moves a topic to a different forum, updating post counts for both forums.
 
   This is the internal move engine shared with `move_topic/4`; it performs no
-  authorization and writes no moderation log, so controller-facing callers go
+  authorization and writes no moderation log, so callers needing authorization and a moderation log go
   through `move_topic/4`.
 
   ## Examples
@@ -964,10 +959,8 @@ defmodule Philomena.Topics do
   the forum post/topic counts are updated, the topic's posts are reindexed, and
   a moderation log is written attributing the deletion to the actor.
 
-  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
-  to the topic), `{:error, forum, topic}` when the hide changeset is rejected
-  (e.g. a blank reason, so the controller can still redirect back to the
-  topic), `{:error, :unauthorized}` when the actor may not see the forum/topic
+  Returns `{:ok, {forum, topic}}` on success (both are returned for the caller to reuse), `{:error, forum, topic}` when the hide changeset is rejected
+  (e.g. a blank reason, so the caller can still act on it), `{:error, :unauthorized}` when the actor may not see the forum/topic
   or hide the topic, or `{:error, :not_found}` when the topic does not exist.
 
   ## Examples
@@ -992,7 +985,7 @@ defmodule Philomena.Topics do
           # The body reads the reason and title off the post-update topic, and
           # the forum name off the separately loaded forum (the loaded topic
           # carries no preloaded `:forum`). The log type and body strings are
-          # stored and displayed, so keep them exact.
+          # stored, so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Hide:create",
@@ -1003,7 +996,7 @@ defmodule Philomena.Topics do
           {:ok, {forum, hidden_topic}}
 
         {:error, %Ecto.Changeset{}} ->
-          # Redirect target uses the pre-update topic.
+          # The pre-update topic is returned for the caller to reuse.
           {:error, forum, topic}
       end
     end
@@ -1014,7 +1007,7 @@ defmodule Philomena.Topics do
 
   This is the internal hide engine shared with `hide_topic/4` and
   `Philomena.Users.Eraser`; it performs no authorization and writes no
-  moderation log, so controller-facing callers go through `hide_topic/4`.
+  moderation log, so callers needing authorization and a moderation log go through `hide_topic/4`.
 
   ## Examples
 
@@ -1058,7 +1051,7 @@ defmodule Philomena.Topics do
   topic's posts are reindexed, and a moderation log is written.
 
   Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
-  restore is rejected (so the controller can redirect back to the topic),
+  restore is rejected (so the caller can act on it),
   `{:error, :unauthorized}`, or `{:error, :not_found}`.
 
   ## Examples
@@ -1078,8 +1071,8 @@ defmodule Philomena.Topics do
       case unhide_topic(topic) do
         {:ok, restored_topic} ->
           # Body reads the title off the post-restore topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored and
-          # displayed, so keep them exact.
+          # separately loaded forum. The log type and body strings are stored,
+          # so keep them exact.
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Hide:delete",
@@ -1099,7 +1092,7 @@ defmodule Philomena.Topics do
   Unhides a previously hidden topic.
 
   Internal restore engine shared with `unhide_topic/3`; it performs no
-  authorization and writes no moderation log, so controller-facing callers go
+  authorization and writes no moderation log, so callers needing authorization and a moderation log go
   through `unhide_topic/3`.
 
   ## Examples
@@ -1139,12 +1132,11 @@ defmodule Philomena.Topics do
   The forum is loaded by short name and authorized for `:show`, the topic is
   loaded by slug with hidden topics visible only to actors who may `:show` them,
   and the `:edit` permission on the topic is then checked. Only the title is
-  updated; the slug is left intact, so the redirect back to the topic keeps
-  working.
+  updated; the slug is left intact.
 
-  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back to
-  the topic), `{:error, forum, topic}` when the title changeset is rejected (the
-  forum and pre-update topic redirect back with an error flash),
+  Returns `{:ok, {forum, topic}}` on success (both are returned for the caller to
+  reuse), `{:error, forum, topic}` when the title changeset is rejected (carrying
+  the forum and pre-update topic for the caller to reuse),
   `{:error, :unauthorized}` when the forum or topic is not visible or may not be
   edited, or `{:error, :not_found}` when the topic does not exist.
 
@@ -1176,7 +1168,7 @@ defmodule Philomena.Topics do
   Updates a topic's title.
 
   This is the internal title engine shared with `update_topic_title/4`; it
-  performs no authorization, so controller-facing callers go through
+  performs no authorization, so callers needing authorization go through
   `update_topic_title/4`.
 
   ## Examples

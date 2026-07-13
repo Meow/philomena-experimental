@@ -1,8 +1,8 @@
 defmodule Philomena.Galleries.GalleryPage do
   @moduledoc """
-  Everything the gallery show page needs for one viewer: the gallery, the
+  Everything the gallery page needs for one viewer: the gallery, the
   visible page of its images (paired with their search hits), the images on
-  the adjacent pages folded into one ordered list for the client, whether
+  the adjacent pages folded into one ordered list, whether
   those adjacent pages exist, the viewer's interactions, and their
   subscription state.
 

@@ -52,10 +52,11 @@ defmodule Philomena.Polls do
   `{:error, :not_found}`), and only then is the `:hide` permission on the topic
   checked. Because the poll load precedes the `:hide` check, a topic with no poll
   answers not-found even for an actor who could not otherwise edit it. The poll's
-  options are preloaded so the edit form can render the existing choices.
+  options are preloaded so the existing choices are available.
 
   Returns `{:ok, {forum, topic, poll, changeset}}` (the forum and topic are
-  needed to build the form action, the changeset drives the form),
+  returned for the caller to reuse, and the changeset tracks changes to the
+  poll),
   `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
   the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
 
@@ -75,8 +76,8 @@ defmodule Philomena.Polls do
   end
 
   # The forum `:show`, topic visibility, poll existence, and topic `:hide` checks
-  # run in that order. Options are preloaded here so both the edit form and the
-  # update error re-render can show the existing choices.
+  # run in that order. Options are preloaded here so the existing choices are
+  # present for editing and on the update-error path.
   defp load_forum_topic_poll(actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
            Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
@@ -86,7 +87,13 @@ defmodule Philomena.Polls do
     end
   end
 
-  defp load_poll(topic) do
+  @doc """
+  Loads the poll attached to `topic`.
+
+  Returns `{:ok, poll}`, or `{:error, :not_found}` when the topic has no poll.
+  """
+  @spec load_poll(Topic.t()) :: {:ok, Poll.t()} | {:error, :not_found}
+  def load_poll(topic) do
     Poll
     |> where(topic_id: ^topic.id)
     |> Repo.one()
@@ -123,10 +130,10 @@ defmodule Philomena.Polls do
   `:show`, topic visibility, poll existence, then topic `:hide`), so an actor
   who may not edit the poll never reaches the update.
 
-  Returns `{:ok, {forum, topic}}` on success (both are needed to redirect back
-  to the topic), `{:error, forum, topic, changeset}` when the poll changeset is
-  rejected (the forum and topic build the form action and the changeset
-  re-renders the edit form),
+  Returns `{:ok, {forum, topic}}` on success (both are returned for the caller
+  to reuse), `{:error, forum, topic, changeset}` when the poll changeset is
+  rejected (the forum, topic, and changeset are returned for the caller to
+  reuse),
   `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
   the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
 
@@ -159,7 +166,7 @@ defmodule Philomena.Polls do
   Updates a poll.
 
   This is the internal update engine shared with `update_poll/4`; it performs no
-  authorization, so controller-facing callers go through `update_poll/4`.
+  authorization, so callers needing authorization go through `update_poll/4`.
 
   ## Examples
 

@@ -30,10 +30,10 @@ defmodule Philomena.PollVotes do
   topic is loaded by slug with hidden topics kept invisible unless the actor may
   `:show` them, the poll is loaded (a topic with no poll is
   `{:error, :not_found}`), and only then is the `:hide` permission on the topic
-  checked. Options with no votes are dropped so the view only renders options
-  someone voted for.
+  checked. Options with no votes are dropped, so only options someone voted for
+  are returned.
 
-  Returns `{:ok, options}` (the list the index view renders),
+  Returns `{:ok, options}` (the options someone voted for),
   `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
   the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
 
@@ -69,19 +69,19 @@ defmodule Philomena.PollVotes do
   neither having touched the poll. Then the forum is loaded by short name and
   authorized for `:show`, the topic is loaded by slug with hidden topics kept
   invisible unless the actor may `:show` them, and the poll is loaded (a topic
-  with no poll is `{:error, :not_found}`). Unlike the index and delete paths,
+  with no poll is `{:error, :not_found}`). Unlike listing and deleting votes,
   there is no `:hide` check: recording a vote is open to any signed-in actor who
   passes the ban filter.
 
-  `poll_params` is the raw `"poll"` request parameter, which may be `nil` when
+  `poll_params` may be `nil` when
   the caller submitted no poll data. A `nil` (or otherwise non-map) params value
   records nothing and is reported as a failure; a map is handed to
   `create_poll_votes/3`, whose own filtering silently drops expired polls, repeat
   voters, and option ids that do not belong to the poll.
 
   Returns `{:ok, {forum, topic}}` when the votes are recorded,
-  `{:error, forum, topic}` when nothing is recorded (both carry the topic needed
-  to redirect back to it), `{:error, :ban}` or `{:error, :unauthorized}` from the
+  `{:error, forum, topic}` when nothing is recorded (both carry the topic for the
+  caller to reuse), `{:error, :ban}` or `{:error, :unauthorized}` from the
   write-access check, `{:error, :unauthorized}` when the forum/topic is not
   visible, or `{:error, :not_found}` when the topic or its poll does not exist.
 
@@ -112,7 +112,7 @@ defmodule Philomena.PollVotes do
     end
   end
 
-  # No "poll" parameter was submitted; report a failure without recording anything.
+  # No poll params were submitted; report a failure without recording anything.
   defp record_votes(_user, forum, topic, _poll, _poll_params), do: {:error, forum, topic}
 
   @doc """
@@ -124,7 +124,7 @@ defmodule Philomena.PollVotes do
   permission on the topic, all before the vote is even looked up. `vote_id` is
   then parsed with `Philomena.IntegerId`; a non-integer id, or an integer naming
   no vote, takes the bespoke failure path `{:error, forum, topic}` with the topic
-  to redirect back to, rather than raising. A found vote is deleted (decrementing
+  for the caller to reuse, rather than raising. A found vote is deleted (decrementing
   the cached option and poll tallies).
 
   Returns `{:ok, {forum, topic}}` when the vote is removed,
@@ -166,25 +166,15 @@ defmodule Philomena.PollVotes do
     end
   end
 
-  # Shared loader for the vote routes: forum `:show`, topic visibility (hidden
+  # Shared loader for the vote operations: forum `:show`, topic visibility (hidden
   # topics stay invisible without `:show`), then poll existence. The `:hide`
   # check is deliberately left to the index/delete callers, since create does
   # not gate on it.
   defp load_forum_topic_poll(actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
            Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
-         {:ok, poll} <- load_poll(topic) do
+         {:ok, poll} <- Polls.load_poll(topic) do
       {:ok, forum, topic, poll}
-    end
-  end
-
-  defp load_poll(topic) do
-    Poll
-    |> where(topic_id: ^topic.id)
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      poll -> {:ok, poll}
     end
   end
 

@@ -1,11 +1,10 @@
 defmodule Philomena.Tags.TagPage do
   @moduledoc """
-  The assembled tag show page: the tag with its display preloads, the executed
+  The assembled tag page: the tag with its preloads, the executed
   page of images tagged with it, the viewer's interactions with those images,
   and the escaped search query that lists the tag.
 
-  The tag carries raw records; rendering its description and DNP conditions to
-  HTML is a presentation concern that happens in the web layer.
+  The tag carries raw records, not rendered output.
   """
 
   alias Philomena.Tags.Tag

@@ -1,7 +1,7 @@
 defmodule Philomena.DnpEntries.DnpListing do
   @moduledoc """
-  The assembled Do-Not-Post index page: a paginated set of DNP entries, the
-  viewer's linked tags for the sidebar, and whether the state column is shown.
+  The assembled Do-Not-Post listing: a paginated set of DNP entries, the
+  viewer's linked tags, and whether the state column is included.
   """
 
   alias Philomena.Tags.Tag

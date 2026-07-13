@@ -5,6 +5,7 @@ defmodule Philomena.DnpEntries do
 
   import Ecto.Query, warn: false
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias Philomena.Attribution.Actor
   alias Philomena.DnpEntries.{DnpEntry, DnpListing}
@@ -48,15 +49,15 @@ defmodule Philomena.DnpEntries do
   def get_dnp_entry!(id), do: Repo.get!(DnpEntry, id)
 
   @doc """
-  Assembles the Do-Not-Post index page for `user` (the current viewer, possibly
+  Assembles the Do-Not-Post listing for `user` (the current viewer, possibly
   `nil`).
 
   With `"mine"` in `params` and a signed-in `user`, returns that user's own
   entries ordered by creation. Otherwise returns the publicly listed entries
-  ordered by tag name. The viewer's linked tags travel along for the sidebar.
+  ordered by tag name. The viewer's linked tags travel along.
   The `status_column` flag records which of the two listings was produced.
 
-  This page is public; no authorization is performed.
+  This listing is public; no authorization is performed.
   """
   @spec load_dnp_listing(User.t() | nil, map(), map() | keyword()) :: DnpListing.t()
   def load_dnp_listing(%User{} = user, %{"mine" => _mine}, pagination) do
@@ -84,7 +85,7 @@ defmodule Philomena.DnpEntries do
 
   @doc """
   Assembles the admin Do-Not-Post listing, on behalf of `actor`, for the given
-  raw request `params` and `pagination`, newest update first.
+  `params` and `pagination`, newest update first.
 
   Authorizes `:index` against the DNP entry model first, so a viewer without DNP
   access is `{:error, :unauthorized}`. A list `"states"` param restricts to
@@ -158,12 +159,12 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
-  Prepares a new DNP request form on behalf of `actor`.
+  Prepares a new DNP request on behalf of `actor`.
 
   Returns `{:error, :ban}` for a banned actor and `{:error, :unauthorized}` when
   the actor has no tag to file a request against. Otherwise returns
-  `{:ok, %{changeset: changeset, selectable_tags: tags}}` with the tags the form
-  offers.
+  `{:ok, %{changeset: changeset, selectable_tags: tags}}` with the offered
+  tags.
   """
   @spec load_new_dnp_entry(Actor.t(), map()) ::
           {:ok, %{changeset: Ecto.Changeset.t(), selectable_tags: [Tag.t()]}}
@@ -177,7 +178,7 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
-  Creates a DNP entry on behalf of `actor` from the controller `params`.
+  Creates a DNP entry on behalf of `actor` from `params`.
 
   Reads the offered tag set from `params` (the top-level `"tag_id"` for staff,
   otherwise the actor's linked tags) and files the request against the tag named
@@ -205,7 +206,7 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
-  Prepares the moderator edit form for the DNP entry named by `id`, on behalf of
+  Prepares the moderator edit of the DNP entry named by `id`, on behalf of
   `user`.
 
   Returns `{:error, :unauthorized}` when the viewer has no selectable tag or may
@@ -227,7 +228,7 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
-  Updates the DNP entry named by `id` on behalf of `user` from the controller
+  Updates the DNP entry named by `id` on behalf of `user` from
   `params`.
 
   Returns `{:error, :unauthorized}` when the viewer has no selectable tag or may
@@ -262,7 +263,7 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
-  Transitions the DNP entry named by the raw request `id` to `new_state`, on
+  Transitions the DNP entry named by the `id` to `new_state`, on
   behalf of `actor` (the acting staff user), and writes a moderation log on
   success.
 
@@ -314,15 +315,10 @@ defmodule Philomena.DnpEntries do
     |> Repo.update()
   end
 
-  # Loads the DNP entry named by the raw request `id` with its tag preloaded,
-  # answering `{:error, :not_found}` for a non-castable id or an id naming no row.
+  # Loads the DNP entry named by `id` with its tag preloaded, answering
+  # `{:error, :not_found}` for a non-castable id or an id naming no row.
   defp load_required_dnp_entry(id) do
-    with {:ok, id} <- Philomena.IntegerId.parse(id),
-         %DnpEntry{} = dnp_entry <- DnpEntry |> preload(:tag) |> Repo.get(id) do
-      {:ok, dnp_entry}
-    else
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch(DnpEntry, id, [:tag])
   end
 
   @doc """
@@ -395,10 +391,10 @@ defmodule Philomena.DnpEntries do
     |> Repo.insert()
   end
 
-  # The tags the DNP form offers: for a viewer who may see the DNP list, the
-  # single tag named by the top-level `tag_id` param; otherwise the viewer's own
-  # linked artist tags. An empty set means the viewer has nothing to file
-  # against and may not use the form.
+  # The tags a DNP request may be filed against: for a viewer who may see the DNP
+  # list, the single tag named by the top-level `tag_id` param; otherwise the
+  # viewer's own linked artist tags. An empty set means the viewer has nothing to
+  # file against.
   defp selectable_tags(user, params) do
     tags =
       if present?(params["tag_id"]) and Canada.Can.can?(user, :index, DnpEntry) do
@@ -418,16 +414,7 @@ defmodule Philomena.DnpEntries do
   # unknown well-formed id an actor may not act on comes back unauthorized, and
   # one it may act on comes back not-found.
   defp load_authorized_dnp_entry(user, id, action) do
-    with {:ok, id} <- Philomena.IntegerId.parse(id),
-         dnp_entry = DnpEntry |> preload(:tag) |> Repo.get(id),
-         :ok <- authorize(user, action, dnp_entry),
-         %DnpEntry{} <- dnp_entry do
-      {:ok, dnp_entry}
-    else
-      :error -> {:error, :not_found}
-      nil -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-    end
+    Loader.fetch_and_authorize(DnpEntry, user, action, id, [:tag])
   end
 
   defp linked_tags(%User{} = user) do

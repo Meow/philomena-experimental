@@ -1,8 +1,9 @@
 defmodule Philomena.IntegerId do
   @moduledoc """
-  Parsing of integer ids taken straight from request paths and query strings.
+  Parsing of an id that may be any value (e.g. a string) before it is used in a
+  query.
 
-  Interpolating an unparsed path segment into `where(id: ^id)` raises rather
+  Interpolating an unparsed id into `where(id: ^id)` raises rather
   than returning no rows: `Ecto.Query.CastError` for a non-integer, and
   `DBConnection.EncodeError` for a value too large for the `integer` column.
   Callers use `parse/1` to turn both into an ordinary "no such row".

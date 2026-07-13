@@ -25,11 +25,11 @@ defmodule Philomena.Activities do
   Assembles the homepage for the viewer described by `scope`.
 
   `filter` is the viewer's active `Filter` (its hidden tags exclude comments);
-  `show_nsfw_channels?` reflects the viewer's channel-NSFW cookie. The recent,
-  top-scoring, comment, and watched strips are batched into a single
+  `show_nsfw_channels?` reflects whether the viewer wants NSFW channels shown.
+  The recent, top-scoring, comment, and watched strips are batched into a single
   multi-search; the featured image, streams, and topics are loaded from
   Postgres. Anonymous viewers have no watched strip (`nil`). The featured
-  image and the recent listing honour the scope's `hidden` display switch.
+  image and the recent listing honour the scope's `hidden` setting.
 
   Returns a `FrontPage` struct carrying the viewer's interactions across the
   image collections.

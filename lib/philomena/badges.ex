@@ -8,6 +8,7 @@ defmodule Philomena.Badges do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias Philomena.IntegerId
   alias Philomena.Users.User
@@ -187,7 +188,7 @@ defmodule Philomena.Badges do
   end
 
   @doc """
-  Builds the changeset backing the new-badge form, on behalf of `actor`.
+  Builds the changeset for creating a badge, on behalf of `actor`.
 
   Authorizes badge administration. Returns `{:ok, changeset}` or
   `{:error, :unauthorized}`.
@@ -217,8 +218,8 @@ defmodule Philomena.Badges do
   end
 
   @doc """
-  Loads the badge named by the raw request `id` for editing, on behalf of
-  `actor`, pairing it with the changeset backing the edit form.
+  Loads the badge named by `id` for editing, on behalf of `actor`, pairing it
+  with a changeset for editing it.
 
   Authorizes badge administration, then loads the badge by id. A non-castable or
   unknown id is `{:error, :not_found}`. Returns `{:ok, {badge, changeset}}` or
@@ -234,8 +235,8 @@ defmodule Philomena.Badges do
   end
 
   @doc """
-  Updates the badge named by the raw request `id` without touching its image, on
-  behalf of `actor`.
+  Updates the badge named by `id` without touching its image, on behalf of
+  `actor`.
 
   Authorizes badge administration, then loads the badge by id. A non-castable or
   unknown id is `{:error, :not_found}`. On success a moderation log attributing
@@ -255,8 +256,8 @@ defmodule Philomena.Badges do
   end
 
   @doc """
-  Updates the image of the badge named by the raw request `id`, on behalf of
-  `actor`, running the SVG upload pipeline.
+  Updates the image of the badge named by `id`, on behalf of `actor`, running
+  the SVG upload pipeline.
 
   Authorizes badge administration, then loads the badge by id. A non-castable or
   unknown id is `{:error, :not_found}`. On success a moderation log attributing
@@ -282,8 +283,8 @@ defmodule Philomena.Badges do
   end
 
   @doc """
-  Loads the badge named by the raw request `id` together with the users who hold
-  it, on behalf of `actor`, paginated and ordered by name.
+  Loads the badge named by `id` together with the users who hold it, on behalf
+  of `actor`, paginated and ordered by name.
 
   Authorizes badge administration, then loads the badge by id. A non-castable or
   unknown id is `{:error, :not_found}`. Returns `{:ok, {badge, users}}` (the
@@ -305,15 +306,9 @@ defmodule Philomena.Badges do
     end
   end
 
-  # Loads a badge by a raw request id. A non-castable or unknown id is
-  # `{:error, :not_found}`.
+  # Loads a badge by id. A non-castable or unknown id is `{:error, :not_found}`.
   defp fetch_badge(id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         %Badge{} = badge <- Repo.get(Badge, id) do
-      {:ok, badge}
-    else
-      _ -> {:error, :not_found}
-    end
+    Loader.fetch(Badge, id)
   end
 
   defp badge_log(actor, action, badge) do
@@ -458,7 +453,7 @@ defmodule Philomena.Badges do
   end
 
   @doc """
-  Loads the user named by the profile `slug` for the new award form, on behalf
+  Loads the user named by the profile `slug` for creating an award, on behalf
   of `actor`.
 
   Awarding requires the `:create` badge-award permission, so an actor without it
@@ -477,7 +472,7 @@ defmodule Philomena.Badges do
 
   @doc """
   Awards a badge to the user named by the profile `slug`, on behalf of `actor`,
-  from the controller-shaped `attrs`.
+  from `attrs`.
 
   Awarding requires the `:create` badge-award permission, so an actor without it
   is `{:error, :unauthorized}`; a permitted actor naming an unknown slug is
@@ -525,7 +520,7 @@ defmodule Philomena.Badges do
 
   @doc """
   Updates the award named by `id` under the profile `slug`, on behalf of
-  `actor`, from the controller-shaped `attrs`.
+  `actor`, from `attrs`.
 
   Awarding requires the `:create` badge-award permission, so an actor without it
   is `{:error, :unauthorized}`. A non-castable or unknown award id, and (for a
@@ -586,7 +581,7 @@ defmodule Philomena.Badges do
 
   # Authorizes `actor`, loads the profile user by slug, and loads the award by
   # id. The award is loaded independently of the profile user, mirroring the two
-  # separate lookups the award routes have always done.
+  # separate lookups award management has always done.
   defp load_award(actor, slug, id) do
     with {:ok, user} <- load_award_profile(actor, slug),
          {:ok, award_id} <- IntegerId.parse(id),

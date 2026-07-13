@@ -49,13 +49,13 @@ defmodule Philomena.Comments do
   def get_comment!(id), do: Repo.get!(Comment, id)
 
   @doc """
-  Loads the comment named by the raw request `id` for public API display, with
-  its image and author preloaded.
+  Loads the comment named by `id` for the public API, with its image and author
+  preloaded.
 
   A comment that does not exist, or whose content has been destroyed, is
   `{:error, :not_found}`. A comment whose image is hidden from users is
   `{:error, :hidden_image}`. Otherwise the comment is returned, including comments
-  hidden from users (whose body the view nulls out).
+  hidden from users.
 
   Returns `{:ok, comment}`, `{:error, :not_found}`, or `{:error, :hidden_image}`.
 
@@ -92,13 +92,13 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads the edit history of the comment named by the raw request `comment_id` on
+  Loads the edit history of the comment named by `comment_id` on
   the image named by `image_id`, on behalf of `actor` (a user, or `nil` for an
   anonymous visitor). This is a public read with no ban check.
 
   The image is loaded by id and authorized for `:show`, so a missing or
   non-visible image is `{:error, :unauthorized}`. The comment is then loaded by
-  id scoped to that image (with the associations the history page renders): a
+  id scoped to that image: a
   missing comment is `{:error, :not_found}`, and a comment hidden from users is
   visible only when `actor` may `:show` it, otherwise `{:error, :unauthorized}`.
 
@@ -118,28 +118,14 @@ defmodule Philomena.Comments do
           {:ok, {Image.t(), Comment.t(), [Version.t()]}}
           | {:error, :unauthorized | :not_found}
   def comment_history(actor, image_id, comment_id) do
-    with {:ok, image} <- load_visible_image(actor, image_id),
+    with {:ok, image} <- Images.load_visible_image(actor, image_id),
          {:ok, comment} <- load_image_comment(actor, image, comment_id) do
       {:ok, {image, comment, Versions.load_last_versions("Comment", comment)}}
     end
   end
 
-  defp load_visible_image(actor, image_id) do
-    case IntegerId.parse(image_id) do
-      {:ok, id} ->
-        image = Repo.get(Image, id)
-
-        with :ok <- authorize(actor, :show, image) do
-          {:ok, image}
-        end
-
-      :error ->
-        {:error, :not_found}
-    end
-  end
-
-  # The comment is loaded by id scoped to the image (with the associations the
-  # history page renders), a missing row is `{:error, :not_found}`, and a comment
+  # The comment is loaded by id scoped to the image, a missing row is
+  # `{:error, :not_found}`, and a comment
   # hidden from users is authorized for `:show` - visible to staff, otherwise
   # `{:error, :unauthorized}`.
   defp load_image_comment(actor, %Image{} = image, comment_id) do
@@ -433,7 +419,7 @@ defmodule Philomena.Comments do
   defp filter_non_approved(query, _user, _show_hidden?),
     do: where(query, [c], c.approved)
 
-  # The offset counts only the comments rendered ahead of the target in
+  # The offset counts only the comments ahead of the target in
   # the viewer's reading direction; counting the target itself would push
   # a comment sitting exactly on a page boundary onto the next page.
   defp filter_direction(query, time, %{comments_newest_first: false}),
@@ -443,13 +429,13 @@ defmodule Philomena.Comments do
     do: where(query, [c], c.created_at > ^time)
 
   @doc """
-  Loads the image named by the raw request `image_id` for the comment `action`
+  Loads the image named by `image_id` for the comment `action`
   (`:index`, `:show`, `:create`, `:edit`, or `:update`), on behalf of `user` (a
   user, or `nil` for an anonymous visitor).
 
-  The image is loaded with the `:sources` and `tags: :aliases` preloads the
-  comment pages and the forced-filter check consume, and authorized for the
-  action's semantic ability: `:index` for the listing, `:show` for a single
+  The image is loaded with `:sources` and `tags: :aliases` preloaded, and
+  authorized for the action's semantic ability: `:index` for a listing, `:show`
+  for a single
   comment (resolving a duplicate image to its target and authorizing `:show` on
   it), and `:create_comment` for posting, editing, or updating. A non-castable
   id is `{:error, :not_found}`; a well-formed id that names no row authorizes
@@ -604,9 +590,8 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads the comment named by the raw request `comment_id` on `image` for display
-  on the single-comment page. A missing comment is `{:error, :not_found}`;
-  hidden comments are returned so staff moderation views can render them.
+  Loads the comment named by `comment_id` on `image`. A missing comment is
+  `{:error, :not_found}`; hidden comments are returned as well, not filtered out.
 
   ## Examples
 
@@ -627,16 +612,16 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads the comment named by the raw request `comment_id` on `image` for editing,
-  on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+  Loads the comment named by `comment_id` on `image` for editing, on behalf of
+  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
 
-  This backs the edit form, a GET-guarded action, so a banned actor is rejected
-  with `{:error, :ban}` first; the fingerprint requirement the write path
-  enforces is skipped here. The comment is then loaded and authorized for
+  This is a read that precedes an edit: a banned actor is rejected with
+  `{:error, :ban}` first, but the fingerprint requirement that the write itself
+  enforces does not apply here. The comment is then loaded and authorized for
   `:edit`.
 
-  Returns `{:ok, {comment, changeset}}` - the comment builds the form action, the
-  changeset drives the form - `{:error, :ban}` for a banned actor,
+  Returns `{:ok, {comment, changeset}}` - the loaded comment and a change-tracking
+  changeset for it - `{:error, :ban}` for a banned actor,
   `{:error, :not_found}` when the comment does not exist, or
   `{:error, :unauthorized}` when it may not be edited.
 
@@ -677,22 +662,20 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads the comment named by the raw request `comment_id` on the image named by
-  `image_id` for the report form, on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
+  Loads the comment named by `comment_id` on the image named by `image_id` for
+  reporting, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may
+  be `nil` for an anonymous visitor).
 
-  This backs the report form (`new`), a GET-guarded action, so a banned actor is
-  rejected with `{:error, :ban}` first; the fingerprint requirement the write
-  path enforces is skipped here. The image is authorized for `:show` and the
+  This is a read that precedes a report: a banned actor is rejected with
+  `{:error, :ban}` first, but the fingerprint requirement that the write itself
+  enforces does not apply here. The image is authorized for `:show` and the
   comment loaded within it (a hidden comment visible only to actors who may
   `:show` it).
 
-  Returns `{:ok, {comment, changeset}}` - the comment (with its image preloaded)
-  builds the form action and reportable link, and the changeset drives the report
-  form - `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the
-  image or hidden comment is not visible, or `{:error, :not_found}` when the
-  comment does not exist.
+  Returns `{:ok, {comment, changeset}}` - the comment with its image preloaded,
+  and a changeset for reporting it - `{:error, :ban}` for a banned actor,
+  `{:error, :unauthorized}` when the image or hidden comment is not visible, or
+  `{:error, :not_found}` when the comment does not exist.
 
   ## Examples
 
@@ -714,20 +697,19 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads the comment named by the raw request `comment_id` on the image named by
-  `image_id` for report submission, on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil`).
+  Loads the comment named by `comment_id` on the image named by `image_id` for
+  creating its report, on behalf of `actor` (a `Philomena.Attribution.Actor`
+  whose user may be `nil`).
 
-  This backs the report submission (`create`), a write, so `actor`'s write access
-  is verified first: a banned actor is `{:error, :ban}` and an actor with no
-  fingerprint is `{:error, :unauthorized}`. The image is then authorized for
-  `:show` and the comment loaded within it, as `load_comment_for_report/3` does.
+  This is the write path, so `actor`'s write access is verified first: a banned
+  actor is `{:error, :ban}` and an actor with no fingerprint is
+  `{:error, :unauthorized}`. The image is then authorized for `:show` and the
+  comment loaded within it, as `load_comment_for_report/3` does.
 
-  Returns `{:ok, comment}` - the comment (with its image preloaded) builds the
-  redirect action and the report - `{:error, :ban}` or `{:error, :unauthorized}`
-  from the write-access check, `{:error, :unauthorized}` when the image or hidden
-  comment is not visible, or `{:error, :not_found}` when the comment does not
-  exist.
+  Returns `{:ok, comment}` - the comment with its image preloaded - `{:error, :ban}`
+  or `{:error, :unauthorized}` from the write-access check,
+  `{:error, :unauthorized}` when the image or hidden comment is not visible, or
+  `{:error, :not_found}` when the comment does not exist.
 
   ## Examples
 
@@ -748,37 +730,15 @@ defmodule Philomena.Comments do
   # row is `{:error, :not_found}`), and a comment hidden from users is visible
   # only to a user who may `:show` it.
   defp load_reportable_comment(user, image_id, comment_id) do
-    with {:ok, image} <- load_reportable_image(user, image_id) do
+    with {:ok, image} <- Images.load_visible_image(user, image_id) do
       image
       |> load_scoped_comment(comment_id, [:image, :deleted_by, user: [awards: :badge]])
-      |> authorize_reportable_comment(user)
-    end
-  end
-
-  defp authorize_reportable_comment(nil, _user),
-    do: {:error, :not_found}
-
-  defp authorize_reportable_comment(%Comment{hidden_from_users: false} = comment, _user),
-    do: {:ok, comment}
-
-  defp authorize_reportable_comment(%Comment{} = comment, user) do
-    with :ok <- authorize(user, :show, comment), do: {:ok, comment}
-  end
-
-  defp load_reportable_image(user, image_id) do
-    case IntegerId.parse(image_id) do
-      {:ok, id} ->
-        image = Repo.get(Image, id)
-
-        with :ok <- authorize(user, :show, image), do: {:ok, image}
-
-      :error ->
-        {:error, :not_found}
+      |> authorize_comment_visibility(user)
     end
   end
 
   @doc """
-  Updates the comment named by the raw request `comment_id` on `image` from
+  Updates the comment named by `comment_id` on `image` from
   `params`, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may
   be `nil`).
 
@@ -789,7 +749,7 @@ defmodule Philomena.Comments do
   reported for containing external links, and the comment is reindexed.
 
   Returns `{:ok, comment}` on success, `{:error, {comment, changeset}}` when the
-  edit is rejected (both re-render the edit form), `{:error, :ban}` or
+  edit is rejected, `{:error, :ban}` or
   `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
   when the comment may not be edited, or `{:error, :not_found}` when it does not
   exist.
@@ -869,7 +829,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Hides the comment named by the raw request `comment_id` with `params`
+  Hides the comment named by `comment_id` with `params`
   (carrying the deletion reason), on behalf of `actor` (a user, or `nil` for an
   anonymous visitor).
 
@@ -882,7 +842,7 @@ defmodule Philomena.Comments do
 
   A blank deletion reason fails the hide changeset and returns
   `{:error, %Comment{}}` carrying the loaded comment so the caller can still
-  redirect to the comment anchor.
+  act on it.
 
   ## Examples
 
@@ -969,7 +929,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Restores the comment named by the raw request `comment_id`, on behalf of
+  Restores the comment named by `comment_id`, on behalf of
   `actor` (a user, or `nil` for an anonymous visitor).
 
   Authorization (`:hide` on the loaded comment) happens here; on success the
@@ -978,10 +938,9 @@ defmodule Philomena.Comments do
   while a well-formed id that names no row authorizes `nil` - which no rule
   permits - and is therefore `{:error, :unauthorized}`.
 
-  Restoring an already-visible comment succeeds and re-logs, matching the
-  action's idempotent behavior. A failed restore returns `{:error, %Comment{}}`
-  carrying the loaded comment so the caller can still redirect to the comment
-  anchor.
+  Restoring an already-visible comment succeeds and re-logs; the restore is
+  idempotent. A failed restore returns `{:error, %Comment{}}` carrying the loaded
+  comment so the caller can still act on it.
 
   ## Examples
 
@@ -1050,7 +1009,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Destroys the content of the comment named by the raw request `comment_id`, on
+  Destroys the content of the comment named by `comment_id`, on
   behalf of `actor` (a user, or `nil` for an anonymous visitor).
 
   Authorization (`:hide` on the loaded comment) happens here; on success the
@@ -1061,7 +1020,7 @@ defmodule Philomena.Comments do
   permits - and is therefore `{:error, :unauthorized}`.
 
   A failed destruction returns `{:error, %Comment{}}` carrying the loaded comment
-  so the caller can still redirect to the comment anchor.
+  so the caller can still act on it.
 
   ## Examples
 
@@ -1101,7 +1060,7 @@ defmodule Philomena.Comments do
 
       _error ->
         # The destroy changeset always succeeds, so this branch is not reachable;
-        # it carries the loaded comment for the caller's anchor redirect.
+        # it carries the loaded comment for the caller to reuse.
         {:error, comment}
     end
   end
@@ -1160,7 +1119,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Approves the comment named by the raw request `comment_id`, on behalf of
+  Approves the comment named by `comment_id`, on behalf of
   `actor` (a user, or `nil` for an anonymous visitor).
 
   Authorization (`:approve` on the loaded comment) happens here; on success the
@@ -1170,8 +1129,8 @@ defmodule Philomena.Comments do
   `{:error, :not_found}`, while a well-formed id that names no row authorizes
   `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`.
 
-  Approving an already-approved comment succeeds and re-logs, matching the
-  action's idempotent behavior. A failed approval changeset returns
+  Approving an already-approved comment succeeds and re-logs; the approval is
+  idempotent. A failed approval changeset returns
   `{:error, %Comment{}}` carrying the loaded comment.
 
   ## Examples

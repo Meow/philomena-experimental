@@ -1,7 +1,7 @@
 defmodule Philomena.Profiles do
   @moduledoc """
-  Assembly of the data behind a user's profile page and its admin-only history
-  views, scoped to the viewer.
+  Assembly of the data behind a user's profile page and its admin-only IP and
+  fingerprint histories, scoped to the viewer.
   """
 
   import Ecto.Query, warn: false
@@ -52,7 +52,7 @@ defmodule Philomena.Profiles do
   tags scope the recent comments strip. The recent uploads, faves, artwork,
   comments, and posts strips are batched into a single multi-search; posts and
   comments the viewer may not see are dropped afterward. Descriptions and
-  commission text are carried raw for the caller to render.
+  commission text are carried raw for the caller to process.
 
   Returns `{:ok, %ProfilePage{}}`.
   """
@@ -245,8 +245,8 @@ defmodule Philomena.Profiles do
   defp map_fetch(map, field_name), do: Map.get(map, field_name)
 
   @doc """
-  Returns the admin metadata shown on the profile of `user` for `viewer`, or
-  `nil` when the viewer may not list users.
+  Returns the admin metadata about `user` for `viewer`, or `nil` when the viewer
+  may not list users.
 
   The metadata is the user's current filter and the most recent IP and
   fingerprint rows.
@@ -275,7 +275,7 @@ defmodule Philomena.Profiles do
   end
 
   @doc """
-  Returns the mod notes on `user` for `viewer`, rendered with `collection_renderer`,
+  Returns the mod notes on `user` for `viewer`, processed through `collection_renderer`,
   or `nil` when the viewer may not read mod notes.
   """
   @spec mod_notes(User.t() | nil, User.t(), (list() -> list())) :: list() | nil

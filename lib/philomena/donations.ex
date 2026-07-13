@@ -46,9 +46,8 @@ defmodule Philomena.Donations do
   end
 
   @doc """
-  Loads the user named by the raw request `slug` together with their donations,
-  on behalf of `actor`, pairing them with a changeset backing the add-donation
-  form.
+  Loads the user named by `slug` together with their donations, on behalf of
+  `actor`, pairing them with a changeset for adding a donation.
 
   Authorizes `:index` against the donation model first, so a viewer without
   donation access is `{:error, :unauthorized}`. An unknown slug is
@@ -91,7 +90,7 @@ defmodule Philomena.Donations do
   def get_donation!(id), do: Repo.get!(Donation, id)
 
   @doc """
-  Creates a donation on behalf of `actor` from the controller `attrs`.
+  Creates a donation on behalf of `actor` from `attrs`.
 
   Authorizes `:index` against the donation model, then inserts the donation.
   Returns `{:ok, donation}`, `{:error, :unauthorized}`, or

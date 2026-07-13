@@ -7,6 +7,7 @@ defmodule Philomena.Channels do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
+  alias Philomena.Loader
 
   alias Philomena.Channels.AutomaticUpdater
   alias Philomena.Channels.Channel
@@ -43,7 +44,7 @@ defmodule Philomena.Channels do
   def get_channel!(id), do: Repo.get!(Channel, id)
 
   @doc """
-  Returns a page of channels for the livestreams index.
+  Returns a page of channels for the livestreams listing.
 
   Only channels the fetcher has stamped (`last_fetched_at` set) are listed,
   ordered live-first and then by title, with the associated artist tag
@@ -70,9 +71,8 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Clears the acting user's live notification for the channel named by the raw
-  request `id`, returning the channel so the caller can redirect to its
-  external stream URL.
+  Clears the acting user's live notification for the channel named by the
+  `id`, returning the channel and its external stream URL.
 
   The channel is loaded by id and authorized for `:show`; every user may view a
   channel, so a visible channel always succeeds. A non-castable id is
@@ -99,8 +99,8 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Clears the acting user's live notification for the channel named by the raw
-  request `id`, returning the channel.
+  Clears the acting user's live notification for the channel named by the
+  `id`, returning the channel.
 
   No authorization is performed - any signed-in user may mark a channel's live
   notification read. A non-castable or unknown id is `{:error, :not_found}`.
@@ -127,7 +127,7 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Builds the changeset backing the new-channel form, on behalf of `actor`.
+  Builds the changeset for a new channel, on behalf of `actor`.
 
   Authorizes `:new` against the channel model. Returns
   `{:ok, %Ecto.Changeset{}}` or `{:error, :unauthorized}`.
@@ -195,8 +195,8 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Loads the channel named by the raw request `id` for editing, on behalf of
-  `actor`, pairing it with the changeset backing the edit form.
+  Loads the channel named by the `id` for editing, on behalf of
+  `actor`, pairing it with a change-tracking changeset.
 
   Loading and authorization follow `update_channel/3`, authorizing `:edit`.
 
@@ -215,7 +215,7 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Updates the channel named by the raw request `id`, on behalf of `actor`.
+  Updates the channel named by the `id`, on behalf of `actor`.
 
   The channel is loaded and `:update` is authorized: a non-castable id is
   `{:error, :not_found}`, an unknown id authorizes `nil` and comes back
@@ -298,7 +298,7 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Deletes the channel named by the raw request `id`, on behalf of `actor`.
+  Deletes the channel named by the `id`, on behalf of `actor`.
 
   Loading and authorization follow `update_channel/3`, authorizing `:delete`.
 
@@ -364,16 +364,15 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Subscribes `actor` to the channel named by the raw request `id`.
+  Subscribes `actor` to the channel named by the `id`.
 
   The channel is loaded by id and authorized for `:show`. A non-castable id is
   `{:error, :not_found}`. A well-formed but unknown id is authorized as a `nil`
   load: a non-admin gets `{:error, :unauthorized}` and an admin
   `{:error, :not_found}`. Subscribing is idempotent.
 
-  Returns `{:ok, channel}` (the channel is needed to render the subscription
-  partial), or `{:error, %Ecto.Changeset{}}` if the subscription insert is
-  rejected.
+  Returns `{:ok, channel}`, or `{:error, %Ecto.Changeset{}}` if the subscription
+  insert is rejected.
 
   ## Examples
 
@@ -394,7 +393,7 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Unsubscribes `actor` from the channel named by the raw request `id`.
+  Unsubscribes `actor` from the channel named by the `id`.
 
   Loading and authorization mirror `subscribe/2`. Unsubscribing is idempotent
   and cannot fail.
@@ -418,19 +417,11 @@ defmodule Philomena.Channels do
     end
   end
 
-  # Loads a channel by raw request id and authorizes `action` against it. A
+  # Loads a channel by id and authorizes `action` against it. A
   # non-castable id is not found; an unknown id authorizes the `nil` load, which
   # only an admin may act on, and the nil then reports not found.
   defp load_channel(actor, id, action) do
-    with {:ok, id} <- IntegerId.parse(id),
-         channel = Repo.get(Channel, id),
-         :ok <- authorize(actor, action, channel),
-         %Channel{} <- channel do
-      {:ok, channel}
-    else
-      shape when shape in [:error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-    end
+    Loader.fetch_and_authorize(Channel, actor, action, id)
   end
 
   defp maybe_search(query, %{"cq" => cq}) when is_binary(cq) and cq != "" do

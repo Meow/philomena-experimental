@@ -158,7 +158,7 @@ defmodule Philomena.Tags do
     |> Enum.uniq_by(& &1.id)
   end
 
-  # Associations the tag show, edit, and CRUD pages display.
+  # Associations loaded when showing, editing, or updating a tag.
   @show_preloads [
     :aliases,
     :aliased_tag,
@@ -170,10 +170,10 @@ defmodule Philomena.Tags do
     hidden_links: :user
   ]
 
-  # Associations the tag alias and reindex pages need.
+  # Associations loaded when aliasing or reindexing a tag.
   @alias_preloads [:implied_tags, :aliased_tag]
 
-  # Associations the tag spoiler image page needs.
+  # Associations loaded when editing a tag's spoiler image.
   @image_preloads [:implied_tags]
 
   @doc """
@@ -217,7 +217,7 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Loads the tag named by `slug` for public API display, with its aliases,
+  Loads the tag named by `slug` for the public API, with its aliases,
   implications, and DNP entries preloaded.
 
   Lookup is strictly by slug. An unknown slug is `{:error, :not_found}`.
@@ -286,14 +286,14 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Assembles the tag show page for the viewer described by `scope`, loading the
+  Assembles the `TagPage` for the viewer described by `scope`, loading the
   tag named by `slug`.
 
-  Loads the tag with its display preloads and authorizes `:show`. An unknown
+  Loads the tag with its preloads and authorizes `:show`. An unknown
   slug the viewer may act on (an admin) is `{:error, :not_found}`; otherwise it
   is `{:error, :unauthorized}`. A tag that is aliased into another is
-  `{:aliased_to, tag}`, its `:aliased_tag` association carrying the target the
-  caller redirects to. Otherwise the page carries the tag, the executed page of
+  `{:aliased_to, tag}`, its `:aliased_tag` association carrying the target.
+  Otherwise the page carries the tag, the executed page of
   images tagged with it, the viewer's interactions, and the escaped search
   query for the tag.
 
@@ -427,7 +427,7 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Assembles the tag usage detail page for the tag named by `slug`, on behalf of
+  Assembles the tag usage detail for the tag named by `slug`, on behalf of
   `actor`.
 
   Authorizes `:edit` on tags first, so an unprivileged actor is
