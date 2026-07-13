@@ -213,6 +213,41 @@ defmodule Philomena.Comments do
     end
   end
 
+  @doc """
+  Searches comments for the public API on behalf of `user`, applying `user`'s
+  hidden-tag `filter`, the query string `query_string`, and `pagination`, sorted
+  newest first.
+
+  Staff viewers see comments hidden from users and non-approved comments; other
+  viewers do not. Results are preloaded with their image and author. Returns
+  `{:ok, results}`, or `{:error, msg}` when `query_string` fails to compile.
+
+  ## Examples
+
+      iex> api_search_comments(user, filter, "created_at.gte:1 week ago", pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> api_search_comments(user, filter, ")", pagination)
+      {:error, "Imbalanced parentheses."}
+
+  """
+  @spec api_search_comments(User.t() | nil, Filter.t(), String.t(), map()) ::
+          {:ok, Scrivener.Page.t()} | {:error, String.t()}
+  def api_search_comments(user, filter, query_string, pagination) do
+    case Query.compile(query_string, user: user) do
+      {:ok, query} ->
+        results =
+          user
+          |> comment_search_definition(filter, query, pagination: pagination, show_hidden: true)
+          |> Search.search_records(preload(Comment, [:image, :user]))
+
+        {:ok, results}
+
+      {:error, msg} ->
+        {:error, msg}
+    end
+  end
+
   # Search-side exclusion filters mirroring the visibility rules a comment
   # listing enforces: everyone hides comments carrying the viewer's hidden
   # tags; non-staff additionally hide deleted and non-approved comments (a
