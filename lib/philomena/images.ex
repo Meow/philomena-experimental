@@ -206,6 +206,37 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Loads the most recently featured non-hidden image for the JSON API featured
+  endpoint.
+
+  The image carries the API view's preloads. Returns `{:ok, image}`, or
+  `{:error, :not_found}` when no eligible feature exists.
+
+  ## Examples
+
+      iex> api_featured_image()
+      {:ok, %Image{}}
+
+      iex> api_featured_image()
+      {:error, :not_found}
+
+  """
+  @spec api_featured_image() :: {:ok, Image.t()} | {:error, :not_found}
+  def api_featured_image do
+    Image
+    |> join(:inner, [i], f in ImageFeature, on: [image_id: i.id])
+    |> where([i], i.hidden_from_users == false)
+    |> order_by([_i, f], desc: f.created_at)
+    |> limit(1)
+    |> preload([:user, :intensity, :sources, tags: :aliases])
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      image -> {:ok, image}
+    end
+  end
+
+  @doc """
   Loads the image `id` names for its show page, on behalf of `user` (`nil`
   for an anonymous visitor).
 
