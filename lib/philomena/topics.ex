@@ -317,6 +317,72 @@ defmodule Philomena.Topics do
   def get_topic!(id), do: Repo.get!(Topic, id)
 
   @doc """
+  Lists the topics of the forum named by `forum_short_name` for the public API,
+  paginated with `pagination`.
+
+  Only topics that are not hidden from users, and that belong to a forum whose
+  access level is `"normal"`, are returned - for every requester alike, so
+  restricted forums are never exposed here. An unknown or restricted forum
+  therefore yields an empty page rather than an error. Results are ordered with
+  sticky topics first, then by most recent reply, and their authors are
+  preloaded.
+
+  Returns a `Scrivener.Page` of topics.
+
+  ## Examples
+
+      iex> api_list_topics("dis", pagination)
+      %Scrivener.Page{}
+
+  """
+  @spec api_list_topics(String.t(), map()) :: Scrivener.Page.t()
+  def api_list_topics(forum_short_name, pagination) do
+    Topic
+    |> join(:inner, [t], _ in assoc(t, :forum))
+    |> where(hidden_from_users: false)
+    |> where([_t, f], f.access_level == "normal" and f.short_name == ^forum_short_name)
+    |> order_by(desc: :sticky, desc: :last_replied_to_at)
+    |> preload([:user])
+    |> Repo.paginate(pagination)
+  end
+
+  @doc """
+  Fetches a single topic for the public API by its `slug` within the forum named
+  by `forum_short_name`.
+
+  Only a topic that is not hidden from users, and that belongs to a forum whose
+  access level is `"normal"`, is returned - for every requester alike. A hidden
+  topic, a topic in a restricted forum, a slug under the wrong forum, and an
+  unknown slug are all reported as missing. The author is preloaded.
+
+  Returns `{:ok, topic}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_show_topic("dis", "some-topic")
+      {:ok, %Topic{}}
+
+      iex> api_show_topic("dis", "nonexistent")
+      {:error, :not_found}
+
+  """
+  @spec api_show_topic(String.t(), String.t()) :: {:ok, Topic.t()} | {:error, :not_found}
+  def api_show_topic(forum_short_name, slug) do
+    Topic
+    |> join(:inner, [t], _ in assoc(t, :forum))
+    |> where(slug: ^slug)
+    |> where(hidden_from_users: false)
+    |> where([_t, f], f.access_level == "normal" and f.short_name == ^forum_short_name)
+    |> order_by(desc: :sticky, desc: :last_replied_to_at)
+    |> preload([:user])
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      topic -> {:ok, topic}
+    end
+  end
+
+  @doc """
   Creates a topic.
 
   Called with a `Philomena.Attribution.Actor`, the forum's short name, and the
