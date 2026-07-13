@@ -114,6 +114,22 @@ defmodule Philomena.Adverts do
   def get_advert!(id), do: Repo.get!(Advert, id)
 
   @doc """
+  Loads the advert named by the raw request `id` for a click-through redirect.
+
+  An id that cannot name a row - one that is not a well-formed integer, or that
+  names no advert - is `{:error, :not_found}`; otherwise `{:ok, advert}`.
+  """
+  @spec get_advert(any()) :: {:ok, Advert.t()} | {:error, :not_found}
+  def get_advert(id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         %Advert{} = advert <- Repo.get(Advert, id) do
+      {:ok, advert}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Creates an advert.
 
   ## Examples
