@@ -204,6 +204,60 @@ defmodule Philomena.Posts do
   end
 
   @doc """
+  Searches posts for the public API on behalf of `user`, applying the compiled
+  query string `query_string` and `pagination`, sorted newest first.
+
+  `user` scopes what the compiled query may match, but the results are further
+  restricted to posts that are not hidden from users and that belong to a forum
+  whose access level is `"normal"` - for every requester alike, so hidden posts
+  and posts in restricted forums are never returned or counted. Results are
+  preloaded for display. An empty or missing query string compiles to a match on
+  nothing, yielding an empty page rather than an error.
+
+  Returns `{:ok, results}`, or `{:error, msg}` when `query_string` fails to
+  compile.
+
+  ## Examples
+
+      iex> api_search_posts(user, "chartreuse", pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> api_search_posts(user, ")", pagination)
+      {:error, "Imbalanced parentheses."}
+
+  """
+  @spec api_search_posts(User.t() | nil, String.t() | nil, map()) ::
+          {:ok, Scrivener.Page.t()} | {:error, String.t()}
+  def api_search_posts(user, query_string, pagination) do
+    case Posts.Query.compile(query_string, user: user) do
+      {:ok, query} ->
+        results =
+          Post
+          |> Search.search_definition(
+            %{
+              query: %{
+                bool: %{
+                  must: [
+                    query,
+                    %{term: %{hidden_from_users: false}},
+                    %{term: %{access_level: "normal"}}
+                  ]
+                }
+              },
+              sort: %{created_at: :desc}
+            },
+            pagination
+          )
+          |> Search.search_records(preload(Post, [:user, :topic]))
+
+        {:ok, results}
+
+      {:error, msg} ->
+        {:error, msg}
+    end
+  end
+
+  @doc """
   Creates a post.
 
   ## Examples
