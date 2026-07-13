@@ -151,6 +151,32 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
+  Loads the revision history for the static page named by `slug`.
+
+  Returns `{:error, :not_found}` for an unknown slug. On success returns
+  `{:ok, {static_page, versions}}`: the page and its versions newest first
+  (ties broken by id), each with the acting user preloaded.
+  """
+  @spec load_page_history(String.t()) ::
+          {:ok, {StaticPage.t(), [Version.t()]}} | {:error, :not_found}
+  def load_page_history(slug) do
+    case Repo.get_by(StaticPage, slug: slug) do
+      nil ->
+        {:error, :not_found}
+
+      static_page ->
+        versions =
+          Version
+          |> where(static_page_id: ^static_page.id)
+          |> preload(:user)
+          |> order_by(desc: :created_at, desc: :id)
+          |> Repo.all()
+
+        {:ok, {static_page, versions}}
+    end
+  end
+
+  @doc """
   Prepares the new-page form on behalf of `user`.
 
   Returns `{:error, :unauthorized}` when the viewer may not manage static pages,
