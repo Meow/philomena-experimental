@@ -246,6 +246,46 @@ defmodule Philomena.Tags do
   end
 
   @doc """
+  Searches tags for the public API with the query string `query_string` and
+  `pagination`, sorted by image count descending.
+
+  An empty or missing `query_string` compiles to a match-none query, returning
+  an empty page. Results are preloaded with their aliases, implications, and
+  DNP entries. Returns `{:ok, tags}`, or `{:error, msg}` when `query_string`
+  fails to compile.
+
+  ## Examples
+
+      iex> api_search_tags("artist:*", pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> api_search_tags(")", pagination)
+      {:error, "Imbalanced parentheses."}
+
+  """
+  @spec api_search_tags(String.t() | nil, map()) ::
+          {:ok, Scrivener.Page.t()} | {:error, String.t()}
+  def api_search_tags(query_string, pagination) do
+    case Philomena.Tags.Query.compile(query_string) do
+      {:ok, query} ->
+        tags =
+          Tag
+          |> Search.search_definition(
+            %{query: query, sort: %{images: :desc}},
+            pagination
+          )
+          |> Search.search_records(
+            preload(Tag, [:aliased_tag, :aliases, :implied_tags, :implied_by_tags, :dnp_entries])
+          )
+
+        {:ok, tags}
+
+      {:error, msg} ->
+        {:error, msg}
+    end
+  end
+
+  @doc """
   Assembles the tag show page for the viewer described by `scope`, loading the
   tag named by `slug`.
 
