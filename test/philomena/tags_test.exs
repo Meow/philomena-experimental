@@ -7,7 +7,7 @@ defmodule Philomena.TagsTest do
   paths, the unknown-slug split (an admin passes authorization on the nil tag
   and gets `:not_found`; anyone else gets `:unauthorized`), the byte-exact
   moderation logs the write paths emit, and the two search-backed loaders
-  (`search_tags/2` and `load_tag_page/2`).
+  (`search_tags/3` and `load_tag_page/2`).
   """
 
   use Philomena.DataCase, async: false
@@ -59,25 +59,37 @@ defmodule Philomena.TagsTest do
 
   defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
 
-  describe "search_tags/2" do
-    test "finds an indexed tag by a wildcard query" do
+  describe "search_tags/3" do
+    test "finds an indexed tag by a wildcard query, carrying the default preloads" do
       tag = tag_fixture()
       SearchHelpers.reindex_all!(Tag)
 
-      assert {:ok, tags} = Tags.search_tags(%{"tq" => "*"}, @pagination)
-      assert tag.id in Enum.map(tags, & &1.id)
+      assert {:ok, tags} = Tags.search_tags("*", @pagination)
+      assert %Tag{} = found = Enum.find(tags, &(&1.id == tag.id))
+      assert Ecto.assoc_loaded?(found.aliases)
+      assert Ecto.assoc_loaded?(found.dnp_entries)
     end
 
-    test "defaults to the wildcard query when tq is absent" do
+    test "a missing query compiles to match-none, returning an empty page" do
+      tag_fixture()
+      SearchHelpers.reindex_all!(Tag)
+
+      assert {:ok, tags} = Tags.search_tags(nil, @pagination)
+      assert Enum.empty?(tags)
+    end
+
+    test ":page_size fixes the result window and :preload replaces the default associations" do
       tag = tag_fixture()
       SearchHelpers.reindex_all!(Tag)
 
-      assert {:ok, tags} = Tags.search_tags(%{}, @pagination)
-      assert tag.id in Enum.map(tags, & &1.id)
+      assert {:ok, tags} = Tags.search_tags("*", @pagination, page_size: 250, preload: [])
+      assert tags.page_size == 250
+      assert %Tag{} = found = Enum.find(tags, &(&1.id == tag.id))
+      refute Ecto.assoc_loaded?(found.aliases)
     end
 
     test "a malformed query returns the compiler error" do
-      assert {:error, msg} = Tags.search_tags(%{"tq" => "("}, @pagination)
+      assert {:error, msg} = Tags.search_tags("(", @pagination)
       assert is_binary(msg)
     end
   end

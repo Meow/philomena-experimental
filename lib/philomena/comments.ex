@@ -49,8 +49,7 @@ defmodule Philomena.Comments do
   def get_comment!(id), do: Repo.get!(Comment, id)
 
   @doc """
-  Loads the comment named by `id` for the public API, with its image and author
-  preloaded.
+  Loads the comment named by `id`, with its image and author preloaded.
 
   A comment that does not exist, or whose content has been destroyed, is
   `{:error, :not_found}`. A comment whose image is hidden from users is
@@ -61,16 +60,16 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> api_show_comment("1")
+      iex> load_comment("1")
       {:ok, %Comment{}}
 
-      iex> api_show_comment("999999999")
+      iex> load_comment("999999999")
       {:error, :not_found}
 
   """
-  @spec api_show_comment(any()) ::
+  @spec load_comment(any()) ::
           {:ok, Comment.t()} | {:error, :not_found} | {:error, :hidden_image}
-  def api_show_comment(id) do
+  def load_comment(id) do
     # The id is interpolated without casting, so a non-integer id raises
     # Ecto.Query.CastError.
     comment =
@@ -153,8 +152,9 @@ defmodule Philomena.Comments do
   the compiled query string `cq_string`, and `pagination`, sorted newest first.
 
   Hidden and non-approved comments are excluded from the results unless `user`
-  is staff. Results are preloaded for display. Returns `{:ok, results}`, or
-  `{:error, msg}` when `cq_string` fails to compile.
+  is staff. Results carry the associations named by `opts[:preload]`, defaulting
+  to the listing-display preloads. Returns `{:ok, results}`, or `{:error, msg}`
+  when `cq_string` fails to compile.
 
   ## Examples
 
@@ -165,67 +165,22 @@ defmodule Philomena.Comments do
       {:error, "Cannot parse date."}
 
   """
-  @spec search_comments(User.t() | nil, Filter.t(), String.t(), map()) ::
+  @spec search_comments(User.t() | nil, Filter.t(), String.t(), map(), Keyword.t()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_comments(user, filter, cq_string, pagination) do
+  def search_comments(user, filter, cq_string, pagination, opts \\ []) do
+    preloads =
+      Keyword.get(opts, :preload, [
+        :deleted_by,
+        image: [:sources, tags: :aliases],
+        user: [awards: :badge]
+      ])
+
     case Query.compile(cq_string, user: user) do
       {:ok, query} ->
         results =
-          Comment
-          |> Search.search_definition(
-            %{
-              query: %{
-                bool: %{
-                  must: query,
-                  must_not: comment_filters(user, filter)
-                }
-              },
-              sort: %{created_at: :desc}
-            },
-            pagination
-          )
-          |> Search.search_records(
-            preload(Comment, [
-              :deleted_by,
-              image: [:sources, tags: :aliases],
-              user: [awards: :badge]
-            ])
-          )
-
-        {:ok, results}
-
-      {:error, msg} ->
-        {:error, msg}
-    end
-  end
-
-  @doc """
-  Searches comments for the public API on behalf of `user`, applying `user`'s
-  hidden-tag `filter`, the query string `query_string`, and `pagination`, sorted
-  newest first.
-
-  Staff viewers see comments hidden from users and non-approved comments; other
-  viewers do not. Results are preloaded with their image and author. Returns
-  `{:ok, results}`, or `{:error, msg}` when `query_string` fails to compile.
-
-  ## Examples
-
-      iex> api_search_comments(user, filter, "created_at.gte:1 week ago", pagination)
-      {:ok, %Scrivener.Page{}}
-
-      iex> api_search_comments(user, filter, ")", pagination)
-      {:error, "Imbalanced parentheses."}
-
-  """
-  @spec api_search_comments(User.t() | nil, Filter.t(), String.t(), map()) ::
-          {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def api_search_comments(user, filter, query_string, pagination) do
-    case Query.compile(query_string, user: user) do
-      {:ok, query} ->
-        results =
           user
-          |> comment_search_definition(filter, query, pagination: pagination, show_hidden: true)
-          |> Search.search_records(preload(Comment, [:image, :user]))
+          |> comment_search_definition(filter, query, pagination: pagination)
+          |> Search.search_records(preload(Comment, ^preloads))
 
         {:ok, results}
 
@@ -239,8 +194,6 @@ defmodule Philomena.Comments do
   # tags; non-staff additionally hide deleted and non-approved comments (a
   # signed-in user still sees their own non-approved comments). Staff see the
   # hidden and non-approved comments the extra filters would exclude.
-  defp comment_filters(user, filter), do: comment_filters(user, filter, staff?(user))
-
   defp comment_filters(user, filter, show_hidden?) do
     [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
     |> hide_deleted(show_hidden?)

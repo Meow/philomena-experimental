@@ -48,7 +48,7 @@ defmodule Philomena.Posts do
   def get_post!(id), do: Repo.get!(Post, id)
 
   @doc """
-  Lists the posts of a topic for the public API, on behalf of any requester.
+  Lists the publicly visible posts of a topic, on behalf of any requester.
 
   The topic is loaded by its `topic_slug` within the forum named by
   `forum_short_name`, requiring the topic to be visible (not hidden from users)
@@ -66,17 +66,17 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> api_list_topic_posts("dis", "some-topic", pagination)
+      iex> list_public_topic_posts("dis", "some-topic", pagination)
       {:ok, {%Topic{}, [%Post{}, ...]}}
 
-      iex> api_list_topic_posts("dis", "nonexistent", pagination)
+      iex> list_public_topic_posts("dis", "nonexistent", pagination)
       {:error, :not_found}
 
   """
-  @spec api_list_topic_posts(String.t(), String.t(), map()) ::
+  @spec list_public_topic_posts(String.t(), String.t(), map()) ::
           {:ok, {Topic.t(), [Post.t()]}} | {:error, :not_found}
-  def api_list_topic_posts(forum_short_name, topic_slug, pagination) do
-    case api_load_topic(forum_short_name, topic_slug) do
+  def list_public_topic_posts(forum_short_name, topic_slug, pagination) do
+    case public_topic(forum_short_name, topic_slug) do
       nil ->
         {:error, :not_found}
 
@@ -102,7 +102,7 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Fetches a single post of a topic for the public API, on behalf of any
+  Fetches a single publicly visible post of a topic, on behalf of any
   requester.
 
   `post_id` is integer-guarded first, so a non-integer id is reported as missing
@@ -118,16 +118,16 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> api_show_topic_post("dis", "some-topic", "1")
+      iex> load_public_topic_post("dis", "some-topic", "1")
       {:ok, %Post{}}
 
-      iex> api_show_topic_post("dis", "some-topic", "not-a-number")
+      iex> load_public_topic_post("dis", "some-topic", "not-a-number")
       {:error, :not_found}
 
   """
-  @spec api_show_topic_post(String.t(), String.t(), any()) ::
+  @spec load_public_topic_post(String.t(), String.t(), any()) ::
           {:ok, Post.t()} | {:error, :not_found}
-  def api_show_topic_post(forum_short_name, topic_slug, post_id) do
+  def load_public_topic_post(forum_short_name, topic_slug, post_id) do
     case IntegerId.parse(post_id) do
       {:ok, post_id} ->
         Post
@@ -149,10 +149,10 @@ defmodule Philomena.Posts do
     end
   end
 
-  # Loads a topic by slug within the named forum for the public API, requiring
-  # the topic to be visible and the forum's access level to be `"normal"`.
-  # Returns the topic or `nil`.
-  defp api_load_topic(forum_short_name, topic_slug) do
+  # Loads a topic by slug within the named forum, requiring the topic to be
+  # visible and the forum's access level to be `"normal"` - for every
+  # requester alike. Returns the topic or `nil`.
+  defp public_topic(forum_short_name, topic_slug) do
     Topic
     |> join(:inner, [t], _ in assoc(t, :forum))
     |> where([t], t.hidden_from_users == false and t.slug == ^topic_slug)
@@ -161,8 +161,8 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Fetches a single post by `post_id` for the top-level public API, on behalf of
-  any requester.
+  Fetches a single publicly visible post by `post_id`, on behalf of any
+  requester.
 
   The post is loaded by id, requiring non-destroyed content, a topic that is not
   hidden from users, and a forum whose access level is `"normal"` - for every
@@ -179,15 +179,15 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> api_show_post("1")
+      iex> load_public_post("1")
       {:ok, %Post{}}
 
-      iex> api_show_post("999999999")
+      iex> load_public_post("999999999")
       {:error, :not_found}
 
   """
-  @spec api_show_post(any()) :: {:ok, Post.t()} | {:error, :not_found}
-  def api_show_post(post_id) do
+  @spec load_public_post(any()) :: {:ok, Post.t()} | {:error, :not_found}
+  def load_public_post(post_id) do
     Post
     |> join(:inner, [p], _ in assoc(p, :topic))
     |> join(:inner, [_p, t], _ in assoc(t, :forum))
@@ -204,8 +204,8 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Searches posts for the public API on behalf of `user`, applying the compiled
-  query string `query_string` and `pagination`, sorted newest first.
+  Searches the publicly visible posts on behalf of `user`, applying the
+  compiled query string `query_string` and `pagination`, sorted newest first.
 
   `user` scopes what the compiled query may match, but the results are further
   restricted to posts that are not hidden from users and that belong to a forum
@@ -219,16 +219,16 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> api_search_posts(user, "chartreuse", pagination)
+      iex> search_public_posts(user, "chartreuse", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> api_search_posts(user, ")", pagination)
+      iex> search_public_posts(user, ")", pagination)
       {:error, "Imbalanced parentheses."}
 
   """
-  @spec api_search_posts(User.t() | nil, String.t() | nil, map()) ::
+  @spec search_public_posts(User.t() | nil, String.t() | nil, map()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def api_search_posts(user, query_string, pagination) do
+  def search_public_posts(user, query_string, pagination) do
     case Posts.Query.compile(query_string, user: user) do
       {:ok, query} ->
         results =

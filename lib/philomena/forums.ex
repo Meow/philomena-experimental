@@ -160,7 +160,7 @@ defmodule Philomena.Forums do
   end
 
   @doc """
-  Lists the forums exposed by the public API, paginated with `pagination`.
+  Lists the publicly accessible forums, paginated with `pagination`.
 
   Only forums whose access level is `"normal"` are returned, for every
   requester alike; restricted forums are never listed here. Results are ordered
@@ -170,12 +170,12 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> api_list_forums(pagination)
+      iex> list_public_forums(pagination)
       %Scrivener.Page{}
 
   """
-  @spec api_list_forums(map()) :: Scrivener.Page.t()
-  def api_list_forums(pagination) do
+  @spec list_public_forums(map()) :: Scrivener.Page.t()
+  def list_public_forums(pagination) do
     Forum
     |> where(access_level: "normal")
     |> order_by(asc: :name)
@@ -183,7 +183,7 @@ defmodule Philomena.Forums do
   end
 
   @doc """
-  Fetches a single forum for the public API by its `short_name`.
+  Fetches a single publicly accessible forum by its `short_name`.
 
   Only a forum whose access level is `"normal"` is returned, for every requester
   alike; a restricted or nonexistent forum is reported as missing.
@@ -192,15 +192,15 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> api_show_forum("dis")
+      iex> load_public_forum("dis")
       {:ok, %Forum{}}
 
-      iex> api_show_forum("staff")
+      iex> load_public_forum("staff")
       {:error, :not_found}
 
   """
-  @spec api_show_forum(String.t()) :: {:ok, Forum.t()} | {:error, :not_found}
-  def api_show_forum(short_name) do
+  @spec load_public_forum(String.t()) :: {:ok, Forum.t()} | {:error, :not_found}
+  def load_public_forum(short_name) do
     Forum
     |> where(short_name: ^short_name)
     |> where(access_level: "normal")

@@ -278,8 +278,8 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Searches galleries for the public API on behalf of `user`, with the query
-  string `query_string` and `pagination`, sorted by creation time descending.
+  Searches galleries on behalf of `user`, with the query string `query_string`
+  and `pagination`, sorted by creation time descending.
 
   An empty or missing `query_string` compiles to a match-none query, returning
   an empty page. Results are preloaded with their creator. Returns
@@ -287,16 +287,16 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> api_search_galleries(user, "title:sunset", pagination)
+      iex> search_galleries(user, "title:sunset", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> api_search_galleries(user, ")", pagination)
+      iex> search_galleries(user, ")", pagination)
       {:error, "Imbalanced parentheses."}
 
   """
-  @spec api_search_galleries(User.t() | nil, String.t() | nil, map()) ::
+  @spec search_galleries(User.t() | nil, String.t() | nil, map()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def api_search_galleries(user, query_string, pagination) do
+  def search_galleries(user, query_string, pagination) do
     case Philomena.Galleries.Query.compile(query_string, user: user) do
       {:ok, query} ->
         galleries =

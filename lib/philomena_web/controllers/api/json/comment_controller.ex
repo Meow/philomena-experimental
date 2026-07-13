@@ -5,7 +5,7 @@ defmodule PhilomenaWeb.Api.Json.CommentController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def show(conn, %{"id" => id}) do
-    case Comments.api_show_comment(id) do
+    case Comments.load_comment(id) do
       {:ok, comment} ->
         render(conn, "show.json", comment: comment)
 

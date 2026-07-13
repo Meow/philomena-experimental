@@ -5,7 +5,7 @@ defmodule PhilomenaWeb.Api.Json.PostController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def show(conn, %{"id" => post_id}) do
-    case Posts.api_show_post(post_id) do
+    case Posts.load_public_post(post_id) do
       {:ok, post} ->
         conn
         |> put_view(PhilomenaWeb.Api.Json.Forum.Topic.PostView)

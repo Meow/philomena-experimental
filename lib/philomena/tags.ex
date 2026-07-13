@@ -177,64 +177,25 @@ defmodule Philomena.Tags do
   @image_preloads [:implied_tags]
 
   @doc """
-  Runs the tag listing search the `"tq"` parameter describes.
+  Loads the tag named by `slug`, with its aliases, implications, and DNP
+  entries preloaded.
 
-  Compiles `params["tq"]` (defaulting to `*`) against the tag search index and
-  returns the matching tags ordered by image count then name. The window is
-  fixed to 250 tags regardless of the requested page size.
-
-  Returns `{:ok, tags}`, or the compiler's `{:error, msg}` for a malformed
-  query.
-
-  ## Examples
-
-      iex> search_tags(%{"tq" => "artist:*"}, pagination)
-      {:ok, %Scrivener.Page{}}
-
-      iex> search_tags(%{"tq" => "("}, pagination)
-      {:error, "There was an error parsing your query."}
-
-  """
-  @spec search_tags(map(), map()) :: {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_tags(params, pagination) do
-    query_string = params["tq"] || "*"
-
-    with {:ok, query} <- Philomena.Tags.Query.compile(query_string) do
-      tags =
-        Tag
-        |> Search.search_definition(
-          %{
-            query: query,
-            size: 250,
-            sort: [%{images: :desc}, %{name: :asc}]
-          },
-          %{pagination | page_size: 250}
-        )
-        |> Search.search_records(Tag)
-
-      {:ok, tags}
-    end
-  end
-
-  @doc """
-  Loads the tag named by `slug` for the public API, with its aliases,
-  implications, and DNP entries preloaded.
-
-  Lookup is strictly by slug. An unknown slug is `{:error, :not_found}`.
+  Lookup is strictly by slug. An unknown slug is `{:error, :not_found}`; an
+  aliased tag is returned as itself, its `:aliased_tag` carrying the target.
 
   Returns `{:ok, tag}` or `{:error, :not_found}`.
 
   ## Examples
 
-      iex> api_show_tag("safe")
+      iex> load_tag("safe")
       {:ok, %Tag{}}
 
-      iex> api_show_tag("nonexistent")
+      iex> load_tag("nonexistent")
       {:error, :not_found}
 
   """
-  @spec api_show_tag(String.t()) :: {:ok, Tag.t()} | {:error, :not_found}
-  def api_show_tag(slug) do
+  @spec load_tag(String.t()) :: {:ok, Tag.t()} | {:error, :not_found}
+  def load_tag(slug) do
     Tag
     |> where(slug: ^slug)
     |> preload([:aliased_tag, :aliases, :implied_tags, :implied_by_tags, :dnp_entries])
@@ -246,42 +207,58 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Searches tags for the public API with the query string `query_string` and
-  `pagination`, sorted by image count descending.
+  Searches tags with the query string `query_string` and `pagination`, sorted
+  by image count descending.
 
   An empty or missing `query_string` compiles to a match-none query, returning
-  an empty page. Results are preloaded with their aliases, implications, and
-  DNP entries. Returns `{:ok, tags}`, or `{:error, msg}` when `query_string`
+  an empty page. Returns `{:ok, tags}`, or `{:error, msg}` when `query_string`
   fails to compile.
+
+  ## Options
+
+    * `:preload` - associations loaded onto the results. Defaults to the
+      aliases, implications, and DNP entries the tag API representation
+      renders.
+    * `:sort` - the search sort to apply. Defaults to image count descending.
+    * `:page_size` - fixes the result window, overriding the page size
+      requested in `pagination`.
 
   ## Examples
 
-      iex> api_search_tags("artist:*", pagination)
+      iex> search_tags("artist:*", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> api_search_tags(")", pagination)
+      iex> search_tags(")", pagination)
       {:error, "Imbalanced parentheses."}
 
   """
-  @spec api_search_tags(String.t() | nil, map()) ::
+  @spec search_tags(String.t() | nil, map(), Keyword.t()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def api_search_tags(query_string, pagination) do
-    case Philomena.Tags.Query.compile(query_string) do
-      {:ok, query} ->
-        tags =
-          Tag
-          |> Search.search_definition(
-            %{query: query, sort: %{images: :desc}},
-            pagination
-          )
-          |> Search.search_records(
-            preload(Tag, [:aliased_tag, :aliases, :implied_tags, :implied_by_tags, :dnp_entries])
-          )
+  def search_tags(query_string, pagination, opts \\ []) do
+    preloads =
+      Keyword.get(opts, :preload, [
+        :aliased_tag,
+        :aliases,
+        :implied_tags,
+        :implied_by_tags,
+        :dnp_entries
+      ])
 
-        {:ok, tags}
+    sort = Keyword.get(opts, :sort, %{images: :desc})
 
-      {:error, msg} ->
-        {:error, msg}
+    pagination =
+      case Keyword.fetch(opts, :page_size) do
+        {:ok, page_size} -> Map.put(pagination, :page_size, page_size)
+        :error -> pagination
+      end
+
+    with {:ok, query} <- Philomena.Tags.Query.compile(query_string) do
+      tags =
+        Tag
+        |> Search.search_definition(%{query: query, sort: sort}, pagination)
+        |> Search.search_records(preload(Tag, ^preloads))
+
+      {:ok, tags}
     end
   end
 

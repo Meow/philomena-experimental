@@ -4,7 +4,11 @@ defmodule PhilomenaWeb.Api.Json.Search.PostController do
   alias Philomena.Posts
 
   def index(conn, params) do
-    case Posts.api_search_posts(conn.assigns.current_user, params["q"], conn.assigns.pagination) do
+    case Posts.search_public_posts(
+           conn.assigns.current_user,
+           params["q"],
+           conn.assigns.pagination
+         ) do
       {:ok, posts} ->
         conn
         |> put_view(PhilomenaWeb.Api.Json.Forum.Topic.PostView)

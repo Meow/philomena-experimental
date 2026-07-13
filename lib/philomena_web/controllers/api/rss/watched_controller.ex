@@ -5,7 +5,7 @@ defmodule PhilomenaWeb.Api.Rss.WatchedController do
 
   def index(conn, _params) do
     scope = PhilomenaWeb.ImageScope.search_scope(conn)
-    images = Images.api_watched_images(scope)
+    images = Images.watched_images(scope)
 
     # NB: this is RSS, but using the RSS format causes Phoenix not to
     # escape HTML

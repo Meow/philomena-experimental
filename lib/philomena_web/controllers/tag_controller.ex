@@ -8,7 +8,11 @@ defmodule PhilomenaWeb.TagController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Tags.search_tags(params, conn.assigns.pagination) do
+    case Tags.search_tags(params["tq"] || "*", conn.assigns.pagination,
+           page_size: 250,
+           sort: [%{images: :desc}, %{name: :asc}],
+           preload: []
+         ) do
       {:ok, tags} ->
         render(conn, "index.html", title: "Tags", tags: tags)
 

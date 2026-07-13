@@ -82,59 +82,45 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Loads the filter named by `id` for the JSON API on behalf of `user`.
+  Loads the filter named by `id` on behalf of `user`, with `:user` preloaded.
 
-  Parses `id`, loads the matching filter with `:user` preloaded, and authorizes
-  `:show` (public and system filters are visible to everyone; private filters
-  only to their owner). Every lookup and authorization failure collapses to
-  `{:error, :not_found}`, so a non-castable `id`, an unknown `id`, and a filter
-  the viewer may not see are indistinguishable.
+  Authorizes `:show` (public and system filters are visible to everyone;
+  private filters only to their owner). A non-castable `id` is
+  `{:error, :not_found}`; a well-formed unknown `id` the actor may act on (an
+  admin) is `{:error, :not_found}`, otherwise `{:error, :unauthorized}`.
 
-  Returns `{:ok, %Filter{}}` or `{:error, :not_found}`.
+  Returns `{:ok, %Filter{}}`, `{:error, :not_found}`, or
+  `{:error, :unauthorized}`.
 
   ## Examples
 
-      iex> api_show_filter(user, "1")
+      iex> load_filter(user, "1")
       {:ok, %Filter{}}
 
-      iex> api_show_filter(user, "not-a-number")
+      iex> load_filter(user, "not-a-number")
       {:error, :not_found}
 
   """
-  @spec api_show_filter(User.t() | nil, any()) :: {:ok, Filter.t()} | {:error, :not_found}
-  def api_show_filter(user, id) do
-    case IntegerId.parse(id) do
-      :error ->
-        {:error, :not_found}
-
-      {:ok, id} ->
-        filter =
-          Filter
-          |> where(id: ^id)
-          |> preload(:user)
-          |> Repo.one()
-
-        case authorize(user, :show, filter) do
-          :ok -> {:ok, filter}
-          _error -> {:error, :not_found}
-        end
-    end
+  @spec load_filter(User.t() | nil, any()) ::
+          {:ok, Filter.t()} | {:error, :not_found | :unauthorized}
+  def load_filter(user, id) do
+    load_and_authorize_filter(user, id, :show, [:user])
   end
 
   @doc """
-  Returns the page of system filters for the JSON API.
+  Returns the page of system filters.
 
   Selects filters flagged `system: true`, ordered by ascending id, paginated by
   `pagination`.
 
   ## Examples
 
-      iex> api_system_filters(pagination)
+      iex> system_filters(pagination)
       %Scrivener.Page{}
 
   """
-  @spec api_system_filters(map()) :: Scrivener.Page.t()
-  def api_system_filters(pagination) do
+  @spec system_filters(map()) :: Scrivener.Page.t()
+  def system_filters(pagination) do
     Filter
     |> where(system: true)
     |> order_by(asc: :id)
@@ -142,19 +128,17 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Returns the page of `user`'s own filters for the JSON API.
-
-  Selects filters owned by `user`, ordered by ascending id, paginated by
-  `pagination`. System filters and other users' filters are excluded.
+  Returns the page of `user`'s own filters, ordered by ascending id, paginated
+  by `pagination`. System filters and other users' filters are excluded.
 
   ## Examples
 
-      iex> api_user_filters(user, pagination)
+      iex> user_filters(user, pagination)
       %Scrivener.Page{}
 
   """
-  @spec api_user_filters(User.t(), map()) :: Scrivener.Page.t()
-  def api_user_filters(user, pagination) do
+  @spec user_filters(User.t(), map()) :: Scrivener.Page.t()
+  def user_filters(user, pagination) do
     Filter
     |> where(user_id: ^user.id)
     |> order_by(asc: :id)
@@ -239,7 +223,7 @@ defmodule Philomena.Filters do
   @spec load_filter_page(User.t() | nil, any()) ::
           {:ok, FilterPage.t()} | {:error, :not_found | :unauthorized}
   def load_filter_page(user, id) do
-    with {:ok, filter} <- load_and_authorize_filter(user, id, :show, [:user]) do
+    with {:ok, filter} <- load_filter(user, id) do
       {:ok,
        %FilterPage{
          filter: filter,

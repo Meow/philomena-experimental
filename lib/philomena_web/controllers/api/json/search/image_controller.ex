@@ -4,11 +4,14 @@ defmodule PhilomenaWeb.Api.Json.Search.ImageController do
   alias Philomena.Images
   alias Philomena.Interactions
 
-  def index(conn, params) do
+  def index(conn, _params) do
     scope = PhilomenaWeb.ImageScope.search_scope(conn)
 
-    case Images.api_search_images(scope, params["q"]) do
-      {:ok, {images, _tags}} ->
+    case Images.search_images(scope,
+           preload: [:user, :intensity, :sources, tags: :aliases],
+           hits: false
+         ) do
+      {:ok, %{images: images}} ->
         interactions = Interactions.user_interactions(images, conn.assigns.current_user)
 
         conn

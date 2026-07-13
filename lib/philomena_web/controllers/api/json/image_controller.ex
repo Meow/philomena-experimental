@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
        [params_name: "image", params_key: "image"] when action in [:create]
 
   def show(conn, %{"id" => id}) do
-    case Images.api_show_image(id) do
+    case Images.load_image(id) do
       {:ok, image} ->
         interactions = Interactions.user_interactions([image], conn.assigns.current_user)
 

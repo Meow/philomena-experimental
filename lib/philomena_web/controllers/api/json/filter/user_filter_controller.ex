@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.Api.Json.Filter.UserFilterController do
         |> text("")
 
       user ->
-        user_filters = Filters.api_user_filters(user, conn.assigns.scrivener)
+        user_filters = Filters.user_filters(user, conn.assigns.scrivener)
 
         conn
         |> put_view(PhilomenaWeb.Api.Json.FilterView)

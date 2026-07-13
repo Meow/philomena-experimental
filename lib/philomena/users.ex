@@ -169,8 +169,8 @@ defmodule Philomena.Users do
   def get_user!(id), do: Repo.get!(User, id)
 
   @doc """
-  Loads the user named by `id` for the public API, with their public links and
-  badge awards preloaded.
+  Loads the user named by `id`, with their public links and badge awards
+  preloaded.
 
   An unknown or deactivated user is `{:error, :not_found}`.
 
@@ -178,15 +178,15 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> api_show_profile("1")
+      iex> load_profile("1")
       {:ok, %User{}}
 
-      iex> api_show_profile("999999999")
+      iex> load_profile("999999999")
       {:error, :not_found}
 
   """
-  @spec api_show_profile(any()) :: {:ok, User.t()} | {:error, :not_found}
-  def api_show_profile(id) do
+  @spec load_profile(any()) :: {:ok, User.t()} | {:error, :not_found}
+  def load_profile(id) do
     # The id is interpolated without casting, so a non-integer id raises
     # Ecto.Query.CastError.
     user =

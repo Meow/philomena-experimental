@@ -143,10 +143,16 @@ defmodule Philomena.Images do
   Runs the search the scope's "q" parameter describes for the viewer.
 
   Compiles "q" against the viewer's filter and visibility switches and executes
-  it with the standard listing preloads. A custom sort field (anything under
-  "sf" other than `id`/`first_seen_at`) needs its sort cursor, so the page is
-  loaded with hits; the default orders load records alone. The raw
-  `Tag` records the query names come back alongside the page.
+  it. The raw `Tag` records the query names come back alongside the page.
+
+  Options:
+
+    * `:preload` - the associations loaded onto the result records; defaults
+      to the standard listing preloads.
+    * `:hits` - whether each entry is paired with its search hit. A custom
+      sort field (anything under "sf" other than `id`/`first_seen_at`) needs
+      its sort cursor, so by default the page is loaded with hits exactly
+      then; pass `false` to always load records alone.
 
   Returns `{:ok, %{images: page, tags: tags}}`, or the compiler's
   `{:error, msg}` for a malformed query.
@@ -160,12 +166,19 @@ defmodule Philomena.Images do
       {:error, "There was an error parsing your query."}
 
   """
-  @spec search_images(Scope.t()) ::
+  @spec search_images(Scope.t(), Keyword.t()) ::
           {:ok, %{images: Scrivener.Page.t(), tags: [Tag.t()]}} | {:error, String.t()}
-  def search_images(scope) do
+  def search_images(scope, opts \\ []) do
+    execute_opts =
+      case Keyword.fetch(opts, :preload) do
+        {:ok, preloads} -> [queryable: preload(Image, ^preloads)]
+        :error -> []
+      end
+      |> Keyword.put(:hits, Keyword.get_lazy(opts, :hits, fn -> custom_ordering?(scope) end))
+
     with {:ok, {definition, tags}} <-
            ImageSearch.search_string(scope, scope.params["q"]) do
-      images = ImageSearch.execute(definition, hits: custom_ordering?(scope))
+      images = ImageSearch.execute(definition, execute_opts)
 
       {:ok, %{images: images, tags: tags}}
     end
@@ -175,23 +188,23 @@ defmodule Philomena.Images do
   defp custom_ordering?(_scope), do: false
 
   @doc """
-  Loads the image `id` for the public API.
+  Loads the image `id`, with its uploader, intensities, sources, and tags
+  preloaded.
 
-  The image carries the preloads the public API uses. A hidden image is still
-  returned. Returns `{:ok, image}`, or `{:error, :not_found}`
-  when no row matches.
+  Viewing needs no permission: a hidden image is still returned. Returns
+  `{:ok, image}`, or `{:error, :not_found}` when no row matches.
 
   ## Examples
 
-      iex> api_show_image("1")
+      iex> load_image("1")
       {:ok, %Image{}}
 
-      iex> api_show_image("0")
+      iex> load_image("0")
       {:error, :not_found}
 
   """
-  @spec api_show_image(any()) :: {:ok, Image.t()} | {:error, :not_found}
-  def api_show_image(id) do
+  @spec load_image(any()) :: {:ok, Image.t()} | {:error, :not_found}
+  def load_image(id) do
     # The id is interpolated without parsing, so a non-integer value raises
     # Ecto.Query.CastError.
     Image
@@ -205,22 +218,23 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Loads the most recently featured non-hidden image for the public API.
+  Loads the most recently featured non-hidden image, with its uploader,
+  intensities, sources, and tags preloaded.
 
-  The image carries the preloads the public API uses. Returns `{:ok, image}`, or
-  `{:error, :not_found}` when no eligible feature exists.
+  Returns `{:ok, image}`, or `{:error, :not_found}` when no eligible feature
+  exists.
 
   ## Examples
 
-      iex> api_featured_image()
+      iex> featured_image()
       {:ok, %Image{}}
 
-      iex> api_featured_image()
+      iex> featured_image()
       {:error, :not_found}
 
   """
-  @spec api_featured_image() :: {:ok, Image.t()} | {:error, :not_found}
-  def api_featured_image do
+  @spec featured_image() :: {:ok, Image.t()} | {:error, :not_found}
+  def featured_image do
     Image
     |> join(:inner, [i], f in ImageFeature, on: [image_id: i.id])
     |> where([i], i.hidden_from_users == false)
@@ -235,82 +249,50 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Loads the non-hidden image `id` for the oembed API.
+  Loads the non-hidden image named by `id`, with its uploader, sources, and
+  tags preloaded.
 
-  `id` is the id string, or `nil` when no image was named. A well-formed id out
-  of the valid range, an unknown id, and a hidden image all resolve to `nil`;
-  the image carries the preloads oembed uses.
+  `id` is the id string, or `nil` when no image was named. A missing or
+  malformed `id`, a well-formed id out of the valid range, an unknown id, and
+  a hidden image are all `{:error, :not_found}`.
 
   ## Examples
 
-      iex> api_oembed_image("1")
-      %Image{}
+      iex> load_public_image("1")
+      {:ok, %Image{}}
 
-      iex> api_oembed_image(nil)
-      nil
+      iex> load_public_image(nil)
+      {:error, :not_found}
 
   """
-  @spec api_oembed_image(String.t() | nil) :: Image.t() | nil
-  def api_oembed_image(nil), do: nil
+  @spec load_public_image(String.t() | nil) :: {:ok, Image.t()} | {:error, :not_found}
+  def load_public_image(nil), do: {:error, :not_found}
 
-  def api_oembed_image(id) when is_binary(id) do
-    case IntegerId.parse(id) do
-      {:ok, id} ->
-        Image
-        |> where(id: ^id, hidden_from_users: false)
-        |> preload([:user, :sources, tags: :aliases])
-        |> Repo.one()
-
-      :error ->
-        nil
+  def load_public_image(id) when is_binary(id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         %Image{} = image <-
+           Image
+           |> where(id: ^id, hidden_from_users: false)
+           |> preload([:user, :sources, tags: :aliases])
+           |> Repo.one() do
+      {:ok, image}
+    else
+      _nil_or_error -> {:error, :not_found}
     end
   end
 
   @doc """
-  Runs the search `query_string` describes for the viewer, for the public API.
-
-  Compiles the `query_string` against the viewer scope, executes it with the
-  public API's preloads, and returns the record page paired with the raw
-  tags. Returns `{:ok, {page, tags}}`, or the compiler's `{:error, msg}` for a
-  malformed query.
+  Runs the "my:watched" search for the viewer scope, with the watched-feed
+  preloads, and returns the record page.
 
   ## Examples
 
-      iex> api_search_images(scope, "safe")
-      {:ok, {%Scrivener.Page{}, [%Tag{}]}}
-
-      iex> api_search_images(scope, "(")
-      {:error, "There was an error parsing your query."}
-
-  """
-  @spec api_search_images(Scope.t(), String.t() | nil) ::
-          {:ok, {Scrivener.Page.t(), [Tag.t()]}} | {:error, String.t()}
-  def api_search_images(scope, query_string) do
-    with {:ok, {definition, tags}} <- ImageSearch.search_string(scope, query_string) do
-      page =
-        Search.search_records(
-          definition,
-          preload(Image, [:user, :intensity, :sources, tags: :aliases])
-        )
-
-      {:ok, {page, tags}}
-    end
-  end
-
-  @doc """
-  Runs the "my:watched" search for the viewer scope, for the watched-images RSS
-  feed.
-
-  Executes with the feed's preloads and returns the record page.
-
-  ## Examples
-
-      iex> api_watched_images(scope)
+      iex> watched_images(scope)
       %Scrivener.Page{}
 
   """
-  @spec api_watched_images(Scope.t()) :: Scrivener.Page.t()
-  def api_watched_images(scope) do
+  @spec watched_images(Scope.t()) :: Scrivener.Page.t()
+  def watched_images(scope) do
     {:ok, {definition, _tags}} = ImageSearch.search_string(scope, "my:watched")
 
     Search.search_records(definition, preload(Image, [:sources, tags: :aliases]))

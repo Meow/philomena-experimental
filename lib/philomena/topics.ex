@@ -317,7 +317,7 @@ defmodule Philomena.Topics do
   def get_topic!(id), do: Repo.get!(Topic, id)
 
   @doc """
-  Lists the topics of the forum named by `forum_short_name` for the public API,
+  Lists the publicly visible topics of the forum named by `forum_short_name`,
   paginated with `pagination`.
 
   Only topics that are not hidden from users, and that belong to a forum whose
@@ -331,12 +331,12 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> api_list_topics("dis", pagination)
+      iex> list_public_topics("dis", pagination)
       %Scrivener.Page{}
 
   """
-  @spec api_list_topics(String.t(), map()) :: Scrivener.Page.t()
-  def api_list_topics(forum_short_name, pagination) do
+  @spec list_public_topics(String.t(), map()) :: Scrivener.Page.t()
+  def list_public_topics(forum_short_name, pagination) do
     Topic
     |> join(:inner, [t], _ in assoc(t, :forum))
     |> where(hidden_from_users: false)
@@ -347,7 +347,7 @@ defmodule Philomena.Topics do
   end
 
   @doc """
-  Fetches a single topic for the public API by its `slug` within the forum named
+  Fetches a single publicly visible topic by its `slug` within the forum named
   by `forum_short_name`.
 
   Only a topic that is not hidden from users, and that belongs to a forum whose
@@ -359,15 +359,15 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> api_show_topic("dis", "some-topic")
+      iex> load_public_topic("dis", "some-topic")
       {:ok, %Topic{}}
 
-      iex> api_show_topic("dis", "nonexistent")
+      iex> load_public_topic("dis", "nonexistent")
       {:error, :not_found}
 
   """
-  @spec api_show_topic(String.t(), String.t()) :: {:ok, Topic.t()} | {:error, :not_found}
-  def api_show_topic(forum_short_name, slug) do
+  @spec load_public_topic(String.t(), String.t()) :: {:ok, Topic.t()} | {:error, :not_found}
+  def load_public_topic(forum_short_name, slug) do
     Topic
     |> join(:inner, [t], _ in assoc(t, :forum))
     |> where(slug: ^slug)
