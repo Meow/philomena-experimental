@@ -277,6 +277,43 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
+  Searches galleries for the public API on behalf of `user`, with the query
+  string `query_string` and `pagination`, sorted by creation time descending.
+
+  An empty or missing `query_string` compiles to a match-none query, returning
+  an empty page. Results are preloaded with their creator. Returns
+  `{:ok, galleries}`, or `{:error, msg}` when `query_string` fails to compile.
+
+  ## Examples
+
+      iex> api_search_galleries(user, "title:sunset", pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> api_search_galleries(user, ")", pagination)
+      {:error, "Imbalanced parentheses."}
+
+  """
+  @spec api_search_galleries(User.t() | nil, String.t() | nil, map()) ::
+          {:ok, Scrivener.Page.t()} | {:error, String.t()}
+  def api_search_galleries(user, query_string, pagination) do
+    case Philomena.Galleries.Query.compile(query_string, user: user) do
+      {:ok, query} ->
+        galleries =
+          Gallery
+          |> Search.search_definition(
+            %{query: query, sort: %{created_at: :desc}},
+            pagination
+          )
+          |> Search.search_records(preload(Gallery, [:user]))
+
+        {:ok, galleries}
+
+      {:error, msg} ->
+        {:error, msg}
+    end
+  end
+
+  @doc """
   Assembles the gallery show page for the viewer described by `scope`, from
   the raw request `gallery_id`.
 
