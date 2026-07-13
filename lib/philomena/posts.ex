@@ -161,6 +161,49 @@ defmodule Philomena.Posts do
   end
 
   @doc """
+  Fetches a single post by `post_id` for the top-level public API, on behalf of
+  any requester.
+
+  The post is loaded by id, requiring non-destroyed content, a topic that is not
+  hidden from users, and a forum whose access level is `"normal"` - for every
+  requester alike, so posts in restricted forums or hidden topics are never
+  exposed here. The author and topic are preloaded. A destroyed post, a post in
+  a hidden topic, a post in a restricted forum, and an unknown id are all
+  reported as missing.
+
+  `post_id` is interpolated into the query without being integer-guarded, so an
+  uncastable id surfaces as an `Ecto.Query.CastError` rather than a missing
+  resource.
+
+  Returns `{:ok, post}` or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> api_show_post("1")
+      {:ok, %Post{}}
+
+      iex> api_show_post("999999999")
+      {:error, :not_found}
+
+  """
+  @spec api_show_post(any()) :: {:ok, Post.t()} | {:error, :not_found}
+  def api_show_post(post_id) do
+    Post
+    |> join(:inner, [p], _ in assoc(p, :topic))
+    |> join(:inner, [_p, t], _ in assoc(t, :forum))
+    |> where(id: ^post_id)
+    |> where(destroyed_content: false)
+    |> where([_p, t], t.hidden_from_users == false)
+    |> where([_p, _t, f], f.access_level == "normal")
+    |> preload([:user, :topic])
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      post -> {:ok, post}
+    end
+  end
+
+  @doc """
   Creates a post.
 
   ## Examples
