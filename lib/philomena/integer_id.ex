@@ -13,6 +13,9 @@ defmodule Philomena.IntegerId do
   @int_min -2_147_483_648
   @int_max 2_147_483_647
 
+  @typedoc "Type of acceptable inputs."
+  @type integer_id :: non_neg_integer() | nonempty_binary()
+
   @doc """
   Parses an id that an `integer` column could hold.
 
@@ -31,7 +34,9 @@ defmodule Philomena.IntegerId do
       :error
 
   """
-  @spec parse(any()) :: {:ok, integer()} | :error
+  @spec parse(integer_id()) :: {:ok, integer()} | :error
+  def parse(id)
+
   def parse(id) when is_integer(id) do
     if in_range?(id), do: {:ok, id}, else: :error
   end

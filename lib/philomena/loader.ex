@@ -36,7 +36,13 @@ defmodule Philomena.Loader do
       {:error, :not_found}
 
   """
-  @spec fetch_and_authorize(Ecto.Queryable.t(), any(), atom(), any(), list()) ::
+  @spec fetch_and_authorize(
+          queryable :: Ecto.Queryable.t(),
+          actor :: any(),
+          action :: atom(),
+          id :: IntegerId.integer_id(),
+          preloads :: list()
+        ) ::
           {:ok, struct()} | {:error, :unauthorized | :not_found}
   def fetch_and_authorize(queryable, actor, action, id, preloads \\ []) do
     case IntegerId.parse(id) do
@@ -74,7 +80,11 @@ defmodule Philomena.Loader do
       {:error, :not_found}
 
   """
-  @spec fetch(Ecto.Queryable.t(), any(), list()) ::
+  @spec fetch(
+          queryable :: Ecto.Queryable.t(),
+          id :: IntegerId.integer_id(),
+          preloads :: list()
+        ) ::
           {:ok, struct()} | {:error, :not_found}
   def fetch(queryable, id, preloads \\ []) do
     case IntegerId.parse(id) do
