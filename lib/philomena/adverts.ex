@@ -18,6 +18,79 @@ defmodule Philomena.Adverts do
   alias Philomena.Adverts.Uploader
 
   @doc """
+  Gets a single advert.
+
+  ## Examples
+
+      iex> get_advert(123)
+      {:ok, %Advert{}}
+
+      iex> get_advert("123")
+      {:ok, %Advert{}}
+
+      iex> get_advert!(456)
+      {:error, :not_found}
+
+  """
+  @spec get_advert(any()) :: {:ok, Advert.t()} | {:error, :not_found}
+  def get_advert(id) do
+    Loader.fetch(Advert, id)
+  end
+
+  # Creates an advert with an image.
+  defp create_advert(attrs) do
+    %Advert{}
+    |> Advert.changeset(attrs)
+    |> Uploader.analyze_upload(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, advert} ->
+        Uploader.persist_upload(advert)
+        Uploader.unpersist_old_upload(advert)
+
+        {:ok, advert}
+
+      error ->
+        error
+    end
+  end
+
+  # Updates an Advert without updating its image.
+  defp update_advert(%Advert{} = advert, attrs) do
+    advert
+    |> Advert.changeset(attrs)
+    |> Repo.update()
+  end
+
+  # Updates the image for an Advert.
+  defp update_advert_image(%Advert{} = advert, attrs) do
+    advert
+    |> Advert.changeset(attrs)
+    |> Uploader.analyze_upload(attrs)
+    |> Repo.update()
+    |> case do
+      {:ok, advert} ->
+        Uploader.persist_upload(advert)
+        Uploader.unpersist_old_upload(advert)
+
+        {:ok, advert}
+
+      error ->
+        error
+    end
+  end
+
+  # Deletes an Advert.
+  defp delete_advert(%Advert{} = advert) do
+    Repo.delete(advert)
+  end
+
+  # Returns an `%Ecto.Changeset{}` for tracking advert changes.
+  defp change_advert(%Advert{} = advert) do
+    Advert.changeset(advert, %{})
+  end
+
+  @doc """
   Gets an advert that is currently live.
 
   Returns the advert, or nil if nothing was live.
@@ -98,143 +171,17 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Gets a single advert.
-
-  Raises `Ecto.NoResultsError` if the Advert does not exist.
-
-  ## Examples
-
-      iex> get_advert!(123)
-      %Advert{}
-
-      iex> get_advert!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_advert!(id), do: Repo.get!(Advert, id)
-
-  @doc """
-  Loads the advert named by `id`.
-
-  An id that cannot name a row - one that is not a well-formed integer, or that
-  names no advert - is `{:error, :not_found}`; otherwise `{:ok, advert}`.
-  """
-  @spec get_advert(any()) :: {:ok, Advert.t()} | {:error, :not_found}
-  def get_advert(id) do
-    Loader.fetch(Advert, id)
-  end
-
-  @doc """
-  Creates an advert.
-
-  ## Examples
-
-      iex> create_advert(%{field: value})
-      {:ok, %Advert{}}
-
-      iex> create_advert(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_advert(attrs \\ %{}) do
-    %Advert{}
-    |> Advert.changeset(attrs)
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, advert} ->
-        Uploader.persist_upload(advert)
-        Uploader.unpersist_old_upload(advert)
-
-        {:ok, advert}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Updates an Advert without updating its image.
-
-  ## Examples
-
-      iex> update_advert(advert, %{field: new_value})
-      {:ok, %Advert{}}
-
-      iex> update_advert(advert, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_advert(%Advert{} = advert, attrs) do
-    advert
-    |> Advert.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Updates the image for an Advert.
-
-  ## Examples
-
-      iex> update_advert_image(advert, %{image: new_value})
-      {:ok, %Advert{}}
-
-      iex> update_advert_image(advert, %{image: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_advert_image(%Advert{} = advert, attrs) do
-    advert
-    |> Advert.changeset(attrs)
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.update()
-    |> case do
-      {:ok, advert} ->
-        Uploader.persist_upload(advert)
-        Uploader.unpersist_old_upload(advert)
-
-        {:ok, advert}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Deletes an Advert.
-
-  ## Examples
-
-      iex> delete_advert(advert)
-      {:ok, %Advert{}}
-
-      iex> delete_advert(advert)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_advert(%Advert{} = advert) do
-    Repo.delete(advert)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking advert changes.
-
-  ## Examples
-
-      iex> change_advert(advert)
-      %Ecto.Changeset{source: %Advert{}}
-
-  """
-  def change_advert(%Advert{} = advert) do
-    Advert.changeset(advert, %{})
-  end
-
-  @doc """
-  Returns the paginated adverts for the admin listing, on behalf of `actor`,
+  Returns paginated adverts for the admin listing, on behalf of `actor`,
   newest finish date first.
 
-  Authorizes advert administration. Returns `{:ok, adverts}` as a
-  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  ## Examples
+
+      iex> load_adverts(admin, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_adverts(user, pagination)
+      {:error, :unauthorized}
+
   """
   @spec load_adverts(User.t() | nil, map() | keyword()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
@@ -252,8 +199,16 @@ defmodule Philomena.Adverts do
   @doc """
   Builds the changeset for a new advert, on behalf of `actor`.
 
-  Authorizes advert administration. Returns `{:ok, changeset}` or
-  `{:error, :unauthorized}`.
+  Returns an `%Ecto.Changeset{}` for tracking advert changes.
+
+  ## Examples
+
+      iex> new_advert(admin)
+      {:ok, %Ecto.Changeset{source: %Advert{}}}
+
+      iex> new_advert(user)
+      {:error, :unauthorized}
+
   """
   @spec new_advert(User.t() | nil) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
   def new_advert(actor) do
@@ -263,11 +218,18 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Creates an advert on behalf of `actor`, running the image upload pipeline.
+  Creates an advert with an image, on behalf of `actor`.
 
-  Authorizes advert administration, then inserts the advert. On success a
-  moderation log attributing the creation to `actor` is written. Returns
-  `{:ok, advert}`, `{:error, :unauthorized}`, or `{:error, %Ecto.Changeset{}}`.
+  On success a moderation log attributing the creation to `actor` is written.
+
+  ## Examples
+
+      iex> create_advert(admin, advert_params)
+      {:ok, %Advert{}}
+
+      iex> create_advert(user, advert_params)
+      {:error, :unauthorized}
+
   """
   @spec create_advert(User.t() | nil, map()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
@@ -283,10 +245,17 @@ defmodule Philomena.Adverts do
   Loads the advert named by the `id` for editing, on behalf of
   `actor`, pairing it with a change-tracking changeset.
 
-  Authorizes advert administration, then loads and authorizes the advert for
-  `:edit`. A non-castable or unknown id is `{:error, :not_found}`; a load a
-  moderator may not act on is `{:error, :unauthorized}`. Returns
-  `{:ok, {advert, changeset}}` or `{:error, :unauthorized | :not_found}`.
+  ## Examples
+
+      iex> load_advert_for_edit(admin, advert_id)
+      {:ok, {%Advert{}, %Ecto.Changeset{}}}
+
+      iex> load_advert_for_edit(admin, invalid_id)
+      {:error, :not_found}
+
+      iex> load_advert_for_edit(user, advert_id)
+      {:error, :unauthorized}
+
   """
   @spec load_advert_for_edit(User.t() | nil, any()) ::
           {:ok, {Advert.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
@@ -301,12 +270,22 @@ defmodule Philomena.Adverts do
   Updates the advert named by the `id` without touching its image,
   on behalf of `actor`.
 
-  Authorizes advert administration, then loads and authorizes the advert for
-  `:update`. A non-castable or unknown id is `{:error, :not_found}`; a load a
-  moderator may not act on is `{:error, :unauthorized}`. On success a moderation
-  log attributing the change to `actor` is written. Returns `{:ok, advert}`,
-  `{:error, :unauthorized}`, `{:error, :not_found}`, or
-  `{:error, %Ecto.Changeset{}}`.
+  On success a moderation log attributing the update to `actor` is written.
+
+  ## Examples
+
+      iex> update_advert(admin, advert_id, advert_params)
+      {:ok, %Advert{}}
+
+      iex> update_advert(admin, advert_id, invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> update_advert(admin, invalid_id, advert_params)
+      {:error, :not_found}
+
+      iex> update_advert(user, advert_id, advert_params)
+      {:error, :unauthorized}
+
   """
   @spec update_advert(User.t() | nil, any(), map()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
@@ -322,11 +301,19 @@ defmodule Philomena.Adverts do
   @doc """
   Deletes the advert named by the `id`, on behalf of `actor`.
 
-  Authorizes advert administration, then loads and authorizes the advert for
-  `:delete`. A non-castable or unknown id is `{:error, :not_found}`; a load a
-  moderator may not act on is `{:error, :unauthorized}`. On success a moderation
-  log attributing the deletion to `actor` is written. Returns `{:ok, advert}` or
-  `{:error, :unauthorized | :not_found}`.
+  On success a moderation log attributing the deletion to `actor` is written.
+
+  ## Examples
+
+      iex> delete_advert(admin, advert_id)
+      {:ok, %Advert{}}
+
+      iex> delete_advert(admin, invalid_id)
+      {:error, :not_found}
+
+      iex> delete_advert(user, advert_id)
+      {:error, :unauthorized}
+
   """
   @spec delete_advert(User.t() | nil, any()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | :not_found}
@@ -343,12 +330,22 @@ defmodule Philomena.Adverts do
   Updates the image of the advert named by the `id`, on behalf of
   `actor`, running the image upload pipeline.
 
-  Authorizes advert administration, then loads and authorizes the advert for
-  `:update`. A non-castable or unknown id is `{:error, :not_found}`; a load a
-  moderator may not act on is `{:error, :unauthorized}`. On success a moderation
-  log attributing the change to `actor` is written. Returns `{:ok, advert}`,
-  `{:error, :unauthorized}`, `{:error, :not_found}`, or
-  `{:error, %Ecto.Changeset{}}`.
+  On success a moderation log attributing the update to `actor` is written.
+
+  ## Examples
+
+      iex> update_advert_image(admin, advert_id, advert_params)
+      {:ok, %Advert{}}
+
+      iex> update_advert_image(admin, advert_id, invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> update_advert_image(admin, invalid_id, advert_params)
+      {:error, :not_found}
+
+      iex> update_advert_image(user, advert_id, advert_params)
+      {:error, :unauthorized}
+
   """
   @spec update_advert_image(User.t() | nil, any(), map()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
