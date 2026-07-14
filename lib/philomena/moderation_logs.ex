@@ -8,6 +8,7 @@ defmodule Philomena.ModerationLogs do
 
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Users.User
 
@@ -58,7 +59,13 @@ defmodule Philomena.ModerationLogs do
       {:error, %Ecto.Changeset{}}
 
   """
-  def create_moderation_log(user, type, subject_path, body) do
+  def create_moderation_log(actor, type, subject_path, body)
+
+  def create_moderation_log(%Actor{} = actor, type, subject_path, body) do
+    create_moderation_log(actor.user, type, subject_path, body)
+  end
+
+  def create_moderation_log(%User{} = user, type, subject_path, body) do
     %ModerationLog{user_id: user.id}
     |> ModerationLog.changeset(%{type: type, subject_path: subject_path, body: body})
     |> Repo.insert()

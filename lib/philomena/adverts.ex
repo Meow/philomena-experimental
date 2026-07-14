@@ -27,11 +27,11 @@ defmodule Philomena.Adverts do
       iex> get_advert("123")
       {:ok, %Advert{}}
 
-      iex> get_advert!(456)
+      iex> get_advert(456)
       {:error, :not_found}
 
   """
-  @spec get_advert(any()) :: {:ok, Advert.t()} | {:error, :not_found}
+  @spec get_advert(Loader.integer_id()) :: {:ok, Advert.t()} | {:error, :not_found}
   def get_advert(id) do
     Loader.fetch(Advert, id)
   end
@@ -203,7 +203,7 @@ defmodule Philomena.Adverts do
   ## Examples
 
       iex> new_advert(admin)
-      {:ok, %Ecto.Changeset{source: %Advert{}}}
+      {:ok, %Ecto.Changeset{}}
 
       iex> new_advert(user)
       {:error, :unauthorized}

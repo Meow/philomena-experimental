@@ -94,13 +94,13 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> list_artist_links(user, user.slug)
-      {:ok, {%User{}, [%ArtistLink{}...]}}
+      iex> list_artist_links(user_actor, user.slug)
+      {:ok, {%User{}, [%ArtistLink{}, ...]}}
 
-      iex> list_artist_links(nil, user.slug)
+      iex> list_artist_links(anonymous_actor, user.slug)
       {:error, :unauthorized}
 
-      iex> list_artist_links(user, invalid_slug)
+      iex> list_artist_links(user_actor, invalid_slug)
       {:error, :not_found}
 
   """
@@ -179,20 +179,20 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> load_artist_link_for_new(user, user.slug)
+      iex> load_artist_link_for_new(user_actor, user.slug)
       {:ok, {%User{}, %Ecto.Changeset{}}}
 
-      iex> load_artist_link_for_new(admin, other_user.slug)
+      iex> load_artist_link_for_new(admin_actor, other_user.slug)
       {:ok, {%User{}, %Ecto.Changeset{}}}
 
-      iex> load_artist_link_for_new(banned_user, banned_user.slug)
+      iex> load_artist_link_for_new(banned_actor, banned_user.slug)
       {:error, :ban}
 
-      iex> load_artist_link_for_new(user, other_user.slug)
-      {:error, :unauthorized}
-
-      iex> load_artist_link_for_new(user, invalid_slug)
+      iex> load_artist_link_for_new(admin_actor, invalid_slug)
       {:error, :not_found}
+
+      iex> load_artist_link_for_new(user_actor, other_user.slug)
+      {:error, :unauthorized}
 
   """
   @spec load_artist_link_for_new(Actor.t(), String.t()) ::
@@ -211,22 +211,22 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> create_artist_link(user, user.slug, artist_link_params)
+      iex> create_artist_link(user_actor, user.slug, artist_link_params)
       {:ok, {%User{}, %ArtistLink{}}}
 
-      iex> create_artist_link(admin, other_user.slug, artist_link_params)
+      iex> create_artist_link(admin_actor, other_user.slug, artist_link_params)
       {:ok, {%User{}, %ArtistLink{}}}
 
-      iex> create_artist_link(user, user.slug, invalid_params)
+      iex> create_artist_link(user_actor, user.slug, invalid_params)
       {:error, {%User{}, %Ecto.Changeset{}}}
 
-      iex> create_artist_link(banned_user, banned_user.slug, artist_link_params)
+      iex> create_artist_link(banned_actor, banned_user.slug, artist_link_params)
       {:error, :ban}
 
-      iex> create_artist_link(user, other_user.slug, artist_link_params)
+      iex> create_artist_link(user_actor, other_user.slug, artist_link_params)
       {:error, :unauthorized}
 
-      iex> create_artist_link(user, invalid_slug, artist_link_params)
+      iex> create_artist_link(admin_actor, invalid_slug, artist_link_params)
       {:error, :not_found}
 
   """

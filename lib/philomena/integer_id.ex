@@ -14,7 +14,7 @@ defmodule Philomena.IntegerId do
   @int_max 2_147_483_647
 
   @typedoc "Type of acceptable integer ID inputs."
-  @type integer_id :: non_neg_integer() | nonempty_binary()
+  @type integer_id :: integer() | nonempty_binary()
 
   @doc """
   Parses an id that an `integer` column could hold.
@@ -26,6 +26,9 @@ defmodule Philomena.IntegerId do
 
       iex> Philomena.IntegerId.parse("42")
       {:ok, 42}
+
+      iex> Philomena.IntegerId.parse("-1")
+      {:ok, -1}
 
       iex> Philomena.IntegerId.parse("not-a-number")
       :error
