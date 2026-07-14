@@ -4,4 +4,6 @@ defmodule Philomena.Repo do
     adapter: Ecto.Adapters.Postgres
 
   use Scrivener, page_size: 250
+
+  @type pagination_params :: map() | keyword()
 end

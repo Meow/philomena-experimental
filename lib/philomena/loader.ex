@@ -14,6 +14,13 @@ defmodule Philomena.Loader do
 
   alias Philomena.Repo
   alias Philomena.IntegerId
+  alias Philomena.Authorization
+
+  @typedoc "Type of acceptable actor inputs."
+  @type actor :: Authorization.actor()
+
+  @typedoc "Type of acceptable integer ID inputs."
+  @type integer_id :: IntegerId.integer_id()
 
   @doc """
   Loads the `queryable` record named by `id`, applying `preloads`, and authorizes
@@ -38,9 +45,9 @@ defmodule Philomena.Loader do
   """
   @spec fetch_and_authorize(
           queryable :: Ecto.Queryable.t(),
-          actor :: any(),
+          actor :: actor(),
           action :: atom(),
-          id :: IntegerId.integer_id(),
+          id :: integer_id(),
           preloads :: list()
         ) ::
           {:ok, struct()} | {:error, :unauthorized | :not_found}
@@ -85,7 +92,7 @@ defmodule Philomena.Loader do
   """
   @spec fetch(
           queryable :: Ecto.Queryable.t(),
-          id :: IntegerId.integer_id(),
+          id :: integer_id(),
           preloads :: list()
         ) ::
           {:ok, struct()} | {:error, :not_found}

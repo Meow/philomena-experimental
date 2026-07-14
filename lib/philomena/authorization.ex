@@ -12,6 +12,10 @@ defmodule Philomena.Authorization do
   """
 
   alias Philomena.Attribution.Actor
+  alias Philomena.Users.User
+
+  @typedoc "Type of acceptable actor inputs."
+  @type actor :: Actor.t() | User.t() | nil
 
   @doc """
   Authorizes `actor` to perform `action` on `subject`.
@@ -36,7 +40,7 @@ defmodule Philomena.Authorization do
       :ok
 
   """
-  @spec authorize(actor :: any(), action :: atom(), subject :: any()) ::
+  @spec authorize(actor :: actor(), action :: atom(), subject :: any()) ::
           :ok | {:error, :unauthorized}
   def authorize(%Actor{user: user}, action, subject), do: authorize(user, action, subject)
 

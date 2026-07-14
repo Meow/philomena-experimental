@@ -13,7 +13,7 @@ defmodule Philomena.IntegerId do
   @int_min -2_147_483_648
   @int_max 2_147_483_647
 
-  @typedoc "Type of acceptable inputs."
+  @typedoc "Type of acceptable integer ID inputs."
   @type integer_id :: non_neg_integer() | nonempty_binary()
 
   @doc """
