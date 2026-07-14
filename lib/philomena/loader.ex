@@ -47,7 +47,10 @@ defmodule Philomena.Loader do
   def fetch_and_authorize(queryable, actor, action, id, preloads \\ []) do
     case IntegerId.parse(id) do
       {:ok, id} ->
-        record = queryable |> preload(^preloads) |> Repo.get(id)
+        record =
+          queryable
+          |> preload(^preloads)
+          |> Repo.get(id)
 
         with :ok <- authorize(actor, action, record),
              %{__struct__: _} <- record do
@@ -89,7 +92,10 @@ defmodule Philomena.Loader do
   def fetch(queryable, id, preloads \\ []) do
     case IntegerId.parse(id) do
       {:ok, id} ->
-        case queryable |> preload(^preloads) |> Repo.get(id) do
+        queryable
+        |> preload(^preloads)
+        |> Repo.get(id)
+        |> case do
           nil -> {:error, :not_found}
           record -> {:ok, record}
         end
