@@ -10,41 +10,13 @@ defmodule Philomena.Badges do
   alias Philomena.Repo
   alias Philomena.Loader
 
+  alias Philomena.Attribution.Actor
   alias Philomena.IntegerId
   alias Philomena.Users.User
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.Badges.Badge
   alias Philomena.Badges.Uploader
-
-  @doc """
-  Returns the list of badges.
-
-  ## Examples
-
-      iex> list_badges()
-      [%Badge{}, ...]
-
-  """
-  def list_badges do
-    Repo.all(Badge)
-  end
-
-  @doc """
-  Gets a single badge.
-
-  Raises `Ecto.NoResultsError` if the Badge does not exist.
-
-  ## Examples
-
-      iex> get_badge!(123)
-      %Badge{}
-
-      iex> get_badge!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_badge!(id), do: Repo.get!(Badge, id)
 
   @doc """
   Gets a single badge by its title.
@@ -62,19 +34,8 @@ defmodule Philomena.Badges do
   """
   def get_badge_by_title(title), do: Repo.get_by(Badge, title: title)
 
-  @doc """
-  Creates a badge.
-
-  ## Examples
-
-      iex> create_badge(%{field: value})
-      {:ok, %Badge{}}
-
-      iex> create_badge(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_badge(attrs \\ %{}) do
+  # Creates a badge.
+  defp create_badge(attrs) do
     %Badge{}
     |> Badge.changeset(attrs)
     |> Uploader.analyze_upload(attrs)
@@ -91,37 +52,15 @@ defmodule Philomena.Badges do
     end
   end
 
-  @doc """
-  Updates a badge without updating its image.
-
-  ## Examples
-
-      iex> update_badge(badge, %{field: new_value})
-      {:ok, %Badge{}}
-
-      iex> update_badge(badge, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_badge(%Badge{} = badge, attrs) do
+  # Updates a badge without updating its image.
+  defp update_badge(%Badge{} = badge, attrs) do
     badge
     |> Badge.changeset(attrs)
     |> Repo.update()
   end
 
-  @doc """
-  Updates the image for a badge.
-
-  ## Examples
-
-      iex> update_badge_image(badge, %{image: new_value})
-      {:ok, %Badge{}}
-
-      iex> update_badge_image(badge, %{image: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_badge_image(%Badge{} = badge, attrs) do
+  # Updates the image for a badge.
+  defp update_badge_image(%Badge{} = badge, attrs) do
     badge
     |> Badge.changeset(attrs)
     |> Uploader.analyze_upload(attrs)
@@ -138,32 +77,8 @@ defmodule Philomena.Badges do
     end
   end
 
-  @doc """
-  Deletes a Badge.
-
-  ## Examples
-
-      iex> delete_badge(badge)
-      {:ok, %Badge{}}
-
-      iex> delete_badge(badge)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_badge(%Badge{} = badge) do
-    Repo.delete(badge)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking badge changes.
-
-  ## Examples
-
-      iex> change_badge(badge)
-      %Ecto.Changeset{source: %Badge{}}
-
-  """
-  def change_badge(%Badge{} = badge) do
+  # Returns an `%Ecto.Changeset{}` for tracking badge changes.
+  defp change_badge(%Badge{} = badge) do
     Badge.changeset(badge, %{})
   end
 
@@ -171,10 +86,16 @@ defmodule Philomena.Badges do
   Returns the paginated badges for the admin listing, on behalf of `actor`,
   ordered by title.
 
-  Authorizes badge administration. Returns `{:ok, badges}` as a
-  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  ## Examples
+
+      iex> load_badges(admin, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_badges(user, pagination)
+      {:error, :unauthorized}
+
   """
-  @spec load_badges(User.t() | nil, map() | keyword()) ::
+  @spec load_badges(Loader.actor(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
   def load_badges(actor, pagination) do
     with :ok <- authorize(actor, :index, Badge) do
@@ -190,10 +111,16 @@ defmodule Philomena.Badges do
   @doc """
   Builds the changeset for creating a badge, on behalf of `actor`.
 
-  Authorizes badge administration. Returns `{:ok, changeset}` or
-  `{:error, :unauthorized}`.
+  ## Examples
+
+      iex> new_badge(admin)
+      {:ok, %Ecto.Changeset{}}
+
+      iex> new_badge(user)
+      {:error, :unauthorized}
+
   """
-  @spec new_badge(User.t() | nil) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  @spec new_badge(Loader.actor()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
   def new_badge(actor) do
     with :ok <- authorize(actor, :index, Badge) do
       {:ok, change_badge(%Badge{})}
@@ -203,11 +130,21 @@ defmodule Philomena.Badges do
   @doc """
   Creates a badge on behalf of `actor`, running the SVG upload pipeline.
 
-  Authorizes badge administration, then inserts the badge. On success a
-  moderation log attributing the creation to `actor` is written. Returns
-  `{:ok, badge}`, `{:error, :unauthorized}`, or `{:error, %Ecto.Changeset{}}`.
+  On success a moderation log attributing the creation to `actor` is written.
+
+  ## Examples
+
+      iex> create_badge(admin, badge_params)
+      {:ok, %Badge{}}
+
+      iex> create_badge(admin, invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> create_badge(user, badge_params)
+      {:error, :unauthorized}
+
   """
-  @spec create_badge(User.t() | nil, map()) ::
+  @spec create_badge(Loader.actor(), map()) ::
           {:ok, Badge.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
   def create_badge(actor, attrs) do
     with :ok <- authorize(actor, :index, Badge),
@@ -221,11 +158,19 @@ defmodule Philomena.Badges do
   Loads the badge named by `id` for editing, on behalf of `actor`, pairing it
   with a changeset for editing it.
 
-  Authorizes badge administration, then loads the badge by id. A non-castable or
-  unknown id is `{:error, :not_found}`. Returns `{:ok, {badge, changeset}}` or
-  `{:error, :unauthorized | :not_found}`.
+  ## Examples
+
+      iex> load_badge_for_edit(admin, badge_id)
+      {:ok, {%Badge{}, %Ecto.Changeset{}}}
+
+      iex> load_badge_for_edit(admin, invalid_id)
+      {:error, :not_found}
+
+      iex> load_badge_for_edit(user, badge_id)
+      {:error, :unauthorized}
+
   """
-  @spec load_badge_for_edit(User.t() | nil, any()) ::
+  @spec load_badge_for_edit(Loader.actor(), Loader.integer_id()) ::
           {:ok, {Badge.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
   def load_badge_for_edit(actor, id) do
     with :ok <- authorize(actor, :index, Badge),
@@ -238,13 +183,24 @@ defmodule Philomena.Badges do
   Updates the badge named by `id` without touching its image, on behalf of
   `actor`.
 
-  Authorizes badge administration, then loads the badge by id. A non-castable or
-  unknown id is `{:error, :not_found}`. On success a moderation log attributing
-  the change to `actor` is written. Returns `{:ok, badge}`,
-  `{:error, :unauthorized}`, `{:error, :not_found}`, or
-  `{:error, %Ecto.Changeset{}}`.
+  On success a moderation log attributing the update to `actor` is written.
+
+  ## Examples
+
+      iex> update_badge(admin, badge_id, badge_params)
+      {:ok, %Badge{}}
+
+      iex> update_badge(admin, badge_id, invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> update_badge(admin, invalid_id, badge_params)
+      {:error, :not_found}
+
+      iex> update_badge(user, badge_id, badge_params)
+      {:error, :unauthorized}
+
   """
-  @spec update_badge(User.t() | nil, any(), map()) ::
+  @spec update_badge(Loader.actor(), Loader.integer_id(), map()) ::
           {:ok, Badge.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_badge(actor, id, attrs) do
     with :ok <- authorize(actor, :index, Badge),
@@ -259,13 +215,24 @@ defmodule Philomena.Badges do
   Updates the image of the badge named by `id`, on behalf of `actor`, running
   the SVG upload pipeline.
 
-  Authorizes badge administration, then loads the badge by id. A non-castable or
-  unknown id is `{:error, :not_found}`. On success a moderation log attributing
-  the change to `actor` is written. Returns `{:ok, badge}`,
-  `{:error, :unauthorized}`, `{:error, :not_found}`, or
-  `{:error, %Ecto.Changeset{}}`.
+  On success a moderation log attributing the update to `actor` is written.
+
+  ## Examples
+
+      iex> update_badge_image(admin, badge_id, badge_params)
+      {:ok, %Badge{}}
+
+      iex> update_badge_image(admin, badge_id, invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> update_badge_image(admin, invalid_id, badge_params)
+      {:error, :not_found}
+
+      iex> update_badge_image(user, badge_id, badge_params)
+      {:error, :unauthorized}
+
   """
-  @spec update_badge_image(User.t() | nil, any(), map()) ::
+  @spec update_badge_image(Loader.actor(), Loader.integer_id(), map()) ::
           {:ok, Badge.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_badge_image(actor, id, attrs) do
     with :ok <- authorize(actor, :index, Badge),
@@ -286,11 +253,19 @@ defmodule Philomena.Badges do
   Loads the badge named by `id` together with the users who hold it, on behalf
   of `actor`, paginated and ordered by name.
 
-  Authorizes badge administration, then loads the badge by id. A non-castable or
-  unknown id is `{:error, :not_found}`. Returns `{:ok, {badge, users}}` (the
-  users as a `m:Scrivener.Page`) or `{:error, :unauthorized | :not_found}`.
+  ## Examples
+
+      iex> load_badge_users(admin, badge_id, pagination)
+      {:ok, {%Badge{}, %Scrivener.Page{}}}
+
+      iex> load_badge_users(admin, invalid_id, pagination)
+      {:error, :not_found}
+
+      iex> load_badge_users(user, badge_id, pagination)
+      {:error, :unauthorized}
+
   """
-  @spec load_badge_users(User.t() | nil, any(), map() | keyword()) ::
+  @spec load_badge_users(Loader.actor(), Loader.integer_id(), Repo.pagination_params()) ::
           {:ok, {Badge.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
   def load_badge_users(actor, id, pagination) do
     with :ok <- authorize(actor, :index, Badge),
@@ -306,11 +281,12 @@ defmodule Philomena.Badges do
     end
   end
 
-  # Loads a badge by id. A non-castable or unknown id is `{:error, :not_found}`.
+  @spec fetch_badge(Loader.integer_id()) :: Loader.fetch_result(Badge.t())
   defp fetch_badge(id) do
     Loader.fetch(Badge, id)
   end
 
+  @spec badge_log(Loader.actor(), atom(), Badge.t()) :: any()
   defp badge_log(actor, action, badge) do
     body =
       case action do
@@ -324,38 +300,7 @@ defmodule Philomena.Badges do
   alias Philomena.Badges.Award
 
   @doc """
-  Returns the list of badge_awards.
-
-  ## Examples
-
-      iex> list_badge_awards()
-      [%Award{}, ...]
-
-  """
-  def list_badge_awards do
-    Repo.all(Award)
-  end
-
-  @doc """
-  Gets a single badge_award.
-
-  Raises `Ecto.NoResultsError` if the Badge award does not exist.
-
-  ## Examples
-
-      iex> get_badge_award!(123)
-      %Award{}
-
-      iex> get_badge_award!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_badge_award!(id), do: Repo.get!(Award, id)
-
-  @doc """
-  Gets a the badge_award with the given badge type belonging to the user.
-
-  Raises nil if the Badge award does not exist.
+  Gets the award with the given badge type belonging to the given user.
 
   ## Examples
 
@@ -366,72 +311,39 @@ defmodule Philomena.Badges do
       nil
 
   """
+  @spec get_badge_award_for(Badge.t(), User.t()) :: Award.t() | nil
   def get_badge_award_for(badge, user) do
     Repo.get_by(Award, badge_id: badge.id, user_id: user.id)
   end
 
-  @doc """
-  Creates a badge_award.
+  # Creates an award.
+  @doc false
+  def create_badge_award(creator, user, attrs \\ %{})
 
-  ## Examples
-
-      iex> create_badge_award(%{field: value})
-      {:ok, %Award{}}
-
-      iex> create_badge_award(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_badge_award(creator, user, attrs \\ %{}) do
+  def create_badge_award(%User{} = creator, user, attrs) do
     %Award{awarded_by_id: creator.id, user_id: user.id}
     |> Award.changeset(attrs)
     |> Repo.insert()
   end
 
-  @doc """
-  Updates a badge_award.
+  def create_badge_award(%Actor{} = actor, user, attrs) do
+    create_badge_award(actor.user, user, attrs)
+  end
 
-  ## Examples
-
-      iex> update_badge_award(badge_award, %{field: new_value})
-      {:ok, %Award{}}
-
-      iex> update_badge_award(badge_award, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_badge_award(%Award{} = badge_award, attrs) do
+  # Updates an award.
+  defp update_badge_award(%Award{} = badge_award, attrs) do
     badge_award
     |> Award.changeset(attrs)
     |> Repo.update()
   end
 
-  @doc """
-  Deletes a Award.
-
-  ## Examples
-
-      iex> delete_badge_award(badge_award)
-      {:ok, %Award{}}
-
-      iex> delete_badge_award(badge_award)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_badge_award(%Award{} = badge_award) do
+  # Deletes an award.
+  defp delete_badge_award(%Award{} = badge_award) do
     Repo.delete(badge_award)
   end
 
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking badge_award changes.
-
-  ## Examples
-
-      iex> change_badge_award(badge_award)
-      %Ecto.Changeset{source: %Award{}}
-
-  """
-  def change_badge_award(%Award{} = badge_award) do
+  # Returns an `%Ecto.Changeset{}` for tracking award changes.
+  defp change_badge_award(%Award{} = badge_award) do
     Award.changeset(badge_award, %{})
   end
 
@@ -456,13 +368,19 @@ defmodule Philomena.Badges do
   Loads the user named by the profile `slug` for creating an award, on behalf
   of `actor`.
 
-  Awarding requires the `:create` badge-award permission, so an actor without it
-  is `{:error, :unauthorized}`; a permitted actor naming an unknown slug is
-  `{:error, :not_found}`.
+  ## Examples
 
-  Returns `{:ok, {user, changeset}}`.
+      iex> load_award_for_new(admin, user.slug)
+      {:ok, {%User{}, %Ecto.Changeset{}}}
+
+      iex> load_award_for_new(admin, invalid_slug)
+      {:error, :not_found}
+
+      iex> load_award_for_new(user, user.slug)
+      {:error, :unauthorized}
+
   """
-  @spec load_award_for_new(User.t() | nil, String.t()) ::
+  @spec load_award_for_new(Loader.actor(), String.t()) ::
           {:ok, {User.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
   def load_award_for_new(actor, slug) do
     with {:ok, user} <- load_award_profile(actor, slug) do
@@ -474,15 +392,24 @@ defmodule Philomena.Badges do
   Awards a badge to the user named by the profile `slug`, on behalf of `actor`,
   from `attrs`.
 
-  Awarding requires the `:create` badge-award permission, so an actor without it
-  is `{:error, :unauthorized}`; a permitted actor naming an unknown slug is
-  `{:error, :not_found}`. On success a moderation log attributing the award to
-  `actor` is written.
+  On success a moderation log attributing the award to `actor` is written.
 
-  Returns `{:ok, {user, award}}` on success, or `{:error, {user, changeset}}`
-  when the insert is rejected.
+  ## Examples
+
+      iex> award_badge(admin, user.slug, award_params)
+      {:ok, {%User{}, %Award{}}}
+
+      iex> award_badge(admin, user.slug, invalid_params)
+      {:error, {%User{}, %Ecto.Changeset{}}}
+
+      iex> award_badge(admin, invalid_slug, award_params)
+      {:error, :not_found}
+
+      iex> award_badge(user, user.slug, award_params)
+      {:error, :unauthorized}
+
   """
-  @spec award_badge(User.t() | nil, String.t(), map()) ::
+  @spec award_badge(Loader.actor(), String.t(), map()) ::
           {:ok, {User.t(), Award.t()}}
           | {:error, {User.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
@@ -503,13 +430,22 @@ defmodule Philomena.Badges do
   Loads the award named by `id` under the profile `slug` for editing, on behalf
   of `actor`.
 
-  Awarding requires the `:create` badge-award permission, so an actor without it
-  is `{:error, :unauthorized}`. A non-castable or unknown award id, and (for a
-  permitted actor) an unknown slug, are `{:error, :not_found}`.
+  ## Examples
 
-  Returns `{:ok, {user, award, changeset}}`.
+      iex> load_award_for_edit(admin, user.slug, award_id)
+      {:ok, {%User{}, %Award{}, %Ecto.Changeset{}}}
+
+      iex> load_award_for_edit(admin, invalid_slug, award_id)
+      {:error, :not_found}
+
+      iex> load_award_for_edit(admin, user.slug, invalid_id)
+      {:error, :not_found}
+
+      iex> load_award_for_edit(user, user.slug, award_id)
+      {:error, :unauthorized}
+
   """
-  @spec load_award_for_edit(User.t() | nil, String.t(), String.t()) ::
+  @spec load_award_for_edit(Loader.actor(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Award.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
   def load_award_for_edit(actor, slug, id) do
@@ -522,15 +458,27 @@ defmodule Philomena.Badges do
   Updates the award named by `id` under the profile `slug`, on behalf of
   `actor`, from `attrs`.
 
-  Awarding requires the `:create` badge-award permission, so an actor without it
-  is `{:error, :unauthorized}`. A non-castable or unknown award id, and (for a
-  permitted actor) an unknown slug, are `{:error, :not_found}`. On success a
-  moderation log attributing the change to `actor` is written.
+  On success a moderation log attributing the update to `actor` is written.
 
-  Returns `{:ok, {user, award}}` on success, or
-  `{:error, {user, award, changeset}}` when the update is rejected.
+  ## Examples
+
+      iex> update_badge_award(admin, user.slug, award_id, award_params)
+      {:ok, {%User{}, %Award{}}}
+
+      iex> update_badge_award(admin, user.slug, award_id, invalid_params)
+      {:error, {%User{}, %Award{}, %Ecto.Changeset{}}}
+
+      iex> update_badge_award(admin, invalid_slug, award_id, award_params)
+      {:error, :not_found}
+
+      iex> update_badge_award(admin, user.slug, invalid_id, award_params)
+      {:error, :not_found}
+
+      iex> update_badge_award(user, user.slug, award_id, award_params)
+      {:error, :unauthorized}
+
   """
-  @spec update_badge_award(User.t() | nil, String.t(), String.t(), map()) ::
+  @spec update_badge_award(Loader.actor(), String.t(), Loader.integer_id(), map()) ::
           {:ok, {User.t(), Award.t()}}
           | {:error, {User.t(), Award.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
@@ -551,14 +499,24 @@ defmodule Philomena.Badges do
   Revokes the award named by `id` under the profile `slug`, on behalf of
   `actor`.
 
-  Awarding requires the `:create` badge-award permission, so an actor without it
-  is `{:error, :unauthorized}`. A non-castable or unknown award id, and (for a
-  permitted actor) an unknown slug, are `{:error, :not_found}`. On success a
-  moderation log attributing the removal to `actor` is written.
+  On success a moderation log attributing the removal to `actor` is written.
 
-  Returns `{:ok, {user, award}}`.
+  ## Examples
+
+      iex> revoke_badge_award(admin, user.slug, award_id)
+      {:ok, {%User{}, %Award{}}}
+
+      iex> revoke_badge_award(admin, invalid_slug, award_id)
+      {:error, :not_found}
+
+      iex> revoke_badge_award(admin, user.slug, invalid_id)
+      {:error, :not_found}
+
+      iex> revoke_badge_award(user, user.slug, award_id)
+      {:error, :unauthorized}
+
   """
-  @spec revoke_badge_award(User.t() | nil, String.t(), String.t()) ::
+  @spec revoke_badge_award(Loader.actor(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Award.t()}} | {:error, :unauthorized | :not_found}
   def revoke_badge_award(actor, slug, id) do
     with {:ok, {user, award}} <- load_award(actor, slug, id) do
@@ -580,8 +538,7 @@ defmodule Philomena.Badges do
   end
 
   # Authorizes `actor`, loads the profile user by slug, and loads the award by
-  # id. The award is loaded independently of the profile user, mirroring the two
-  # separate lookups award management has always done.
+  # id. The award is loaded independently of the profile user.
   defp load_award(actor, slug, id) do
     with {:ok, user} <- load_award_profile(actor, slug),
          {:ok, award_id} <- IntegerId.parse(id),
@@ -594,6 +551,7 @@ defmodule Philomena.Badges do
     end
   end
 
+  @spec award_log(Loader.actor(), atom(), User.t(), Award.t()) :: any()
   defp award_log(actor, action, user, award) do
     award = Repo.preload(award, [:badge])
 
