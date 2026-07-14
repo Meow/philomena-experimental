@@ -183,7 +183,7 @@ defmodule Philomena.Adverts do
 
   """
   @spec load_adverts(Loader.actor(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(Advert.t())} | {:error, :unauthorized}
   def load_adverts(actor, pagination) do
     with :ok <- authorize(actor, :index, Advert) do
       adverts =
@@ -352,6 +352,8 @@ defmodule Philomena.Adverts do
     with :ok <- authorize(actor, :index, Advert),
          {:ok, advert} <- authorized_advert(actor, :update, id),
          {:ok, advert} <- update_advert_image(advert, attrs) do
+      # TODO: it would change the log contents but this can realistically just be
+      # folded into advert_log
       ModerationLogs.create_moderation_log(
         actor,
         "Admin.Advert.Image:update",
@@ -365,7 +367,7 @@ defmodule Philomena.Adverts do
 
   # Loads an advert by id and authorizes `action` against it.
   @spec authorized_advert(Loader.actor(), atom(), Loader.integer_id()) ::
-          {:ok, Advert.t()} | {:error, :unauthorized | :not_found}
+          Loader.fetch_and_authorize_result(Advert.t())
   defp authorized_advert(actor, action, id) do
     Loader.fetch_and_authorize(Advert, actor, action, id)
   end

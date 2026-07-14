@@ -22,6 +22,12 @@ defmodule Philomena.Loader do
   @typedoc "Type of acceptable integer ID inputs."
   @type integer_id :: IntegerId.integer_id()
 
+  @typedoc "Generic type of fetch_and_authorize return value."
+  @type fetch_and_authorize_result(t) :: {:ok, t} | {:error, :unauthorized | :not_found}
+
+  @typedoc "Generic type of fetch return value."
+  @type fetch_result(t) :: {:ok, t} | {:error, :not_found}
+
   @doc """
   Loads the `queryable` record named by `id`, applying `preloads`, and authorizes
   `actor` for `action` on it.
@@ -49,8 +55,7 @@ defmodule Philomena.Loader do
           action :: atom(),
           id :: integer_id(),
           preloads :: list()
-        ) ::
-          {:ok, struct()} | {:error, :unauthorized | :not_found}
+        ) :: fetch_and_authorize_result(struct())
   def fetch_and_authorize(queryable, actor, action, id, preloads \\ []) do
     case IntegerId.parse(id) do
       {:ok, id} ->
@@ -95,7 +100,7 @@ defmodule Philomena.Loader do
           id :: integer_id(),
           preloads :: list()
         ) ::
-          {:ok, struct()} | {:error, :not_found}
+          fetch_result(struct())
   def fetch(queryable, id, preloads \\ []) do
     case IntegerId.parse(id) do
       {:ok, id} ->
