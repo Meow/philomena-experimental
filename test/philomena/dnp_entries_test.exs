@@ -61,7 +61,7 @@ defmodule Philomena.DnpEntriesTest do
       entry = dnp_entry_fixture(user, tag)
 
       assert %DnpListing{status_column: true, dnp_entries: page} =
-               DnpEntries.load_dnp_listing(user, %{"mine" => "1"}, @pagination)
+               DnpEntries.load_dnp_listing(actor(user), %{"mine" => "1"}, @pagination)
 
       assert entry.id in Enum.map(page.entries, & &1.id)
     end
@@ -74,7 +74,7 @@ defmodule Philomena.DnpEntriesTest do
       requested = dnp_entry_fixture(other, other_tag)
 
       assert %DnpListing{status_column: false, dnp_entries: page} =
-               DnpEntries.load_dnp_listing(nil, %{}, @pagination)
+               DnpEntries.load_dnp_listing(actor(), %{}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
       assert listed.id in ids
@@ -85,13 +85,13 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
 
       assert %DnpListing{linked_tags: tags} =
-               DnpEntries.load_dnp_listing(user, %{}, @pagination)
+               DnpEntries.load_dnp_listing(actor(user), %{}, @pagination)
 
       assert tag.id in Enum.map(tags, & &1.id)
     end
 
     test "an anonymous viewer has no linked tags" do
-      assert %DnpListing{linked_tags: []} = DnpEntries.load_dnp_listing(nil, %{}, @pagination)
+      assert %DnpListing{linked_tags: []} = DnpEntries.load_dnp_listing(actor(), %{}, @pagination)
     end
   end
 
@@ -100,7 +100,7 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag, %{state: "listed"})
 
-      assert {:ok, loaded} = DnpEntries.load_dnp_entry(nil, to_string(entry.id))
+      assert {:ok, loaded} = DnpEntries.load_dnp_entry(actor(), to_string(entry.id))
       assert loaded.id == entry.id
       refute match?(%Ecto.Association.NotLoaded{}, loaded.tag)
     end
@@ -109,7 +109,7 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert {:ok, loaded} = DnpEntries.load_dnp_entry(user, to_string(entry.id))
+      assert {:ok, loaded} = DnpEntries.load_dnp_entry(actor(user), to_string(entry.id))
       assert loaded.id == entry.id
     end
 
@@ -117,27 +117,27 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.load_dnp_entry(confirmed_user_fixture(), to_string(entry.id)) ==
+      assert DnpEntries.load_dnp_entry(actor(confirmed_user_fixture()), to_string(entry.id)) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a plain user and a moderator, not-found for an admin" do
-      assert DnpEntries.load_dnp_entry(confirmed_user_fixture(), "2147483647") ==
+      assert DnpEntries.load_dnp_entry(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert DnpEntries.load_dnp_entry(moderator_user_fixture(), "2147483647") ==
+      assert DnpEntries.load_dnp_entry(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert DnpEntries.load_dnp_entry(admin_user_fixture(), "2147483647") ==
+      assert DnpEntries.load_dnp_entry(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is unauthorized for an anonymous viewer" do
-      assert DnpEntries.load_dnp_entry(nil, "2147483647") == {:error, :unauthorized}
+      assert DnpEntries.load_dnp_entry(actor(), "2147483647") == {:error, :unauthorized}
     end
 
     test "a non-integer id is not-found" do
-      assert DnpEntries.load_dnp_entry(nil, "not-a-number") == {:error, :not_found}
+      assert DnpEntries.load_dnp_entry(actor(), "not-a-number") == {:error, :not_found}
     end
   end
 
@@ -154,7 +154,7 @@ defmodule Philomena.DnpEntriesTest do
 
       # The renderer zips each note with its rendered body into a {note, body}
       # tuple, so the identity renderer pairs each note with itself.
-      notes = DnpEntries.mod_notes(moderator_user_fixture(), entry, & &1)
+      notes = DnpEntries.mod_notes(actor(moderator_user_fixture()), entry, & &1)
       assert is_list(notes)
       assert note.id in Enum.map(notes, fn {loaded, _body} -> loaded.id end)
     end
@@ -163,21 +163,21 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert is_list(DnpEntries.mod_notes(assistant_user_fixture(), entry, & &1))
+      assert is_list(DnpEntries.mod_notes(actor(assistant_user_fixture()), entry, & &1))
     end
 
     test "a regular user gets nil" do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.mod_notes(confirmed_user_fixture(), entry, & &1) == nil
+      assert DnpEntries.mod_notes(actor(confirmed_user_fixture()), entry, & &1) == nil
     end
 
     test "an anonymous viewer gets nil" do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.mod_notes(nil, entry, & &1) == nil
+      assert DnpEntries.mod_notes(actor(), entry, & &1) == nil
     end
   end
 
@@ -269,7 +269,7 @@ defmodule Philomena.DnpEntriesTest do
 
       assert {:ok, %{dnp_entry: loaded, changeset: %Ecto.Changeset{}, selectable_tags: [_ | _]}} =
                DnpEntries.load_dnp_entry_for_edit(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  to_string(entry.id),
                  %{"tag_id" => to_string(tag.id)}
                )
@@ -281,7 +281,7 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.load_dnp_entry_for_edit(user, to_string(entry.id), %{
+      assert DnpEntries.load_dnp_entry_for_edit(actor(user), to_string(entry.id), %{
                "tag_id" => to_string(tag.id)
              }) == {:error, :unauthorized}
     end
@@ -289,9 +289,13 @@ defmodule Philomena.DnpEntriesTest do
     test "a non-integer id is not-found" do
       tag = artist_tag()
 
-      assert DnpEntries.load_dnp_entry_for_edit(moderator_user_fixture(), "not-a-number", %{
-               "tag_id" => to_string(tag.id)
-             }) == {:error, :not_found}
+      assert DnpEntries.load_dnp_entry_for_edit(
+               actor(moderator_user_fixture()),
+               "not-a-number",
+               %{
+                 "tag_id" => to_string(tag.id)
+               }
+             ) == {:error, :not_found}
     end
   end
 
@@ -301,10 +305,14 @@ defmodule Philomena.DnpEntriesTest do
       entry = dnp_entry_fixture(user, tag)
 
       assert {:ok, %DnpEntry{}} =
-               DnpEntries.update_dnp_entry(moderator_user_fixture(), to_string(entry.id), %{
-                 "tag_id" => to_string(tag.id),
-                 "dnp_entry" => dnp_entry_attrs(tag, %{"reason" => "Updated reason"})
-               })
+               DnpEntries.update_dnp_entry(
+                 actor(moderator_user_fixture()),
+                 to_string(entry.id),
+                 %{
+                   "tag_id" => to_string(tag.id),
+                   "dnp_entry" => dnp_entry_attrs(tag, %{"reason" => "Updated reason"})
+                 }
+               )
 
       assert DnpEntries.get_dnp_entry!(entry.id).reason == "Updated reason"
     end
@@ -319,10 +327,14 @@ defmodule Philomena.DnpEntriesTest do
                 changeset: %Ecto.Changeset{} = changeset,
                 selectable_tags: [_ | _]
               }} =
-               DnpEntries.update_dnp_entry(moderator_user_fixture(), to_string(entry.id), %{
-                 "tag_id" => to_string(tag.id),
-                 "dnp_entry" => dnp_entry_attrs(tag, %{"reason" => ""})
-               })
+               DnpEntries.update_dnp_entry(
+                 actor(moderator_user_fixture()),
+                 to_string(entry.id),
+                 %{
+                   "tag_id" => to_string(tag.id),
+                   "dnp_entry" => dnp_entry_attrs(tag, %{"reason" => ""})
+                 }
+               )
 
       refute changeset.valid?
     end
@@ -331,7 +343,7 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.update_dnp_entry(user, to_string(entry.id), %{
+      assert DnpEntries.update_dnp_entry(actor(user), to_string(entry.id), %{
                "tag_id" => to_string(tag.id),
                "dnp_entry" => dnp_entry_attrs(tag)
              }) == {:error, :unauthorized}
@@ -340,7 +352,7 @@ defmodule Philomena.DnpEntriesTest do
     test "a non-integer id is not-found" do
       tag = artist_tag()
 
-      assert DnpEntries.update_dnp_entry(moderator_user_fixture(), "not-a-number", %{
+      assert DnpEntries.update_dnp_entry(actor(moderator_user_fixture()), "not-a-number", %{
                "tag_id" => to_string(tag.id),
                "dnp_entry" => dnp_entry_attrs(tag)
              }) == {:error, :not_found}
@@ -376,18 +388,19 @@ defmodule Philomena.DnpEntriesTest do
 
   describe "load_admin_dnp_entries/3" do
     test "an anonymous viewer is unauthorized" do
-      assert DnpEntries.load_admin_dnp_entries(nil, %{}, @pagination) == {:error, :unauthorized}
+      assert DnpEntries.load_admin_dnp_entries(actor(), %{}, @pagination) ==
+               {:error, :unauthorized}
     end
 
     test "a regular user is unauthorized" do
-      assert DnpEntries.load_admin_dnp_entries(confirmed_user_fixture(), %{}, @pagination) ==
+      assert DnpEntries.load_admin_dnp_entries(actor(confirmed_user_fixture()), %{}, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "a moderator and an admin are authorized" do
-      for actor <- [moderator_user_fixture(), admin_user_fixture()] do
+      for user <- [moderator_user_fixture(), admin_user_fixture()] do
         assert {:ok, %Scrivener.Page{}} =
-                 DnpEntries.load_admin_dnp_entries(actor, %{}, @pagination)
+                 DnpEntries.load_admin_dnp_entries(actor(user), %{}, @pagination)
       end
     end
 
@@ -399,7 +412,11 @@ defmodule Philomena.DnpEntriesTest do
       listed = dnp_entry_fixture(other, other_tag, %{state: "listed"})
 
       assert {:ok, page} =
-               DnpEntries.load_admin_dnp_entries(moderator_user_fixture(), %{}, @pagination)
+               DnpEntries.load_admin_dnp_entries(
+                 actor(moderator_user_fixture()),
+                 %{},
+                 @pagination
+               )
 
       ids = Enum.map(page.entries, & &1.id)
       assert requested.id in ids
@@ -415,7 +432,7 @@ defmodule Philomena.DnpEntriesTest do
 
       assert {:ok, page} =
                DnpEntries.load_admin_dnp_entries(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  %{"states" => ["listed"]},
                  @pagination
                )
@@ -434,7 +451,7 @@ defmodule Philomena.DnpEntriesTest do
 
       assert {:ok, page} =
                DnpEntries.load_admin_dnp_entries(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  %{"eq" => tag.name},
                  @pagination
                )
@@ -452,7 +469,11 @@ defmodule Philomena.DnpEntriesTest do
       moderator = moderator_user_fixture()
 
       assert {:ok, %DnpEntry{aasm_state: "acknowledged"} = transitioned} =
-               DnpEntries.transition_dnp_entry(moderator, to_string(entry.id), "acknowledged")
+               DnpEntries.transition_dnp_entry(
+                 actor(moderator),
+                 to_string(entry.id),
+                 "acknowledged"
+               )
 
       assert transitioned.id == entry.id
 
@@ -469,7 +490,7 @@ defmodule Philomena.DnpEntriesTest do
 
       assert {:ok, %DnpEntry{aasm_state: "rescinded"}} =
                DnpEntries.transition_dnp_entry(
-                 admin_user_fixture(),
+                 actor(admin_user_fixture()),
                  to_string(entry.id),
                  "rescinded"
                )
@@ -479,7 +500,7 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.transition_dnp_entry(nil, to_string(entry.id), "acknowledged") ==
+      assert DnpEntries.transition_dnp_entry(actor(), to_string(entry.id), "acknowledged") ==
                {:error, :unauthorized}
 
       assert Repo.aggregate(ModerationLog, :count) == 0
@@ -490,7 +511,7 @@ defmodule Philomena.DnpEntriesTest do
       entry = dnp_entry_fixture(user, tag)
 
       assert DnpEntries.transition_dnp_entry(
-               confirmed_user_fixture(),
+               actor(confirmed_user_fixture()),
                to_string(entry.id),
                "acknowledged"
              ) == {:error, :unauthorized}
@@ -504,7 +525,7 @@ defmodule Philomena.DnpEntriesTest do
 
       assert {:error, %Ecto.Changeset{} = changeset} =
                DnpEntries.transition_dnp_entry(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  to_string(entry.id),
                  "not-a-state"
                )
@@ -515,7 +536,7 @@ defmodule Philomena.DnpEntriesTest do
 
     test "an unknown well-formed id is not-found for an authorized actor" do
       assert DnpEntries.transition_dnp_entry(
-               moderator_user_fixture(),
+               actor(moderator_user_fixture()),
                "2147483647",
                "acknowledged"
              ) ==
@@ -524,7 +545,7 @@ defmodule Philomena.DnpEntriesTest do
 
     test "a non-integer id is not-found for an authorized actor" do
       assert DnpEntries.transition_dnp_entry(
-               moderator_user_fixture(),
+               actor(moderator_user_fixture()),
                "not-a-number",
                "acknowledged"
              ) == {:error, :not_found}

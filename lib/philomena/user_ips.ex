@@ -8,13 +8,13 @@ defmodule Philomena.UserIps do
 
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Bans
   alias Philomena.UserIps.UserIp
   alias Philomena.UserIps.IpProfile
-  alias Philomena.Users.User
 
   @doc """
-  Assembles the IP profile page for `user` (the current viewer) from the raw
+  Assembles the IP profile page for `actor` (the current viewer) from the raw
   address string `ip`.
 
   The profile is staff-only: a viewer who may not see IP addresses gets
@@ -24,10 +24,10 @@ defmodule Philomena.UserIps do
   Returns `{:ok, %IpProfile{}}` carrying the users seen on the address and the
   subnet bans covering it.
   """
-  @spec load_ip_profile(User.t() | nil, String.t()) ::
+  @spec load_ip_profile(Actor.t(), String.t()) ::
           {:ok, IpProfile.t()} | {:error, :unauthorized | :not_found}
-  def load_ip_profile(user, ip) do
-    with :ok <- authorize(user, :show, :ip_address),
+  def load_ip_profile(%Actor{} = actor, ip) do
+    with :ok <- authorize(actor, :show, :ip_address),
          {:ok, ip} <- cast_ip(ip) do
       {:ok,
        %IpProfile{

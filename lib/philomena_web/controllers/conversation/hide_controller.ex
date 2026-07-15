@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Conversation.HideController do
 
   def create(conn, %{"conversation_id" => conversation_id}) do
     with {:ok, _conversation} <-
-           Conversations.set_conversation_hidden(conn.assigns.current_user, conversation_id) do
+           Conversations.set_conversation_hidden(conn.assigns.actor, conversation_id) do
       conn
       |> put_flash(:info, "Conversation hidden.")
       |> redirect(to: ~p"/conversations")
@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Conversation.HideController do
   def delete(conn, %{"conversation_id" => conversation_id}) do
     with {:ok, conversation} <-
            Conversations.set_conversation_hidden(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              conversation_id,
              false
            ) do

@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Image.SourceChangeController do
   def index(conn, params) do
     with {:ok, {image, source_changes}} <-
            SourceChanges.image_source_changes(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              params["image_id"],
              conn.assigns.scrivener
            ) do

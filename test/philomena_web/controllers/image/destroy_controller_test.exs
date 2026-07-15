@@ -98,7 +98,7 @@ defmodule PhilomenaWeb.Image.DestroyControllerTest do
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central
-    # IntegerId guard before Canary authorizes.
+    # IntegerId guard before authorization runs.
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do
       conn = log_in_role_moderator(conn, "Image")
 

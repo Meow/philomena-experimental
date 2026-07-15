@@ -6,6 +6,7 @@ defmodule Philomena.Notifications do
   import Ecto.Query, warn: false
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Channels
   alias Philomena.Forums
   alias Philomena.Galleries
@@ -52,7 +53,7 @@ defmodule Philomena.Notifications do
       ]
 
   """
-  def unread_notifications_for_user(user, pagination) do
+  def unread_notifications_for_user(%Actor{user: user}, pagination) do
     Category.unread_notifications_for_user(user, pagination)
   end
 
@@ -65,7 +66,7 @@ defmodule Philomena.Notifications do
       [%ImageCommentNotification{...}]
 
   """
-  def unread_notifications_for_user_and_category(user, category, pagination) do
+  def unread_notifications_for_user_and_category(%Actor{user: user}, category, pagination) do
     Category.unread_notifications_for_user_and_category(user, category, pagination)
   end
 

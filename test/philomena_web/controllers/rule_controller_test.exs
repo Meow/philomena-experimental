@@ -112,7 +112,7 @@ defmodule PhilomenaWeb.RuleControllerTest do
     test "redirects to /rules for a hidden rule as anonymous", %{conn: conn} do
       rule = rule_fixture(%{name: "Test Hidden Rule", hidden: true})
 
-      # NOTE: hidden/internal rules pass Canary (any %Rule{} is :show-able)
+      # NOTE: hidden/internal rules pass authorization (any %Rule{} is :show-able)
       # and are caught by the controller's own check_permission plug, which
       # redirects to /rules - not to / like most unauthorized pages.
       conn = get(conn, ~p"/rules/#{rule}")

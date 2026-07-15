@@ -17,7 +17,6 @@ defmodule Philomena.Filters do
   alias Philomena.Schema.TagList
   alias Philomena.Tags.Tag
   alias Philomena.Users
-  alias Philomena.Users.User
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
 
@@ -60,8 +59,8 @@ defmodule Philomena.Filters do
       {[%Filter{}, ...], [%Filter{}, ...]}
 
   """
-  @spec index_filters(User.t() | nil) :: {[Filter.t()], [Filter.t()]}
-  def index_filters(user) do
+  @spec index_filters(Actor.t()) :: {[Filter.t()], [Filter.t()]}
+  def index_filters(%Actor{user: user}) do
     my_filters =
       if user do
         user_filters_query(user)
@@ -99,10 +98,10 @@ defmodule Philomena.Filters do
       {:error, :not_found}
 
   """
-  @spec load_filter(User.t() | nil, any()) ::
+  @spec load_filter(Actor.t(), Loader.integer_id()) ::
           {:ok, Filter.t()} | {:error, :not_found | :unauthorized}
-  def load_filter(user, id) do
-    load_and_authorize_filter(user, id, :show, [:user])
+  def load_filter(%Actor{} = actor, id) do
+    load_and_authorize_filter(actor, id, :show, [:user])
   end
 
   @doc """
@@ -134,8 +133,8 @@ defmodule Philomena.Filters do
       %Scrivener.Page{}
 
   """
-  @spec user_filters(User.t(), map()) :: Scrivener.Page.t()
-  def user_filters(user, pagination) do
+  @spec user_filters(Actor.t(), Repo.pagination_params()) :: Scrivener.Page.t()
+  def user_filters(%Actor{user: user}, pagination) do
     user_filters_query(user)
     |> order_by(asc: :id)
     |> Repo.paginate(pagination)
@@ -166,9 +165,9 @@ defmodule Philomena.Filters do
       {:error, "There was an error parsing your query."}
 
   """
-  @spec search_filters(User.t() | nil, String.t(), map()) ::
+  @spec search_filters(Actor.t(), String.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_filters(user, query_string, pagination) do
+  def search_filters(%Actor{user: user}, query_string, pagination) do
     with {:ok, query} <- Query.compile(query_string, user: user) do
       filters =
         Filter
@@ -220,10 +219,10 @@ defmodule Philomena.Filters do
       {:ok, %FilterPage{}}
 
   """
-  @spec load_filter_page(User.t() | nil, any()) ::
+  @spec load_filter_page(Actor.t(), Loader.integer_id()) ::
           {:ok, FilterPage.t()} | {:error, :not_found | :unauthorized}
-  def load_filter_page(user, id) do
-    with {:ok, filter} <- load_filter(user, id) do
+  def load_filter_page(%Actor{} = actor, id) do
+    with {:ok, filter} <- load_filter(actor, id) do
       {:ok,
        %FilterPage{
          filter: filter,
@@ -259,11 +258,11 @@ defmodule Philomena.Filters do
       {:ok, %Ecto.Changeset{}}
 
   """
-  @spec new_filter(User.t() | nil, any()) ::
+  @spec new_filter(Actor.t(), any()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_filter(user, based_on) do
-    with :ok <- authorize(user, :new, Filter) do
-      {:ok, change_filter(base_filter(user, based_on))}
+  def new_filter(%Actor{} = actor, based_on) do
+    with :ok <- authorize(actor, :new, Filter) do
+      {:ok, change_filter(base_filter(actor.user, based_on))}
     end
   end
 
@@ -305,10 +304,10 @@ defmodule Philomena.Filters do
       {:ok, {%Filter{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_filter_for_edit(User.t() | nil, any()) ::
+  @spec load_filter_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Filter.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_filter_for_edit(user, id) do
-    with {:ok, filter} <- load_and_authorize_filter(user, id, :edit) do
+  def load_filter_for_edit(%Actor{} = actor, id) do
+    with {:ok, filter} <- load_and_authorize_filter(actor, id, :edit) do
       filter =
         filter
         |> TagList.assign_tag_list(:spoilered_tag_ids, :spoilered_tag_list)
@@ -337,9 +336,9 @@ defmodule Philomena.Filters do
       {:ok, %Filter{}}
 
   """
-  @spec switch_current_filter(User.t() | nil, any()) ::
+  @spec switch_current_filter(Actor.t(), any()) ::
           {:ok, Filter.t()} | {:error, :not_found}
-  def switch_current_filter(user, id) do
+  def switch_current_filter(%Actor{user: user}, id) do
     case filter_for_switch(id) do
       nil ->
         {:error, :not_found}
@@ -410,11 +409,11 @@ defmodule Philomena.Filters do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec create_filter(User.t() | nil, map()) ::
+  @spec create_filter(Actor.t(), map()) ::
           {:ok, Filter.t()} | {:error, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def create_filter(user, attrs \\ %{}) do
-    with :ok <- authorize(user, :create, Filter) do
-      %Filter{user_id: user.id}
+  def create_filter(%Actor{} = actor, attrs \\ %{}) do
+    with :ok <- authorize(actor, :create, Filter) do
+      %Filter{user_id: actor.user.id}
       |> Filter.creation_changeset(attrs)
       |> Repo.insert()
       |> reindex_after_update()
@@ -457,12 +456,12 @@ defmodule Philomena.Filters do
       {:ok, %Filter{}}
 
   """
-  @spec update_filter(User.t() | nil, any(), map()) ::
+  @spec update_filter(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized}
-  def update_filter(user, id, attrs) do
-    with {:ok, filter} <- load_and_authorize_filter(user, id, :update) do
+  def update_filter(%Actor{} = actor, id, attrs) do
+    with {:ok, filter} <- load_and_authorize_filter(actor, id, :update) do
       update_filter(filter, attrs)
     end
   end
@@ -502,12 +501,12 @@ defmodule Philomena.Filters do
       {:ok, %Filter{}}
 
   """
-  @spec make_filter_public(User.t() | nil, any()) ::
+  @spec make_filter_public(Actor.t(), Loader.integer_id()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized}
-  def make_filter_public(user, id) do
-    with {:ok, filter} <- load_and_authorize_filter(user, id, :edit) do
+  def make_filter_public(%Actor{} = actor, id) do
+    with {:ok, filter} <- load_and_authorize_filter(actor, id, :edit) do
       make_filter_public(filter)
     end
   end
@@ -558,12 +557,12 @@ defmodule Philomena.Filters do
       {:ok, %Filter{}}
 
   """
-  @spec delete_filter(User.t() | nil, any()) ::
+  @spec delete_filter(Actor.t(), Loader.integer_id()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized}
-  def delete_filter(user, id) do
-    with {:ok, filter} <- load_and_authorize_filter(user, id, :delete) do
+  def delete_filter(%Actor{} = actor, id) do
+    with {:ok, filter} <- load_and_authorize_filter(actor, id, :delete) do
       delete_filter(filter)
     end
   end
@@ -786,8 +785,8 @@ defmodule Philomena.Filters do
   # Parses the id, loads the filter, and authorizes `action` on it. A
   # non-castable id is not-found; a well-formed unknown id is authorized as a
   # nil load, so an admin sees not-found and everyone else unauthorized.
-  defp load_and_authorize_filter(user, id, action, preloads \\ []) do
-    Loader.fetch_and_authorize(Filter, user, action, id, preloads)
+  defp load_and_authorize_filter(actor, id, action, preloads \\ []) do
+    Loader.fetch_and_authorize(Filter, actor, action, id, preloads)
   end
 
   defp reindex_after_update(result) do

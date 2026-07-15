@@ -392,22 +392,25 @@ defmodule Philomena.GalleriesTest do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(confirmed_user_fixture())
 
-      assert {:ok, %Gallery{} = returned} = Galleries.mark_gallery_read(user, "#{gallery.id}")
+      assert {:ok, %Gallery{} = returned} =
+               Galleries.mark_gallery_read(actor(user), "#{gallery.id}")
+
       assert returned.id == gallery.id
     end
 
     # No authorization runs here, so an unknown id is not-found for everyone,
     # admins included.
     test "an unknown id is not-found for a user and for an admin" do
-      assert Galleries.mark_gallery_read(confirmed_user_fixture(), "999999999") ==
+      assert Galleries.mark_gallery_read(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
 
-      assert Galleries.mark_gallery_read(admin_user_fixture(), "999999999") ==
+      assert Galleries.mark_gallery_read(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.mark_gallery_read(confirmed_user_fixture(), "abc") == {:error, :not_found}
+      assert Galleries.mark_gallery_read(actor(confirmed_user_fixture()), "abc") ==
+               {:error, :not_found}
     end
   end
 
@@ -416,10 +419,10 @@ defmodule Philomena.GalleriesTest do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(confirmed_user_fixture())
 
-      assert {:ok, %Gallery{}} = Galleries.subscribe_gallery(user, "#{gallery.id}")
+      assert {:ok, %Gallery{}} = Galleries.subscribe_gallery(actor(user), "#{gallery.id}")
       assert Galleries.subscribed?(gallery, user)
 
-      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(user, "#{gallery.id}")
+      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(actor(user), "#{gallery.id}")
       refute Galleries.subscribed?(gallery, user)
     end
 
@@ -427,17 +430,18 @@ defmodule Philomena.GalleriesTest do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(confirmed_user_fixture())
 
-      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(user, "#{gallery.id}")
+      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(actor(user), "#{gallery.id}")
       refute Galleries.subscribed?(gallery, user)
     end
 
     test "subscribing to an unknown id is unauthorized for a user" do
-      assert Galleries.subscribe_gallery(confirmed_user_fixture(), "999999999") ==
+      assert Galleries.subscribe_gallery(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.subscribe_gallery(confirmed_user_fixture(), "abc") == {:error, :not_found}
+      assert Galleries.subscribe_gallery(actor(confirmed_user_fixture()), "abc") ==
+               {:error, :not_found}
     end
   end
 

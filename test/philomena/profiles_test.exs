@@ -18,6 +18,7 @@ defmodule Philomena.ProfilesTest do
 
   @moduletag :search
 
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
   import Philomena.BansFixtures
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
@@ -163,18 +164,19 @@ defmodule Philomena.ProfilesTest do
       user_fingerprint_fixture(user, "metadatafp")
 
       assert %{filter: _filter, last_ip: last_ip, last_fp: last_fp} =
-               Profiles.admin_metadata(moderator_user_fixture(), user)
+               Profiles.admin_metadata(actor(moderator_user_fixture()), user)
 
       assert to_string(last_ip.ip) == "203.0.113.55"
       assert last_fp.fingerprint == "metadatafp"
     end
 
     test "a regular user sees no metadata" do
-      assert Profiles.admin_metadata(confirmed_user_fixture(), confirmed_user_fixture()) == nil
+      assert Profiles.admin_metadata(actor(confirmed_user_fixture()), confirmed_user_fixture()) ==
+               nil
     end
 
     test "an anonymous viewer sees no metadata" do
-      assert Profiles.admin_metadata(nil, confirmed_user_fixture()) == nil
+      assert Profiles.admin_metadata(actor(), confirmed_user_fixture()) == nil
     end
   end
 
@@ -188,19 +190,23 @@ defmodule Philomena.ProfilesTest do
       user = confirmed_user_fixture()
 
       {:ok, note} =
-        Philomena.ModNotes.create_mod_note(moderator, %{
+        Philomena.ModNotes.create_mod_note(actor(moderator), %{
           "notable_type" => "User",
           "notable_id" => user.id,
           "body" => "Watching this account"
         })
 
-      assert [{loaded_note, body}] = Profiles.mod_notes(moderator, user, renderer())
+      assert [{loaded_note, body}] = Profiles.mod_notes(actor(moderator), user, renderer())
       assert loaded_note.id == note.id
       assert body == "Watching this account"
     end
 
     test "a regular user sees no notes" do
-      assert Profiles.mod_notes(confirmed_user_fixture(), confirmed_user_fixture(), renderer()) ==
+      assert Profiles.mod_notes(
+               actor(confirmed_user_fixture()),
+               confirmed_user_fixture(),
+               renderer()
+             ) ==
                nil
     end
   end
@@ -211,12 +217,13 @@ defmodule Philomena.ProfilesTest do
       older = Repo.insert!(%UserNameChange{user_id: user.id, name: "oldname"})
       newer = Repo.insert!(%UserNameChange{user_id: user.id, name: "newername"})
 
-      assert changes = Profiles.name_changes(moderator_user_fixture(), user)
+      assert changes = Profiles.name_changes(actor(moderator_user_fixture()), user)
       assert Enum.map(changes, & &1.id) == [newer.id, older.id]
     end
 
     test "a regular user sees no name changes" do
-      assert Profiles.name_changes(confirmed_user_fixture(), confirmed_user_fixture()) == nil
+      assert Profiles.name_changes(actor(confirmed_user_fixture()), confirmed_user_fixture()) ==
+               nil
     end
   end
 
@@ -228,7 +235,7 @@ defmodule Philomena.ProfilesTest do
       user_ip_fixture(alias_user, "203.0.113.40")
 
       assert {:ok, %{user: loaded, user_ips: user_ips, other_users: other_users}} =
-               Profiles.load_ip_history(moderator_user_fixture(), subject.slug)
+               Profiles.load_ip_history(actor(moderator_user_fixture()), subject.slug)
 
       assert loaded.id == subject.id
       assert length(user_ips) == 1
@@ -240,22 +247,25 @@ defmodule Philomena.ProfilesTest do
     end
 
     test "a regular user may not load IP history" do
-      assert Profiles.load_ip_history(confirmed_user_fixture(), confirmed_user_fixture().slug) ==
+      assert Profiles.load_ip_history(
+               actor(confirmed_user_fixture()),
+               confirmed_user_fixture().slug
+             ) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous viewer may not load IP history" do
-      assert Profiles.load_ip_history(nil, confirmed_user_fixture().slug) ==
+      assert Profiles.load_ip_history(actor(), confirmed_user_fixture().slug) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is unauthorized for a moderator, not-found for an admin" do
       # A moderator's :show_details grant is over %User{} only, so it does not
       # cover the nil load an unknown slug produces; an admin's blanket grant does.
-      assert Profiles.load_ip_history(moderator_user_fixture(), "no-such-user") ==
+      assert Profiles.load_ip_history(actor(moderator_user_fixture()), "no-such-user") ==
                {:error, :unauthorized}
 
-      assert Profiles.load_ip_history(admin_user_fixture(), "no-such-user") ==
+      assert Profiles.load_ip_history(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -268,7 +278,7 @@ defmodule Philomena.ProfilesTest do
       user_fingerprint_fixture(alias_user, "sharedfp")
 
       assert {:ok, %{user: loaded, user_fps: user_fps, other_users: other_users}} =
-               Profiles.load_fp_history(moderator_user_fixture(), subject.slug)
+               Profiles.load_fp_history(actor(moderator_user_fixture()), subject.slug)
 
       assert loaded.id == subject.id
       assert length(user_fps) == 1
@@ -279,15 +289,18 @@ defmodule Philomena.ProfilesTest do
     end
 
     test "a regular user may not load fingerprint history" do
-      assert Profiles.load_fp_history(confirmed_user_fixture(), confirmed_user_fixture().slug) ==
+      assert Profiles.load_fp_history(
+               actor(confirmed_user_fixture()),
+               confirmed_user_fixture().slug
+             ) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is unauthorized for a moderator, not-found for an admin" do
-      assert Profiles.load_fp_history(moderator_user_fixture(), "no-such-user") ==
+      assert Profiles.load_fp_history(actor(moderator_user_fixture()), "no-such-user") ==
                {:error, :unauthorized}
 
-      assert Profiles.load_fp_history(admin_user_fixture(), "no-such-user") ==
+      assert Profiles.load_fp_history(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Conversation.ReadController do
 
   def create(conn, %{"conversation_id" => conversation_id}) do
     with {:ok, conversation} <-
-           Conversations.set_conversation_read(conn.assigns.current_user, conversation_id) do
+           Conversations.set_conversation_read(conn.assigns.actor, conversation_id) do
       conn
       |> put_flash(:info, "Conversation marked as read.")
       |> redirect(to: ~p"/conversations/#{conversation}")
@@ -16,7 +16,7 @@ defmodule PhilomenaWeb.Conversation.ReadController do
 
   def delete(conn, %{"conversation_id" => conversation_id}) do
     with {:ok, _conversation} <-
-           Conversations.set_conversation_read(conn.assigns.current_user, conversation_id, false) do
+           Conversations.set_conversation_read(conn.assigns.actor, conversation_id, false) do
       conn
       |> put_flash(:info, "Conversation marked as unread.")
       |> redirect(to: ~p"/conversations")

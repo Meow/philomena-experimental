@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Image.RelatedController do
   def index(conn, params) do
     with {:ok, {image, images}} <-
            Images.related_images(ImageScope.search_scope(conn), params["image_id"]) do
-      interactions = Interactions.user_interactions(images, conn.assigns.current_user)
+      interactions = Interactions.user_interactions(images, conn.assigns.actor)
 
       render(conn, "index.html",
         title: "##{image.id} - Related Images",

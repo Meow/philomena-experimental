@@ -83,8 +83,8 @@ defmodule PhilomenaWeb.Image.TamperControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Vote removed."
     end
 
-    # Failure path: an unknown user_id is loaded with load_resource, whose
-    # not-found handler fires here and redirects rather than crashing.
+    # Failure path: an unknown user_id loads nil and resolves to not_found here,
+    # redirecting rather than crashing.
     test "for an unknown user_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
@@ -98,7 +98,7 @@ defmodule PhilomenaWeb.Image.TamperControllerTest do
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central
-    # IntegerId guard before Canary authorizes.
+    # IntegerId guard before authorization runs.
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       voter = confirmed_user_fixture()

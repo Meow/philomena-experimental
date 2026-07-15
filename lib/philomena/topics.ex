@@ -26,8 +26,11 @@ defmodule Philomena.Topics do
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.IntegerId
+  alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
   alias Philomena.Users.User
+
+  @topic_create_window 300
 
   use Philomena.Subscriptions,
     on_delete: :clear_topic_notification,
@@ -56,13 +59,13 @@ defmodule Philomena.Topics do
       {:error, :not_found}
 
   """
-  @spec subscribe(User.t() | nil, String.t(), String.t()) ::
+  @spec subscribe(Actor.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def subscribe(actor, forum_slug, topic_slug) do
+  def subscribe(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
-         {:ok, _subscription} <- create_subscription(topic, actor) do
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
+         {:ok, _subscription} <- create_subscription(topic, actor.user) do
       {:ok, {forum, topic}}
     end
   end
@@ -85,13 +88,13 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unsubscribe(User.t() | nil, String.t(), String.t()) ::
+  @spec unsubscribe(Actor.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t()}} | {:error, :unauthorized | :not_found}
-  def unsubscribe(actor, forum_slug, topic_slug) do
+  def unsubscribe(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: true) do
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: true) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
-      {:ok, _subscription} = delete_subscription(topic, actor)
+      {:ok, _subscription} = delete_subscription(topic, actor.user)
       {:ok, {forum, topic}}
     end
   end
@@ -182,18 +185,18 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> mark_topic_read(user, "dis", "some-topic")
+      iex> mark_topic_read(actor, "dis", "some-topic")
       {:ok, %Topic{}}
 
-      iex> mark_topic_read(user, "dis", "nonexistent")
+      iex> mark_topic_read(actor, "dis", "nonexistent")
       {:error, :not_found}
 
   """
-  @spec mark_topic_read(User.t() | nil, String.t(), String.t()) ::
+  @spec mark_topic_read(Actor.t(), String.t(), String.t()) ::
           {:ok, Topic.t()} | {:error, :not_found}
-  def mark_topic_read(actor, forum_slug, topic_slug) do
-    with {:ok, topic} <- load_forum_topic_for_read(actor, forum_slug, topic_slug) do
-      clear_topic_notification(topic, actor)
+  def mark_topic_read(%Actor{} = actor, forum_slug, topic_slug) do
+    with {:ok, topic} <- load_forum_topic_for_read(actor.user, forum_slug, topic_slug) do
+      clear_topic_notification(topic, actor.user)
       {:ok, topic}
     end
   end
@@ -213,8 +216,9 @@ defmodule Philomena.Topics do
 
   @doc """
   Assembles the `TopicPage` for the topic named by `topic_slug` within the
-  forum named by `forum_slug`, on behalf of `actor` (a user, or `nil` for an
-  anonymous visitor).
+  forum named by `forum_slug`, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
 
   The forum is loaded by short name and authorized for `:show`, and the topic is
   loaded by slug with hidden topics visible only to actors who may `:show` them.
@@ -242,14 +246,20 @@ defmodule Philomena.Topics do
       {:ok, %TopicPage{}}
 
   """
-  @spec load_topic_page(User.t() | nil, String.t(), String.t(), String.t() | nil, map()) ::
+  @spec load_topic_page(
+          Actor.t(),
+          String.t(),
+          String.t(),
+          String.t() | nil,
+          Repo.pagination_params()
+        ) ::
           {:ok, TopicPage.t()} | {:error, :unauthorized | :not_found}
-  def load_topic_page(actor, forum_slug, topic_slug, post_id_param, pagination) do
+  def load_topic_page(%Actor{} = actor, forum_slug, topic_slug, post_id_param, pagination) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false) do
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false) do
       topic = Repo.preload(topic, [:user, :forum, :deleted_by, :locked_by, poll: :options])
 
-      clear_topic_notification(topic, actor)
+      clear_topic_notification(topic, actor.user)
 
       page = topic_page_number(post_id_param, pagination)
 
@@ -258,8 +268,8 @@ defmodule Philomena.Topics do
          forum: forum,
          topic: topic,
          posts: load_topic_posts(topic, page),
-         watching: subscribed?(topic, actor),
-         voted: PollVotes.voted?(topic.poll, actor),
+         watching: subscribed?(topic, actor.user),
+         voted: PollVotes.voted?(topic.poll, actor.user),
          poll_active: Polls.active?(topic.poll),
          post_changeset: Posts.change_post(%Post{}),
          topic_changeset: change_topic(topic)
@@ -403,8 +413,10 @@ defmodule Philomena.Topics do
   on success, `{:error, forum, changeset}` when the topic changeset is rejected,
   `{:error, :creation_failed, forum}` when the insert fails for another reason,
   or `{:error, :ban |
-  :unauthorized}` from the write-access and forum checks. The engine form returns
-  `{:ok, %{topic: %Topic{}}}` on success or a failed-step tuple.
+  :unauthorized}` from the write-access and forum checks. A non-exempt actor who
+  has created a topic within the last 5 minutes gets `{:error, :rate_limited}`.
+  The engine form returns `{:ok, %{topic: %Topic{}}}` on success or a failed-step
+  tuple.
 
   ## Examples
 
@@ -419,14 +431,16 @@ defmodule Philomena.Topics do
           {:ok, %{topic: Topic.t(), forum: Forum.t(), post: Post.t()}}
           | {:error, Forum.t(), Ecto.Changeset.t()}
           | {:error, :creation_failed, Forum.t()}
-          | {:error, :ban | :unauthorized}
+          | {:error, :ban | :unauthorized | :rate_limited}
   @spec create_topic(Forum.t(), keyword(), map()) ::
           {:ok, %{topic: Topic.t()}} | {:error, atom(), Ecto.Changeset.t(), map()}
   def create_topic(%Actor{} = actor, forum_slug, topic_params) do
     with :ok <- verify_write_access(actor),
+         :ok <- RateLimiter.check_rate_limit(actor, :topic_create),
          {:ok, forum} <- load_authorized_forum(actor.user, forum_slug) do
       case create_topic(forum, actor_attributes(actor), topic_params || %{}) do
         {:ok, %{topic: topic}} ->
+          RateLimiter.record_action(actor, :topic_create, @topic_create_window)
           {:ok, %{topic: topic, forum: forum, post: hd(topic.posts)}}
 
         {:error, :topic, changeset, _changes} ->
@@ -595,13 +609,13 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec stick_topic(User.t() | nil, String.t(), String.t()) ::
+  @spec stick_topic(Actor.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def stick_topic(actor, forum_slug, topic_slug) do
+  def stick_topic(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :hide, topic) do
       case stick_topic(topic) do
         {:ok, stuck_topic} ->
@@ -659,13 +673,13 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unstick_topic(User.t() | nil, String.t(), String.t()) ::
+  @spec unstick_topic(Actor.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def unstick_topic(actor, forum_slug, topic_slug) do
+  def unstick_topic(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :hide, topic) do
       case unstick_topic(topic) do
         {:ok, unstuck_topic} ->
@@ -728,15 +742,15 @@ defmodule Philomena.Topics do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec lock_topic(User.t() | nil, String.t(), String.t(), map()) ::
+  @spec lock_topic(Actor.t(), String.t(), String.t(), map()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def lock_topic(actor, forum_slug, topic_slug, topic_params) do
+  def lock_topic(%Actor{} = actor, forum_slug, topic_slug, topic_params) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :hide, topic) do
-      case lock_topic(topic, topic_params, actor) do
+      case lock_topic(topic, topic_params, actor.user) do
         {:ok, locked_topic} ->
           # The body reads the reason and title off the post-update topic, and
           # the forum name off the separately loaded forum (the loaded topic
@@ -794,13 +808,13 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unlock_topic(User.t() | nil, String.t(), String.t()) ::
+  @spec unlock_topic(Actor.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def unlock_topic(actor, forum_slug, topic_slug) do
+  def unlock_topic(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :hide, topic) do
       case unlock_topic(topic) do
         {:ok, unlocked_topic} ->
@@ -872,13 +886,13 @@ defmodule Philomena.Topics do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec move_topic(User.t() | nil, String.t(), String.t(), map() | nil) ::
+  @spec move_topic(Actor.t(), String.t(), String.t(), map() | nil) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def move_topic(actor, forum_slug, topic_slug, topic_params) do
+  def move_topic(%Actor{} = actor, forum_slug, topic_slug, topic_params) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :hide, topic) do
       # Target id parsing happens only after authorization, so an unprivileged
       # actor with a malformed target still answers unauthorized rather than the
@@ -972,15 +986,15 @@ defmodule Philomena.Topics do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec hide_topic(User.t() | nil, String.t(), String.t(), String.t() | nil) ::
+  @spec hide_topic(Actor.t(), String.t(), String.t(), String.t() | nil) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def hide_topic(actor, forum_slug, topic_slug, deletion_reason) do
+  def hide_topic(%Actor{} = actor, forum_slug, topic_slug, deletion_reason) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :hide, topic) do
-      case hide_topic(topic, deletion_reason, actor) do
+      case hide_topic(topic, deletion_reason, actor.user) do
         {:ok, hidden_topic} ->
           # The body reads the reason and title off the post-update topic, and
           # the forum name off the separately loaded forum (the loaded topic
@@ -1060,13 +1074,13 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unhide_topic(User.t() | nil, String.t(), String.t()) ::
+  @spec unhide_topic(Actor.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def unhide_topic(actor, forum_slug, topic_slug) do
+  def unhide_topic(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :hide, topic) do
       case unhide_topic(topic) do
         {:ok, restored_topic} ->
@@ -1126,8 +1140,9 @@ defmodule Philomena.Topics do
 
   @doc """
   Updates the title of the topic named by `topic_slug` within the forum named by
-  `forum_slug` from `topic_params`, on behalf of `actor` (a user, or `nil` for an
-  anonymous visitor).
+  `forum_slug` from `topic_params`, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
 
   The forum is loaded by short name and authorized for `:show`, the topic is
   loaded by slug with hidden topics visible only to actors who may `:show` them,
@@ -1146,13 +1161,13 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec update_topic_title(User.t() | nil, String.t(), String.t(), map()) ::
+  @spec update_topic_title(Actor.t(), String.t(), String.t(), map()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def update_topic_title(actor, forum_slug, topic_slug, topic_params) do
+  def update_topic_title(%Actor{} = actor, forum_slug, topic_slug, topic_params) do
     with {:ok, forum, topic} <-
-           load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor, :edit, topic) do
       case update_topic_title(topic, topic_params) do
         {:ok, updated_topic} ->

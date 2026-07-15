@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.HideController do
 
   def create(conn, %{"topic" => topic_params} = params) do
     case Topics.hide_topic(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],
            topic_params["deletion_reason"]
@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.Topic.HideController do
 
   def delete(conn, params) do
     case Topics.unhide_topic(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]
          ) do

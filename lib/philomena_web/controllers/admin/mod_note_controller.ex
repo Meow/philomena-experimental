@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
 
     with {:ok, mod_notes} <-
            ModNotes.load_mod_note_index(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              params,
              renderer,
              conn.assigns.scrivener
@@ -21,13 +21,13 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
   end
 
   def new(conn, params) do
-    with {:ok, changeset} <- ModNotes.new_mod_note(conn.assigns.current_user, params) do
+    with {:ok, changeset} <- ModNotes.new_mod_note(conn.assigns.actor, params) do
       render(conn, "new.html", title: "New Mod Note", changeset: changeset)
     end
   end
 
   def create(conn, %{"mod_note" => mod_note_params}) do
-    case ModNotes.create_mod_note(conn.assigns.current_user, mod_note_params) do
+    case ModNotes.create_mod_note(conn.assigns.actor, mod_note_params) do
       {:ok, _mod_note} ->
         conn
         |> put_flash(:info, "Successfully created mod note.")
@@ -43,7 +43,7 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
 
   def edit(conn, %{"id" => id}) do
     with {:ok, {mod_note, changeset}} <-
-           ModNotes.load_mod_note_for_edit(conn.assigns.current_user, id) do
+           ModNotes.load_mod_note_for_edit(conn.assigns.actor, id) do
       render(conn, "edit.html",
         title: "Editing Mod Note",
         mod_note: mod_note,
@@ -53,7 +53,7 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
   end
 
   def update(conn, %{"id" => id, "mod_note" => mod_note_params}) do
-    case ModNotes.update_mod_note(conn.assigns.current_user, id, mod_note_params) do
+    case ModNotes.update_mod_note(conn.assigns.actor, id, mod_note_params) do
       {:ok, _mod_note} ->
         conn
         |> put_flash(:info, "Successfully updated mod note.")
@@ -68,7 +68,7 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
   end
 
   def delete(conn, %{"id" => id}) do
-    with {:ok, _mod_note} <- ModNotes.delete_mod_note(conn.assigns.current_user, id) do
+    with {:ok, _mod_note} <- ModNotes.delete_mod_note(conn.assigns.actor, id) do
       conn
       |> put_flash(:info, "Successfully deleted mod note.")
       |> redirect(to: ~p"/admin/mod_notes")

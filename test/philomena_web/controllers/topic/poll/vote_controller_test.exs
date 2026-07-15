@@ -2,7 +2,7 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
   # :create is public (any logged-in user); :index and :delete are
-  # moderator-only (verify_authorized gates on :hide of the topic).
+  # moderator-only (the context authorizes :hide of the topic).
 
   import Ecto.Query
   import Philomena.ForumsFixtures

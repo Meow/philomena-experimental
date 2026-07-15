@@ -21,7 +21,6 @@ defmodule Philomena.DuplicateReports do
   alias Philomena.Images
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
-  alias Philomena.Users.User
 
   @valid_states ~w(open rejected accepted claimed)
 
@@ -221,7 +220,8 @@ defmodule Philomena.DuplicateReports do
 
   @doc """
   Lists the duplicate reports involving the image named by `image_id`, on behalf
-  of `actor` (a user, or `nil` for an anonymous visitor).
+  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
+  anonymous visitor).
 
   The image is loaded by id (with its sources and tags preloaded) and
   authorized for `:show`. A non-castable or out-of-range id is
@@ -242,9 +242,9 @@ defmodule Philomena.DuplicateReports do
       {:error, :unauthorized}
 
   """
-  @spec image_duplicate_reports(User.t() | nil, String.t() | integer()) ::
+  @spec image_duplicate_reports(Actor.t(), String.t() | integer()) ::
           {:ok, {Image.t(), [DuplicateReport.t()]}} | {:error, :unauthorized | :not_found}
-  def image_duplicate_reports(actor, image_id) do
+  def image_duplicate_reports(%Actor{} = actor, image_id) do
     with {:ok, id} <- IntegerId.parse(image_id),
          image = Repo.get(preload(Image, [:sources, tags: :aliases]), id),
          :ok <- authorize(actor, :show, image),
@@ -401,14 +401,14 @@ defmodule Philomena.DuplicateReports do
       {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
 
   """
-  @spec accept_duplicate_report(User.t() | nil, String.t() | integer()) ::
+  @spec accept_duplicate_report(Actor.t(), String.t() | integer()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
-  def accept_duplicate_report(actor, id) do
+  def accept_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
          report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report,
-         {:ok, results} <- accept_report_multi(report, actor) do
+         {:ok, results} <- accept_report_multi(report, actor.user) do
       report = results.duplicate_report
 
       ModerationLogs.create_moderation_log(
@@ -488,14 +488,14 @@ defmodule Philomena.DuplicateReports do
       {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
 
   """
-  @spec accept_reverse_duplicate_report(User.t() | nil, String.t() | integer()) ::
+  @spec accept_reverse_duplicate_report(Actor.t(), String.t() | integer()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
-  def accept_reverse_duplicate_report(actor, id) do
+  def accept_reverse_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
          report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report,
-         {:ok, results} <- accept_reverse_report_multi(report, actor) do
+         {:ok, results} <- accept_reverse_report_multi(report, actor.user) do
       report = results.duplicate_report
 
       ModerationLogs.create_moderation_log(
@@ -572,14 +572,14 @@ defmodule Philomena.DuplicateReports do
       {:ok, %DuplicateReport{}}
 
   """
-  @spec claim_duplicate_report(User.t() | nil, String.t() | integer()) ::
+  @spec claim_duplicate_report(Actor.t(), String.t() | integer()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
-  def claim_duplicate_report(actor, id) do
+  def claim_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
          report = Repo.get(DuplicateReport, report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report do
-      {:ok, report} = Repo.update(DuplicateReport.claim_changeset(report, actor))
+      {:ok, report} = Repo.update(DuplicateReport.claim_changeset(report, actor.user))
 
       ModerationLogs.create_moderation_log(
         actor,
@@ -613,9 +613,9 @@ defmodule Philomena.DuplicateReports do
       {:ok, %DuplicateReport{}}
 
   """
-  @spec unclaim_duplicate_report(User.t() | nil, String.t() | integer()) ::
+  @spec unclaim_duplicate_report(Actor.t(), String.t() | integer()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
-  def unclaim_duplicate_report(actor, id) do
+  def unclaim_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
          report = Repo.get(DuplicateReport, report_id),
          :ok <- authorize(actor, :edit, report),
@@ -654,14 +654,14 @@ defmodule Philomena.DuplicateReports do
       {:ok, %DuplicateReport{}}
 
   """
-  @spec reject_duplicate_report(User.t() | nil, String.t() | integer()) ::
+  @spec reject_duplicate_report(Actor.t(), String.t() | integer()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
-  def reject_duplicate_report(actor, id) do
+  def reject_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
          report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report do
-      {:ok, report} = reject_report(report, actor)
+      {:ok, report} = reject_report(report, actor.user)
 
       ModerationLogs.create_moderation_log(
         actor,

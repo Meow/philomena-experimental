@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Profile.AwardController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"profile_id" => slug}) do
-    with {:ok, {user, changeset}} <- Badges.load_award_for_new(conn.assigns.current_user, slug) do
+    with {:ok, {user, changeset}} <- Badges.load_award_for_new(conn.assigns.actor, slug) do
       render(conn, "new.html",
         title: "New Award",
         user: user,
@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Profile.AwardController do
   end
 
   def create(conn, %{"profile_id" => slug, "award" => award_params}) do
-    case Badges.award_badge(conn.assigns.current_user, slug, award_params) do
+    case Badges.award_badge(conn.assigns.actor, slug, award_params) do
       {:ok, {user, _award}} ->
         conn
         |> put_flash(:info, "Award successfully created.")
@@ -37,7 +37,7 @@ defmodule PhilomenaWeb.Profile.AwardController do
 
   def edit(conn, %{"profile_id" => slug, "id" => id}) do
     with {:ok, {user, award, changeset}} <-
-           Badges.load_award_for_edit(conn.assigns.current_user, slug, id) do
+           Badges.load_award_for_edit(conn.assigns.actor, slug, id) do
       render(conn, "edit.html",
         title: "Editing Award",
         user: user,
@@ -49,7 +49,7 @@ defmodule PhilomenaWeb.Profile.AwardController do
   end
 
   def update(conn, %{"profile_id" => slug, "id" => id, "award" => award_params}) do
-    case Badges.update_badge_award(conn.assigns.current_user, slug, id, award_params) do
+    case Badges.update_badge_award(conn.assigns.actor, slug, id, award_params) do
       {:ok, {user, _award}} ->
         conn
         |> put_flash(:info, "Award successfully updated.")
@@ -69,7 +69,7 @@ defmodule PhilomenaWeb.Profile.AwardController do
   end
 
   def delete(conn, %{"profile_id" => slug, "id" => id}) do
-    with {:ok, {user, _award}} <- Badges.revoke_badge_award(conn.assigns.current_user, slug, id) do
+    with {:ok, {user, _award}} <- Badges.revoke_badge_award(conn.assigns.actor, slug, id) do
       conn
       |> put_flash(:info, "Award successfully destroyed. By cruel and unusual means.")
       |> redirect(to: ~p"/profiles/#{user}")

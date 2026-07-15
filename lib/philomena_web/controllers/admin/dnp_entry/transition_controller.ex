@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.DnpEntry.TransitionController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"dnp_entry_id" => dnp_entry_id, "state" => new_state}) do
-    case DnpEntries.transition_dnp_entry(conn.assigns.current_user, dnp_entry_id, new_state) do
+    case DnpEntries.transition_dnp_entry(conn.assigns.actor, dnp_entry_id, new_state) do
       {:ok, dnp_entry} ->
         conn
         |> put_flash(:info, "Successfully updated DNP entry.")

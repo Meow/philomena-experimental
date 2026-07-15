@@ -9,6 +9,8 @@ defmodule Philomena.AttributionFixtures do
   which hardcodes the same values on the image row).
   """
 
+  alias Philomena.Attribution.Actor
+
   @doc """
   Attribution keyword list for the given `user` (`nil` for anonymous).
   """
@@ -69,6 +71,52 @@ defmodule Philomena.AttributionFixtures do
       end
 
     Redix.command!(:redix, ["DEL" | keys])
+    :ok
+  end
+
+  @doc """
+  The Valkey counter key `Philomena.RateLimiter` scopes to `actor` for
+  `operation` - `u:<user_id>` when signed in, `i:<ip>` when anonymous (the same
+  scheme `Philomena.RateLimiter.key/2` uses privately).
+  """
+  def rate_limit_key(%Actor{user: nil, ip: ip}, operation), do: "rl:#{operation}:i:#{ip}"
+  def rate_limit_key(%Actor{user: user}, operation), do: "rl:#{operation}:u:#{user.id}"
+
+  @doc """
+  Reads `actor`'s raw `Philomena.RateLimiter` counter for `operation` from
+  Valkey (a decimal string, or `nil` when nothing has been recorded).
+  """
+  def rate_limit_count(%Actor{} = actor, operation) do
+    Redix.command!(:redix, ["GET", rate_limit_key(actor, operation)])
+  end
+
+  @doc """
+  Registers `on_exit` cleanup that deletes `actor`'s `Philomena.RateLimiter`
+  counter for `operation`.
+
+  The SQL sandbox does not roll Valkey back, so any test that lets a counter be
+  recorded (or primes one itself) must clear it or it leaks into later tests and
+  runs. Use this when the function under test records the counter for you; use
+  `exceed_rate_limit/2` when you need to prime it over the limit.
+  """
+  def track_rate_limit(%Actor{} = actor, operation) do
+    key = rate_limit_key(actor, operation)
+    ExUnit.Callbacks.on_exit(fn -> Redix.command!(:redix, ["DEL", key]) end)
+    :ok
+  end
+
+  @doc """
+  Primes `actor`'s `Philomena.RateLimiter` counter for `operation` past the
+  limit so the next `check_rate_limit/2` refuses it, and registers `on_exit`
+  cleanup of the key.
+
+  The check boundary is inclusive at a limit of 1, so a counter of 2 is over the
+  limit. This only makes sense for a non-exempt actor (a plain user or an
+  anonymous IP); staff and `bypass_rate_limits` users are never limited.
+  """
+  def exceed_rate_limit(%Actor{} = actor, operation) do
+    track_rate_limit(actor, operation)
+    Redix.command!(:redix, ["SET", rate_limit_key(actor, operation), "2"])
     :ok
   end
 end

@@ -67,14 +67,14 @@ defmodule Philomena.TagChangesTest do
     test "denies an anonymous actor" do
       {_image, tc} = tag_change!(confirmed_user_fixture())
 
-      assert TagChanges.delete_tag_change(nil, "#{tc.id}") == {:error, :unauthorized}
+      assert TagChanges.delete_tag_change(actor(), "#{tc.id}") == {:error, :unauthorized}
       assert Repo.get(TagChange, tc.id)
     end
 
     test "denies a regular user" do
       {_image, tc} = tag_change!(confirmed_user_fixture())
 
-      assert TagChanges.delete_tag_change(confirmed_user_fixture(), "#{tc.id}") ==
+      assert TagChanges.delete_tag_change(actor(confirmed_user_fixture()), "#{tc.id}") ==
                {:error, :unauthorized}
 
       assert Repo.get(TagChange, tc.id)
@@ -85,7 +85,7 @@ defmodule Philomena.TagChangesTest do
       moderator = moderator_user_fixture()
       {image, tc} = tag_change!(author)
 
-      assert {:ok, %TagChange{}} = TagChanges.delete_tag_change(moderator, "#{tc.id}")
+      assert {:ok, %TagChange{}} = TagChanges.delete_tag_change(actor(moderator), "#{tc.id}")
       refute Repo.get(TagChange, tc.id)
 
       log = only_moderation_log!()
@@ -100,22 +100,24 @@ defmodule Philomena.TagChangesTest do
     test "an admin may also delete" do
       {_image, tc} = tag_change!(confirmed_user_fixture())
 
-      assert {:ok, %TagChange{}} = TagChanges.delete_tag_change(admin_user_fixture(), tc.id)
+      assert {:ok, %TagChange{}} =
+               TagChanges.delete_tag_change(actor(admin_user_fixture()), tc.id)
     end
 
     test "a well-formed id naming no row is unauthorized, not not-found" do
       # The former load-then-authorize plug authorized the nil load result,
       # which no :delete rule permits; the context preserves that shape.
-      assert TagChanges.delete_tag_change(moderator_user_fixture(), "123456789") ==
+      assert TagChanges.delete_tag_change(actor(moderator_user_fixture()), "123456789") ==
                {:error, :unauthorized}
     end
 
     test "an id that cannot name a row is not found" do
       moderator = moderator_user_fixture()
 
-      assert TagChanges.delete_tag_change(moderator, "not-an-integer") == {:error, :not_found}
+      assert TagChanges.delete_tag_change(actor(moderator), "not-an-integer") ==
+               {:error, :not_found}
 
-      assert TagChanges.delete_tag_change(moderator, "99999999999999999999") ==
+      assert TagChanges.delete_tag_change(actor(moderator), "99999999999999999999") ==
                {:error, :not_found}
     end
   end

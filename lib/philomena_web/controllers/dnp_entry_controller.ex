@@ -4,13 +4,11 @@ defmodule PhilomenaWeb.DnpEntryController do
   alias PhilomenaWeb.MarkdownRenderer
   alias Philomena.DnpEntries
 
-  plug PhilomenaWeb.UserAttributionPlug when action in [:new, :create]
-
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
     listing =
-      DnpEntries.load_dnp_listing(conn.assigns.current_user, params, conn.assigns.scrivener)
+      DnpEntries.load_dnp_listing(conn.assigns.actor, params, conn.assigns.scrivener)
 
     bodies =
       listing.dnp_entries
@@ -29,7 +27,7 @@ defmodule PhilomenaWeb.DnpEntryController do
   end
 
   def show(conn, %{"id" => id}) do
-    with {:ok, dnp_entry} <- DnpEntries.load_dnp_entry(conn.assigns.current_user, id) do
+    with {:ok, dnp_entry} <- DnpEntries.load_dnp_entry(conn.assigns.actor, id) do
       [conditions, reason, instructions] =
         MarkdownRenderer.render_collection(
           [
@@ -51,7 +49,7 @@ defmodule PhilomenaWeb.DnpEntryController do
       ]
 
       assigns =
-        case DnpEntries.mod_notes(conn.assigns.current_user, dnp_entry, renderer) do
+        case DnpEntries.mod_notes(conn.assigns.actor, dnp_entry, renderer) do
           nil -> assigns
           mod_notes -> [{:mod_notes, mod_notes} | assigns]
         end
@@ -88,7 +86,7 @@ defmodule PhilomenaWeb.DnpEntryController do
 
   def edit(conn, %{"id" => id} = params) do
     with {:ok, %{dnp_entry: dnp_entry, changeset: changeset, selectable_tags: selectable_tags}} <-
-           DnpEntries.load_dnp_entry_for_edit(conn.assigns.current_user, id, params) do
+           DnpEntries.load_dnp_entry_for_edit(conn.assigns.actor, id, params) do
       render(conn, "edit.html",
         title: "Editing DNP Listing",
         dnp_entry: dnp_entry,
@@ -99,7 +97,7 @@ defmodule PhilomenaWeb.DnpEntryController do
   end
 
   def update(conn, %{"id" => id} = params) do
-    case DnpEntries.update_dnp_entry(conn.assigns.current_user, id, params) do
+    case DnpEntries.update_dnp_entry(conn.assigns.actor, id, params) do
       {:ok, dnp_entry} ->
         conn
         |> put_flash(:info, "Successfully updated DNP request.")

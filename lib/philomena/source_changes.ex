@@ -8,6 +8,7 @@ defmodule Philomena.SourceChanges do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
+  alias Philomena.Attribution.Actor
   alias Philomena.IntegerId
   alias Philomena.Images.Image
   alias Philomena.Users.User
@@ -32,7 +33,8 @@ defmodule Philomena.SourceChanges do
 
   @doc """
   Lists the source changes recorded on the image named by `image_id`, newest
-  first, on behalf of `actor` (a user, or `nil` for an anonymous visitor).
+  first, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
+  `nil` for an anonymous visitor).
 
   The image is loaded by id and authorized for `:show`. A non-castable or
   out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
@@ -53,10 +55,10 @@ defmodule Philomena.SourceChanges do
       {:error, :unauthorized}
 
   """
-  @spec image_source_changes(User.t() | nil, String.t() | integer(), keyword() | map()) ::
+  @spec image_source_changes(Actor.t(), String.t() | integer(), keyword() | map()) ::
           {:ok, {Image.t(), Scrivener.Page.t()}}
           | {:error, :unauthorized | :not_found}
-  def image_source_changes(actor, image_id, pagination) do
+  def image_source_changes(%Actor{} = actor, image_id, pagination) do
     with {:ok, id} <- IntegerId.parse(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :show, image),
@@ -78,7 +80,8 @@ defmodule Philomena.SourceChanges do
 
   @doc """
   Lists the source changes made by the user named by the profile `slug`, newest
-  first, on behalf of `actor` (a user, or `nil` for an anonymous visitor).
+  first, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
+  `nil` for an anonymous visitor).
 
   The user is loaded by slug and authorized for `:show`; an unknown slug
   authorizes `nil`, which no ordinary rule permits, so it is
@@ -97,10 +100,10 @@ defmodule Philomena.SourceChanges do
       {:ok, {%User{}, %Scrivener.Page{}, 3}}
 
   """
-  @spec user_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
+  @spec user_source_changes(Actor.t(), String.t(), map(), keyword() | map()) ::
           {:ok, {User.t(), Scrivener.Page.t(), non_neg_integer()}}
           | {:error, :unauthorized | :not_found}
-  def user_source_changes(actor, slug, params, pagination) do
+  def user_source_changes(%Actor{} = actor, slug, params, pagination) do
     user = Repo.get_by(User, slug: slug)
 
     with :ok <- authorize(actor, :show, user),
@@ -147,10 +150,10 @@ defmodule Philomena.SourceChanges do
   `range` is the masked address actually queried, and `source_changes` is a
   paginated set with its user and image associations preloaded.
   """
-  @spec ip_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
+  @spec ip_source_changes(Actor.t(), String.t(), map(), keyword() | map()) ::
           {:ok, {Postgrex.INET.t(), Postgrex.INET.t(), Scrivener.Page.t()}}
           | {:error, :unauthorized | :not_found}
-  def ip_source_changes(actor, ip, params, pagination) do
+  def ip_source_changes(%Actor{} = actor, ip, params, pagination) do
     with :ok <- authorize(actor, :show, :ip_address),
          {:ok, ip} <- cast_ip(ip) do
       range = IpMask.parse_mask(ip, params)
@@ -180,9 +183,9 @@ defmodule Philomena.SourceChanges do
   Returns `{:ok, source_changes}`, a paginated set with its user and image
   associations preloaded.
   """
-  @spec fingerprint_source_changes(User.t() | nil, String.t(), map(), keyword() | map()) ::
+  @spec fingerprint_source_changes(Actor.t(), String.t(), map(), keyword() | map()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def fingerprint_source_changes(actor, fingerprint, params, pagination) do
+  def fingerprint_source_changes(%Actor{} = actor, fingerprint, params, pagination) do
     with :ok <- authorize(actor, :show, :ip_address) do
       source_changes =
         SourceChange

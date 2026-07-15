@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.Conversation.MessageController do
 
   alias Philomena.Conversations
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   action_fallback PhilomenaWeb.FallbackController
 
   @page_size 25

@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.AvatarController do
 
   alias Philomena.Users
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   plug PhilomenaWeb.ScraperPlug,
        [params_name: "user", params_key: "avatar"] when action in [:update]
 

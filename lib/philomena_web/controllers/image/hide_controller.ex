@@ -6,8 +6,6 @@ defmodule PhilomenaWeb.Image.HideController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   def create(conn, params) do
     case Images.create_image_hide(conn.assigns.actor, params["image_id"]) do
       {:ok, image} ->

@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Image.ReportingController do
 
   def show(conn, params) do
     with {:ok, {image, dupe_reports}} <-
-           DuplicateReports.image_duplicate_reports(conn.assigns.current_user, params["image_id"]) do
+           DuplicateReports.image_duplicate_reports(conn.assigns.actor, params["image_id"]) do
       changeset = DuplicateReports.change_duplicate_report(%DuplicateReport{})
 
       render(conn, "show.html",

@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.Filter.HideController do
 
   alias Philomena.Filters
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do

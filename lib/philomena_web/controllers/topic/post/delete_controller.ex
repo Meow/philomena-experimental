@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.Post.DeleteController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"post_id" => post_id}) do
-    case Posts.destroy_post(conn.assigns.current_user, post_id) do
+    case Posts.destroy_post(conn.assigns.actor, post_id) do
       {:ok, post} ->
         conn
         |> put_flash(:info, "Post successfully destroyed!")

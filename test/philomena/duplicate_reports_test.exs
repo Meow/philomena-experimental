@@ -11,10 +11,10 @@ defmodule Philomena.DuplicateReportsTest do
   type strings, bodies, and subject paths - that each moderation action writes
   on success.
 
-  The read/moderation actor here is a plain `User.t()` or `nil`, matching what
-  the controller hands in as `conn.assigns.current_user`; `create_duplicate_report/2`
-  instead takes the `Philomena.Attribution.Actor` struct built by
-  `UserAttributionPlug`.
+  The read/moderation actor here is a `Philomena.Attribution.Actor` (whose user
+  may be `nil` for an anonymous viewer), matching what the controller hands in as
+  `conn.assigns.actor`; `create_duplicate_report/2` takes the same
+  `Philomena.Attribution.Actor` struct built by `UserAttributionPlug`.
   """
 
   use Philomena.DataCase, async: true
@@ -52,8 +52,8 @@ defmodule Philomena.DuplicateReportsTest do
       rejected = duplicate_report_fixture(image_fixture(), image_fixture())
 
       moderator = moderator_user_fixture()
-      {:ok, _} = DuplicateReports.claim_duplicate_report(moderator, claimed.id)
-      {:ok, _} = DuplicateReports.reject_duplicate_report(moderator, rejected.id)
+      {:ok, _} = DuplicateReports.claim_duplicate_report(actor(moderator), claimed.id)
+      {:ok, _} = DuplicateReports.reject_duplicate_report(actor(moderator), rejected.id)
 
       page = DuplicateReports.list_duplicate_reports(%{}, @pagination)
       ids = Enum.map(page.entries, & &1.id)
@@ -74,7 +74,9 @@ defmodule Philomena.DuplicateReportsTest do
     test "an explicit single state filters to that state" do
       open = duplicate_report_fixture(image_fixture(), image_fixture())
       rejected = duplicate_report_fixture(image_fixture(), image_fixture())
-      {:ok, _} = DuplicateReports.reject_duplicate_report(moderator_user_fixture(), rejected.id)
+
+      {:ok, _} =
+        DuplicateReports.reject_duplicate_report(actor(moderator_user_fixture()), rejected.id)
 
       page = DuplicateReports.list_duplicate_reports(%{"states" => "rejected"}, @pagination)
       ids = Enum.map(page.entries, & &1.id)
@@ -86,7 +88,9 @@ defmodule Philomena.DuplicateReportsTest do
     test "a list of states is accepted" do
       open = duplicate_report_fixture(image_fixture(), image_fixture())
       rejected = duplicate_report_fixture(image_fixture(), image_fixture())
-      {:ok, _} = DuplicateReports.reject_duplicate_report(moderator_user_fixture(), rejected.id)
+
+      {:ok, _} =
+        DuplicateReports.reject_duplicate_report(actor(moderator_user_fixture()), rejected.id)
 
       page =
         DuplicateReports.list_duplicate_reports(%{"states" => ["open", "rejected"]}, @pagination)
@@ -270,13 +274,14 @@ defmodule Philomena.DuplicateReportsTest do
     test "denies an anonymous actor" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.accept_duplicate_report(nil, report.id) == {:error, :unauthorized}
+      assert DuplicateReports.accept_duplicate_report(actor(), report.id) ==
+               {:error, :unauthorized}
     end
 
     test "denies a regular user" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.accept_duplicate_report(confirmed_user_fixture(), report.id) ==
+      assert DuplicateReports.accept_duplicate_report(actor(confirmed_user_fixture()), report.id) ==
                {:error, :unauthorized}
     end
 
@@ -286,7 +291,9 @@ defmodule Philomena.DuplicateReportsTest do
       target = image_fixture()
       report = duplicate_report_fixture(source, target)
 
-      assert {:ok, results} = DuplicateReports.accept_duplicate_report(moderator, report.id)
+      assert {:ok, results} =
+               DuplicateReports.accept_duplicate_report(actor(moderator), report.id)
+
       assert results.duplicate_report.state == "accepted"
 
       # The source image is hidden and pointed at the target.
@@ -302,15 +309,21 @@ defmodule Philomena.DuplicateReportsTest do
     end
 
     test "a well-formed unknown id is unauthorized for a moderator, not found for an admin" do
-      assert DuplicateReports.accept_duplicate_report(moderator_user_fixture(), "2147483647") ==
+      assert DuplicateReports.accept_duplicate_report(
+               actor(moderator_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :unauthorized}
 
-      assert DuplicateReports.accept_duplicate_report(admin_user_fixture(), "2147483647") ==
+      assert DuplicateReports.accept_duplicate_report(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert DuplicateReports.accept_duplicate_report(moderator_user_fixture(), "not-an-integer") ==
+      assert DuplicateReports.accept_duplicate_report(
+               actor(moderator_user_fixture()),
+               "not-an-integer"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -319,14 +332,17 @@ defmodule Philomena.DuplicateReportsTest do
     test "denies an anonymous actor" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.accept_reverse_duplicate_report(nil, report.id) ==
+      assert DuplicateReports.accept_reverse_duplicate_report(actor(), report.id) ==
                {:error, :unauthorized}
     end
 
     test "denies a regular user" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.accept_reverse_duplicate_report(confirmed_user_fixture(), report.id) ==
+      assert DuplicateReports.accept_reverse_duplicate_report(
+               actor(confirmed_user_fixture()),
+               report.id
+             ) ==
                {:error, :unauthorized}
     end
 
@@ -337,7 +353,7 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(source, target)
 
       assert {:ok, results} =
-               DuplicateReports.accept_reverse_duplicate_report(moderator, report.id)
+               DuplicateReports.accept_reverse_duplicate_report(actor(moderator), report.id)
 
       assert results.duplicate_report.state == "accepted"
 
@@ -357,17 +373,20 @@ defmodule Philomena.DuplicateReportsTest do
 
     test "a well-formed unknown id is unauthorized for a moderator, not found for an admin" do
       assert DuplicateReports.accept_reverse_duplicate_report(
-               moderator_user_fixture(),
+               actor(moderator_user_fixture()),
                "2147483647"
              ) == {:error, :unauthorized}
 
-      assert DuplicateReports.accept_reverse_duplicate_report(admin_user_fixture(), "2147483647") ==
+      assert DuplicateReports.accept_reverse_duplicate_report(
+               actor(admin_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
       assert DuplicateReports.accept_reverse_duplicate_report(
-               moderator_user_fixture(),
+               actor(moderator_user_fixture()),
                "not-an-integer"
              ) == {:error, :not_found}
     end
@@ -377,13 +396,14 @@ defmodule Philomena.DuplicateReportsTest do
     test "denies an anonymous actor" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.claim_duplicate_report(nil, report.id) == {:error, :unauthorized}
+      assert DuplicateReports.claim_duplicate_report(actor(), report.id) ==
+               {:error, :unauthorized}
     end
 
     test "denies a regular user" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.claim_duplicate_report(confirmed_user_fixture(), report.id) ==
+      assert DuplicateReports.claim_duplicate_report(actor(confirmed_user_fixture()), report.id) ==
                {:error, :unauthorized}
     end
 
@@ -391,7 +411,7 @@ defmodule Philomena.DuplicateReportsTest do
       moderator = moderator_user_fixture()
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert {:ok, claimed} = DuplicateReports.claim_duplicate_report(moderator, report.id)
+      assert {:ok, claimed} = DuplicateReports.claim_duplicate_report(actor(moderator), report.id)
       assert claimed.state == "claimed"
       assert claimed.modifier_id == moderator.id
 
@@ -403,15 +423,21 @@ defmodule Philomena.DuplicateReportsTest do
     end
 
     test "a well-formed unknown id is unauthorized for a moderator, not found for an admin" do
-      assert DuplicateReports.claim_duplicate_report(moderator_user_fixture(), "2147483647") ==
+      assert DuplicateReports.claim_duplicate_report(
+               actor(moderator_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :unauthorized}
 
-      assert DuplicateReports.claim_duplicate_report(admin_user_fixture(), "2147483647") ==
+      assert DuplicateReports.claim_duplicate_report(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert DuplicateReports.claim_duplicate_report(moderator_user_fixture(), "not-an-integer") ==
+      assert DuplicateReports.claim_duplicate_report(
+               actor(moderator_user_fixture()),
+               "not-an-integer"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -420,16 +446,18 @@ defmodule Philomena.DuplicateReportsTest do
     test "denies a regular user" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.unclaim_duplicate_report(confirmed_user_fixture(), report.id) ==
+      assert DuplicateReports.unclaim_duplicate_report(actor(confirmed_user_fixture()), report.id) ==
                {:error, :unauthorized}
     end
 
     test "a moderator releases a claimed report and logs it" do
       moderator = moderator_user_fixture()
       report = duplicate_report_fixture(image_fixture(), image_fixture())
-      {:ok, _} = DuplicateReports.claim_duplicate_report(moderator, report.id)
+      {:ok, _} = DuplicateReports.claim_duplicate_report(actor(moderator), report.id)
 
-      assert {:ok, released} = DuplicateReports.unclaim_duplicate_report(moderator, report.id)
+      assert {:ok, released} =
+               DuplicateReports.unclaim_duplicate_report(actor(moderator), report.id)
+
       assert released.state == "open"
       assert released.modifier_id == nil
 
@@ -440,15 +468,21 @@ defmodule Philomena.DuplicateReportsTest do
     end
 
     test "a well-formed unknown id is unauthorized for a moderator, not found for an admin" do
-      assert DuplicateReports.unclaim_duplicate_report(moderator_user_fixture(), "2147483647") ==
+      assert DuplicateReports.unclaim_duplicate_report(
+               actor(moderator_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :unauthorized}
 
-      assert DuplicateReports.unclaim_duplicate_report(admin_user_fixture(), "2147483647") ==
+      assert DuplicateReports.unclaim_duplicate_report(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert DuplicateReports.unclaim_duplicate_report(moderator_user_fixture(), "not-an-integer") ==
+      assert DuplicateReports.unclaim_duplicate_report(
+               actor(moderator_user_fixture()),
+               "not-an-integer"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -457,13 +491,14 @@ defmodule Philomena.DuplicateReportsTest do
     test "denies an anonymous actor" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.reject_duplicate_report(nil, report.id) == {:error, :unauthorized}
+      assert DuplicateReports.reject_duplicate_report(actor(), report.id) ==
+               {:error, :unauthorized}
     end
 
     test "denies a regular user" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert DuplicateReports.reject_duplicate_report(confirmed_user_fixture(), report.id) ==
+      assert DuplicateReports.reject_duplicate_report(actor(confirmed_user_fixture()), report.id) ==
                {:error, :unauthorized}
     end
 
@@ -473,7 +508,9 @@ defmodule Philomena.DuplicateReportsTest do
       target = image_fixture()
       report = duplicate_report_fixture(source, target)
 
-      assert {:ok, rejected} = DuplicateReports.reject_duplicate_report(moderator, report.id)
+      assert {:ok, rejected} =
+               DuplicateReports.reject_duplicate_report(actor(moderator), report.id)
+
       assert rejected.state == "rejected"
       assert rejected.modifier_id == moderator.id
 
@@ -485,15 +522,21 @@ defmodule Philomena.DuplicateReportsTest do
     end
 
     test "a well-formed unknown id is unauthorized for a moderator, not found for an admin" do
-      assert DuplicateReports.reject_duplicate_report(moderator_user_fixture(), "2147483647") ==
+      assert DuplicateReports.reject_duplicate_report(
+               actor(moderator_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :unauthorized}
 
-      assert DuplicateReports.reject_duplicate_report(admin_user_fixture(), "2147483647") ==
+      assert DuplicateReports.reject_duplicate_report(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert DuplicateReports.reject_duplicate_report(moderator_user_fixture(), "not-an-integer") ==
+      assert DuplicateReports.reject_duplicate_report(
+               actor(moderator_user_fixture()),
+               "not-an-integer"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -510,7 +553,7 @@ defmodule Philomena.DuplicateReportsTest do
       as_target = duplicate_report_fixture(other_source, image)
 
       assert {:ok, {loaded, reports}} =
-               DuplicateReports.image_duplicate_reports(nil, to_string(image.id))
+               DuplicateReports.image_duplicate_reports(actor(), to_string(image.id))
 
       assert loaded.id == image.id
       assert Enum.sort(Enum.map(reports, & &1.id)) == Enum.sort([as_source.id, as_target.id])
@@ -523,7 +566,7 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(image, other)
 
       assert {:ok, {loaded, reports}} =
-               DuplicateReports.image_duplicate_reports(user, to_string(image.id))
+               DuplicateReports.image_duplicate_reports(actor(user), to_string(image.id))
 
       assert loaded.id == image.id
       assert Enum.map(reports, & &1.id) == [report.id]
@@ -536,7 +579,7 @@ defmodule Philomena.DuplicateReportsTest do
       duplicate_report_fixture(image, other, reporter)
 
       assert {:ok, {_image, [report]}} =
-               DuplicateReports.image_duplicate_reports(nil, to_string(image.id))
+               DuplicateReports.image_duplicate_reports(actor(), to_string(image.id))
 
       assert Ecto.assoc_loaded?(report.user)
       assert Ecto.assoc_loaded?(report.modifier)
@@ -547,7 +590,7 @@ defmodule Philomena.DuplicateReportsTest do
       image = image_fixture()
 
       assert {:ok, {loaded, reports}} =
-               DuplicateReports.image_duplicate_reports(nil, to_string(image.id))
+               DuplicateReports.image_duplicate_reports(actor(), to_string(image.id))
 
       assert loaded.id == image.id
       assert reports == []
@@ -558,7 +601,9 @@ defmodule Philomena.DuplicateReportsTest do
       other = image_fixture()
       report = duplicate_report_fixture(image, other)
 
-      assert {:ok, {_image, reports}} = DuplicateReports.image_duplicate_reports(nil, image.id)
+      assert {:ok, {_image, reports}} =
+               DuplicateReports.image_duplicate_reports(actor(), image.id)
+
       assert Enum.map(reports, & &1.id) == [report.id]
     end
 
@@ -566,14 +611,14 @@ defmodule Philomena.DuplicateReportsTest do
       user = confirmed_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert DuplicateReports.image_duplicate_reports(user, to_string(image.id)) ==
+      assert DuplicateReports.image_duplicate_reports(actor(user), to_string(image.id)) ==
                {:error, :unauthorized}
     end
 
     test "a hidden image is unauthorized for an anonymous actor" do
       image = image_fixture(hidden_from_users: true)
 
-      assert DuplicateReports.image_duplicate_reports(nil, to_string(image.id)) ==
+      assert DuplicateReports.image_duplicate_reports(actor(), to_string(image.id)) ==
                {:error, :unauthorized}
     end
 
@@ -584,7 +629,7 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(image, other)
 
       assert {:ok, {loaded, reports}} =
-               DuplicateReports.image_duplicate_reports(moderator, to_string(image.id))
+               DuplicateReports.image_duplicate_reports(actor(moderator), to_string(image.id))
 
       assert loaded.id == image.id
       assert Enum.map(reports, & &1.id) == [report.id]
@@ -593,36 +638,42 @@ defmodule Philomena.DuplicateReportsTest do
     test "an unknown well-formed id is unauthorized for an anonymous actor" do
       # The image loads as nil and a nil actor fails :show on the nil load, so the
       # missing image surfaces as unauthorized rather than not found.
-      assert DuplicateReports.image_duplicate_reports(nil, "2147483647") ==
+      assert DuplicateReports.image_duplicate_reports(actor(), "2147483647") ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a regular user" do
-      assert DuplicateReports.image_duplicate_reports(confirmed_user_fixture(), "2147483647") ==
+      assert DuplicateReports.image_duplicate_reports(
+               actor(confirmed_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator" do
-      assert DuplicateReports.image_duplicate_reports(moderator_user_fixture(), "2147483647") ==
+      assert DuplicateReports.image_duplicate_reports(
+               actor(moderator_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is not found for an admin" do
       # An admin clears :show on the nil load via the blanket ability rule, then
       # the image presence check fails, so the missing image is not found.
-      assert DuplicateReports.image_duplicate_reports(admin_user_fixture(), "2147483647") ==
+      assert DuplicateReports.image_duplicate_reports(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert DuplicateReports.image_duplicate_reports(nil, "not-a-number") ==
+      assert DuplicateReports.image_duplicate_reports(actor(), "not-a-number") ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       # IntegerId.parse rejects a value the integer column could not hold before
       # the row is ever queried, ahead of any authorization.
-      assert DuplicateReports.image_duplicate_reports(nil, "99999999999999999999") ==
+      assert DuplicateReports.image_duplicate_reports(actor(), "99999999999999999999") ==
                {:error, :not_found}
     end
   end

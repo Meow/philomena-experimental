@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.RuleController do
 
   def index(conn, _params) do
     rules =
-      conn.assigns.current_user
+      conn.assigns.actor
       |> Rules.list_rules_for()
       |> Enum.map(&render_rule(&1, conn))
 
@@ -21,13 +21,13 @@ defmodule PhilomenaWeb.RuleController do
   end
 
   def new(conn, _params) do
-    with {:ok, changeset} <- Rules.load_new_rule(conn.assigns.current_user) do
+    with {:ok, changeset} <- Rules.load_new_rule(conn.assigns.actor) do
       render(conn, :new, changeset: changeset)
     end
   end
 
   def create(conn, %{"rule" => rule_params}) do
-    case Rules.create_rule(conn.assigns.current_user, rule_params) do
+    case Rules.create_rule(conn.assigns.actor, rule_params) do
       {:ok, [rule, _version]} ->
         conn
         |> put_flash(:info, "Rule created successfully.")
@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.RuleController do
   end
 
   def show(conn, %{"id" => id}) do
-    case Rules.load_rule_for_show(conn.assigns.current_user, id) do
+    case Rules.load_rule_for_show(conn.assigns.actor, id) do
       {:ok, rule} ->
         rule = render_rule(rule, conn)
 
@@ -64,13 +64,13 @@ defmodule PhilomenaWeb.RuleController do
   end
 
   def edit(conn, %{"id" => id}) do
-    with {:ok, {rule, changeset}} <- Rules.load_rule_for_edit(conn.assigns.current_user, id) do
+    with {:ok, {rule, changeset}} <- Rules.load_rule_for_edit(conn.assigns.actor, id) do
       render(conn, :edit, rule: rule, changeset: changeset)
     end
   end
 
   def update(conn, %{"id" => id, "rule" => rule_params}) do
-    case Rules.update_rule(conn.assigns.current_user, id, rule_params) do
+    case Rules.update_rule(conn.assigns.actor, id, rule_params) do
       {:ok, [rule, _version]} ->
         conn
         |> put_flash(:info, "Rule updated successfully.")

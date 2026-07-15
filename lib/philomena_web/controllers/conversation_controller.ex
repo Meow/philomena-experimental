@@ -2,20 +2,15 @@ defmodule PhilomenaWeb.ConversationController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.NotificationCountPlug
+  alias PhilomenaWeb.RateLimitedResponse
   alias Philomena.Conversations
   alias PhilomenaWeb.MarkdownRenderer
-
-  plug PhilomenaWeb.UserAttributionPlug when action in [:new, :create]
-
-  plug PhilomenaWeb.LimitPlug,
-       [time: 60, error: "You may only create a conversation once every minute."]
-       when action in [:create]
 
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
     conversations =
-      Conversations.list_conversations(conn.assigns.current_user, params, conn.assigns.scrivener)
+      Conversations.list_conversations(conn.assigns.actor, params, conn.assigns.scrivener)
 
     render(conn, "index.html", title: "Conversations", conversations: conversations)
   end
@@ -23,7 +18,7 @@ defmodule PhilomenaWeb.ConversationController do
   def show(conn, %{"id" => id}) do
     with {:ok, page} <-
            Conversations.load_conversation_page(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              id,
              conn.assigns.scrivener
            ) do
@@ -59,6 +54,9 @@ defmodule PhilomenaWeb.ConversationController do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
+
+      {:error, :rate_limited} ->
+        RateLimitedResponse.call(conn, "You may only create a conversation once every minute.")
 
       {:error, _} = error ->
         error

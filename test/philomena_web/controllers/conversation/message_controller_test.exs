@@ -86,7 +86,8 @@ defmodule PhilomenaWeb.Conversation.MessageControllerTest do
 
   test "POST for an unknown conversation redirects to / with the authorization flash",
        %{conn: conn} do
-    # Canary sends the nil resource down the unauthorized path
+    # the nil load is authorized against the actor; a regular user's grant does
+    # not cover nil, so the context returns unauthorized
     %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
     conn =

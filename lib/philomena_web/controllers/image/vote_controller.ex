@@ -4,14 +4,13 @@ defmodule PhilomenaWeb.Image.VoteController do
   alias Philomena.Images.Image
   alias Philomena.Images
 
-  plug PhilomenaWeb.UserAttributionPlug
   plug :load_interaction_image
   plug PhilomenaWeb.FilterForcedUsersPlug
 
   def create(conn, params) do
     case parse_up(params["up"]) do
       {:ok, up} ->
-        case Images.create_vote(conn.assigns.image, conn.assigns.current_user, up) do
+        case Images.create_vote(conn.assigns.image, conn.assigns.actor, up) do
           {:ok, image} ->
             json(conn, Image.interaction_data(image))
 
@@ -29,7 +28,7 @@ defmodule PhilomenaWeb.Image.VoteController do
   end
 
   def delete(conn, _params) do
-    case Images.delete_vote(conn.assigns.image, conn.assigns.current_user) do
+    case Images.delete_vote(conn.assigns.image, conn.assigns.actor) do
       {:ok, image} ->
         json(conn, Image.interaction_data(image))
 

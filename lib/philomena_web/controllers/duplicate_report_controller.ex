@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.DuplicateReportController do
 
   alias Philomena.DuplicateReports
 
-  plug PhilomenaWeb.UserAttributionPlug when action in [:create]
-
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do

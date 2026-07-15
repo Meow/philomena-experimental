@@ -860,9 +860,9 @@ defmodule Philomena.Users do
   `{:error, message}` carrying the parser's message string when the query cannot
   be compiled.
   """
-  @spec search_users(User.t() | nil, map(), map() | keyword()) ::
+  @spec search_users(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized | String.t()}
-  def search_users(viewer, params, pagination) do
+  def search_users(%Actor{} = viewer, params, pagination) do
     with :ok <- authorize(viewer, :index, User) do
       query_string =
         case params["uq"] do
@@ -928,9 +928,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec load_user_for_edit(User.t() | nil, String.t()) ::
+  @spec load_user_for_edit(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def load_user_for_edit(actor, slug) do
+  def load_user_for_edit(%Actor{} = actor, slug) do
     target = user_by_slug_with_roles(slug)
 
     with :ok <- authorize(actor, :edit, target),
@@ -955,9 +955,9 @@ defmodule Philomena.Users do
   Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
   rejected.
   """
-  @spec update_user_details(User.t() | nil, String.t(), map()) ::
+  @spec update_user_details(Actor.t(), String.t(), map()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_user_details(actor, slug, params) do
+  def update_user_details(%Actor{} = actor, slug, params) do
     target = user_by_slug_with_roles(slug)
 
     with :ok <- authorize(actor, :update, target),
@@ -983,9 +983,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_reactivate_user(User.t() | nil, String.t()) ::
+  @spec admin_reactivate_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_reactivate_user(actor, slug) do
+  def admin_reactivate_user(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = reactivate_user(user)
       log_managed_user(actor, user, "Admin.User.Activation:create", "Reactivated #{user.name}")
@@ -1005,11 +1005,11 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_deactivate_user(User.t() | nil, String.t()) ::
+  @spec admin_deactivate_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_deactivate_user(actor, slug) do
+  def admin_deactivate_user(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = deactivate_user(actor, user)
+      {:ok, user} = deactivate_user(actor.user, user)
       log_managed_user(actor, user, "Admin.User.Activation:delete", "Deactivated #{user.name}")
 
       {:ok, user}
@@ -1026,9 +1026,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_reset_api_key(User.t() | nil, String.t()) ::
+  @spec admin_reset_api_key(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_reset_api_key(actor, slug) do
+  def admin_reset_api_key(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = reset_api_key(user)
       log_managed_user(actor, user, "Admin.User.ApiKey:delete", "Reset API key for #{user.name}")
@@ -1047,9 +1047,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_remove_avatar(User.t() | nil, String.t()) ::
+  @spec admin_remove_avatar(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_remove_avatar(actor, slug) do
+  def admin_remove_avatar(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = remove_avatar(user)
       log_managed_user(actor, user, "Admin.User.Avatar:delete", "Removed avatar for #{user.name}")
@@ -1068,9 +1068,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_wipe_downvotes(User.t() | nil, String.t()) ::
+  @spec admin_wipe_downvotes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_wipe_downvotes(actor, slug) do
+  def admin_wipe_downvotes(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, false])
 
@@ -1098,11 +1098,11 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}` for an erasable user, with its roles preloaded.
   """
-  @spec load_user_for_erase(User.t() | nil, String.t()) ::
+  @spec load_user_for_erase(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error,
              :unauthorized | :not_erasable | {:privileged, User.t()} | {:verified, User.t()}}
-  def load_user_for_erase(actor, slug) do
+  def load_user_for_erase(%Actor{} = actor, slug) do
     with :ok <- authorize(actor, :edit, %User{}) do
       user = user_by_slug_with_roles(slug)
 
@@ -1125,13 +1125,13 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}` with the renamed account.
   """
-  @spec admin_erase_user(User.t() | nil, String.t()) ::
+  @spec admin_erase_user(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error,
              :unauthorized | :not_erasable | {:privileged, User.t()} | {:verified, User.t()}}
-  def admin_erase_user(actor, slug) do
+  def admin_erase_user(%Actor{} = actor, slug) do
     with {:ok, user} <- load_user_for_erase(actor, slug),
-         {:ok, erased} <- erase_user(user, actor) do
+         {:ok, erased} <- erase_user(user, actor.user) do
       log_managed_user(actor, erased, "Admin.User.Erase:create", "Erased #{user.name}")
 
       {:ok, erased}
@@ -1147,9 +1147,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec load_user_for_force_filter(User.t() | nil, String.t()) ::
+  @spec load_user_for_force_filter(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def load_user_for_force_filter(actor, slug) do
+  def load_user_for_force_filter(%Actor{} = actor, slug) do
     load_managed_user(actor, slug)
   end
 
@@ -1164,9 +1164,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_force_filter(User.t() | nil, String.t(), map()) ::
+  @spec admin_force_filter(Actor.t(), String.t(), map()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_force_filter(actor, slug, params) do
+  def admin_force_filter(%Actor{} = actor, slug, params) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       # A `forced_filter_id` naming no filter fails the foreign-key constraint;
       # the raise on that mismatch is pinned.
@@ -1193,9 +1193,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_unforce_filter(User.t() | nil, String.t()) ::
+  @spec admin_unforce_filter(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_unforce_filter(actor, slug) do
+  def admin_unforce_filter(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = unforce_filter(user)
 
@@ -1220,9 +1220,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_unlock_user(User.t() | nil, String.t()) ::
+  @spec admin_unlock_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_unlock_user(actor, slug) do
+  def admin_unlock_user(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = unlock_user(user)
       log_managed_user(actor, user, "Admin.User.Unlock:create", "Unlocked #{user.name}")
@@ -1241,9 +1241,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_verify_user(User.t() | nil, String.t()) ::
+  @spec admin_verify_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_verify_user(actor, slug) do
+  def admin_verify_user(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = verify_user(user)
 
@@ -1268,9 +1268,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_unverify_user(User.t() | nil, String.t()) ::
+  @spec admin_unverify_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_unverify_user(actor, slug) do
+  def admin_unverify_user(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       {:ok, user} = unverify_user(user)
 
@@ -1296,9 +1296,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_wipe_votes(User.t() | nil, String.t()) ::
+  @spec admin_wipe_votes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_wipe_votes(actor, slug) do
+  def admin_wipe_votes(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, true])
 
@@ -1323,9 +1323,9 @@ defmodule Philomena.Users do
 
   Returns `{:ok, user}`.
   """
-  @spec admin_wipe_user(User.t() | nil, String.t()) ::
+  @spec admin_wipe_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def admin_wipe_user(actor, slug) do
+  def admin_wipe_user(%Actor{} = actor, slug) do
     with {:ok, user} <- load_managed_user(actor, slug) do
       Exq.enqueue(Exq, "indexing", UserWipeWorker, [user.id])
       log_managed_user(actor, user, "Admin.User.Wipe:create", "Wiped PII for #{user.name}")
@@ -1470,9 +1470,9 @@ defmodule Philomena.Users do
   fp_matches: [...]}}` with each match list carrying the matched users and their
   bans.
   """
-  @spec load_alias_matches(User.t() | nil, String.t()) ::
+  @spec load_alias_matches(Actor.t(), String.t()) ::
           {:ok, map()} | {:error, :unauthorized | :not_found}
-  def load_alias_matches(actor, slug) do
+  def load_alias_matches(%Actor{} = actor, slug) do
     user = Repo.get_by(User, slug: slug)
 
     with :ok <- authorize(actor, :show_details, user),

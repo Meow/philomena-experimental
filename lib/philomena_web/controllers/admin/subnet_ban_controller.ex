@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Bans.admin_subnet_bans(conn.assigns.current_user, params, conn.assigns.scrivener) do
+    case Bans.admin_subnet_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
       {:ok, subnet_bans} ->
         render(conn, "index.html",
           title: "Admin - Subnet Bans",
@@ -25,7 +25,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
   end
 
   def new(conn, params) do
-    case Bans.new_subnet_ban(conn.assigns.current_user, params["specification"]) do
+    case Bans.new_subnet_ban(conn.assigns.actor, params["specification"]) do
       {:ok, subnet} ->
         render_new(conn, subnet)
 
@@ -45,7 +45,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
   end
 
   def create(conn, %{"subnet" => subnet_ban_params}) do
-    case Bans.create_subnet_ban(conn.assigns.current_user, subnet_ban_params) do
+    case Bans.create_subnet_ban(conn.assigns.actor, subnet_ban_params) do
       {:ok, _subnet_ban} ->
         conn
         |> put_flash(:info, "Subnet was successfully banned.")
@@ -61,13 +61,13 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
 
   def edit(conn, params) do
     with {:ok, {subnet, changeset}} <-
-           Bans.load_subnet_ban_for_edit(conn.assigns.current_user, params["id"]) do
+           Bans.load_subnet_ban_for_edit(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Subnet Ban", subnet: subnet, changeset: changeset)
     end
   end
 
   def update(conn, %{"id" => id, "subnet" => subnet_ban_params}) do
-    case Bans.update_subnet_ban(conn.assigns.current_user, id, subnet_ban_params) do
+    case Bans.update_subnet_ban(conn.assigns.actor, id, subnet_ban_params) do
       {:ok, _subnet_ban} ->
         conn
         |> put_flash(:info, "Subnet ban successfully updated.")
@@ -82,7 +82,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
   end
 
   def delete(conn, params) do
-    with {:ok, _subnet_ban} <- Bans.delete_subnet_ban(conn.assigns.current_user, params["id"]) do
+    with {:ok, _subnet_ban} <- Bans.delete_subnet_ban(conn.assigns.actor, params["id"]) do
       conn
       |> put_flash(:info, "Subnet ban successfully deleted.")
       |> redirect(to: ~p"/admin/subnet_bans")

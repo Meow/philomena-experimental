@@ -109,7 +109,8 @@ defmodule PhilomenaWeb.Admin.ReportControllerTest do
   describe "GET /admin/reports/:id (show) failure paths" do
     setup [:register_and_log_in_admin]
 
-    # NOTE: :show runs Canary's not-found handler for an unknown id.
+    # NOTE: an unknown id loads nil; an admin is authorized on the nil load, so
+    # :show returns not_found.
     test "redirects for an unknown report id", %{conn: conn} do
       conn = get(conn, ~p"/admin/reports/#{0}")
       assert redirected_to(conn) == "/"

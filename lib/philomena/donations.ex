@@ -7,6 +7,7 @@ defmodule Philomena.Donations do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
+  alias Philomena.Attribution.Actor
   alias Philomena.Donations.Donation
   alias Philomena.Users.User
 
@@ -31,9 +32,9 @@ defmodule Philomena.Donations do
   access is `{:error, :unauthorized}`. Returns `{:ok, donations}` as a
   `m:Scrivener.Page` or `{:error, :unauthorized}`.
   """
-  @spec load_donations(User.t() | nil, map() | keyword()) ::
+  @spec load_donations(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_donations(actor, pagination) do
+  def load_donations(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, Donation) do
       donations =
         Donation
@@ -56,9 +57,9 @@ defmodule Philomena.Donations do
   Returns `{:ok, {user, changeset}}`, `{:error, :unauthorized}`, or
   `{:error, :not_found}`.
   """
-  @spec load_user_donations(User.t() | nil, String.t()) ::
+  @spec load_user_donations(Actor.t(), String.t()) ::
           {:ok, {User.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_user_donations(actor, slug) do
+  def load_user_donations(%Actor{} = actor, slug) do
     with :ok <- authorize(actor, :index, Donation) do
       user =
         User
@@ -105,9 +106,9 @@ defmodule Philomena.Donations do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec create_donation(User.t() | nil, map()) ::
+  @spec create_donation(Actor.t(), map()) ::
           {:ok, Donation.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_donation(actor, attrs) do
+  def create_donation(%Actor{} = actor, attrs) do
     with :ok <- authorize(actor, :index, Donation) do
       insert_donation(attrs)
     end

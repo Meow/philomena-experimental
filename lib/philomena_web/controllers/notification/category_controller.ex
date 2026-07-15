@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Notification.CategoryController do
 
     notifications =
       Notifications.unread_notifications_for_user_and_category(
-        conn.assigns.current_user,
+        conn.assigns.actor,
         category,
         conn.assigns.scrivener
       )

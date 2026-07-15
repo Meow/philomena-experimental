@@ -8,13 +8,13 @@ defmodule Philomena.UserFingerprints do
 
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Bans
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserFingerprints.FingerprintProfile
-  alias Philomena.Users.User
 
   @doc """
-  Assembles the fingerprint profile page for `user` (the current viewer) from the
+  Assembles the fingerprint profile page for `actor` (the current viewer) from the
   raw `fingerprint` string.
 
   The profile is staff-only: a viewer who may not see fingerprints gets
@@ -24,10 +24,10 @@ defmodule Philomena.UserFingerprints do
   Returns `{:ok, %FingerprintProfile{}}` carrying the users seen with the
   fingerprint and the fingerprint bans matching it.
   """
-  @spec load_fingerprint_profile(User.t() | nil, String.t()) ::
+  @spec load_fingerprint_profile(Actor.t(), String.t()) ::
           {:ok, FingerprintProfile.t()} | {:error, :unauthorized}
-  def load_fingerprint_profile(user, fingerprint) do
-    with :ok <- authorize(user, :show, :ip_address) do
+  def load_fingerprint_profile(%Actor{} = actor, fingerprint) do
+    with :ok <- authorize(actor, :show, :ip_address) do
       {:ok,
        %FingerprintProfile{
          fingerprint: fingerprint,

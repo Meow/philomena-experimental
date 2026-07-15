@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Search.ReverseController do
     case DuplicateReports.execute_search_query(image_params) do
       {:ok, images} ->
         changeset = DuplicateReports.change_search_query(%SearchQuery{})
-        interactions = Interactions.user_interactions(images, conn.assigns.current_user)
+        interactions = Interactions.user_interactions(images, conn.assigns.actor)
 
         render(conn, "index.html",
           title: "Reverse Search",

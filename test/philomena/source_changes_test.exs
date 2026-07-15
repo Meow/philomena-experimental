@@ -7,8 +7,8 @@ defmodule Philomena.SourceChangesTest do
   load (including the admin/other-actor divergence on an unknown id), and the
   paginated, newest-first result on success.
 
-  The actor here is a plain `User.t()` or `nil`, matching what the controller
-  hands in as `conn.assigns.current_user`.
+  The actor here is a `Philomena.Attribution.Actor`, matching what the
+  controller hands in as `conn.assigns.actor`.
   """
 
   use Philomena.DataCase, async: true
@@ -16,6 +16,7 @@ defmodule Philomena.SourceChangesTest do
   alias Philomena.SourceChanges
   alias Scrivener.Page
 
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
   import Philomena.ImagesFixtures
   import Philomena.SourceChangesFixtures
   import Philomena.UsersFixtures
@@ -29,7 +30,7 @@ defmodule Philomena.SourceChangesTest do
       newer = source_change_fixture(image)
 
       assert {:ok, {loaded_image, %Page{} = page}} =
-               SourceChanges.image_source_changes(nil, to_string(image.id), @pagination)
+               SourceChanges.image_source_changes(actor(), to_string(image.id), @pagination)
 
       assert loaded_image.id == image.id
       assert Enum.map(page.entries, & &1.id) == [newer.id, older.id]
@@ -41,7 +42,7 @@ defmodule Philomena.SourceChangesTest do
       change = source_change_fixture(image)
 
       assert {:ok, {loaded_image, page}} =
-               SourceChanges.image_source_changes(user, to_string(image.id), @pagination)
+               SourceChanges.image_source_changes(actor(user), to_string(image.id), @pagination)
 
       assert loaded_image.id == image.id
       assert Enum.map(page.entries, & &1.id) == [change.id]
@@ -53,7 +54,7 @@ defmodule Philomena.SourceChangesTest do
       source_change_fixture(image, user_id: user.id)
 
       assert {:ok, {_image, page}} =
-               SourceChanges.image_source_changes(nil, to_string(image.id), @pagination)
+               SourceChanges.image_source_changes(actor(), to_string(image.id), @pagination)
 
       [entry] = page.entries
       assert entry.user.id == user.id
@@ -64,7 +65,10 @@ defmodule Philomena.SourceChangesTest do
       for _ <- 1..3, do: source_change_fixture(image)
 
       assert {:ok, {_image, page}} =
-               SourceChanges.image_source_changes(nil, to_string(image.id), page: 1, page_size: 2)
+               SourceChanges.image_source_changes(actor(), to_string(image.id),
+                 page: 1,
+                 page_size: 2
+               )
 
       assert page.page_size == 2
       assert length(page.entries) == 2
@@ -75,7 +79,7 @@ defmodule Philomena.SourceChangesTest do
       image = image_fixture()
 
       assert {:ok, {loaded_image, page}} =
-               SourceChanges.image_source_changes(nil, to_string(image.id), @pagination)
+               SourceChanges.image_source_changes(actor(), to_string(image.id), @pagination)
 
       assert loaded_image.id == image.id
       assert page.entries == []
@@ -87,7 +91,7 @@ defmodule Philomena.SourceChangesTest do
       change = source_change_fixture(image)
 
       assert {:ok, {_image, page}} =
-               SourceChanges.image_source_changes(nil, image.id, @pagination)
+               SourceChanges.image_source_changes(actor(), image.id, @pagination)
 
       assert Enum.map(page.entries, & &1.id) == [change.id]
     end
@@ -95,13 +99,13 @@ defmodule Philomena.SourceChangesTest do
     test "an unknown well-formed id is unauthorized for an anonymous actor" do
       # The image loads as nil and a nil actor fails :show on the nil load, so the
       # missing image surfaces as unauthorized rather than not found.
-      assert SourceChanges.image_source_changes(nil, "2147483647", @pagination) ==
+      assert SourceChanges.image_source_changes(actor(), "2147483647", @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a regular user" do
       assert SourceChanges.image_source_changes(
-               confirmed_user_fixture(),
+               actor(confirmed_user_fixture()),
                "2147483647",
                @pagination
              ) == {:error, :unauthorized}
@@ -109,7 +113,7 @@ defmodule Philomena.SourceChangesTest do
 
     test "an unknown well-formed id is unauthorized for a moderator" do
       assert SourceChanges.image_source_changes(
-               moderator_user_fixture(),
+               actor(moderator_user_fixture()),
                "2147483647",
                @pagination
              ) == {:error, :unauthorized}
@@ -119,21 +123,21 @@ defmodule Philomena.SourceChangesTest do
       # An admin clears :show on the nil load via the blanket ability rule, then
       # the image presence check fails, so the missing image is not found.
       assert SourceChanges.image_source_changes(
-               admin_user_fixture(),
+               actor(admin_user_fixture()),
                "2147483647",
                @pagination
              ) == {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert SourceChanges.image_source_changes(nil, "not-a-number", @pagination) ==
+      assert SourceChanges.image_source_changes(actor(), "not-a-number", @pagination) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       # IntegerId.parse rejects a value the integer column could not hold before
       # the row is ever queried, ahead of any authorization.
-      assert SourceChanges.image_source_changes(nil, "99999999999999999999", @pagination) ==
+      assert SourceChanges.image_source_changes(actor(), "99999999999999999999", @pagination) ==
                {:error, :not_found}
     end
   end
@@ -146,7 +150,7 @@ defmodule Philomena.SourceChangesTest do
       newer = source_change_fixture(image, user_id: user.id)
 
       assert {:ok, {loaded_user, %Page{} = page, image_count}} =
-               SourceChanges.user_source_changes(nil, user.slug, %{}, @pagination)
+               SourceChanges.user_source_changes(actor(), user.slug, %{}, @pagination)
 
       assert loaded_user.id == user.id
       assert Enum.map(page.entries, & &1.id) == [newer.id, older.id]
@@ -161,7 +165,7 @@ defmodule Philomena.SourceChangesTest do
       kept = source_change_fixture(public_image, user_id: user.id)
 
       assert {:ok, {_user, page, image_count}} =
-               SourceChanges.user_source_changes(nil, user.slug, %{}, @pagination)
+               SourceChanges.user_source_changes(actor(), user.slug, %{}, @pagination)
 
       # The change on the user's own anonymous upload is dropped; only the change
       # on the public image survives.
@@ -176,7 +180,12 @@ defmodule Philomena.SourceChangesTest do
       source_change_fixture(image, user_id: user.id, added: false)
 
       assert {:ok, {_user, page, _count}} =
-               SourceChanges.user_source_changes(nil, user.slug, %{"added" => "1"}, @pagination)
+               SourceChanges.user_source_changes(
+                 actor(),
+                 user.slug,
+                 %{"added" => "1"},
+                 @pagination
+               )
 
       assert Enum.map(page.entries, & &1.id) == [added.id]
     end
@@ -188,7 +197,12 @@ defmodule Philomena.SourceChangesTest do
       removed = source_change_fixture(image, user_id: user.id, added: false)
 
       assert {:ok, {_user, page, _count}} =
-               SourceChanges.user_source_changes(nil, user.slug, %{"added" => "0"}, @pagination)
+               SourceChanges.user_source_changes(
+                 actor(),
+                 user.slug,
+                 %{"added" => "0"},
+                 @pagination
+               )
 
       assert Enum.map(page.entries, & &1.id) == [removed.id]
     end
@@ -202,7 +216,7 @@ defmodule Philomena.SourceChangesTest do
       source_change_fixture(other, user_id: user.id)
 
       assert {:ok, {_user, _page, image_count}} =
-               SourceChanges.user_source_changes(nil, user.slug, %{}, @pagination)
+               SourceChanges.user_source_changes(actor(), user.slug, %{}, @pagination)
 
       assert image_count == 2
     end
@@ -213,7 +227,7 @@ defmodule Philomena.SourceChangesTest do
       for _ <- 1..3, do: source_change_fixture(image, user_id: user.id)
 
       assert {:ok, {_user, page, _count}} =
-               SourceChanges.user_source_changes(nil, user.slug, %{}, page: 1, page_size: 2)
+               SourceChanges.user_source_changes(actor(), user.slug, %{}, page: 1, page_size: 2)
 
       assert page.page_size == 2
       assert length(page.entries) == 2
@@ -221,11 +235,11 @@ defmodule Philomena.SourceChangesTest do
     end
 
     test "an unknown slug is unauthorized for an anonymous actor, not-found for an admin" do
-      assert SourceChanges.user_source_changes(nil, "no-such-user", %{}, @pagination) ==
+      assert SourceChanges.user_source_changes(actor(), "no-such-user", %{}, @pagination) ==
                {:error, :unauthorized}
 
       assert SourceChanges.user_source_changes(
-               admin_user_fixture(),
+               actor(admin_user_fixture()),
                "no-such-user",
                %{},
                @pagination
@@ -266,7 +280,7 @@ defmodule Philomena.SourceChangesTest do
 
       assert {:ok, {%Postgrex.INET{} = ip, %Postgrex.INET{} = range, page}} =
                SourceChanges.ip_source_changes(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  "203.0.113.5",
                  %{},
                  @pagination
@@ -282,7 +296,7 @@ defmodule Philomena.SourceChangesTest do
 
       assert {:ok, {_ip, range, page}} =
                SourceChanges.ip_source_changes(
-                 admin_user_fixture(),
+                 actor(admin_user_fixture()),
                  "203.0.113.5",
                  %{"mask" => "24"},
                  @pagination
@@ -299,7 +313,7 @@ defmodule Philomena.SourceChangesTest do
 
       assert {:ok, {_ip, _range, page}} =
                SourceChanges.ip_source_changes(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  "203.0.113.6",
                  %{"added" => "1"},
                  @pagination
@@ -310,7 +324,7 @@ defmodule Philomena.SourceChangesTest do
 
     test "a staffer submitting an unparsable address is not-found" do
       assert SourceChanges.ip_source_changes(
-               moderator_user_fixture(),
+               actor(moderator_user_fixture()),
                "not-an-ip",
                %{},
                @pagination
@@ -319,7 +333,7 @@ defmodule Philomena.SourceChangesTest do
 
     test "a regular user is unauthorized before the address is parsed" do
       assert SourceChanges.ip_source_changes(
-               confirmed_user_fixture(),
+               actor(confirmed_user_fixture()),
                "garbage",
                %{},
                @pagination
@@ -327,7 +341,7 @@ defmodule Philomena.SourceChangesTest do
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert SourceChanges.ip_source_changes(nil, "203.0.113.5", %{}, @pagination) ==
+      assert SourceChanges.ip_source_changes(actor(), "203.0.113.5", %{}, @pagination) ==
                {:error, :unauthorized}
     end
   end
@@ -340,7 +354,7 @@ defmodule Philomena.SourceChangesTest do
 
       assert {:ok, page} =
                SourceChanges.fingerprint_source_changes(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  "abc123",
                  %{},
                  @pagination
@@ -352,7 +366,7 @@ defmodule Philomena.SourceChangesTest do
     test "any raw string is accepted and returns a possibly-empty page" do
       assert {:ok, page} =
                SourceChanges.fingerprint_source_changes(
-                 admin_user_fixture(),
+                 actor(admin_user_fixture()),
                  "no-such-fingerprint",
                  %{},
                  @pagination
@@ -368,7 +382,7 @@ defmodule Philomena.SourceChangesTest do
 
       assert {:ok, page} =
                SourceChanges.fingerprint_source_changes(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  "def456",
                  %{"added" => "0"},
                  @pagination
@@ -379,7 +393,7 @@ defmodule Philomena.SourceChangesTest do
 
     test "a regular user is unauthorized" do
       assert SourceChanges.fingerprint_source_changes(
-               confirmed_user_fixture(),
+               actor(confirmed_user_fixture()),
                "abc123",
                %{},
                @pagination
@@ -387,7 +401,7 @@ defmodule Philomena.SourceChangesTest do
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert SourceChanges.fingerprint_source_changes(nil, "abc123", %{}, @pagination) ==
+      assert SourceChanges.fingerprint_source_changes(actor(), "abc123", %{}, @pagination) ==
                {:error, :unauthorized}
     end
   end

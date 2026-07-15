@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Profile.SourceChangeController do
   def index(conn, %{"profile_id" => slug} = params) do
     with {:ok, {user, source_changes, image_count}} <-
            SourceChanges.user_source_changes(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              slug,
              params,
              conn.assigns.scrivener

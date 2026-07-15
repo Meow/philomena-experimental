@@ -61,8 +61,8 @@ defmodule PhilomenaWeb.Page.HistoryControllerTest do
     end
 
     test "redirects with the not-found flash for an unknown slug", %{conn: conn} do
-      # NOTE: load_resource now uses required: true, so Canary runs its
-      # not-found handler on this :index action - an unknown slug redirects
+      # NOTE: the context authorizes the loaded page on this :index action; an
+      # unknown slug loads nil, the actor is authorized on it, so it redirects
       # instead of dereferencing a nil page.
       conn = get(conn, ~p"/pages/nonexistent-page/history")
 

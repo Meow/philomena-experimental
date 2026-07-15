@@ -14,7 +14,6 @@ defmodule Philomena.PollVotes do
   alias Philomena.Topics
   alias Philomena.Forums.Forum
   alias Philomena.Topics.Topic
-  alias Philomena.Users.User
   alias Philomena.Polls
   alias Philomena.Polls.Poll
   alias Philomena.PollVotes.PollVote
@@ -43,10 +42,10 @@ defmodule Philomena.PollVotes do
       {:ok, [%PollOption{}]}
 
   """
-  @spec list_votes(User.t() | nil, String.t(), String.t()) ::
+  @spec list_votes(Actor.t(), String.t(), String.t()) ::
           {:ok, [PollOption.t()]} | {:error, :unauthorized | :not_found}
-  def list_votes(actor, forum_slug, topic_slug) do
-    with {:ok, _forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
+  def list_votes(%Actor{} = actor, forum_slug, topic_slug) do
+    with {:ok, _forum, topic, poll} <- load_forum_topic_poll(actor.user, forum_slug, topic_slug),
          :ok <- authorize(actor, :hide, topic) do
       {:ok, voted_options(poll)}
     end
@@ -141,12 +140,12 @@ defmodule Philomena.PollVotes do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec delete_vote(User.t() | nil, String.t(), String.t(), String.t()) ::
+  @spec delete_vote(Actor.t(), String.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
-  def delete_vote(actor, forum_slug, topic_slug, vote_id) do
-    with {:ok, forum, topic, _poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
+  def delete_vote(%Actor{} = actor, forum_slug, topic_slug, vote_id) do
+    with {:ok, forum, topic, _poll} <- load_forum_topic_poll(actor.user, forum_slug, topic_slug),
          :ok <- authorize(actor, :hide, topic) do
       case load_poll_vote(vote_id) do
         nil ->

@@ -6,11 +6,11 @@ defmodule Philomena.Polls do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Repo
   alias Philomena.Topics
   alias Philomena.Forums.Forum
   alias Philomena.Topics.Topic
-  alias Philomena.Users.User
   alias Philomena.Polls.Poll
 
   @doc """
@@ -66,10 +66,10 @@ defmodule Philomena.Polls do
       {:ok, {%Forum{}, %Topic{}, %Poll{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_poll_for_edit(User.t() | nil, String.t(), String.t()) ::
+  @spec load_poll_for_edit(Actor.t(), String.t(), String.t()) ::
           {:ok, {Forum.t(), Topic.t(), Poll.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
-  def load_poll_for_edit(actor, forum_slug, topic_slug) do
+  def load_poll_for_edit(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug) do
       {:ok, {forum, topic, poll, change_poll(poll)}}
     end
@@ -80,7 +80,7 @@ defmodule Philomena.Polls do
   # present for editing and on the update-error path.
   defp load_forum_topic_poll(actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+           Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          {:ok, poll} <- load_poll(topic),
          :ok <- authorize(actor, :hide, topic) do
       {:ok, forum, topic, Repo.preload(poll, :options)}
@@ -146,11 +146,11 @@ defmodule Philomena.Polls do
       {:error, %Forum{}, %Topic{}, %Ecto.Changeset{}}
 
   """
-  @spec update_poll(User.t() | nil, String.t(), String.t(), map()) ::
+  @spec update_poll(Actor.t(), String.t(), String.t(), map()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t(), Ecto.Changeset.t()}
           | {:error, :unauthorized | :not_found}
-  def update_poll(actor, forum_slug, topic_slug, poll_params) do
+  def update_poll(%Actor{} = actor, forum_slug, topic_slug, poll_params) do
     with {:ok, forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug) do
       case update_poll(poll, poll_params) do
         {:ok, _poll} ->

@@ -16,9 +16,11 @@ defmodule Philomena.Conversations do
   alias Philomena.Conversations.Message
   alias Philomena.IntegerId
   alias Philomena.ModerationLogs
+  alias Philomena.RateLimiter
   alias Philomena.Reports
   alias Philomena.Users
-  alias Philomena.Users.User
+
+  @conversation_create_window 60
 
   @doc """
   Returns the number of unread conversations for the given user.
@@ -58,15 +60,15 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> list_conversations(%User{}, %{}, page_size: 10)
+      iex> list_conversations(actor, %{}, page_size: 10)
       %Scrivener.Page{}
 
-      iex> list_conversations(%User{}, %{"with" => "123"}, page_size: 10)
+      iex> list_conversations(actor, %{"with" => "123"}, page_size: 10)
       %Scrivener.Page{}
 
   """
-  @spec list_conversations(User.t(), map(), keyword()) :: Scrivener.Page.t()
-  def list_conversations(user, params, pagination) do
+  @spec list_conversations(Actor.t(), map(), keyword()) :: Scrivener.Page.t()
+  def list_conversations(%Actor{user: user}, params, pagination) do
     case params do
       %{"with" => partner_id} ->
         query =
@@ -117,13 +119,13 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> load_conversation_page(%User{}, "slug", page_size: 25)
+      iex> load_conversation_page(actor, "slug", page_size: 25)
       {:ok, %ConversationPage{}}
 
   """
-  @spec load_conversation_page(User.t(), String.t(), keyword()) ::
+  @spec load_conversation_page(Actor.t(), String.t(), keyword()) ::
           {:ok, ConversationPage.t()} | {:error, :unauthorized | :not_found}
-  def load_conversation_page(user, slug, pagination) do
+  def load_conversation_page(%Actor{user: user}, slug, pagination) do
     with {:ok, conversation} <- load_authorized_conversation(user, slug, [:to, :from]) do
       messages = paginate_messages(conversation, user, pagination)
       {:ok, _conversation} = mark_conversation_read(conversation, user)
@@ -200,8 +202,10 @@ defmodule Philomena.Conversations do
 
   This is a write, so `actor`'s write access is verified first: a banned actor
   is `{:error, :ban}` and an actor with no fingerprint `{:error, :unauthorized}`.
-  The recipient is resolved from the `"recipient"` param; a system report is
-  filed against the first message when it is withheld from approval.
+  A non-exempt actor who has created a conversation within the last minute gets
+  `{:error, :rate_limited}`. The recipient is resolved from the `"recipient"`
+  param; a system report is filed against the first message when it is withheld
+  from approval.
 
   Returns `{:ok, conversation}` on success or `{:error, %Ecto.Changeset{}}` when
   the insert is rejected (an unknown recipient fails the required-recipient
@@ -217,10 +221,15 @@ defmodule Philomena.Conversations do
 
   """
   @spec create_conversation(Actor.t(), map() | nil) ::
-          {:ok, Conversation.t()} | {:error, :ban | :unauthorized} | {:error, Ecto.Changeset.t()}
+          {:ok, Conversation.t()}
+          | {:error, :ban | :unauthorized | :rate_limited}
+          | {:error, Ecto.Changeset.t()}
   def create_conversation(%Actor{} = actor, params) do
-    with :ok <- verify_write_access(actor) do
-      create_conversation_from(actor.user, params || %{})
+    with :ok <- verify_write_access(actor),
+         :ok <- RateLimiter.check_rate_limit(actor, :conversation_create),
+         {:ok, conversation} <- create_conversation_from(actor.user, params || %{}) do
+      RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
+      {:ok, conversation}
     end
   end
 
@@ -334,16 +343,16 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> set_conversation_read(%User{}, "slug")
+      iex> set_conversation_read(actor, "slug")
       {:ok, %Conversation{}}
 
-      iex> set_conversation_read(%User{}, "slug", false)
+      iex> set_conversation_read(actor, "slug", false)
       {:ok, %Conversation{}}
 
   """
-  @spec set_conversation_read(User.t(), String.t(), boolean()) ::
+  @spec set_conversation_read(Actor.t(), String.t(), boolean()) ::
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found}
-  def set_conversation_read(user, slug, read \\ true) do
+  def set_conversation_read(%Actor{user: user}, slug, read \\ true) do
     with {:ok, conversation} <- load_authorized_conversation(user, slug) do
       {:ok, _conversation} = mark_conversation_read(conversation, user, read)
       {:ok, conversation}
@@ -363,16 +372,16 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> set_conversation_hidden(%User{}, "slug")
+      iex> set_conversation_hidden(actor, "slug")
       {:ok, %Conversation{}}
 
-      iex> set_conversation_hidden(%User{}, "slug", false)
+      iex> set_conversation_hidden(actor, "slug", false)
       {:ok, %Conversation{}}
 
   """
-  @spec set_conversation_hidden(User.t(), String.t(), boolean()) ::
+  @spec set_conversation_hidden(Actor.t(), String.t(), boolean()) ::
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found}
-  def set_conversation_hidden(user, slug, hidden \\ true) do
+  def set_conversation_hidden(%Actor{user: user}, slug, hidden \\ true) do
     with {:ok, conversation} <- load_authorized_conversation(user, slug) do
       {:ok, _conversation} = mark_conversation_hidden(conversation, user, hidden)
       {:ok, conversation}
@@ -491,13 +500,13 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> approve_message(%User{}, "1")
+      iex> approve_message(actor, "1")
       {:ok, %Message{}}
 
   """
-  @spec approve_message(User.t(), any()) ::
+  @spec approve_message(Actor.t(), any()) ::
           {:ok, Message.t()} | {:error, :unauthorized | :not_found} | {:error, Ecto.Changeset.t()}
-  def approve_message(actor, message_id) do
+  def approve_message(%Actor{} = actor, message_id) do
     case IntegerId.parse(message_id) do
       {:ok, id} ->
         message =
@@ -527,7 +536,7 @@ defmodule Philomena.Conversations do
         update: [set: [from_read: false, to_read: false]]
 
     reports_query =
-      Reports.close_report_query({"Conversation", message.conversation_id}, actor)
+      Reports.close_report_query({"Conversation", message.conversation_id}, actor.user)
 
     Multi.new()
     |> Multi.update(:message, message_changeset)

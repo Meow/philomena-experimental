@@ -20,19 +20,19 @@ defmodule PhilomenaWeb.ChannelController do
   end
 
   def show(conn, params) do
-    with {:ok, channel} <- Channels.visit_channel(conn.assigns.current_user, params["id"]) do
+    with {:ok, channel} <- Channels.visit_channel(conn.assigns.actor, params["id"]) do
       redirect(conn, external: channel_url(channel))
     end
   end
 
   def new(conn, _params) do
-    with {:ok, changeset} <- Channels.new_channel(conn.assigns.current_user) do
+    with {:ok, changeset} <- Channels.new_channel(conn.assigns.actor) do
       render(conn, "new.html", title: "New Channel", changeset: changeset)
     end
   end
 
   def create(conn, %{"channel" => channel_params}) do
-    case Channels.create_channel(conn.assigns.current_user, channel_params) do
+    case Channels.create_channel(conn.assigns.actor, channel_params) do
       {:ok, _channel} ->
         conn
         |> put_flash(:info, "Channel created successfully.")
@@ -48,13 +48,13 @@ defmodule PhilomenaWeb.ChannelController do
 
   def edit(conn, params) do
     with {:ok, {channel, changeset}} <-
-           Channels.load_channel_for_edit(conn.assigns.current_user, params["id"]) do
+           Channels.load_channel_for_edit(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Channel", channel: channel, changeset: changeset)
     end
   end
 
   def update(conn, %{"id" => id, "channel" => channel_params}) do
-    case Channels.update_channel(conn.assigns.current_user, id, channel_params) do
+    case Channels.update_channel(conn.assigns.actor, id, channel_params) do
       {:ok, _channel} ->
         conn
         |> put_flash(:info, "Channel updated successfully.")
@@ -69,7 +69,7 @@ defmodule PhilomenaWeb.ChannelController do
   end
 
   def delete(conn, params) do
-    with {:ok, _channel} <- Channels.delete_channel(conn.assigns.current_user, params["id"]) do
+    with {:ok, _channel} <- Channels.delete_channel(conn.assigns.actor, params["id"]) do
       conn
       |> put_flash(:info, "Channel destroyed successfully.")
       |> redirect(to: ~p"/channels")

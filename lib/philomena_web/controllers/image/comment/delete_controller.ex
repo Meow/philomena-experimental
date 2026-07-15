@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.Comment.DeleteController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"comment_id" => comment_id}) do
-    case Comments.destroy_comment(conn.assigns.current_user, comment_id) do
+    case Comments.destroy_comment(conn.assigns.actor, comment_id) do
       {:ok, comment} ->
         conn
         |> put_flash(:info, "Comment successfully destroyed!")

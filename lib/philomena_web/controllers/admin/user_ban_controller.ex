@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
 
   def index(conn, params) do
     with {:ok, user_bans} <-
-           Bans.admin_user_bans(conn.assigns.current_user, params, conn.assigns.scrivener) do
+           Bans.admin_user_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "Admin - User Bans",
         layout_class: "layout--wide",
@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
   end
 
   def new(conn, params) do
-    case Bans.new_user_ban(conn.assigns.current_user, params["user_id"]) do
+    case Bans.new_user_ban(conn.assigns.actor, params["user_id"]) do
       {:ok, {target_user, changeset}} ->
         render_new(conn, target_user, changeset)
 
@@ -30,7 +30,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
   end
 
   def create(conn, %{"user" => user_ban_params}) do
-    case Bans.create_user_ban(conn.assigns.current_user, user_ban_params) do
+    case Bans.create_user_ban(conn.assigns.actor, user_ban_params) do
       {:ok, _user_ban} ->
         conn
         |> put_flash(:info, "User was successfully banned.")
@@ -51,13 +51,13 @@ defmodule PhilomenaWeb.Admin.UserBanController do
 
   def edit(conn, params) do
     with {:ok, {user_ban, changeset}} <-
-           Bans.load_user_ban_for_edit(conn.assigns.current_user, params["id"]) do
+           Bans.load_user_ban_for_edit(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing User Ban", user: user_ban, changeset: changeset)
     end
   end
 
   def update(conn, %{"id" => id, "user" => user_ban_params}) do
-    case Bans.update_user_ban(conn.assigns.current_user, id, user_ban_params) do
+    case Bans.update_user_ban(conn.assigns.actor, id, user_ban_params) do
       {:ok, _user_ban} ->
         conn
         |> put_flash(:info, "User ban successfully updated.")
@@ -72,7 +72,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
   end
 
   def delete(conn, params) do
-    with {:ok, _user_ban} <- Bans.delete_user_ban(conn.assigns.current_user, params["id"]) do
+    with {:ok, _user_ban} <- Bans.delete_user_ban(conn.assigns.actor, params["id"]) do
       conn
       |> put_flash(:info, "User ban successfully deleted.")
       |> redirect(to: ~p"/admin/user_bans")

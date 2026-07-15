@@ -5,7 +5,7 @@ defmodule PhilomenaWeb.Api.Json.FilterController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def show(conn, %{"id" => id}) do
-    case Filters.load_filter(conn.assigns.current_user, id) do
+    case Filters.load_filter(conn.assigns.actor, id) do
       {:ok, filter} ->
         render(conn, "show.json", filter: filter)
 

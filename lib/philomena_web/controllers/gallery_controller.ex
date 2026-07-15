@@ -9,9 +9,6 @@ defmodule PhilomenaWeb.GalleryController do
 
   plug PhilomenaWeb.MapParameterPlug, [param: "gallery"] when action in [:index]
 
-  plug PhilomenaWeb.UserAttributionPlug
-       when action in [:new, :create, :edit, :update, :delete]
-
   def index(conn, params) do
     galleries = Galleries.load_gallery_index(params, conn.assigns.pagination)
 

@@ -3,14 +3,10 @@ defmodule PhilomenaWeb.TopicController do
 
   alias PhilomenaWeb.NotificationCountPlug
   alias PhilomenaWeb.MarkdownRenderer
+  alias PhilomenaWeb.RateLimitedResponse
   alias Philomena.Forums.Forum
   alias Philomena.Topics
 
-  plug PhilomenaWeb.LimitPlug,
-       [time: 300, error: "You may only make a new topic once every 5 minutes."]
-       when action in [:create]
-
-  plug PhilomenaWeb.UserAttributionPlug when action in [:new, :create]
   plug PhilomenaWeb.AdvertPlug when action in [:show]
 
   action_fallback PhilomenaWeb.FallbackController
@@ -18,7 +14,7 @@ defmodule PhilomenaWeb.TopicController do
   def show(conn, %{"forum_id" => forum_id, "id" => id} = params) do
     with {:ok, page} <-
            Topics.load_topic_page(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              forum_id,
              id,
              params["post_id"],
@@ -83,13 +79,16 @@ defmodule PhilomenaWeb.TopicController do
         |> put_flash(:error, "There was an error with your submission. Please try again.")
         |> redirect(to: ~p"/forums/#{forum}/topics/new")
 
+      {:error, :rate_limited} ->
+        RateLimitedResponse.call(conn, "You may only make a new topic once every 5 minutes.")
+
       {:error, _} = error ->
         error
     end
   end
 
   def update(conn, %{"forum_id" => forum_id, "id" => id, "topic" => topic_params}) do
-    case Topics.update_topic_title(conn.assigns.current_user, forum_id, id, topic_params) do
+    case Topics.update_topic_title(conn.assigns.actor, forum_id, id, topic_params) do
       {:ok, {forum, topic}} ->
         conn
         |> put_flash(:info, "Successfully updated topic.")

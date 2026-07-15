@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.SourceHistoryController do
 
   def delete(conn, params) do
     with {:ok, image} <-
-           Images.remove_source_history(conn.assigns.current_user, params["image_id"]) do
+           Images.remove_source_history(conn.assigns.actor, params["image_id"]) do
       conn
       |> put_flash(:info, "Successfully deleted source history.")
       |> redirect(to: ~p"/images/#{image}")

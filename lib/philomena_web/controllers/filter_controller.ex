@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.FilterController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"fq" => fq}) do
-    case Filters.search_filters(conn.assigns.current_user, fq, conn.assigns.pagination) do
+    case Filters.search_filters(conn.assigns.actor, fq, conn.assigns.pagination) do
       {:ok, filters} ->
         render(conn, "index.html", title: "Filters", filters: filters)
 
@@ -18,7 +18,7 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def index(conn, _params) do
-    {my_filters, system_filters} = Filters.index_filters(conn.assigns.current_user)
+    {my_filters, system_filters} = Filters.index_filters(conn.assigns.actor)
 
     render(conn, "index.html",
       title: "Filters",
@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def show(conn, %{"id" => id}) do
-    with {:ok, page} <- Filters.load_filter_page(conn.assigns.current_user, id) do
+    with {:ok, page} <- Filters.load_filter_page(conn.assigns.actor, id) do
       render(conn, "show.html",
         title: "Showing Filter",
         filter: page.filter,
@@ -39,13 +39,13 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def new(conn, params) do
-    with {:ok, changeset} <- Filters.new_filter(conn.assigns.current_user, params["based_on"]) do
+    with {:ok, changeset} <- Filters.new_filter(conn.assigns.actor, params["based_on"]) do
       render(conn, "new.html", title: "New Filter", changeset: changeset)
     end
   end
 
   def create(conn, %{"filter" => filter_params}) do
-    case Filters.create_filter(conn.assigns.current_user, filter_params) do
+    case Filters.create_filter(conn.assigns.actor, filter_params) do
       {:ok, filter} ->
         conn
         |> put_flash(:info, "Filter created successfully.")
@@ -57,13 +57,13 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def edit(conn, %{"id" => id}) do
-    with {:ok, {filter, changeset}} <- Filters.load_filter_for_edit(conn.assigns.current_user, id) do
+    with {:ok, {filter, changeset}} <- Filters.load_filter_for_edit(conn.assigns.actor, id) do
       render(conn, "edit.html", title: "Editing Filter", filter: filter, changeset: changeset)
     end
   end
 
   def update(conn, %{"id" => id, "filter" => filter_params}) do
-    case Filters.update_filter(conn.assigns.current_user, id, filter_params) do
+    case Filters.update_filter(conn.assigns.actor, id, filter_params) do
       {:ok, filter} ->
         conn
         |> put_flash(:info, "Filter updated successfully.")
@@ -78,7 +78,7 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def delete(conn, %{"id" => id}) do
-    case Filters.delete_filter(conn.assigns.current_user, id) do
+    case Filters.delete_filter(conn.assigns.actor, id) do
       {:ok, _filter} ->
         conn
         |> put_flash(:info, "Filter deleted successfully.")

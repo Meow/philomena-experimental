@@ -2,7 +2,7 @@ defmodule PhilomenaWeb.DuplicateReportControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
   # The :index/:show/:create actions live in the public (Tor-authorized)
-  # scope with no Canary gate, so any visitor can reach them; the
+  # scope with no authorization gate, so any visitor can reach them; the
   # accept/reject/claim moderation children are tested separately.
 
   import Philomena.ImagesFixtures

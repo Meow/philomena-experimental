@@ -67,7 +67,7 @@ defmodule Philomena.PollVotesTest do
       user = confirmed_user_fixture()
       %{forum: forum, topic: topic} = forum_topic_poll_options()
 
-      assert PollVotes.list_votes(user, forum.short_name, topic.slug) ==
+      assert PollVotes.list_votes(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
     end
 
@@ -79,7 +79,8 @@ defmodule Philomena.PollVotesTest do
 
       vote = record_vote(poll, option_a)
 
-      assert {:ok, [option]} = PollVotes.list_votes(moderator, forum.short_name, topic.slug)
+      assert {:ok, [option]} =
+               PollVotes.list_votes(actor(moderator), forum.short_name, topic.slug)
 
       # Only the option that carries a vote is returned; the zero-vote option is
       # dropped so the index view renders only options someone voted for.
@@ -96,14 +97,18 @@ defmodule Philomena.PollVotesTest do
     test "an unknown forum is unauthorized" do
       # The forum is loaded by short name and authorized for :show; the nil result
       # is denied before any topic or poll load, for a moderator as much as anyone.
-      assert PollVotes.list_votes(moderator_user_fixture(), "nonexistent", "whatever") ==
+      assert PollVotes.list_votes(actor(moderator_user_fixture()), "nonexistent", "whatever") ==
                {:error, :unauthorized}
     end
 
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert PollVotes.list_votes(moderator_user_fixture(), forum.short_name, "nonexistent-topic") ==
+      assert PollVotes.list_votes(
+               actor(moderator_user_fixture()),
+               forum.short_name,
+               "nonexistent-topic"
+             ) ==
                {:error, :not_found}
     end
 
@@ -113,7 +118,7 @@ defmodule Philomena.PollVotesTest do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
-      assert PollVotes.list_votes(moderator_user_fixture(), forum.short_name, topic.slug) ==
+      assert PollVotes.list_votes(actor(moderator_user_fixture()), forum.short_name, topic.slug) ==
                {:error, :not_found}
     end
   end
@@ -248,7 +253,7 @@ defmodule Philomena.PollVotesTest do
       %{forum: forum, topic: topic, poll: poll, option_a: option_a} = forum_topic_poll_options()
       vote = record_vote(poll, option_a)
 
-      assert PollVotes.delete_vote(user, forum.short_name, topic.slug, to_string(vote.id)) ==
+      assert PollVotes.delete_vote(actor(user), forum.short_name, topic.slug, to_string(vote.id)) ==
                {:error, :unauthorized}
 
       assert Repo.get(PollVote, vote.id)
@@ -259,7 +264,7 @@ defmodule Philomena.PollVotesTest do
       %{forum: forum, topic: topic} = forum_topic_poll_options()
 
       assert {:error, error_forum, error_topic} =
-               PollVotes.delete_vote(moderator, forum.short_name, topic.slug, "999999999")
+               PollVotes.delete_vote(actor(moderator), forum.short_name, topic.slug, "999999999")
 
       assert error_forum.id == forum.id
       assert error_topic.id == topic.id
@@ -272,7 +277,12 @@ defmodule Philomena.PollVotesTest do
       %{forum: forum, topic: topic} = forum_topic_poll_options()
 
       assert {:error, error_forum, error_topic} =
-               PollVotes.delete_vote(moderator, forum.short_name, topic.slug, "not-a-number")
+               PollVotes.delete_vote(
+                 actor(moderator),
+                 forum.short_name,
+                 topic.slug,
+                 "not-a-number"
+               )
 
       assert error_forum.id == forum.id
       assert error_topic.id == topic.id
@@ -287,7 +297,12 @@ defmodule Philomena.PollVotesTest do
       assert Repo.reload!(poll).total_votes == 1
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               PollVotes.delete_vote(moderator, forum.short_name, topic.slug, to_string(vote.id))
+               PollVotes.delete_vote(
+                 actor(moderator),
+                 forum.short_name,
+                 topic.slug,
+                 to_string(vote.id)
+               )
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id

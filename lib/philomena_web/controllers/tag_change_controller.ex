@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.TagChangeController do
   def index(conn, params) do
     tag_changes =
       TagChanges.load(
-        conn.assigns.current_user,
+        conn.assigns.actor,
         params,
         conn.assigns.pagination
       )
@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.TagChangeController do
   end
 
   def delete(conn, params) do
-    case TagChanges.delete_tag_change(conn.assigns.current_user, params["id"]) do
+    case TagChanges.delete_tag_change(conn.assigns.actor, params["id"]) do
       {:ok, _tag_change} ->
         conn
         |> put_flash(:info, "Successfully deleted tag change from history.")

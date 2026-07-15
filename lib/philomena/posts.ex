@@ -16,6 +16,7 @@ defmodule Philomena.Posts do
   alias Philomena.Topics
   alias Philomena.Forums
   alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.UserStatistics
@@ -29,7 +30,10 @@ defmodule Philomena.Posts do
   alias Philomena.Versions.Version
   alias Philomena.Reports
   alias Philomena.Reports.Report
+  alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
+
+  @post_create_window 15
 
   @doc """
   Gets a single post.
@@ -204,13 +208,14 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Searches the publicly visible posts on behalf of `user`, applying the
+  Searches the publicly visible posts on behalf of `actor`, applying the
   compiled query string `query_string` and `pagination`, sorted newest first.
 
-  `user` scopes what the compiled query may match, but the results are further
-  restricted to posts that are not hidden from users and that belong to a forum
-  whose access level is `"normal"` - for every requester alike, so hidden posts
-  and posts in restricted forums are never returned or counted. Results are
+  The actor's user scopes what the compiled query may match, but the results
+  are further restricted to posts that are not hidden from users and that
+  belong to a forum whose access level is `"normal"` - for every requester
+  alike, so hidden posts and posts in restricted forums are never returned or
+  counted. Results are
   preloaded. An empty or missing query string compiles to a match on
   nothing, yielding an empty page rather than an error.
 
@@ -219,16 +224,16 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> search_public_posts(user, "chartreuse", pagination)
+      iex> search_public_posts(actor, "chartreuse", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> search_public_posts(user, ")", pagination)
+      iex> search_public_posts(actor, ")", pagination)
       {:error, "Imbalanced parentheses."}
 
   """
-  @spec search_public_posts(User.t() | nil, String.t() | nil, map()) ::
+  @spec search_public_posts(Actor.t(), String.t() | nil, map()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_public_posts(user, query_string, pagination) do
+  def search_public_posts(%Actor{user: user}, query_string, pagination) do
     case Posts.Query.compile(query_string, user: user) do
       {:ok, query} ->
         results =
@@ -356,8 +361,9 @@ defmodule Philomena.Posts do
   `{:error, forum, topic}` when the insert is rejected (both carry the topic
   for the caller to reuse), `{:error, :ban}` or
   `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
-  when the forum or topic is not visible or the topic may not be posted in, or
-  `{:error, :not_found}` when the topic does not exist.
+  when the forum or topic is not visible or the topic may not be posted in,
+  `{:error, :not_found}` when the topic does not exist, or `{:error, :rate_limited}`
+  when a non-exempt actor has posted within the last 15 seconds.
 
   ## Examples
 
@@ -371,14 +377,16 @@ defmodule Philomena.Posts do
   @spec create_post(Actor.t(), String.t(), String.t(), map() | nil) ::
           {:ok, %{post: Post.t(), topic: Topic.t(), forum: Forum.t()}}
           | {:error, Forum.t(), Topic.t()}
-          | {:error, :ban | :unauthorized | :not_found}
+          | {:error, :ban | :unauthorized | :not_found | :rate_limited}
   def create_post(%Actor{} = actor, forum_slug, topic_slug, post_params) do
     with :ok <- verify_write_access(actor),
+         :ok <- RateLimiter.check_rate_limit(actor, :post_create),
          {:ok, forum, topic} <-
            Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor.user, :create_post, topic) do
       case create_post(topic, actor_attributes(actor), post_params || %{}) do
         {:ok, %{post: post}} ->
+          RateLimiter.record_action(actor, :post_create, @post_create_window)
           record_post_creation(actor, post)
           # The firehose broadcast needs the topic's author, so the topic
           # carries its `:user` here.
@@ -584,8 +592,9 @@ defmodule Philomena.Posts do
 
   @doc """
   Hides the post named by `post_id`, recording the
-  `"deletion_reason"` carried in `post_params`, on behalf of `actor` (a user, or
-  `nil` for an anonymous visitor).
+  `"deletion_reason"` carried in `post_params`, on behalf of `actor` (a
+  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
 
   Authorization (`:hide` on the loaded post) happens here; on success the post's
   associated reports are closed, the topic's and forum's last-post pointers are
@@ -611,11 +620,11 @@ defmodule Philomena.Posts do
       {:error, :unauthorized}
 
   """
-  @spec hide_post(User.t() | nil, any(), map()) ::
+  @spec hide_post(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Post.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Post.t()}
-  def hide_post(actor, post_id, post_params) do
+  def hide_post(%Actor{} = actor, post_id, post_params) do
     case IntegerId.parse(post_id) do
       {:ok, id} ->
         post =
@@ -633,7 +642,7 @@ defmodule Philomena.Posts do
   end
 
   defp hide_authorized_post(actor, %Post{} = post, post_params) do
-    case hide_loaded_post(post, post_params, actor) do
+    case hide_loaded_post(post, post_params, actor.user) do
       {:ok, hidden_post} ->
         log_post_hide(actor, hidden_post)
         {:ok, hidden_post}
@@ -692,7 +701,8 @@ defmodule Philomena.Posts do
 
   @doc """
   Restores the post named by `post_id`, on behalf of `actor`
-  (a user, or `nil` for an anonymous visitor).
+  (a `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
 
   Loading and authorization mirror `hide_post/3` (`:hide` on the loaded post -
   a moderator can still see the hidden post here). On success the topic's and
@@ -714,11 +724,11 @@ defmodule Philomena.Posts do
       {:error, :unauthorized}
 
   """
-  @spec unhide_post(User.t() | nil, any()) ::
+  @spec unhide_post(Actor.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Post.t()}
-  def unhide_post(actor, post_id) do
+  def unhide_post(%Actor{} = actor, post_id) do
     case IntegerId.parse(post_id) do
       {:ok, id} ->
         post =
@@ -789,7 +799,8 @@ defmodule Philomena.Posts do
 
   @doc """
   Destroys (permanently wipes the text of) the post named by
-  `post_id`, on behalf of `actor` (a user, or `nil` for an anonymous visitor).
+  `post_id`, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user
+  may be `nil` for an anonymous visitor).
 
   Authorization (`:hide` on the loaded post) happens here; on success the post's
   text is blanked, the topic's and forum's post counts and the author's forum
@@ -814,11 +825,11 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec destroy_post(User.t() | nil, any()) ::
+  @spec destroy_post(Actor.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Post.t()}
-  def destroy_post(actor, post_id) do
+  def destroy_post(%Actor{} = actor, post_id) do
     case IntegerId.parse(post_id) do
       {:ok, id} ->
         post =
@@ -899,7 +910,8 @@ defmodule Philomena.Posts do
 
   @doc """
   Approves the post named by `post_id`, on behalf of `actor`
-  (a user, or `nil` for an anonymous visitor).
+  (a `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
+  visitor).
 
   Authorization (`:approve` on the loaded post) happens here; on success the
   post's associated reports are closed, the author's forum post count is
@@ -925,11 +937,11 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec approve_post(User.t() | nil, any()) ::
+  @spec approve_post(Actor.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Post.t()}
-  def approve_post(actor, post_id) do
+  def approve_post(%Actor{} = actor, post_id) do
     case IntegerId.parse(post_id) do
       {:ok, id} ->
         post =
@@ -947,7 +959,7 @@ defmodule Philomena.Posts do
   end
 
   defp approve_loaded_post(actor, %Post{} = post) do
-    report_query = Reports.close_report_query({"Post", post.id}, actor)
+    report_query = Reports.close_report_query({"Post", post.id}, actor.user)
     changeset = Post.approve_changeset(post)
 
     Multi.new()
@@ -983,8 +995,8 @@ defmodule Philomena.Posts do
   @doc """
   Loads the edit history of the post named by `post_id` within
   the topic named by `topic_slug` in the forum named by `forum_slug`, on behalf
-  of `actor` (a user, or `nil` for an anonymous visitor). This is a public read
-  with no ban check.
+  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
+  anonymous visitor). This is a public read with no ban check.
 
   The forum is loaded by short name and authorized for `:show`, and the topic is
   loaded by slug with hidden topics visible only to actors who may `:show` them.
@@ -1012,13 +1024,13 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec post_history(User.t() | nil, String.t(), String.t(), any()) ::
+  @spec post_history(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
           {:ok, {Topic.t(), Post.t(), [Version.t()]}}
           | {:error, :unauthorized | :not_found}
-  def post_history(actor, forum_slug, topic_slug, post_id) do
+  def post_history(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with {:ok, _forum, topic} <-
-           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
-         {:ok, post} <- load_topic_post(actor, topic, post_id) do
+           Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
+         {:ok, post} <- load_topic_post(actor.user, topic, post_id) do
       {:ok, {topic, post, Versions.load_last_versions("Post", post)}}
     end
   end

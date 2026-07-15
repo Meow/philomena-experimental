@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.MoveController do
 
   def create(conn, params) do
     case Topics.move_topic(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],
            params["topic"]

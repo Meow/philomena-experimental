@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Topic.SubscriptionController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Topics.subscribe(conn.assigns.current_user, params["forum_id"], params["topic_id"]) do
+    case Topics.subscribe(conn.assigns.actor, params["forum_id"], params["topic_id"]) do
       {:ok, {forum, topic}} ->
         render(conn, "_subscription.html",
           forum: forum,
@@ -25,7 +25,7 @@ defmodule PhilomenaWeb.Topic.SubscriptionController do
 
   def delete(conn, params) do
     with {:ok, {forum, topic}} <-
-           Topics.unsubscribe(conn.assigns.current_user, params["forum_id"], params["topic_id"]) do
+           Topics.unsubscribe(conn.assigns.actor, params["forum_id"], params["topic_id"]) do
       render(conn, "_subscription.html",
         forum: forum,
         topic: topic,

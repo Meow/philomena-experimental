@@ -8,8 +8,6 @@ defmodule PhilomenaWeb.Api.Json.Search.ReverseController do
   plug PhilomenaWeb.ScraperPlug, params_key: "image", params_name: "image"
 
   def create(conn, %{"image" => image_params}) do
-    user = conn.assigns.current_user
-
     {images, total} =
       image_params
       |> Map.put("distance", conn.params["distance"])
@@ -23,7 +21,7 @@ defmodule PhilomenaWeb.Api.Json.Search.ReverseController do
           {[], 0}
       end
 
-    interactions = Interactions.user_interactions(images, user)
+    interactions = Interactions.user_interactions(images, conn.assigns.actor)
 
     conn
     |> put_view(PhilomenaWeb.Api.Json.ImageView)

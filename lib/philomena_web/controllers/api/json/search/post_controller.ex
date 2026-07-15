@@ -5,7 +5,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostController do
 
   def index(conn, params) do
     case Posts.search_public_posts(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["q"],
            conn.assigns.pagination
          ) do

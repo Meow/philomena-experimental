@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Topic.Post.HistoryController do
 
   def index(conn, %{"forum_id" => forum_id, "topic_id" => topic_id, "post_id" => post_id}) do
     with {:ok, {topic, post, versions}} <-
-           Posts.post_history(conn.assigns.current_user, forum_id, topic_id, post_id) do
+           Posts.post_history(conn.assigns.actor, forum_id, topic_id, post_id) do
       render(conn, "index.html",
         title: "Post History for Post #{post.id} - #{topic.title} - Forums",
         post: post,

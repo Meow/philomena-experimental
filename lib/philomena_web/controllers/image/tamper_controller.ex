@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Image.TamperController do
   def create(conn, params) do
     with {:ok, image} <-
            Images.delete_user_vote(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              params["image_id"],
              params["user_id"]
            ) do

@@ -69,9 +69,9 @@ defmodule PhilomenaWeb.Filter.SpoilerControllerTest do
   end
 
   test "POST for an unknown tag redirects with the not-found flash", %{conn: conn} do
-    # NOTE: load_resource now uses required: true, so Canary runs its not-found
-    # handler on :create - an unknown slug redirects instead of passing nil
-    # into Filters.spoiler_tag/2.
+    # NOTE: the context authorizes the loaded record on :create; an unknown slug
+    # loads nil, authorization passes on the nil load, so it returns not_found
+    # and redirects instead of passing nil into Filters.spoiler_tag/2.
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     {:ok, _} = Users.update_filter(user, filter_fixture(user))
 

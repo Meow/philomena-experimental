@@ -7,6 +7,7 @@ defmodule Philomena.Tags do
   import Philomena.Authorization, only: [authorize: 3]
   alias Ecto.Multi
   alias Philomena.Repo
+  alias Philomena.Attribution.Actor
 
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
@@ -333,9 +334,9 @@ defmodule Philomena.Tags do
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_tag_for_edit(User.t() | nil, String.t(), Keyword.t()) ::
+  @spec load_tag_for_edit(Actor.t(), String.t(), Keyword.t()) ::
           {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_tag_for_edit(actor, slug, opts \\ []) do
+  def load_tag_for_edit(%Actor{} = actor, slug, opts \\ []) do
     load_tag_changeset(actor, :edit, slug, Keyword.get(opts, :preload, @show_preloads))
   end
 
@@ -354,9 +355,9 @@ defmodule Philomena.Tags do
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_tag_alias_for_edit(User.t() | nil, String.t()) ::
+  @spec load_tag_alias_for_edit(Actor.t(), String.t()) ::
           {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_tag_alias_for_edit(actor, slug) do
+  def load_tag_alias_for_edit(%Actor{} = actor, slug) do
     load_tag_changeset(actor, :alias, slug, @alias_preloads)
   end
 
@@ -393,9 +394,9 @@ defmodule Philomena.Tags do
       {:ok, %{tag: %Tag{}, filters_spoilering: [], filters_hiding: [], users_watching: []}}
 
   """
-  @spec tag_detail(User.t() | nil, String.t()) ::
+  @spec tag_detail(Actor.t(), String.t()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized}
-  def tag_detail(actor, slug) do
+  def tag_detail(%Actor{} = actor, slug) do
     with :ok <- authorize(actor, :edit, %Tag{}) do
       case tag_by_slug(slug, []) do
         nil ->
@@ -539,7 +540,7 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Adds the tag named by `slug` to `user`'s watched tags.
+  Adds the tag named by `slug` to `actor`'s watched tags.
 
   An unknown slug is `{:error, :not_found}`. Otherwise this defers to the
   watched-tags update, which reindexes the user.
@@ -549,13 +550,13 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> watch_tag(user, "safe")
+      iex> watch_tag(actor, "safe")
       {:ok, %User{}}
 
   """
-  @spec watch_tag(User.t(), String.t()) ::
+  @spec watch_tag(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
-  def watch_tag(user, slug) do
+  def watch_tag(%Actor{user: user}, slug) do
     case tag_by_slug(slug, []) do
       nil -> {:error, :not_found}
       tag -> Users.watch_tag(user, tag)
@@ -563,7 +564,7 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Removes the tag named by `slug` from `user`'s watched tags.
+  Removes the tag named by `slug` from `actor`'s watched tags.
 
   An unknown slug is `{:error, :not_found}`. Otherwise this defers to the
   watched-tags update, which reindexes the user.
@@ -573,13 +574,13 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> unwatch_tag(user, "safe")
+      iex> unwatch_tag(actor, "safe")
       {:ok, %User{}}
 
   """
-  @spec unwatch_tag(User.t(), String.t()) ::
+  @spec unwatch_tag(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
-  def unwatch_tag(user, slug) do
+  def unwatch_tag(%Actor{user: user}, slug) do
     case tag_by_slug(slug, []) do
       nil -> {:error, :not_found}
       tag -> Users.unwatch_tag(user, tag)
@@ -620,11 +621,11 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec update_tag(User.t() | nil, String.t(), map()) ::
+  @spec update_tag(Actor.t(), String.t(), map()) ::
           {:ok, Tag.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized}
-  def update_tag(actor, slug, attrs) do
+  def update_tag(%Actor{} = actor, slug, attrs) do
     tag = tag_by_slug(slug, @show_preloads)
 
     with :ok <- authorize(actor, :edit, tag),
@@ -730,11 +731,11 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec update_tag_image(User.t() | nil, String.t(), map()) ::
+  @spec update_tag_image(Actor.t(), String.t(), map()) ::
           {:ok, Tag.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized}
-  def update_tag_image(actor, slug, attrs) do
+  def update_tag_image(%Actor{} = actor, slug, attrs) do
     tag = tag_by_slug(slug, @image_preloads)
 
     with :ok <- authorize(actor, :edit, tag),
@@ -797,11 +798,11 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec remove_tag_image(User.t() | nil, String.t()) ::
+  @spec remove_tag_image(Actor.t(), String.t()) ::
           {:ok, Tag.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized}
-  def remove_tag_image(actor, slug) do
+  def remove_tag_image(%Actor{} = actor, slug) do
     tag = tag_by_slug(slug, @image_preloads)
 
     with :ok <- authorize(actor, :edit, tag),
@@ -855,9 +856,9 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec delete_tag(User.t() | nil, String.t()) ::
+  @spec delete_tag(Actor.t(), String.t()) ::
           {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
-  def delete_tag(actor, slug) do
+  def delete_tag(%Actor{} = actor, slug) do
     tag = tag_by_slug(slug, @show_preloads)
 
     with :ok <- authorize(actor, :delete, tag),
@@ -960,11 +961,11 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec alias_tag(User.t() | nil, String.t(), map()) ::
+  @spec alias_tag(Actor.t(), String.t(), map()) ::
           {:ok, Tag.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized}
-  def alias_tag(actor, slug, attrs) do
+  def alias_tag(%Actor{} = actor, slug, attrs) do
     tag = tag_by_slug(slug, @alias_preloads)
 
     with :ok <- authorize(actor, :alias, tag),
@@ -1087,9 +1088,9 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec reindex_tag_by_slug(User.t() | nil, String.t()) ::
+  @spec reindex_tag_by_slug(Actor.t(), String.t()) ::
           {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
-  def reindex_tag_by_slug(actor, slug) do
+  def reindex_tag_by_slug(%Actor{} = actor, slug) do
     tag = tag_by_slug(slug, @alias_preloads)
 
     with :ok <- authorize(actor, :alias, tag),
@@ -1173,9 +1174,9 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec unalias_tag(User.t() | nil, String.t()) ::
+  @spec unalias_tag(Actor.t(), String.t()) ::
           {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
-  def unalias_tag(actor, slug) do
+  def unalias_tag(%Actor{} = actor, slug) do
     tag = tag_by_slug(slug, @alias_preloads)
 
     with :ok <- authorize(actor, :alias, tag),

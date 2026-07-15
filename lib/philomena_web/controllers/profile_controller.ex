@@ -53,7 +53,7 @@ defmodule PhilomenaWeb.ProfileController do
   # view uses to show them, so the assigns are present exactly when the view
   # reads them.
   defp admin_assigns(conn, user) do
-    viewer = conn.assigns.current_user
+    viewer = conn.assigns.actor
     renderer = &MarkdownRenderer.render_collection(&1, conn)
 
     []

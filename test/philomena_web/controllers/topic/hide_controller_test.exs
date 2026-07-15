@@ -109,9 +109,9 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
       assert Repo.reload!(topic).hidden_from_users
     end
 
-    # A regular user cannot even load a hidden topic (LoadTopicPlug rejects it
-    # before the authorize_resource :hide check), so the not-authorized redirect
-    # comes from the load plug.
+    # A regular user cannot even load a hidden topic - the context's topic load
+    # rejects it (show_hidden: false) before the :hide authorization, so the
+    # not-authorized result comes from the load-visibility step.
     test "rejects a regular user with the authorization flash",
          %{conn: conn, forum: forum, topic: topic} do
       topic = hidden_topic(topic)

@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.TagChange.RevertController do
 
   alias Philomena.TagChanges
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do

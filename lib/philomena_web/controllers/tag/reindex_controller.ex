@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Tag.ReindexController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    with {:ok, tag} <- Tags.reindex_tag_by_slug(conn.assigns.current_user, params["tag_id"]) do
+    with {:ok, tag} <- Tags.reindex_tag_by_slug(conn.assigns.actor, params["tag_id"]) do
       conn
       |> put_flash(:info, "Tag reindex started.")
       |> redirect(to: ~p"/tags/#{tag}/edit")

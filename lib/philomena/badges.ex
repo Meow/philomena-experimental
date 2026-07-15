@@ -95,9 +95,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_badges(Loader.actor(), Repo.pagination_params()) ::
+  @spec load_badges(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_badges(actor, pagination) do
+  def load_badges(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, Badge) do
       badges =
         Badge
@@ -120,8 +120,8 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec new_badge(Loader.actor()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_badge(actor) do
+  @spec new_badge(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_badge(%Actor{} = actor) do
     with :ok <- authorize(actor, :index, Badge) do
       {:ok, change_badge(%Badge{})}
     end
@@ -144,9 +144,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec create_badge(Loader.actor(), map()) ::
+  @spec create_badge(Actor.t(), map()) ::
           {:ok, Badge.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_badge(actor, attrs) do
+  def create_badge(%Actor{} = actor, attrs) do
     with :ok <- authorize(actor, :index, Badge),
          {:ok, badge} <- create_badge(attrs) do
       badge_log(actor, :create, badge)
@@ -170,9 +170,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_badge_for_edit(Loader.actor(), Loader.integer_id()) ::
+  @spec load_badge_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Badge.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_badge_for_edit(actor, id) do
+  def load_badge_for_edit(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :index, Badge),
          {:ok, badge} <- fetch_badge(id) do
       {:ok, {badge, change_badge(badge)}}
@@ -200,9 +200,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec update_badge(Loader.actor(), Loader.integer_id(), map()) ::
+  @spec update_badge(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Badge.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_badge(actor, id, attrs) do
+  def update_badge(%Actor{} = actor, id, attrs) do
     with :ok <- authorize(actor, :index, Badge),
          {:ok, badge} <- fetch_badge(id),
          {:ok, badge} <- update_badge(badge, attrs) do
@@ -232,9 +232,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec update_badge_image(Loader.actor(), Loader.integer_id(), map()) ::
+  @spec update_badge_image(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Badge.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_badge_image(actor, id, attrs) do
+  def update_badge_image(%Actor{} = actor, id, attrs) do
     with :ok <- authorize(actor, :index, Badge),
          {:ok, badge} <- fetch_badge(id),
          {:ok, badge} <- update_badge_image(badge, attrs) do
@@ -265,9 +265,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_badge_users(Loader.actor(), Loader.integer_id(), Repo.pagination_params()) ::
+  @spec load_badge_users(Actor.t(), Loader.integer_id(), Repo.pagination_params()) ::
           {:ok, {Badge.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
-  def load_badge_users(actor, id, pagination) do
+  def load_badge_users(%Actor{} = actor, id, pagination) do
     with :ok <- authorize(actor, :index, Badge),
          {:ok, badge} <- fetch_badge(id) do
       users =
@@ -380,9 +380,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_award_for_new(Loader.actor(), String.t()) ::
+  @spec load_award_for_new(Actor.t(), String.t()) ::
           {:ok, {User.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_award_for_new(actor, slug) do
+  def load_award_for_new(%Actor{} = actor, slug) do
     with {:ok, user} <- load_award_profile(actor, slug) do
       {:ok, {user, change_badge_award(%Award{})}}
     end
@@ -409,11 +409,11 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec award_badge(Loader.actor(), String.t(), map()) ::
+  @spec award_badge(Actor.t(), String.t(), map()) ::
           {:ok, {User.t(), Award.t()}}
           | {:error, {User.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
-  def award_badge(actor, slug, attrs) do
+  def award_badge(%Actor{} = actor, slug, attrs) do
     with {:ok, user} <- load_award_profile(actor, slug) do
       case create_badge_award(actor, user, attrs) do
         {:ok, award} ->
@@ -445,10 +445,10 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_award_for_edit(Loader.actor(), String.t(), Loader.integer_id()) ::
+  @spec load_award_for_edit(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Award.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
-  def load_award_for_edit(actor, slug, id) do
+  def load_award_for_edit(%Actor{} = actor, slug, id) do
     with {:ok, {user, award}} <- load_award(actor, slug, id) do
       {:ok, {user, award, change_badge_award(award)}}
     end
@@ -478,11 +478,11 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec update_badge_award(Loader.actor(), String.t(), Loader.integer_id(), map()) ::
+  @spec update_badge_award(Actor.t(), String.t(), Loader.integer_id(), map()) ::
           {:ok, {User.t(), Award.t()}}
           | {:error, {User.t(), Award.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
-  def update_badge_award(actor, slug, id, attrs) do
+  def update_badge_award(%Actor{} = actor, slug, id, attrs) do
     with {:ok, {user, award}} <- load_award(actor, slug, id) do
       case update_badge_award(award, attrs) do
         {:ok, award} ->
@@ -516,9 +516,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec revoke_badge_award(Loader.actor(), String.t(), Loader.integer_id()) ::
+  @spec revoke_badge_award(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Award.t()}} | {:error, :unauthorized | :not_found}
-  def revoke_badge_award(actor, slug, id) do
+  def revoke_badge_award(%Actor{} = actor, slug, id) do
     with {:ok, {user, award}} <- load_award(actor, slug, id) do
       {:ok, award} = delete_badge_award(award)
       award_log(actor, :delete, user, award)

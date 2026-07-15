@@ -89,9 +89,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec admin_fingerprint_bans(Loader.actor(), map(), Repo.pagination_params()) ::
+  @spec admin_fingerprint_bans(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Fingerprint.t())} | {:error, :unauthorized}
-  def admin_fingerprint_bans(actor, params, pagination) do
+  def admin_fingerprint_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Fingerprint) do
       fingerprint_bans =
         params
@@ -134,9 +134,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec new_fingerprint_ban(Loader.actor(), String.t() | nil) ::
+  @spec new_fingerprint_ban(Actor.t(), String.t() | nil) ::
           {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_fingerprint_ban(actor, fingerprint) do
+  def new_fingerprint_ban(%Actor{} = actor, fingerprint) do
     with :ok <- authorize(actor, :new, Fingerprint) do
       {:ok, change_fingerprint(%Fingerprint{fingerprint: fingerprint})}
     end
@@ -159,9 +159,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec create_fingerprint_ban(Loader.actor(), map()) ::
+  @spec create_fingerprint_ban(Actor.t(), map()) ::
           {:ok, Fingerprint.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_fingerprint_ban(actor, attrs) do
+  def create_fingerprint_ban(%Actor{} = actor, attrs) do
     with :ok <- authorize(actor, :create, Fingerprint),
          {:ok, fingerprint_ban} <- create_fingerprint(actor, attrs) do
       log_fingerprint_ban(actor, "Admin.FingerprintBan:create", fingerprint_ban, "Created")
@@ -185,9 +185,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec load_fingerprint_ban_for_edit(Loader.actor(), Loader.integer_id()) ::
+  @spec load_fingerprint_ban_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Fingerprint.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_fingerprint_ban_for_edit(actor, id) do
+  def load_fingerprint_ban_for_edit(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :edit, Fingerprint),
          {:ok, fingerprint_ban} <- load_fingerprint_ban(id) do
       {:ok, {fingerprint_ban, change_fingerprint(fingerprint_ban)}}
@@ -214,9 +214,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec update_fingerprint_ban(Loader.actor(), Loader.integer_id(), map()) ::
+  @spec update_fingerprint_ban(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Fingerprint.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_fingerprint_ban(actor, id, attrs) do
+  def update_fingerprint_ban(%Actor{} = actor, id, attrs) do
     with :ok <- authorize(actor, :update, Fingerprint),
          {:ok, fingerprint_ban} <- load_fingerprint_ban(id),
          {:ok, fingerprint_ban} <- update_fingerprint(fingerprint_ban, attrs) do
@@ -242,12 +242,12 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec delete_fingerprint_ban(Loader.actor(), Loader.integer_id()) ::
+  @spec delete_fingerprint_ban(Actor.t(), Loader.integer_id()) ::
           {:ok, Fingerprint.t()} | {:error, :unauthorized | :not_found}
-  def delete_fingerprint_ban(actor, id) do
+  def delete_fingerprint_ban(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :delete, Fingerprint),
          {:ok, fingerprint_ban} <- load_fingerprint_ban(id),
-         :ok <- verify_can_delete(actor) do
+         :ok <- verify_can_delete(actor.user) do
       {:ok, fingerprint_ban} = delete_fingerprint(fingerprint_ban)
       log_fingerprint_ban(actor, "Admin.FingerprintBan:delete", fingerprint_ban, "Deleted")
       {:ok, fingerprint_ban}
@@ -321,10 +321,10 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec admin_subnet_bans(Loader.actor(), map(), Repo.pagination_params()) ::
+  @spec admin_subnet_bans(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Subnet.t())}
           | {:error, :unauthorized | {:invalid_ip, String.t()}}
-  def admin_subnet_bans(actor, params, pagination) do
+  def admin_subnet_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Subnet),
          {:ok, query} <- subnet_bans_query(params) do
       subnet_bans =
@@ -378,9 +378,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec new_subnet_ban(Loader.actor(), String.t() | nil) ::
+  @spec new_subnet_ban(Actor.t(), String.t() | nil) ::
           {:ok, Subnet.t()} | {:error, :unauthorized | {:invalid_ip, String.t()}}
-  def new_subnet_ban(actor, specification) do
+  def new_subnet_ban(%Actor{} = actor, specification) do
     with :ok <- authorize(actor, :new, Subnet) do
       new_subnet_from_specification(specification)
     end
@@ -412,9 +412,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec create_subnet_ban(Loader.actor(), map()) ::
+  @spec create_subnet_ban(Actor.t(), map()) ::
           {:ok, Subnet.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_subnet_ban(actor, attrs) do
+  def create_subnet_ban(%Actor{} = actor, attrs) do
     with :ok <- authorize(actor, :create, Subnet),
          {:ok, subnet_ban} <- create_subnet(actor, attrs) do
       log_subnet_ban(actor, "Admin.SubnetBan:create", subnet_ban, "Created")
@@ -438,9 +438,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec load_subnet_ban_for_edit(Loader.actor(), Loader.integer_id()) ::
+  @spec load_subnet_ban_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Subnet.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_subnet_ban_for_edit(actor, id) do
+  def load_subnet_ban_for_edit(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :edit, Subnet),
          {:ok, subnet_ban} <- load_subnet_ban(id) do
       {:ok, {subnet_ban, change_subnet(subnet_ban)}}
@@ -467,9 +467,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec update_subnet_ban(Loader.actor(), Loader.integer_id(), map()) ::
+  @spec update_subnet_ban(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Subnet.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_subnet_ban(actor, id, attrs) do
+  def update_subnet_ban(%Actor{} = actor, id, attrs) do
     with :ok <- authorize(actor, :update, Subnet),
          {:ok, subnet_ban} <- load_subnet_ban(id),
          {:ok, subnet_ban} <- update_subnet(subnet_ban, attrs) do
@@ -495,12 +495,12 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec delete_subnet_ban(Loader.actor(), Loader.integer_id()) ::
+  @spec delete_subnet_ban(Actor.t(), Loader.integer_id()) ::
           {:ok, Subnet.t()} | {:error, :unauthorized | :not_found}
-  def delete_subnet_ban(actor, id) do
+  def delete_subnet_ban(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :delete, Subnet),
          {:ok, subnet_ban} <- load_subnet_ban(id),
-         :ok <- verify_can_delete(actor) do
+         :ok <- verify_can_delete(actor.user) do
       {:ok, subnet_ban} = delete_subnet(subnet_ban)
       log_subnet_ban(actor, "Admin.SubnetBan:delete", subnet_ban, "Deleted")
       {:ok, subnet_ban}
@@ -597,9 +597,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec admin_user_bans(Loader.actor(), map(), Repo.pagination_params()) ::
+  @spec admin_user_bans(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def admin_user_bans(actor, params, pagination) do
+  def admin_user_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, User) do
       user_bans =
         params
@@ -669,10 +669,10 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec new_user_ban(Loader.actor(), Loader.integer_id()) ::
+  @spec new_user_ban(Actor.t(), Loader.integer_id()) ::
           {:ok, {Users.User.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :no_target}
-  def new_user_ban(actor, user_id) do
+  def new_user_ban(%Actor{} = actor, user_id) do
     with :ok <- authorize(actor, :new, User) do
       case target_user(user_id) do
         nil -> {:error, :no_target}
@@ -698,11 +698,11 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec create_user_ban(Loader.actor(), map()) ::
+  @spec create_user_ban(Actor.t(), map()) ::
           {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_user_ban(actor, attrs) do
+  def create_user_ban(%Actor{} = actor, attrs) do
     with :ok <- authorize(actor, :create, User),
-         {:ok, user_ban} <- create_user(actor, attrs) do
+         {:ok, user_ban} <- create_user(actor.user, attrs) do
       log_user_ban(actor, "Admin.UserBan:create", user_ban, "Created")
       {:ok, user_ban}
     end
@@ -724,9 +724,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec load_user_ban_for_edit(Loader.actor(), Loader.integer_id()) ::
+  @spec load_user_ban_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_user_ban_for_edit(actor, id) do
+  def load_user_ban_for_edit(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :edit, User),
          {:ok, user_ban} <- load_user_ban(id, [:user]) do
       {:ok, {user_ban, change_user(user_ban)}}
@@ -753,9 +753,9 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec update_user_ban(Loader.actor(), Loader.integer_id(), map()) ::
+  @spec update_user_ban(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_user_ban(actor, id, attrs) do
+  def update_user_ban(%Actor{} = actor, id, attrs) do
     with :ok <- authorize(actor, :update, User),
          {:ok, user_ban} <- load_user_ban(id, [:user]),
          {:ok, user_ban} <- update_user(user_ban, attrs) do
@@ -781,12 +781,12 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec delete_user_ban(Loader.actor(), Loader.integer_id()) ::
+  @spec delete_user_ban(Actor.t(), Loader.integer_id()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def delete_user_ban(actor, id) do
+  def delete_user_ban(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :delete, User),
          {:ok, user_ban} <- load_user_ban(id, []),
-         :ok <- verify_can_delete(actor) do
+         :ok <- verify_can_delete(actor.user) do
       {:ok, user_ban} = delete_user(user_ban)
       log_user_ban(actor, "Admin.UserBan:delete", user_ban, "Deleted")
       {:ok, user_ban}

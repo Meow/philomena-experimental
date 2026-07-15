@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.LockController do
 
   def create(conn, %{"topic" => topic_params} = params) do
     case Topics.lock_topic(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],
            topic_params
@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.Topic.LockController do
 
   def delete(conn, params) do
     case Topics.unlock_topic(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]
          ) do

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.StickController do
 
   def create(conn, params) do
     case Topics.stick_topic(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]
          ) do
@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Topic.StickController do
 
   def delete(conn, params) do
     case Topics.unstick_topic(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]
          ) do

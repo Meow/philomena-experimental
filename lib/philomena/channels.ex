@@ -9,12 +9,12 @@ defmodule Philomena.Channels do
   alias Philomena.Repo
   alias Philomena.Loader
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Channels.AutomaticUpdater
   alias Philomena.Channels.Channel
   alias Philomena.IntegerId
   alias Philomena.Notifications
   alias Philomena.Tags
-  alias Philomena.Users.User
 
   use Philomena.Subscriptions,
     on_delete: :clear_channel_notification,
@@ -89,11 +89,11 @@ defmodule Philomena.Channels do
       {:error, :unauthorized}
 
   """
-  @spec visit_channel(User.t() | nil, any()) ::
+  @spec visit_channel(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
-  def visit_channel(actor, id) do
+  def visit_channel(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :show) do
-      clear_channel_notification(channel, actor)
+      clear_channel_notification(channel, actor.user)
       {:ok, channel}
     end
   end
@@ -114,12 +114,12 @@ defmodule Philomena.Channels do
       {:error, :not_found}
 
   """
-  @spec clear_notification(User.t() | nil, any()) ::
+  @spec clear_notification(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found}
-  def clear_notification(actor, id) do
+  def clear_notification(%Actor{} = actor, id) do
     with {:ok, id} <- IntegerId.parse(id),
          %Channel{} = channel <- Repo.get(Channel, id) do
-      clear_channel_notification(channel, actor)
+      clear_channel_notification(channel, actor.user)
       {:ok, channel}
     else
       _ -> {:error, :not_found}
@@ -141,8 +141,8 @@ defmodule Philomena.Channels do
       {:error, :unauthorized}
 
   """
-  @spec new_channel(User.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_channel(%User{} = actor) do
+  @spec new_channel(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_channel(%Actor{} = actor) do
     with :ok <- authorize(actor, :new, Channel) do
       {:ok, change_channel(%Channel{})}
     end
@@ -163,9 +163,9 @@ defmodule Philomena.Channels do
       {:ok, %Channel{}}
 
   """
-  @spec create_channel(User.t(), map()) ::
+  @spec create_channel(Actor.t(), map()) ::
           {:ok, Channel.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_channel(%User{} = actor, attrs) do
+  def create_channel(%Actor{} = actor, attrs) do
     with :ok <- authorize(actor, :create, Channel) do
       create_channel(attrs)
     end
@@ -206,9 +206,9 @@ defmodule Philomena.Channels do
       {:ok, {%Channel{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_channel_for_edit(User.t(), any()) ::
+  @spec load_channel_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Channel.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_channel_for_edit(%User{} = actor, id) do
+  def load_channel_for_edit(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :edit) do
       {:ok, {channel, change_channel(channel)}}
     end
@@ -233,9 +233,9 @@ defmodule Philomena.Channels do
       {:ok, %Channel{}}
 
   """
-  @spec update_channel(User.t(), any(), map()) ::
+  @spec update_channel(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def update_channel(%User{} = actor, id, attrs) do
+  def update_channel(%Actor{} = actor, id, attrs) do
     with {:ok, channel} <- load_channel(actor, id, :update) do
       update_channel(channel, attrs)
     end
@@ -311,9 +311,9 @@ defmodule Philomena.Channels do
       {:ok, %Channel{}}
 
   """
-  @spec delete_channel(User.t(), any()) ::
+  @spec delete_channel(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
-  def delete_channel(%User{} = actor, id) do
+  def delete_channel(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :delete) do
       delete_channel(channel)
     end
@@ -383,11 +383,11 @@ defmodule Philomena.Channels do
       {:error, :unauthorized}
 
   """
-  @spec subscribe(User.t() | nil, any()) ::
+  @spec subscribe(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def subscribe(actor, id) do
+  def subscribe(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :show),
-         {:ok, _subscription} <- create_subscription(channel, actor) do
+         {:ok, _subscription} <- create_subscription(channel, actor.user) do
       {:ok, channel}
     end
   end
@@ -407,12 +407,12 @@ defmodule Philomena.Channels do
       {:ok, %Channel{}}
 
   """
-  @spec unsubscribe(User.t() | nil, any()) ::
+  @spec unsubscribe(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
-  def unsubscribe(actor, id) do
+  def unsubscribe(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :show) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
-      {:ok, _subscription} = delete_subscription(channel, actor)
+      {:ok, _subscription} = delete_subscription(channel, actor.user)
       {:ok, channel}
     end
   end

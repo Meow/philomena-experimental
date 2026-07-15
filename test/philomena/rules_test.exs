@@ -10,6 +10,7 @@ defmodule Philomena.RulesTest do
 
   use Philomena.DataCase, async: true
 
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
   import Philomena.RulesFixtures
   import Philomena.UsersFixtures
 
@@ -22,7 +23,7 @@ defmodule Philomena.RulesTest do
       hidden = rule_fixture(%{hidden: true})
       internal = rule_fixture(%{internal: true})
 
-      ids = Enum.map(Rules.list_rules_for(admin_user_fixture()), & &1.id)
+      ids = Enum.map(Rules.list_rules_for(actor(admin_user_fixture())), & &1.id)
       assert visible.id in ids
       assert hidden.id in ids
       assert internal.id in ids
@@ -33,7 +34,7 @@ defmodule Philomena.RulesTest do
       hidden = rule_fixture(%{hidden: true})
       internal = rule_fixture(%{internal: true})
 
-      ids = Enum.map(Rules.list_rules_for(confirmed_user_fixture()), & &1.id)
+      ids = Enum.map(Rules.list_rules_for(actor(confirmed_user_fixture())), & &1.id)
       assert visible.id in ids
       refute hidden.id in ids
       refute internal.id in ids
@@ -43,7 +44,7 @@ defmodule Philomena.RulesTest do
       visible = rule_fixture()
       hidden = rule_fixture(%{hidden: true})
 
-      ids = Enum.map(Rules.list_rules_for(nil), & &1.id)
+      ids = Enum.map(Rules.list_rules_for(actor()), & &1.id)
       assert visible.id in ids
       refute hidden.id in ids
     end
@@ -53,55 +54,57 @@ defmodule Philomena.RulesTest do
     test "loads a visible rule by position for an anonymous viewer" do
       rule = rule_fixture()
 
-      assert {:ok, loaded} = Rules.load_rule_for_show(nil, to_string(rule.position))
+      assert {:ok, loaded} = Rules.load_rule_for_show(actor(), to_string(rule.position))
       assert loaded.id == rule.id
     end
 
     test "a hidden rule is rule_hidden for a viewer who may not edit it" do
       rule = rule_fixture(%{hidden: true})
 
-      assert Rules.load_rule_for_show(confirmed_user_fixture(), to_string(rule.position)) ==
+      assert Rules.load_rule_for_show(actor(confirmed_user_fixture()), to_string(rule.position)) ==
                {:error, :rule_hidden}
     end
 
     test "an internal rule is rule_hidden for a viewer who may not edit it" do
       rule = rule_fixture(%{internal: true})
 
-      assert Rules.load_rule_for_show(nil, to_string(rule.position)) == {:error, :rule_hidden}
+      assert Rules.load_rule_for_show(actor(), to_string(rule.position)) == {:error, :rule_hidden}
     end
 
     test "an admin may show a hidden rule" do
       rule = rule_fixture(%{hidden: true})
 
       assert {:ok, loaded} =
-               Rules.load_rule_for_show(admin_user_fixture(), to_string(rule.position))
+               Rules.load_rule_for_show(actor(admin_user_fixture()), to_string(rule.position))
 
       assert loaded.id == rule.id
     end
 
     test "a non-integer position is not-found" do
-      assert Rules.load_rule_for_show(nil, "not-a-number") == {:error, :not_found}
+      assert Rules.load_rule_for_show(actor(), "not-a-number") == {:error, :not_found}
     end
 
     test "an unknown well-formed position is unauthorized for a user, not-found for an admin" do
-      assert Rules.load_rule_for_show(confirmed_user_fixture(), "2147483647") ==
+      assert Rules.load_rule_for_show(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Rules.load_rule_for_show(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Rules.load_rule_for_show(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
   end
 
   describe "load_new_rule/1" do
     test "an admin gets a blank changeset" do
-      assert {:ok, %Ecto.Changeset{data: %Rule{}}} = Rules.load_new_rule(admin_user_fixture())
+      assert {:ok, %Ecto.Changeset{data: %Rule{}}} =
+               Rules.load_new_rule(actor(admin_user_fixture()))
     end
 
     test "a regular user is unauthorized" do
-      assert Rules.load_new_rule(confirmed_user_fixture()) == {:error, :unauthorized}
+      assert Rules.load_new_rule(actor(confirmed_user_fixture())) == {:error, :unauthorized}
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert Rules.load_new_rule(nil) == {:error, :unauthorized}
+      assert Rules.load_new_rule(actor()) == {:error, :unauthorized}
     end
   end
 
@@ -110,7 +113,7 @@ defmodule Philomena.RulesTest do
       unique = System.unique_integer([:positive])
 
       assert {:ok, [%Rule{} = rule, _version]} =
-               Rules.create_rule(admin_user_fixture(), %{
+               Rules.create_rule(actor(admin_user_fixture()), %{
                  name: "New Rule ##{unique}",
                  position: unique
                })
@@ -120,13 +123,13 @@ defmodule Philomena.RulesTest do
 
     test "invalid attrs are a rejected changeset" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Rules.create_rule(admin_user_fixture(), %{name: ""})
+               Rules.create_rule(actor(admin_user_fixture()), %{name: ""})
 
       refute changeset.valid?
     end
 
     test "a regular user is unauthorized" do
-      assert Rules.create_rule(confirmed_user_fixture(), %{name: "x", position: 1}) ==
+      assert Rules.create_rule(actor(confirmed_user_fixture()), %{name: "x", position: 1}) ==
                {:error, :unauthorized}
     end
   end
@@ -136,7 +139,7 @@ defmodule Philomena.RulesTest do
       rule = rule_fixture()
 
       assert {:ok, {%Rule{} = loaded, %Ecto.Changeset{}}} =
-               Rules.load_rule_for_edit(admin_user_fixture(), to_string(rule.position))
+               Rules.load_rule_for_edit(actor(admin_user_fixture()), to_string(rule.position))
 
       assert loaded.id == rule.id
     end
@@ -144,15 +147,16 @@ defmodule Philomena.RulesTest do
     test "a regular user is unauthorized" do
       rule = rule_fixture()
 
-      assert Rules.load_rule_for_edit(confirmed_user_fixture(), to_string(rule.position)) ==
+      assert Rules.load_rule_for_edit(actor(confirmed_user_fixture()), to_string(rule.position)) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed position is unauthorized for a user, not-found for an admin" do
-      assert Rules.load_rule_for_edit(confirmed_user_fixture(), "2147483647") ==
+      assert Rules.load_rule_for_edit(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Rules.load_rule_for_edit(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Rules.load_rule_for_edit(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
   end
 
@@ -161,7 +165,7 @@ defmodule Philomena.RulesTest do
       rule = rule_fixture()
 
       assert {:ok, [%Rule{} = updated, _version]} =
-               Rules.update_rule(admin_user_fixture(), to_string(rule.position), %{
+               Rules.update_rule(actor(admin_user_fixture()), to_string(rule.position), %{
                  title: "Updated Title"
                })
 
@@ -173,7 +177,9 @@ defmodule Philomena.RulesTest do
       rule = rule_fixture()
 
       assert {:error, {%Rule{} = carried, %Ecto.Changeset{} = changeset}} =
-               Rules.update_rule(admin_user_fixture(), to_string(rule.position), %{name: ""})
+               Rules.update_rule(actor(admin_user_fixture()), to_string(rule.position), %{
+                 name: ""
+               })
 
       assert carried.id == rule.id
       refute changeset.valid?
@@ -182,13 +188,13 @@ defmodule Philomena.RulesTest do
     test "a regular user is unauthorized" do
       rule = rule_fixture()
 
-      assert Rules.update_rule(confirmed_user_fixture(), to_string(rule.position), %{
+      assert Rules.update_rule(actor(confirmed_user_fixture()), to_string(rule.position), %{
                title: "Hijacked"
              }) == {:error, :unauthorized}
     end
 
     test "a non-integer position is not-found" do
-      assert Rules.update_rule(admin_user_fixture(), "not-a-number", %{title: "x"}) ==
+      assert Rules.update_rule(actor(admin_user_fixture()), "not-a-number", %{title: "x"}) ==
                {:error, :not_found}
     end
   end

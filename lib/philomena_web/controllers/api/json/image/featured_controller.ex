@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Api.Json.Image.FeaturedController do
   def show(conn, _params) do
     case Images.featured_image() do
       {:ok, image} ->
-        interactions = Interactions.user_interactions([image], conn.assigns.current_user)
+        interactions = Interactions.user_interactions([image], conn.assigns.actor)
 
         conn
         |> put_view(PhilomenaWeb.Api.Json.ImageView)

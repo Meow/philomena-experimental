@@ -24,6 +24,7 @@ defmodule PhilomenaWeb.Router do
     plug PhilomenaWeb.FilterSelectPlug
     plug PhilomenaWeb.ChannelPlug
     plug PhilomenaWeb.AdminCountersPlug
+    plug PhilomenaWeb.UserAttributionPlug
   end
 
   pipeline :api do
@@ -33,6 +34,7 @@ defmodule PhilomenaWeb.Router do
     plug PhilomenaWeb.FilterIdPlug
     plug PhilomenaWeb.ImageFilterPlug
     plug PhilomenaWeb.PaginationPlug
+    plug PhilomenaWeb.UserAttributionPlug
   end
 
   pipeline :accepts_rss do

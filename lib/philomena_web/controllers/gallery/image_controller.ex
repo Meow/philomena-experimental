@@ -5,8 +5,6 @@ defmodule PhilomenaWeb.Gallery.ImageController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   def create(conn, params) do
     conn.assigns.actor
     |> Galleries.add_image_to_gallery(params["gallery_id"], params["image_id"])

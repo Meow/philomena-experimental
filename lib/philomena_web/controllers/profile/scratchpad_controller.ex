@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.Profile.ScratchpadController do
 
   alias Philomena.Users
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   action_fallback PhilomenaWeb.FallbackController
 
   def edit(conn, %{"profile_id" => slug}) do

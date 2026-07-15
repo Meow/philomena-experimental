@@ -183,8 +183,9 @@ defmodule PhilomenaWeb.TagChangeControllerTest do
       tc = tag_change_row!(image)
 
       # NOTE: /tag_changes sits in the Tor-authorized scope, not the
-      # login-required one, so an anonymous visitor is stopped by the Canary
-      # authorization (redirect to "/") rather than a login redirect.
+      # login-required one, so an anonymous visitor gets {:error, :unauthorized}
+      # from the context (redirect to "/" with the can't-access flash) rather
+      # than a login redirect.
       conn = delete(conn, ~p"/tag_changes/#{tc}", %{"redirect" => ~p"/images/#{image}"})
 
       assert redirected_to(conn) == "/"
@@ -223,8 +224,8 @@ defmodule PhilomenaWeb.TagChangeControllerTest do
     test "an unknown id takes the not-authorized redirect", %{conn: conn} do
       conn = log_in_user(conn, moderator_user_fixture())
 
-      # NOTE: load_and_authorize_resource authorizes a nil resource for a
-      # moderator (no :delete rule matches nil), so an unknown id redirects.
+      # NOTE: the context authorizes the nil load for a moderator (no :delete
+      # rule matches nil), so an unknown id returns unauthorized and redirects.
       conn = delete(conn, ~p"/tag_changes/#{123_456_789}", %{"redirect" => "/"})
 
       assert redirected_to(conn) == "/"

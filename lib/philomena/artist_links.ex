@@ -104,10 +104,10 @@ defmodule Philomena.ArtistLinks do
       {:error, :not_found}
 
   """
-  @spec list_artist_links(Loader.actor(), String.t()) ::
+  @spec list_artist_links(Actor.t(), String.t()) ::
           {:ok, {User.t(), [ArtistLink.t()]}} | {:error, :unauthorized | :not_found}
-  def list_artist_links(actor, slug) do
-    with {:ok, user} <- authorized_profile(actor, :create_links, slug) do
+  def list_artist_links(%Actor{} = actor, slug) do
+    with {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
       links =
         ArtistLink
         |> where(user_id: ^user.id)
@@ -137,9 +137,9 @@ defmodule Philomena.ArtistLinks do
       {:error, :unauthorized}
 
   """
-  @spec load_artist_links_index(Loader.actor(), map(), Repo.pagination_params()) ::
+  @spec load_artist_links_index(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(ArtistLink.t())} | {:error, :unauthorized}
-  def load_artist_links_index(actor, params, pagination) do
+  def load_artist_links_index(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, %ArtistLink{}) do
       artist_links =
         params
@@ -263,11 +263,11 @@ defmodule Philomena.ArtistLinks do
       {:error, :not_found}
 
   """
-  @spec load_artist_link_for_show(Loader.actor(), String.t(), Loader.integer_id()) ::
+  @spec load_artist_link_for_show(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), ArtistLink.t()}} | {:error, :unauthorized | :not_found}
-  def load_artist_link_for_show(actor, slug, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor, :show, id),
-         {:ok, user} <- authorized_profile(actor, :create_links, slug) do
+  def load_artist_link_for_show(%Actor{} = actor, slug, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor.user, :show, id),
+         {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
       {:ok, {user, artist_link}}
     end
   end
@@ -291,12 +291,12 @@ defmodule Philomena.ArtistLinks do
       {:error, :not_found}
 
   """
-  @spec load_artist_link_for_edit(Loader.actor(), String.t(), Loader.integer_id()) ::
+  @spec load_artist_link_for_edit(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {ArtistLink.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
-  def load_artist_link_for_edit(actor, slug, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor, :edit, id),
-         {:ok, _user} <- authorized_profile(actor, :edit_links, slug) do
+  def load_artist_link_for_edit(%Actor{} = actor, slug, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id),
+         {:ok, _user} <- authorized_profile(actor.user, :edit_links, slug) do
       {:ok, {artist_link, change_artist_link(artist_link)}}
     end
   end
@@ -349,13 +349,13 @@ defmodule Philomena.ArtistLinks do
       {:error, :unauthorized}
 
   """
-  @spec update_artist_link(Loader.actor(), String.t(), Loader.integer_id(), map()) ::
+  @spec update_artist_link(Actor.t(), String.t(), Loader.integer_id(), map()) ::
           {:ok, {User.t(), ArtistLink.t()}}
           | {:error, {ArtistLink.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
-  def update_artist_link(actor, slug, id, attrs) do
-    with {:ok, artist_link} <- authorized_artist_link(actor, :update, id),
-         {:ok, user} <- authorized_profile(actor, :edit_links, slug) do
+  def update_artist_link(%Actor{} = actor, slug, id, attrs) do
+    with {:ok, artist_link} <- authorized_artist_link(actor.user, :update, id),
+         {:ok, user} <- authorized_profile(actor.user, :edit_links, slug) do
       case update_artist_link(artist_link, attrs) do
         {:ok, artist_link} -> {:ok, {user, artist_link}}
         {:error, changeset} -> {:error, {artist_link, changeset}}
@@ -381,11 +381,11 @@ defmodule Philomena.ArtistLinks do
       {:error, :unauthorized}
 
   """
-  @spec verify_artist_link(Loader.actor(), Loader.integer_id()) ::
+  @spec verify_artist_link(Actor.t(), Loader.integer_id()) ::
           {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
-  def verify_artist_link(actor, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor, :edit, id) do
-      {:ok, artist_link} = verify_loaded_link(artist_link, actor)
+  def verify_artist_link(%Actor{} = actor, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id) do
+      {:ok, artist_link} = verify_loaded_link(artist_link, actor.user)
 
       ModerationLogs.create_moderation_log(
         actor,
@@ -416,10 +416,10 @@ defmodule Philomena.ArtistLinks do
       {:error, :unauthorized}
 
   """
-  @spec reject_artist_link(Loader.actor(), Loader.integer_id()) ::
+  @spec reject_artist_link(Actor.t(), Loader.integer_id()) ::
           {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
-  def reject_artist_link(actor, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor, :edit, id) do
+  def reject_artist_link(%Actor{} = actor, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id) do
       {:ok, artist_link} = reject_loaded_link(artist_link)
 
       ModerationLogs.create_moderation_log(
@@ -451,11 +451,11 @@ defmodule Philomena.ArtistLinks do
       {:error, :unauthorized}
 
   """
-  @spec contact_artist_link(Loader.actor(), Loader.integer_id()) ::
+  @spec contact_artist_link(Actor.t(), Loader.integer_id()) ::
           {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
-  def contact_artist_link(actor, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor, :edit, id) do
-      {:ok, artist_link} = contact_loaded_link(artist_link, actor)
+  def contact_artist_link(%Actor{} = actor, id) do
+    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id) do
+      {:ok, artist_link} = contact_loaded_link(artist_link, actor.user)
 
       ModerationLogs.create_moderation_log(
         actor,

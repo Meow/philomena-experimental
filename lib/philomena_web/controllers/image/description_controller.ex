@@ -6,8 +6,6 @@ defmodule PhilomenaWeb.Image.DescriptionController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   def update(conn, %{"image" => image_params} = params) do
     case Images.update_description(conn.assigns.actor, params["image_id"], image_params) do
       {:ok, {image, old_description}} ->

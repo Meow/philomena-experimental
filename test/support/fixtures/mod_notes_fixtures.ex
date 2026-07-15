@@ -4,10 +4,12 @@ defmodule Philomena.ModNotesFixtures do
   entities via the `Philomena.ModNotes` context.
   """
 
+  import Philomena.AttributionFixtures
+
   alias Philomena.ModNotes
 
   @doc """
-  Creates a mod note authored by `author` against a fresh
+  Creates a mod note authored by `author` (a `User.t()`) against a fresh
   `confirmed_user_fixture/0`.
 
   Notes are created through the context so `moderator_id` is set to the passed
@@ -19,7 +21,7 @@ defmodule Philomena.ModNotesFixtures do
 
     {:ok, note} =
       ModNotes.create_mod_note(
-        author,
+        actor(author),
         Enum.into(attrs, %{
           "notable_type" => "User",
           "notable_id" => target.id,

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
 
   def index(conn, params) do
     with {:ok, fingerprint_bans} <-
-           Bans.admin_fingerprint_bans(conn.assigns.current_user, params, conn.assigns.scrivener) do
+           Bans.admin_fingerprint_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "Admin - Fingerprint Bans",
         layout_class: "layout--wide",
@@ -18,13 +18,13 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
 
   def new(conn, params) do
     with {:ok, changeset} <-
-           Bans.new_fingerprint_ban(conn.assigns.current_user, params["fingerprint"]) do
+           Bans.new_fingerprint_ban(conn.assigns.actor, params["fingerprint"]) do
       render(conn, "new.html", title: "New Fingerprint Ban", changeset: changeset)
     end
   end
 
   def create(conn, %{"fingerprint" => fingerprint_ban_params}) do
-    case Bans.create_fingerprint_ban(conn.assigns.current_user, fingerprint_ban_params) do
+    case Bans.create_fingerprint_ban(conn.assigns.actor, fingerprint_ban_params) do
       {:ok, _fingerprint_ban} ->
         conn
         |> put_flash(:info, "Fingerprint was successfully banned.")
@@ -40,7 +40,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
 
   def edit(conn, params) do
     with {:ok, {fingerprint_ban, changeset}} <-
-           Bans.load_fingerprint_ban_for_edit(conn.assigns.current_user, params["id"]) do
+           Bans.load_fingerprint_ban_for_edit(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html",
         title: "Editing Fingerprint Ban",
         fingerprint_ban: fingerprint_ban,
@@ -50,7 +50,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
   end
 
   def update(conn, %{"id" => id, "fingerprint" => fingerprint_ban_params}) do
-    case Bans.update_fingerprint_ban(conn.assigns.current_user, id, fingerprint_ban_params) do
+    case Bans.update_fingerprint_ban(conn.assigns.actor, id, fingerprint_ban_params) do
       {:ok, _fingerprint_ban} ->
         conn
         |> put_flash(:info, "Fingerprint ban successfully updated.")
@@ -66,7 +66,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
 
   def delete(conn, params) do
     with {:ok, _fingerprint_ban} <-
-           Bans.delete_fingerprint_ban(conn.assigns.current_user, params["id"]) do
+           Bans.delete_fingerprint_ban(conn.assigns.actor, params["id"]) do
       conn
       |> put_flash(:info, "Fingerprint ban successfully deleted.")
       |> redirect(to: ~p"/admin/fingerprint_bans")

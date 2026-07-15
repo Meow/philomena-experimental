@@ -65,13 +65,13 @@ defmodule PhilomenaWeb.TagController do
 
   def edit(conn, params) do
     with {:ok, {tag, changeset}} <-
-           Tags.load_tag_for_edit(conn.assigns.current_user, params["id"]) do
+           Tags.load_tag_for_edit(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Tag", tag: tag, changeset: changeset)
     end
   end
 
   def update(conn, %{"id" => slug, "tag" => tag_params}) do
-    case Tags.update_tag(conn.assigns.current_user, slug, tag_params) do
+    case Tags.update_tag(conn.assigns.actor, slug, tag_params) do
       {:ok, tag} ->
         conn
         |> put_flash(:info, "Tag successfully updated.")
@@ -86,7 +86,7 @@ defmodule PhilomenaWeb.TagController do
   end
 
   def delete(conn, params) do
-    with {:ok, _tag} <- Tags.delete_tag(conn.assigns.current_user, params["id"]) do
+    with {:ok, _tag} <- Tags.delete_tag(conn.assigns.actor, params["id"]) do
       conn
       |> put_flash(:info, "Tag queued for deletion.")
       |> redirect(to: "/")

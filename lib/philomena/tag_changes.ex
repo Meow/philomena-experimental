@@ -343,7 +343,7 @@ defmodule Philomena.TagChanges do
 
   @doc """
   Deletes the tag change named by `id` from the history, on
-  behalf of `actor` (a user, or `nil` for an anonymous visitor).
+  behalf of `actor` (a `Philomena.Attribution.Actor`).
 
   Authorization (`:delete` on the loaded record) happens here; on success the
   record's search document is removed and a moderation log is written. An id
@@ -363,11 +363,11 @@ defmodule Philomena.TagChanges do
       {:error, :not_found}
 
   """
-  @spec delete_tag_change(User.t() | nil, any()) ::
+  @spec delete_tag_change(Actor.t(), any()) ::
           {:ok, TagChange.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Ecto.Changeset.t()}
-  def delete_tag_change(actor, id) do
+  def delete_tag_change(%Actor{} = actor, id) do
     case IntegerId.parse(id) do
       {:ok, id} ->
         tag_change =
@@ -436,7 +436,7 @@ defmodule Philomena.TagChanges do
     |> Repo.one()
   end
 
-  def load(user, params, pagination) do
+  def load(%Actor{user: user}, params, pagination) do
     {:ok, query} = Query.compile(get_query(params), user: user)
 
     TagChange

@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.AdvertController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with {:ok, adverts} <- Adverts.load_adverts(conn.assigns.current_user, conn.assigns.scrivener) do
+    with {:ok, adverts} <- Adverts.load_adverts(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "Admin - Adverts",
         layout_class: "layout--wide",
@@ -16,13 +16,13 @@ defmodule PhilomenaWeb.Admin.AdvertController do
   end
 
   def new(conn, _params) do
-    with {:ok, changeset} <- Adverts.new_advert(conn.assigns.current_user) do
+    with {:ok, changeset} <- Adverts.new_advert(conn.assigns.actor) do
       render(conn, "new.html", title: "New Advert", changeset: changeset)
     end
   end
 
   def create(conn, %{"advert" => advert_params}) do
-    case Adverts.create_advert(conn.assigns.current_user, advert_params) do
+    case Adverts.create_advert(conn.assigns.actor, advert_params) do
       {:ok, _advert} ->
         conn
         |> put_flash(:info, "Advert was successfully created.")
@@ -37,13 +37,13 @@ defmodule PhilomenaWeb.Admin.AdvertController do
   end
 
   def edit(conn, %{"id" => id}) do
-    with {:ok, {advert, changeset}} <- Adverts.load_advert_for_edit(conn.assigns.current_user, id) do
+    with {:ok, {advert, changeset}} <- Adverts.load_advert_for_edit(conn.assigns.actor, id) do
       render(conn, "edit.html", title: "Editing Advert", advert: advert, changeset: changeset)
     end
   end
 
   def update(conn, %{"id" => id, "advert" => advert_params}) do
-    case Adverts.update_advert(conn.assigns.current_user, id, advert_params) do
+    case Adverts.update_advert(conn.assigns.actor, id, advert_params) do
       {:ok, _advert} ->
         conn
         |> put_flash(:info, "Advert was successfully updated.")
@@ -58,7 +58,7 @@ defmodule PhilomenaWeb.Admin.AdvertController do
   end
 
   def delete(conn, %{"id" => id}) do
-    with {:ok, _advert} <- Adverts.delete_advert(conn.assigns.current_user, id) do
+    with {:ok, _advert} <- Adverts.delete_advert(conn.assigns.actor, id) do
       conn
       |> put_flash(:info, "Advert was successfully deleted.")
       |> redirect(to: ~p"/admin/adverts")

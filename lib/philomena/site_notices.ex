@@ -6,10 +6,10 @@ defmodule Philomena.SiteNotices do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Repo
   alias Philomena.Loader
   alias Philomena.SiteNotices.SiteNotice
-  alias Philomena.Users.User
 
   @doc """
   Returns the list of site_notices.
@@ -53,9 +53,9 @@ defmodule Philomena.SiteNotices do
   Authorizes `:index` against the site-notice model. Returns
   `{:ok, site_notices}` as a `m:Scrivener.Page` or `{:error, :unauthorized}`.
   """
-  @spec load_site_notices(User.t() | nil, map() | keyword()) ::
+  @spec load_site_notices(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_site_notices(actor, pagination) do
+  def load_site_notices(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, SiteNotice) do
       site_notices =
         SiteNotice
@@ -72,16 +72,16 @@ defmodule Philomena.SiteNotices do
   Authorizes `:new` against the site-notice model. Returns `{:ok, changeset}` or
   `{:error, :unauthorized}`.
   """
-  @spec new_site_notice(User.t() | nil) ::
+  @spec new_site_notice(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_site_notice(actor) do
+  def new_site_notice(%Actor{} = actor) do
     with :ok <- authorize(actor, :new, SiteNotice) do
       {:ok, change_site_notice(%SiteNotice{})}
     end
   end
 
   @doc """
-  Creates a site notice on behalf of `actor`, who becomes its author.
+  Creates a site notice on behalf of `actor`, whose user becomes its author.
 
   Authorizes `:create` against the site-notice model, then inserts the notice.
   Returns `{:ok, site_notice}`, `{:error, :unauthorized}`, or
@@ -96,11 +96,11 @@ defmodule Philomena.SiteNotices do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec create_site_notice(User.t() | nil, map()) ::
+  @spec create_site_notice(Actor.t(), map()) ::
           {:ok, SiteNotice.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_site_notice(actor, attrs \\ %{}) do
+  def create_site_notice(%Actor{} = actor, attrs \\ %{}) do
     with :ok <- authorize(actor, :create, SiteNotice) do
-      %SiteNotice{user_id: actor.id}
+      %SiteNotice{user_id: actor.user.id}
       |> SiteNotice.changeset(attrs)
       |> Repo.insert()
     end
@@ -117,9 +117,9 @@ defmodule Philomena.SiteNotices do
   Returns `{:ok, {site_notice, changeset}}`, `{:error, :unauthorized}`, or
   `{:error, :not_found}`.
   """
-  @spec load_site_notice_for_edit(User.t() | nil, any()) ::
+  @spec load_site_notice_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {SiteNotice.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_site_notice_for_edit(actor, id) do
+  def load_site_notice_for_edit(%Actor{} = actor, id) do
     with {:ok, site_notice} <- load_site_notice(actor, id, :edit) do
       {:ok, {site_notice, change_site_notice(site_notice)}}
     end
@@ -132,9 +132,9 @@ defmodule Philomena.SiteNotices do
   `:update`. Returns `{:ok, site_notice}`, `{:error, :unauthorized}`,
   `{:error, :not_found}`, or `{:error, %Ecto.Changeset{}}`.
   """
-  @spec update_site_notice(User.t() | nil, any(), map()) ::
+  @spec update_site_notice(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, SiteNotice.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_site_notice(actor, id, attrs) do
+  def update_site_notice(%Actor{} = actor, id, attrs) do
     with {:ok, site_notice} <- load_site_notice(actor, id, :update) do
       update_site_notice(site_notice, attrs)
     end
@@ -165,9 +165,9 @@ defmodule Philomena.SiteNotices do
   `:delete`. Returns `{:ok, site_notice}`, `{:error, :unauthorized}`, or
   `{:error, :not_found}`.
   """
-  @spec delete_site_notice(User.t() | nil, any()) ::
+  @spec delete_site_notice(Actor.t(), Loader.integer_id()) ::
           {:ok, SiteNotice.t()} | {:error, :unauthorized | :not_found}
-  def delete_site_notice(actor, id) do
+  def delete_site_notice(%Actor{} = actor, id) do
     with {:ok, site_notice} <- load_site_notice(actor, id, :delete) do
       delete_site_notice(site_notice)
     end

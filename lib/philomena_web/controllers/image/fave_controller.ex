@@ -4,12 +4,11 @@ defmodule PhilomenaWeb.Image.FaveController do
   alias Philomena.Images.Image
   alias Philomena.Images
 
-  plug PhilomenaWeb.UserAttributionPlug
   plug :load_interaction_image
   plug PhilomenaWeb.FilterForcedUsersPlug
 
   def create(conn, _params) do
-    case Images.create_fave(conn.assigns.image, conn.assigns.current_user) do
+    case Images.create_fave(conn.assigns.image, conn.assigns.actor) do
       {:ok, image} ->
         json(conn, Image.interaction_data(image))
 
@@ -21,7 +20,7 @@ defmodule PhilomenaWeb.Image.FaveController do
   end
 
   def delete(conn, _params) do
-    case Images.delete_fave(conn.assigns.image, conn.assigns.current_user) do
+    case Images.delete_fave(conn.assigns.image, conn.assigns.actor) do
       {:ok, image} ->
         json(conn, Image.interaction_data(image))
 

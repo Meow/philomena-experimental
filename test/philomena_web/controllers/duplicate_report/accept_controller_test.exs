@@ -57,8 +57,9 @@ defmodule PhilomenaWeb.DuplicateReport.AcceptControllerTest do
     test "an unknown report id takes the not-authorized redirect", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
-      # NOTE: load_and_authorize_resource authorizes a nil resource for a
-      # moderator (no rule matches), so an unknown id redirects rather than 404s.
+      # NOTE: the context authorizes the nil load for a moderator (no rule
+      # matches), so an unknown id returns unauthorized and redirects rather
+      # than 404s.
       conn = post(conn, ~p"/duplicate_reports/#{123_456_789}/accept")
 
       assert redirected_to(conn) == "/"

@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Admin.ReportController do
 
   def index(conn, params) do
     with {:ok, page} <-
-           Reports.load_report_index(conn.assigns.current_user, params, conn.assigns.pagination) do
+           Reports.load_report_index(conn.assigns.actor, params, conn.assigns.pagination) do
       render(conn, "index.html",
         title: "Admin - Reports",
         layout_class: "layout--wide",
@@ -20,7 +20,7 @@ defmodule PhilomenaWeb.Admin.ReportController do
   end
 
   def show(conn, params) do
-    with {:ok, report} <- Reports.load_report(conn.assigns.current_user, params["id"]) do
+    with {:ok, report} <- Reports.load_report(conn.assigns.actor, params["id"]) do
       body = MarkdownRenderer.render_one(%{body: report.reason}, conn)
 
       render(conn, "show.html",
@@ -34,6 +34,6 @@ defmodule PhilomenaWeb.Admin.ReportController do
 
   defp mod_notes(conn, report) do
     renderer = &MarkdownRenderer.render_collection(&1, conn)
-    Reports.mod_notes(conn.assigns.current_user, report, renderer)
+    Reports.mod_notes(conn.assigns.actor, report, renderer)
   end
 end

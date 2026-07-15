@@ -11,6 +11,7 @@ defmodule Philomena.UserFingerprintsTest do
 
   use Philomena.DataCase, async: true
 
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
   import Philomena.BansFixtures
   import Philomena.UserFingerprintsFixtures
   import Philomena.UsersFixtures
@@ -31,7 +32,7 @@ defmodule Philomena.UserFingerprintsTest do
                 fingerprint_bans: fingerprint_bans
               }} =
                UserFingerprints.load_fingerprint_profile(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  "c1836fd10ff8f27a"
                )
 
@@ -41,24 +42,28 @@ defmodule Philomena.UserFingerprintsTest do
 
     test "an admin may load a fingerprint profile" do
       assert {:ok, %FingerprintProfile{}} =
-               UserFingerprints.load_fingerprint_profile(admin_user_fixture(), "anything")
+               UserFingerprints.load_fingerprint_profile(actor(admin_user_fixture()), "anything")
     end
 
     test "any raw string is accepted and returns a possibly-empty profile" do
       assert {:ok, %FingerprintProfile{user_fingerprints: [], fingerprint_bans: []}} =
                UserFingerprints.load_fingerprint_profile(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  "no-such-fingerprint"
                )
     end
 
     test "a regular user is unauthorized" do
-      assert UserFingerprints.load_fingerprint_profile(confirmed_user_fixture(), "anything") ==
+      assert UserFingerprints.load_fingerprint_profile(
+               actor(confirmed_user_fixture()),
+               "anything"
+             ) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert UserFingerprints.load_fingerprint_profile(nil, "anything") == {:error, :unauthorized}
+      assert UserFingerprints.load_fingerprint_profile(actor(), "anything") ==
+               {:error, :unauthorized}
     end
   end
 end

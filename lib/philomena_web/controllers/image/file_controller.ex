@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Image.FileController do
   plug PhilomenaWeb.ScraperPlug, params_name: "image", params_key: "image"
 
   def update(conn, %{"image" => image_params} = params) do
-    case Images.update_file(conn.assigns.current_user, params["image_id"], image_params) do
+    case Images.update_file(conn.assigns.actor, params["image_id"], image_params) do
       {:ok, image} ->
         conn
         |> put_flash(:info, "Successfully updated file.")

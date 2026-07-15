@@ -14,6 +14,7 @@ defmodule Philomena.NotificationsTest do
   alias Philomena.Notifications
   alias Philomena.Notifications.ChannelLiveNotification
 
+  import Philomena.AttributionFixtures, only: [actor: 1]
   import Philomena.ChannelsFixtures
   import Philomena.UsersFixtures
 
@@ -46,7 +47,7 @@ defmodule Philomena.NotificationsTest do
     test "returns every category keyed, each empty, when the user has none" do
       user = confirmed_user_fixture()
 
-      result = Notifications.unread_notifications_for_user(user, @pagination)
+      result = Notifications.unread_notifications_for_user(actor(user), @pagination)
 
       assert Keyword.keys(result) == [
                :channel_live,
@@ -69,7 +70,7 @@ defmodule Philomena.NotificationsTest do
       {:ok, _} = Channels.create_subscription(channel, user)
       assert {:ok, 1} = Notifications.create_channel_live_notification(channel)
 
-      result = Notifications.unread_notifications_for_user(user, @pagination)
+      result = Notifications.unread_notifications_for_user(actor(user), @pagination)
 
       assert [%ChannelLiveNotification{}] = result[:channel_live].entries
       assert result[:forum_post].entries == []
@@ -84,7 +85,7 @@ defmodule Philomena.NotificationsTest do
       {:ok, _} = Channels.create_subscription(channel, subscriber)
       assert {:ok, 1} = Notifications.create_channel_live_notification(channel)
 
-      result = Notifications.unread_notifications_for_user(other, @pagination)
+      result = Notifications.unread_notifications_for_user(actor(other), @pagination)
 
       assert result[:channel_live].entries == []
     end

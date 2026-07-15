@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.PollController do
 
   def edit(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug}) do
     with {:ok, {forum, topic, poll, changeset}} <-
-           Polls.load_poll_for_edit(conn.assigns.current_user, forum_slug, topic_slug) do
+           Polls.load_poll_for_edit(conn.assigns.actor, forum_slug, topic_slug) do
       render(conn, "edit.html",
         title: "Editing Poll",
         forum: forum,
@@ -19,7 +19,7 @@ defmodule PhilomenaWeb.Topic.PollController do
   end
 
   def update(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug, "poll" => poll_params}) do
-    case Polls.update_poll(conn.assigns.current_user, forum_slug, topic_slug, poll_params) do
+    case Polls.update_poll(conn.assigns.actor, forum_slug, topic_slug, poll_params) do
       {:ok, {forum, topic}} ->
         conn
         |> put_flash(:info, "Poll successfully updated.")

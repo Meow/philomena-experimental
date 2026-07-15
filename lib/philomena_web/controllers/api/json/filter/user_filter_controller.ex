@@ -10,8 +10,8 @@ defmodule PhilomenaWeb.Api.Json.Filter.UserFilterController do
         |> put_status(:forbidden)
         |> text("")
 
-      user ->
-        user_filters = Filters.user_filters(user, conn.assigns.scrivener)
+      _user ->
+        user_filters = Filters.user_filters(conn.assigns.actor, conn.assigns.scrivener)
 
         conn
         |> put_view(PhilomenaWeb.Api.Json.FilterView)

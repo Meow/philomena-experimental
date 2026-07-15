@@ -81,8 +81,8 @@ defmodule PhilomenaWeb.Topic.Post.ApproveControllerTest do
     end
 
     # Failure path: the only reachable failure surface is an unknown post -
-    # load_and_authorize_resource authorizes the nil resource, which no
-    # moderator rule matches, so it redirects with the authorization flash.
+    # the context authorizes the nil load, which no moderator rule matches, so
+    # it returns unauthorized and redirects with the authorization flash.
     test "for an unknown post_id redirects with the authorization flash",
          %{conn: conn, forum: forum, topic: topic} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})

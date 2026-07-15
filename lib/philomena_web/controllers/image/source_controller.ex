@@ -3,16 +3,12 @@ defmodule PhilomenaWeb.Image.SourceController do
 
   alias Philomena.Images.Source
   alias Philomena.Images
+  alias PhilomenaWeb.RateLimitedResponse
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.LimitPlug,
-       [time: 5, error: "You may only update metadata once every 5 seconds."]
-       when action in [:update]
-
   plug PhilomenaWeb.CaptchaPlug
   plug PhilomenaWeb.CheckCaptchaPlug
-  plug PhilomenaWeb.UserAttributionPlug
 
   def update(conn, %{"image" => image_params} = params) do
     case Images.update_sources(conn.assigns.actor, params["image_id"], image_params) do
@@ -51,6 +47,9 @@ defmodule PhilomenaWeb.Image.SourceController do
           image: changeset.data,
           changeset: changeset
         )
+
+      {:error, :rate_limited} ->
+        RateLimitedResponse.call(conn, "You may only update metadata once every 5 seconds.")
 
       {:error, _} = error ->
         error

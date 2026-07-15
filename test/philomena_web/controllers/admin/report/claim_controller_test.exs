@@ -46,19 +46,18 @@ defmodule PhilomenaWeb.Admin.Report.ClaimControllerTest do
   describe "POST /admin/reports/:report_id/claim (create) failure paths" do
     setup [:register_and_log_in_moderator]
 
-    # NOTE: an unknown report id takes Canary's not-found path on :create
-    # (the authorization check fails against the nil resource), so it is the
-    # authorization flash + redirect to /, not a 404.
+    # NOTE: an unknown (well-formed) report id loads nil; a moderator's grant
+    # does not cover nil (the authorization check fails against nil), so it is
+    # the authorization flash + redirect to /, not a 404.
     test "redirects for an unknown report id", %{conn: conn} do
       conn = post(conn, ~p"/admin/reports/#{0}/claim")
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
     end
 
-    # NOTE: a non-integer report id short-circuits to NotFoundPlug via the
-    # central IntegerId guard before Canary authorizes, so the flash is the
-    # not-found message rather than the "You can't access that page." an unknown
-    # integer id gets.
+    # NOTE: a non-integer report id fails the id parse before authorization, so
+    # the flash is the not-found message rather than the "You can't access that
+    # page." an unknown (well-formed) integer id gets.
     test "redirects with the not-found flash for a non-integer report id", %{conn: conn} do
       conn = post(conn, ~p"/admin/reports/not-an-integer/claim")
       assert redirected_to(conn) == "/"

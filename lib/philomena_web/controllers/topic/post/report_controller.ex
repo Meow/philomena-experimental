@@ -5,7 +5,6 @@ defmodule PhilomenaWeb.Topic.Post.ReportController do
   alias PhilomenaWeb.ReportView
   alias Philomena.Posts
 
-  plug PhilomenaWeb.UserAttributionPlug
   plug PhilomenaWeb.CaptchaPlug
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
 

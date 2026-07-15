@@ -54,7 +54,7 @@ defmodule Philomena.CommentsTest do
     test "returns an error for an uncompilable query string" do
       assert {:error, msg} =
                Comments.search_comments(
-                 nil,
+                 actor(),
                  @empty_filter,
                  "created_at.gte:not-a-date",
                  @pagination
@@ -70,7 +70,7 @@ defmodule Philomena.CommentsTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, results} =
-               Comments.search_comments(nil, @empty_filter, "grapefruit", @pagination)
+               Comments.search_comments(actor(), @empty_filter, "grapefruit", @pagination)
 
       assert [entry] = results.entries
       assert entry.id == comment.id
@@ -92,7 +92,7 @@ defmodule Philomena.CommentsTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, results} =
-               Comments.search_comments(nil, @empty_filter, "grapefruit", @pagination)
+               Comments.search_comments(actor(), @empty_filter, "grapefruit", @pagination)
 
       assert results.entries == []
     end
@@ -109,7 +109,12 @@ defmodule Philomena.CommentsTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, results} =
-               Comments.search_comments(moderator, @empty_filter, "grapefruit", @pagination)
+               Comments.search_comments(
+                 actor(moderator),
+                 @empty_filter,
+                 "grapefruit",
+                 @pagination
+               )
 
       assert [entry] = results.entries
       assert entry.id == comment.id
@@ -124,13 +129,13 @@ defmodule Philomena.CommentsTest do
       hidden_filter = %Filter{hidden_tag_ids: [tag.id]}
 
       assert {:ok, results} =
-               Comments.search_comments(nil, hidden_filter, "grapefruit", @pagination)
+               Comments.search_comments(actor(), hidden_filter, "grapefruit", @pagination)
 
       assert results.entries == []
 
       # The same comment is visible when the tag is not hidden.
       assert {:ok, results} =
-               Comments.search_comments(nil, @empty_filter, "grapefruit", @pagination)
+               Comments.search_comments(actor(), @empty_filter, "grapefruit", @pagination)
 
       assert [_entry] = results.entries
     end
@@ -161,7 +166,7 @@ defmodule Philomena.CommentsTest do
     test "denies an anonymous actor", %{image: image} do
       {comment, _author} = unapproved_comment(image)
 
-      assert Comments.approve_comment(nil, "#{comment.id}") == {:error, :unauthorized}
+      assert Comments.approve_comment(actor(), "#{comment.id}") == {:error, :unauthorized}
       refute Repo.reload!(comment).approved
       no_moderation_logs!()
     end
@@ -169,7 +174,7 @@ defmodule Philomena.CommentsTest do
     test "denies a regular user", %{image: image} do
       {comment, _author} = unapproved_comment(image)
 
-      assert Comments.approve_comment(confirmed_user_fixture(), "#{comment.id}") ==
+      assert Comments.approve_comment(actor(confirmed_user_fixture()), "#{comment.id}") ==
                {:error, :unauthorized}
 
       refute Repo.reload!(comment).approved
@@ -180,7 +185,8 @@ defmodule Philomena.CommentsTest do
       {comment, _author} = unapproved_comment(image)
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Comment{} = approved} = Comments.approve_comment(moderator, "#{comment.id}")
+      assert {:ok, %Comment{} = approved} =
+               Comments.approve_comment(actor(moderator), "#{comment.id}")
 
       assert approved.id == comment.id
       assert approved.approved
@@ -192,7 +198,7 @@ defmodule Philomena.CommentsTest do
       {comment, _author} = unapproved_comment(image)
       moderator = moderator_user_fixture()
 
-      assert {:ok, _} = Comments.approve_comment(moderator, "#{comment.id}")
+      assert {:ok, _} = Comments.approve_comment(actor(moderator), "#{comment.id}")
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -205,7 +211,7 @@ defmodule Philomena.CommentsTest do
       {comment, author} = unapproved_comment(image)
       before = Repo.get!(User, author.id).comments_count
 
-      assert {:ok, _} = Comments.approve_comment(moderator_user_fixture(), "#{comment.id}")
+      assert {:ok, _} = Comments.approve_comment(actor(moderator_user_fixture()), "#{comment.id}")
 
       assert Repo.get!(User, author.id).comments_count == before + 1
     end
@@ -217,7 +223,7 @@ defmodule Philomena.CommentsTest do
       assert report.open
       assert report.state == "open"
 
-      assert {:ok, _} = Comments.approve_comment(moderator_user_fixture(), "#{comment.id}")
+      assert {:ok, _} = Comments.approve_comment(actor(moderator_user_fixture()), "#{comment.id}")
 
       closed = Repo.get!(Report, report.id)
       refute closed.open
@@ -234,7 +240,7 @@ defmodule Philomena.CommentsTest do
       before = Repo.get!(User, author.id).comments_count
 
       assert {:ok, %Comment{} = approved} =
-               Comments.approve_comment(moderator_user_fixture(), "#{comment.id}")
+               Comments.approve_comment(actor(moderator_user_fixture()), "#{comment.id}")
 
       assert approved.approved
       assert Repo.get!(User, author.id).comments_count == before + 1
@@ -247,14 +253,16 @@ defmodule Philomena.CommentsTest do
     # A well-formed id naming no row loads nil, which no :approve rule permits;
     # the context returns unauthorized rather than not-found.
     test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Comments.approve_comment(moderator_user_fixture(), "999999999") ==
+      assert Comments.approve_comment(actor(moderator_user_fixture()), "999999999") ==
                {:error, :unauthorized}
 
       no_moderation_logs!()
     end
 
     test "an id that cannot name a row is not found" do
-      assert Comments.approve_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
+      assert Comments.approve_comment(actor(moderator_user_fixture()), "abc") ==
+               {:error, :not_found}
+
       no_moderation_logs!()
     end
   end
@@ -285,7 +293,7 @@ defmodule Philomena.CommentsTest do
     test "denies an anonymous actor, leaving the body intact", %{image: image} do
       comment = visible_comment(image)
 
-      assert Comments.destroy_comment(nil, "#{comment.id}") == {:error, :unauthorized}
+      assert Comments.destroy_comment(actor(), "#{comment.id}") == {:error, :unauthorized}
 
       reloaded = Repo.reload!(comment)
       assert reloaded.body == "Rule-breaking comment"
@@ -296,7 +304,7 @@ defmodule Philomena.CommentsTest do
     test "denies a regular user, leaving the body intact", %{image: image} do
       comment = visible_comment(image)
 
-      assert Comments.destroy_comment(confirmed_user_fixture(), "#{comment.id}") ==
+      assert Comments.destroy_comment(actor(confirmed_user_fixture()), "#{comment.id}") ==
                {:error, :unauthorized}
 
       reloaded = Repo.reload!(comment)
@@ -309,7 +317,8 @@ defmodule Philomena.CommentsTest do
       comment = visible_comment(image)
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Comment{} = destroyed} = Comments.destroy_comment(moderator, "#{comment.id}")
+      assert {:ok, %Comment{} = destroyed} =
+               Comments.destroy_comment(actor(moderator), "#{comment.id}")
 
       assert destroyed.id == comment.id
 
@@ -334,7 +343,7 @@ defmodule Philomena.CommentsTest do
       no_moderation_logs!()
 
       assert {:ok, %Comment{}} =
-               Comments.destroy_comment(moderator_user_fixture(), "#{comment.id}")
+               Comments.destroy_comment(actor(moderator_user_fixture()), "#{comment.id}")
 
       reloaded = Repo.reload!(comment)
       assert reloaded.body == ""
@@ -347,7 +356,7 @@ defmodule Philomena.CommentsTest do
       comment = visible_comment(image)
       moderator = moderator_user_fixture()
 
-      assert {:ok, _} = Comments.destroy_comment(moderator, "#{comment.id}")
+      assert {:ok, _} = Comments.destroy_comment(actor(moderator), "#{comment.id}")
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -361,7 +370,7 @@ defmodule Philomena.CommentsTest do
       comment = comment_fixture(image, author, %{"body" => "Rule-breaking comment"})
       before = Repo.get!(User, author.id).comments_count
 
-      assert {:ok, _} = Comments.destroy_comment(moderator_user_fixture(), "#{comment.id}")
+      assert {:ok, _} = Comments.destroy_comment(actor(moderator_user_fixture()), "#{comment.id}")
 
       assert Repo.get!(User, author.id).comments_count == before - 1
     end
@@ -369,14 +378,16 @@ defmodule Philomena.CommentsTest do
     # A well-formed id naming no row loads nil, which no :hide rule permits; the
     # context returns unauthorized rather than not-found.
     test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Comments.destroy_comment(moderator_user_fixture(), "999999999") ==
+      assert Comments.destroy_comment(actor(moderator_user_fixture()), "999999999") ==
                {:error, :unauthorized}
 
       no_moderation_logs!()
     end
 
     test "an id that cannot name a row is not found" do
-      assert Comments.destroy_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
+      assert Comments.destroy_comment(actor(moderator_user_fixture()), "abc") ==
+               {:error, :not_found}
+
       no_moderation_logs!()
     end
   end
@@ -389,7 +400,7 @@ defmodule Philomena.CommentsTest do
     test "denies an anonymous actor, leaving the comment visible", %{image: image} do
       comment = visible_comment(image)
 
-      assert Comments.hide_comment(nil, "#{comment.id}", %{"deletion_reason" => "Spam"}) ==
+      assert Comments.hide_comment(actor(), "#{comment.id}", %{"deletion_reason" => "Spam"}) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(comment).hidden_from_users
@@ -399,7 +410,7 @@ defmodule Philomena.CommentsTest do
     test "denies a regular user, leaving the comment visible", %{image: image} do
       comment = visible_comment(image)
 
-      assert Comments.hide_comment(confirmed_user_fixture(), "#{comment.id}", %{
+      assert Comments.hide_comment(actor(confirmed_user_fixture()), "#{comment.id}", %{
                "deletion_reason" => "Spam"
              }) ==
                {:error, :unauthorized}
@@ -415,7 +426,9 @@ defmodule Philomena.CommentsTest do
       moderator = moderator_user_fixture()
 
       assert {:ok, %Comment{} = hidden} =
-               Comments.hide_comment(moderator, "#{comment.id}", %{"deletion_reason" => "Spam"})
+               Comments.hide_comment(actor(moderator), "#{comment.id}", %{
+                 "deletion_reason" => "Spam"
+               })
 
       assert hidden.id == comment.id
       assert hidden.hidden_from_users
@@ -431,7 +444,9 @@ defmodule Philomena.CommentsTest do
       moderator = moderator_user_fixture()
 
       assert {:ok, _} =
-               Comments.hide_comment(moderator, "#{comment.id}", %{"deletion_reason" => "Spam"})
+               Comments.hide_comment(actor(moderator), "#{comment.id}", %{
+                 "deletion_reason" => "Spam"
+               })
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -445,7 +460,7 @@ defmodule Philomena.CommentsTest do
       comment = visible_comment(image)
 
       assert {:error, %Comment{} = returned} =
-               Comments.hide_comment(moderator_user_fixture(), "#{comment.id}", %{
+               Comments.hide_comment(actor(moderator_user_fixture()), "#{comment.id}", %{
                  "deletion_reason" => ""
                })
 
@@ -457,7 +472,7 @@ defmodule Philomena.CommentsTest do
     # A well-formed id naming no row loads nil, which no :hide rule permits; the
     # context returns unauthorized rather than not-found.
     test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Comments.hide_comment(moderator_user_fixture(), "999999999", %{
+      assert Comments.hide_comment(actor(moderator_user_fixture()), "999999999", %{
                "deletion_reason" => "Spam"
              }) ==
                {:error, :unauthorized}
@@ -466,7 +481,9 @@ defmodule Philomena.CommentsTest do
     end
 
     test "an id that cannot name a row is not found" do
-      assert Comments.hide_comment(moderator_user_fixture(), "abc", %{"deletion_reason" => "Spam"}) ==
+      assert Comments.hide_comment(actor(moderator_user_fixture()), "abc", %{
+               "deletion_reason" => "Spam"
+             }) ==
                {:error, :not_found}
 
       no_moderation_logs!()
@@ -481,7 +498,7 @@ defmodule Philomena.CommentsTest do
     test "denies an anonymous actor, leaving the comment hidden", %{image: image} do
       comment = already_hidden_comment(image)
 
-      assert Comments.unhide_comment(nil, "#{comment.id}") == {:error, :unauthorized}
+      assert Comments.unhide_comment(actor(), "#{comment.id}") == {:error, :unauthorized}
       assert Repo.reload!(comment).hidden_from_users
       no_moderation_logs!()
     end
@@ -489,7 +506,7 @@ defmodule Philomena.CommentsTest do
     test "denies a regular user, leaving the comment hidden", %{image: image} do
       comment = already_hidden_comment(image)
 
-      assert Comments.unhide_comment(confirmed_user_fixture(), "#{comment.id}") ==
+      assert Comments.unhide_comment(actor(confirmed_user_fixture()), "#{comment.id}") ==
                {:error, :unauthorized}
 
       reloaded = Repo.reload!(comment)
@@ -503,7 +520,8 @@ defmodule Philomena.CommentsTest do
       comment = already_hidden_comment(image)
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Comment{} = restored} = Comments.unhide_comment(moderator, "#{comment.id}")
+      assert {:ok, %Comment{} = restored} =
+               Comments.unhide_comment(actor(moderator), "#{comment.id}")
 
       assert restored.id == comment.id
       refute restored.hidden_from_users
@@ -518,7 +536,7 @@ defmodule Philomena.CommentsTest do
       comment = already_hidden_comment(image)
       moderator = moderator_user_fixture()
 
-      assert {:ok, _} = Comments.unhide_comment(moderator, "#{comment.id}")
+      assert {:ok, _} = Comments.unhide_comment(actor(moderator), "#{comment.id}")
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -534,7 +552,7 @@ defmodule Philomena.CommentsTest do
       refute comment.hidden_from_users
 
       assert {:ok, %Comment{} = restored} =
-               Comments.unhide_comment(moderator_user_fixture(), "#{comment.id}")
+               Comments.unhide_comment(actor(moderator_user_fixture()), "#{comment.id}")
 
       refute restored.hidden_from_users
 
@@ -546,14 +564,16 @@ defmodule Philomena.CommentsTest do
     # A well-formed id naming no row loads nil, which no :hide rule permits; the
     # context returns unauthorized rather than not-found.
     test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Comments.unhide_comment(moderator_user_fixture(), "999999999") ==
+      assert Comments.unhide_comment(actor(moderator_user_fixture()), "999999999") ==
                {:error, :unauthorized}
 
       no_moderation_logs!()
     end
 
     test "an id that cannot name a row is not found" do
-      assert Comments.unhide_comment(moderator_user_fixture(), "abc") == {:error, :not_found}
+      assert Comments.unhide_comment(actor(moderator_user_fixture()), "abc") ==
+               {:error, :not_found}
+
       no_moderation_logs!()
     end
   end
@@ -571,7 +591,7 @@ defmodule Philomena.CommentsTest do
       comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "A visible comment"})
 
       assert {:ok, {loaded_image, %Comment{} = loaded_comment, versions}} =
-               Comments.comment_history(nil, "#{image.id}", "#{comment.id}")
+               Comments.comment_history(actor(), "#{image.id}", "#{comment.id}")
 
       assert loaded_image.id == image.id
       assert loaded_comment.id == comment.id
@@ -585,24 +605,28 @@ defmodule Philomena.CommentsTest do
     end
 
     test "an unknown image id is unauthorized" do
-      assert Comments.comment_history(nil, "999999999", "1") == {:error, :unauthorized}
+      assert Comments.comment_history(actor(), "999999999", "1") == {:error, :unauthorized}
     end
 
     test "an unknown comment id on a real image is not found", %{image: image} do
-      assert Comments.comment_history(nil, "#{image.id}", "999999999") == {:error, :not_found}
+      assert Comments.comment_history(actor(), "#{image.id}", "999999999") == {:error, :not_found}
     end
 
     test "an anonymous actor cannot read the history of a hidden comment", %{image: image} do
       comment = already_hidden_comment(image)
 
-      assert Comments.comment_history(nil, "#{image.id}", "#{comment.id}") ==
+      assert Comments.comment_history(actor(), "#{image.id}", "#{comment.id}") ==
                {:error, :unauthorized}
     end
 
     test "a regular user cannot read the history of a hidden comment", %{image: image} do
       comment = already_hidden_comment(image)
 
-      assert Comments.comment_history(confirmed_user_fixture(), "#{image.id}", "#{comment.id}") ==
+      assert Comments.comment_history(
+               actor(confirmed_user_fixture()),
+               "#{image.id}",
+               "#{comment.id}"
+             ) ==
                {:error, :unauthorized}
     end
 
@@ -611,7 +635,7 @@ defmodule Philomena.CommentsTest do
 
       assert {:ok, {_image, %Comment{} = loaded_comment, versions}} =
                Comments.comment_history(
-                 moderator_user_fixture(),
+                 actor(moderator_user_fixture()),
                  "#{image.id}",
                  "#{comment.id}"
                )
@@ -633,7 +657,7 @@ defmodule Philomena.CommentsTest do
         })
 
       assert {:ok, {_image, _comment, [%Version{} = version]}} =
-               Comments.comment_history(nil, "#{image.id}", "#{comment.id}")
+               Comments.comment_history(actor(), "#{image.id}", "#{comment.id}")
 
       # create_version records the body as it stood before the edit, so the
       # single version carries the original text and names its editor.
@@ -655,7 +679,7 @@ defmodule Philomena.CommentsTest do
       end)
 
       assert {:ok, {_image, _comment, versions}} =
-               Comments.comment_history(nil, "#{image.id}", "#{comment.id}")
+               Comments.comment_history(actor(), "#{image.id}", "#{comment.id}")
 
       assert length(versions) == 25
     end
@@ -669,7 +693,7 @@ defmodule Philomena.CommentsTest do
       image = image_fixture()
 
       assert {:ok, %Image{} = loaded} =
-               Comments.load_commentable_image(nil, "#{image.id}", :index)
+               Comments.load_commentable_image(actor(), "#{image.id}", :index)
 
       assert loaded.id == image.id
 
@@ -681,7 +705,9 @@ defmodule Philomena.CommentsTest do
     test ":show on a visible image succeeds for an anonymous actor" do
       image = image_fixture()
 
-      assert {:ok, %Image{} = loaded} = Comments.load_commentable_image(nil, "#{image.id}", :show)
+      assert {:ok, %Image{} = loaded} =
+               Comments.load_commentable_image(actor(), "#{image.id}", :show)
+
       assert loaded.id == image.id
     end
 
@@ -689,7 +715,7 @@ defmodule Philomena.CommentsTest do
       image = image_fixture(%{hidden_from_users: true})
 
       assert Comments.load_commentable_image(
-               confirmed_user_fixture(),
+               actor(confirmed_user_fixture()),
                "#{image.id}",
                :show
              ) ==
@@ -701,7 +727,7 @@ defmodule Philomena.CommentsTest do
       user = confirmed_user_fixture()
 
       for action <- [:create, :edit, :update] do
-        assert Comments.load_commentable_image(user, "#{image.id}", action) ==
+        assert Comments.load_commentable_image(actor(user), "#{image.id}", action) ==
                  {:error, :unauthorized}
       end
     end
@@ -710,7 +736,11 @@ defmodule Philomena.CommentsTest do
       image = image_fixture()
 
       assert {:ok, %Image{} = loaded} =
-               Comments.load_commentable_image(confirmed_user_fixture(), "#{image.id}", :create)
+               Comments.load_commentable_image(
+                 actor(confirmed_user_fixture()),
+                 "#{image.id}",
+                 :create
+               )
 
       assert loaded.id == image.id
     end
@@ -718,12 +748,12 @@ defmodule Philomena.CommentsTest do
     # A well-formed id naming no row loads nil, which no rule permits; the
     # context returns unauthorized rather than not-found.
     test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Comments.load_commentable_image(confirmed_user_fixture(), "999999999", :index) ==
+      assert Comments.load_commentable_image(actor(confirmed_user_fixture()), "999999999", :index) ==
                {:error, :unauthorized}
     end
 
     test "an id that cannot name a row is not found" do
-      assert Comments.load_commentable_image(confirmed_user_fixture(), "abc", :index) ==
+      assert Comments.load_commentable_image(actor(confirmed_user_fixture()), "abc", :index) ==
                {:error, :not_found}
     end
   end
@@ -792,6 +822,36 @@ defmodule Philomena.CommentsTest do
 
       assert comment.approved
       assert Repo.get!(User, author.id).comments_count == before + 1
+    end
+
+    test "an over-limit actor is rate limited and no comment is created", %{image: image} do
+      # The :comment_create counter is primed past the limit, so the rate check
+      # (after write-access, before the insert) refuses the write.
+      actor = actor(confirmed_user_fixture())
+      exceed_rate_limit(actor, :comment_create)
+
+      assert Comments.create_comment(actor, image, %{"body" => "Hi"}) == {:error, :rate_limited}
+
+      # The comment and its image comment-count bump never happened.
+      assert Repo.get!(Image, image.id).comments_count == 0
+    end
+
+    test "a successful create records the counter", %{image: image} do
+      actor = actor(confirmed_user_fixture())
+      track_rate_limit(actor, :comment_create)
+
+      assert {:ok, %Comment{}} = Comments.create_comment(actor, image, %{"body" => "Hi"})
+      assert rate_limit_count(actor, :comment_create) == "1"
+    end
+
+    test "the rate check precedes the insert: over-limit with a blank body is still rate limited",
+         %{image: image} do
+      # A blank body would fail the insert with :creation_failed, but the rate
+      # check runs before create_loaded_comment, so the actor gets :rate_limited.
+      actor = actor(confirmed_user_fixture())
+      exceed_rate_limit(actor, :comment_create)
+
+      assert Comments.create_comment(actor, image, %{"body" => ""}) == {:error, :rate_limited}
     end
   end
 
@@ -1320,25 +1380,25 @@ defmodule Philomena.CommentsTest do
     test "returns the page a comment falls on for a newest-first reader",
          %{image: image, c1: c1, c2: c2, c3: c3} do
       # Newest first, page size 2: c3 and c2 share page 1, c1 falls to page 2.
-      assert Comments.find_comment_page(nil, image, c3.id, page_size: 2) == 1
-      assert Comments.find_comment_page(nil, image, c2.id, page_size: 2) == 1
-      assert Comments.find_comment_page(nil, image, c1.id, page_size: 2) == 2
+      assert Comments.find_comment_page(actor(), image, c3.id, page_size: 2) == 1
+      assert Comments.find_comment_page(actor(), image, c2.id, page_size: 2) == 1
+      assert Comments.find_comment_page(actor(), image, c1.id, page_size: 2) == 2
     end
 
     test "honors an oldest-first reader's direction", %{image: image, c1: c1, c2: c2, c3: c3} do
       user = oldest_first_user()
 
       # Oldest first, page size 2: c1 and c2 share page 1, c3 falls to page 2.
-      assert Comments.find_comment_page(user, image, c1.id, page_size: 2) == 1
-      assert Comments.find_comment_page(user, image, c2.id, page_size: 2) == 1
-      assert Comments.find_comment_page(user, image, c3.id, page_size: 2) == 2
+      assert Comments.find_comment_page(actor(user), image, c1.id, page_size: 2) == 1
+      assert Comments.find_comment_page(actor(user), image, c2.id, page_size: 2) == 1
+      assert Comments.find_comment_page(actor(user), image, c3.id, page_size: 2) == 2
     end
 
     test "raises when the comment does not belong to the image", %{image: image} do
       foreign = comment_fixture(image_fixture(), confirmed_user_fixture())
 
       assert_raise Ecto.NoResultsError, fn ->
-        Comments.find_comment_page(nil, image, foreign.id, page_size: 2)
+        Comments.find_comment_page(actor(), image, foreign.id, page_size: 2)
       end
     end
   end

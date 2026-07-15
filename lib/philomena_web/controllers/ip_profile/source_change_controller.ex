@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.IpProfile.SourceChangeController do
   def index(conn, %{"ip_profile_id" => ip} = params) do
     with {:ok, {ip, range, source_changes}} <-
            SourceChanges.ip_source_changes(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              ip,
              params,
              conn.assigns.scrivener

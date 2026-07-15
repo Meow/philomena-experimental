@@ -66,7 +66,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central
-    # IntegerId guard before Canary authorizes, so the flash is the not-found
+    # IntegerId guard before authorization runs, so the flash is the not-found
     # message rather than the "You can't access that page." an unknown integer
     # id gets.
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do
@@ -133,7 +133,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central
-    # IntegerId guard before Canary authorizes, so the flash is the not-found
+    # IntegerId guard before authorization runs, so the flash is the not-found
     # message rather than the "You can't access that page." an unknown integer
     # id gets.
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do
@@ -225,7 +225,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central
-    # IntegerId guard before Canary authorizes, so the flash is the not-found
+    # IntegerId guard before authorization runs, so the flash is the not-found
     # message rather than the "You can't access that page." an unknown integer
     # id gets.
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do
@@ -292,7 +292,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central
-    # IntegerId guard before Canary authorizes, so the flash is the not-found
+    # IntegerId guard before authorization runs, so the flash is the not-found
     # message rather than the "You can't access that page." an unknown integer
     # id gets.
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do

@@ -5,13 +5,12 @@ defmodule PhilomenaWeb.Topic.Poll.VoteController do
 
   # Builds the `:actor` struct (with the request's ban) that create's
   # write-access check consumes; only create needs it.
-  plug PhilomenaWeb.UserAttributionPlug when action in [:create]
 
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug}) do
     with {:ok, options} <-
-           PollVotes.list_votes(conn.assigns.current_user, forum_slug, topic_slug) do
+           PollVotes.list_votes(conn.assigns.actor, forum_slug, topic_slug) do
       render(conn, "index.html", layout: false, options: options)
     end
   end
@@ -34,7 +33,7 @@ defmodule PhilomenaWeb.Topic.Poll.VoteController do
   end
 
   def delete(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug, "id" => vote_id}) do
-    case PollVotes.delete_vote(conn.assigns.current_user, forum_slug, topic_slug, vote_id) do
+    case PollVotes.delete_vote(conn.assigns.actor, forum_slug, topic_slug, vote_id) do
       {:ok, {forum, topic}} ->
         conn
         |> put_flash(:info, "Vote successfully removed.")

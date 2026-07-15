@@ -2,12 +2,7 @@ defmodule PhilomenaWeb.Topic.PostController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Posts
-
-  plug PhilomenaWeb.LimitPlug,
-       [time: 15, error: "You may only make a post once every 15 seconds."]
-       when action in [:create]
-
-  plug PhilomenaWeb.UserAttributionPlug
+  alias PhilomenaWeb.RateLimitedResponse
 
   action_fallback PhilomenaWeb.FallbackController
 
@@ -38,6 +33,9 @@ defmodule PhilomenaWeb.Topic.PostController do
         conn
         |> put_flash(:error, "There was an error creating the post")
         |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
+
+      {:error, :rate_limited} ->
+        RateLimitedResponse.call(conn, "You may only make a post once every 15 seconds.")
 
       {:error, _} = error ->
         error

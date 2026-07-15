@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.TagLockController do
 
   def show(conn, params) do
     with {:ok, image} <-
-           Images.load_hidable_image(conn.assigns.current_user, params["image_id"],
+           Images.load_hidable_image(conn.assigns.actor, params["image_id"],
              preload: :locked_tags
            ) do
       changeset = Images.change_image(image)
@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Image.TagLockController do
 
   def update(conn, %{"image" => image_attrs} = params) do
     with {:ok, image} <-
-           Images.update_locked_tags(conn.assigns.current_user, params["image_id"], image_attrs) do
+           Images.update_locked_tags(conn.assigns.actor, params["image_id"], image_attrs) do
       conn
       |> put_flash(:info, "Successfully updated list of locked tags.")
       |> redirect(to: ~p"/images/#{image}")
@@ -26,7 +26,7 @@ defmodule PhilomenaWeb.Image.TagLockController do
 
   def create(conn, params) do
     with {:ok, image} <-
-           Images.set_tag_locked(conn.assigns.current_user, params["image_id"], true) do
+           Images.set_tag_locked(conn.assigns.actor, params["image_id"], true) do
       conn
       |> put_flash(:info, "Successfully locked tags.")
       |> redirect(to: ~p"/images/#{image}")
@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.Image.TagLockController do
 
   def delete(conn, params) do
     with {:ok, image} <-
-           Images.set_tag_locked(conn.assigns.current_user, params["image_id"], false) do
+           Images.set_tag_locked(conn.assigns.actor, params["image_id"], false) do
       conn
       |> put_flash(:info, "Successfully unlocked tags.")
       |> redirect(to: ~p"/images/#{image}")

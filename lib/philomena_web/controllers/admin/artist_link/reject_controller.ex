@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.ArtistLink.RejectController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"artist_link_id" => id}) do
-    with {:ok, _artist_link} <- ArtistLinks.reject_artist_link(conn.assigns.current_user, id) do
+    with {:ok, _artist_link} <- ArtistLinks.reject_artist_link(conn.assigns.actor, id) do
       conn
       |> put_flash(:info, "Artist link successfully marked as rejected.")
       |> redirect(to: ~p"/admin/artist_links")

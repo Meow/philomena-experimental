@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Image.DestroyController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Images.destroy_image(conn.assigns.current_user, params["image_id"]) do
+    case Images.destroy_image(conn.assigns.actor, params["image_id"]) do
       {:ok, image} ->
         conn
         |> put_flash(:info, "Image contents destroyed.")

@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.DuplicateReport.AcceptReverseController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"duplicate_report_id" => id}) do
-    case DuplicateReports.accept_reverse_duplicate_report(conn.assigns.current_user, id) do
+    case DuplicateReports.accept_reverse_duplicate_report(conn.assigns.actor, id) do
       {:ok, _results} ->
         conn
         |> put_flash(:info, "Successfully accepted report in reverse.")

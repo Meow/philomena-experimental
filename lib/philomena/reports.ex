@@ -117,9 +117,9 @@ defmodule Philomena.Reports do
       {:ok, %Philomena.Reports.ReportPage{}}
 
   """
-  @spec load_report_index(User.t() | nil, map(), map() | keyword()) ::
+  @spec load_report_index(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, ReportPage.t()} | {:error, :unauthorized}
-  def load_report_index(actor, params, pagination) do
+  def load_report_index(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Report) do
       {:ok, build_report_page(actor, params, pagination)}
     end
@@ -144,7 +144,7 @@ defmodule Philomena.Reports do
             bool: %{
               must: %{term: %{open: true}},
               must_not: [
-                %{term: %{admin_id: actor.id}},
+                %{term: %{admin_id: actor.user.id}},
                 %{term: %{system: true}}
               ]
             }
@@ -179,7 +179,7 @@ defmodule Philomena.Reports do
 
   defp own_open_reports(actor) do
     Report
-    |> where(open: true, admin_id: ^actor.id)
+    |> where(open: true, admin_id: ^actor.user.id)
     |> preload([:admin, :rule, user: :linked_tags])
     |> order_by(desc: :created_at)
     |> Repo.all()
@@ -220,9 +220,9 @@ defmodule Philomena.Reports do
       {:ok, %Report{}}
 
   """
-  @spec load_report(User.t() | nil, any()) ::
+  @spec load_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :unauthorized | :not_found}
-  def load_report(actor, id) do
+  def load_report(%Actor{} = actor, id) do
     with {:ok, id} <- IntegerId.parse(id),
          report = load_report_with_preloads(id),
          :ok <- authorize(actor, :show, report),
@@ -247,9 +247,9 @@ defmodule Philomena.Reports do
   Returns the mod notes attached to `report` for `viewer`, rendered with
   `collection_renderer`, or `nil` when the viewer may not read mod notes.
   """
-  @spec mod_notes(User.t() | nil, Report.t(), (list() -> list())) :: list() | nil
-  def mod_notes(viewer, report, collection_renderer) do
-    if Canada.Can.can?(viewer, :index, ModNote) do
+  @spec mod_notes(Actor.t(), Report.t(), (list() -> list())) :: list() | nil
+  def mod_notes(%Actor{} = viewer, report, collection_renderer) do
+    if Canada.Can.can?(viewer.user, :index, ModNote) do
       ModNotes.list_all_mod_notes_by_type_and_id("Report", report.id, collection_renderer)
     end
   end
@@ -796,12 +796,12 @@ defmodule Philomena.Reports do
       {:ok, %Report{}}
 
   """
-  @spec claim_report(User.t() | nil, any()) ::
+  @spec claim_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def claim_report(actor, id) do
+  def claim_report(%Actor{} = actor, id) do
     with {:ok, report} <- load_report_for_edit(actor, id) do
       report
-      |> Report.claim_changeset(actor)
+      |> Report.claim_changeset(actor.user)
       |> Repo.update()
       |> reindex_after_update()
     end
@@ -822,9 +822,9 @@ defmodule Philomena.Reports do
       {:ok, %Report{}}
 
   """
-  @spec unclaim_report(User.t() | nil, any()) ::
+  @spec unclaim_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def unclaim_report(actor, id) do
+  def unclaim_report(%Actor{} = actor, id) do
     with {:ok, report} <- load_report_for_edit(actor, id) do
       report
       |> Report.unclaim_changeset()
@@ -848,12 +848,12 @@ defmodule Philomena.Reports do
       {:ok, %Report{}}
 
   """
-  @spec close_report(User.t() | nil, any()) ::
+  @spec close_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def close_report(actor, id) do
+  def close_report(%Actor{} = actor, id) do
     with {:ok, report} <- load_report_for_edit(actor, id) do
       report
-      |> Report.close_changeset(actor)
+      |> Report.close_changeset(actor.user)
       |> Repo.update()
       |> reindex_after_update()
     end

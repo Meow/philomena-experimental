@@ -162,17 +162,17 @@ defmodule Philomena.ReportsTest do
 
   describe "load_report_index/3" do
     test "an anonymous viewer is unauthorized" do
-      assert Reports.load_report_index(nil, %{}, @pagination) == {:error, :unauthorized}
+      assert Reports.load_report_index(actor(), %{}, @pagination) == {:error, :unauthorized}
     end
 
     test "a regular user is unauthorized" do
-      assert Reports.load_report_index(confirmed_user_fixture(), %{}, @pagination) ==
+      assert Reports.load_report_index(actor(confirmed_user_fixture()), %{}, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "a moderator is authorized" do
       assert {:ok, %ReportPage{}} =
-               Reports.load_report_index(moderator_user_fixture(), %{}, @pagination)
+               Reports.load_report_index(actor(moderator_user_fixture()), %{}, @pagination)
     end
 
     test "an admin gets the assembled page struct with the searched report" do
@@ -182,7 +182,7 @@ defmodule Philomena.ReportsTest do
       SearchHelpers.reindex_all!(Report)
 
       assert {:ok, %ReportPage{reports: reports, my_reports: my, system_reports: system}} =
-               Reports.load_report_index(admin, %{}, @pagination)
+               Reports.load_report_index(actor(admin), %{}, @pagination)
 
       assert %Scrivener.Page{} = reports
       assert is_list(my)
@@ -196,7 +196,7 @@ defmodule Philomena.ReportsTest do
       SearchHelpers.reindex_all!(Report)
 
       assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []}} =
-               Reports.load_report_index(admin_user_fixture(), %{}, @pagination)
+               Reports.load_report_index(actor(admin_user_fixture()), %{}, @pagination)
 
       assert Enum.empty?(reports.entries)
     end
@@ -205,11 +205,11 @@ defmodule Philomena.ReportsTest do
       admin = admin_user_fixture()
       image = image_fixture()
       report = report_fixture({"Image", image.id})
-      {:ok, _} = Reports.claim_report(admin, to_string(report.id))
+      {:ok, _} = Reports.claim_report(actor(admin), to_string(report.id))
       SearchHelpers.reindex_all!(Report)
 
       assert {:ok, %ReportPage{my_reports: my, reports: reports}} =
-               Reports.load_report_index(admin, %{}, @pagination)
+               Reports.load_report_index(actor(admin), %{}, @pagination)
 
       assert report.id in Enum.map(my, & &1.id)
       refute report.id in Enum.map(reports.entries, & &1.id)
@@ -226,7 +226,7 @@ defmodule Philomena.ReportsTest do
       SearchHelpers.reindex_all!(Report)
 
       assert {:ok, %ReportPage{system_reports: system, reports: reports}} =
-               Reports.load_report_index(admin, %{}, @pagination)
+               Reports.load_report_index(actor(admin), %{}, @pagination)
 
       assert report.id in Enum.map(system, & &1.id)
 
@@ -240,11 +240,11 @@ defmodule Philomena.ReportsTest do
       report = report_fixture({"Image", image.id})
 
       # A report that would land in my_reports in the default view.
-      {:ok, _} = Reports.claim_report(admin, to_string(report.id))
+      {:ok, _} = Reports.claim_report(actor(admin), to_string(report.id))
       SearchHelpers.reindex_all!(Report)
 
       assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []}} =
-               Reports.load_report_index(admin, %{"rq" => "*"}, @pagination)
+               Reports.load_report_index(actor(admin), %{"rq" => "*"}, @pagination)
 
       assert report.id in Enum.map(reports.entries, & &1.id)
     end
@@ -253,7 +253,7 @@ defmodule Philomena.ReportsTest do
       # An authorized actor reaches the query compile, which returns an error
       # tuple that the {:ok, query} match rejects.
       assert_raise MatchError, fn ->
-        Reports.load_report_index(admin_user_fixture(), %{"rq" => "("}, @pagination)
+        Reports.load_report_index(actor(admin_user_fixture()), %{"rq" => "("}, @pagination)
       end
     end
   end
@@ -268,35 +268,41 @@ defmodule Philomena.ReportsTest do
       image: image,
       report: report
     } do
-      assert {:ok, loaded} = Reports.load_report(moderator_user_fixture(), to_string(report.id))
+      assert {:ok, loaded} =
+               Reports.load_report(actor(moderator_user_fixture()), to_string(report.id))
+
       assert loaded.id == report.id
       assert loaded.reportable_type == "Image"
       assert loaded.reportable.id == image.id
     end
 
     test "an admin loads a report", %{report: report} do
-      assert {:ok, loaded} = Reports.load_report(admin_user_fixture(), to_string(report.id))
+      assert {:ok, loaded} =
+               Reports.load_report(actor(admin_user_fixture()), to_string(report.id))
+
       assert loaded.id == report.id
     end
 
     test "a regular user is unauthorized", %{report: report} do
-      assert Reports.load_report(confirmed_user_fixture(), to_string(report.id)) ==
+      assert Reports.load_report(actor(confirmed_user_fixture()), to_string(report.id)) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous viewer is unauthorized", %{report: report} do
-      assert Reports.load_report(nil, to_string(report.id)) == {:error, :unauthorized}
+      assert Reports.load_report(actor(), to_string(report.id)) == {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
-      assert Reports.load_report(moderator_user_fixture(), "2147483647") ==
+      assert Reports.load_report(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Reports.load_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Reports.load_report(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert Reports.load_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+      assert Reports.load_report(actor(admin_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
     end
   end
 
@@ -309,7 +315,7 @@ defmodule Philomena.ReportsTest do
     test "a moderator claims a report", %{report: report} do
       moderator = moderator_user_fixture()
 
-      assert {:ok, claimed} = Reports.claim_report(moderator, to_string(report.id))
+      assert {:ok, claimed} = Reports.claim_report(actor(moderator), to_string(report.id))
       assert claimed.admin_id == moderator.id
       assert claimed.state == "in_progress"
       assert claimed.open
@@ -322,31 +328,33 @@ defmodule Philomena.ReportsTest do
       first = moderator_user_fixture()
       second = moderator_user_fixture()
 
-      {:ok, claimed} = Reports.claim_report(first, to_string(report.id))
+      {:ok, claimed} = Reports.claim_report(actor(first), to_string(report.id))
       assert claimed.admin_id == first.id
 
-      assert {:ok, reclaimed} = Reports.claim_report(second, to_string(report.id))
+      assert {:ok, reclaimed} = Reports.claim_report(actor(second), to_string(report.id))
       assert reclaimed.admin_id == second.id
     end
 
     test "a regular user is unauthorized", %{report: report} do
-      assert Reports.claim_report(confirmed_user_fixture(), to_string(report.id)) ==
+      assert Reports.claim_report(actor(confirmed_user_fixture()), to_string(report.id)) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous actor is unauthorized", %{report: report} do
-      assert Reports.claim_report(nil, to_string(report.id)) == {:error, :unauthorized}
+      assert Reports.claim_report(actor(), to_string(report.id)) == {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
-      assert Reports.claim_report(moderator_user_fixture(), "2147483647") ==
+      assert Reports.claim_report(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Reports.claim_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Reports.claim_report(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert Reports.claim_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+      assert Reports.claim_report(actor(admin_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
     end
   end
 
@@ -354,13 +362,13 @@ defmodule Philomena.ReportsTest do
     setup do
       image = image_fixture()
       report = report_fixture({"Image", image.id})
-      {:ok, _} = Reports.claim_report(admin_user_fixture(), to_string(report.id))
+      {:ok, _} = Reports.claim_report(actor(admin_user_fixture()), to_string(report.id))
       %{report: report}
     end
 
     test "a moderator unclaims a report", %{report: report} do
       assert {:ok, unclaimed} =
-               Reports.unclaim_report(moderator_user_fixture(), to_string(report.id))
+               Reports.unclaim_report(actor(moderator_user_fixture()), to_string(report.id))
 
       assert unclaimed.admin_id == nil
       assert unclaimed.state == "open"
@@ -368,23 +376,25 @@ defmodule Philomena.ReportsTest do
     end
 
     test "a regular user is unauthorized", %{report: report} do
-      assert Reports.unclaim_report(confirmed_user_fixture(), to_string(report.id)) ==
+      assert Reports.unclaim_report(actor(confirmed_user_fixture()), to_string(report.id)) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous actor is unauthorized", %{report: report} do
-      assert Reports.unclaim_report(nil, to_string(report.id)) == {:error, :unauthorized}
+      assert Reports.unclaim_report(actor(), to_string(report.id)) == {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
-      assert Reports.unclaim_report(moderator_user_fixture(), "2147483647") ==
+      assert Reports.unclaim_report(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Reports.unclaim_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Reports.unclaim_report(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert Reports.unclaim_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+      assert Reports.unclaim_report(actor(admin_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
     end
   end
 
@@ -397,30 +407,32 @@ defmodule Philomena.ReportsTest do
     test "a moderator closes a report", %{report: report} do
       moderator = moderator_user_fixture()
 
-      assert {:ok, closed} = Reports.close_report(moderator, to_string(report.id))
+      assert {:ok, closed} = Reports.close_report(actor(moderator), to_string(report.id))
       assert closed.admin_id == moderator.id
       assert closed.state == "closed"
       refute closed.open
     end
 
     test "a regular user is unauthorized", %{report: report} do
-      assert Reports.close_report(confirmed_user_fixture(), to_string(report.id)) ==
+      assert Reports.close_report(actor(confirmed_user_fixture()), to_string(report.id)) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous actor is unauthorized", %{report: report} do
-      assert Reports.close_report(nil, to_string(report.id)) == {:error, :unauthorized}
+      assert Reports.close_report(actor(), to_string(report.id)) == {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
-      assert Reports.close_report(moderator_user_fixture(), "2147483647") ==
+      assert Reports.close_report(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Reports.close_report(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Reports.close_report(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert Reports.close_report(admin_user_fixture(), "not-a-number") == {:error, :not_found}
+      assert Reports.close_report(actor(admin_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
     end
   end
 
@@ -441,17 +453,17 @@ defmodule Philomena.ReportsTest do
     test "a moderator gets the rendered mod notes for the report", %{report: report, note: note} do
       # The renderer zips each note with its rendered body into a {note, body}
       # tuple, so the identity renderer pairs each note with itself.
-      notes = Reports.mod_notes(moderator_user_fixture(), report, & &1)
+      notes = Reports.mod_notes(actor(moderator_user_fixture()), report, & &1)
       assert is_list(notes)
       assert note.id in Enum.map(notes, fn {loaded, _body} -> loaded.id end)
     end
 
     test "a regular user gets nil", %{report: report} do
-      assert Reports.mod_notes(confirmed_user_fixture(), report, & &1) == nil
+      assert Reports.mod_notes(actor(confirmed_user_fixture()), report, & &1) == nil
     end
 
     test "an anonymous viewer gets nil", %{report: report} do
-      assert Reports.mod_notes(nil, report, & &1) == nil
+      assert Reports.mod_notes(actor(), report, & &1) == nil
     end
   end
 

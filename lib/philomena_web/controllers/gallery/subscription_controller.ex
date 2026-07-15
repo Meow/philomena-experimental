@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Gallery.SubscriptionController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Galleries.subscribe_gallery(conn.assigns.current_user, params["gallery_id"]) do
+    case Galleries.subscribe_gallery(conn.assigns.actor, params["gallery_id"]) do
       {:ok, gallery} ->
         render(conn, "_subscription.html", gallery: gallery, watching: true, layout: false)
 
@@ -20,7 +20,7 @@ defmodule PhilomenaWeb.Gallery.SubscriptionController do
 
   def delete(conn, params) do
     with {:ok, gallery} <-
-           Galleries.unsubscribe_gallery(conn.assigns.current_user, params["gallery_id"]) do
+           Galleries.unsubscribe_gallery(conn.assigns.actor, params["gallery_id"]) do
       render(conn, "_subscription.html", gallery: gallery, watching: false, layout: false)
     end
   end

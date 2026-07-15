@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.UserController do
 
   def index(conn, params) do
     with {:ok, users} <-
-           Users.search_users(conn.assigns.current_user, params, conn.assigns.pagination) do
+           Users.search_users(conn.assigns.actor, params, conn.assigns.pagination) do
       render(conn, "index.html",
         title: "Admin - Users",
         layout_class: "layout--medium",
@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Admin.UserController do
   end
 
   def edit(conn, %{"id" => slug}) do
-    with {:ok, user} <- Users.load_user_for_edit(conn.assigns.current_user, slug) do
+    with {:ok, user} <- Users.load_user_for_edit(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing User",
         user: user,
@@ -39,7 +39,7 @@ defmodule PhilomenaWeb.Admin.UserController do
   end
 
   def update(conn, %{"id" => slug, "user" => user_params}) do
-    with {:ok, user} <- Users.update_user_details(conn.assigns.current_user, slug, user_params) do
+    with {:ok, user} <- Users.update_user_details(conn.assigns.actor, slug, user_params) do
       conn
       |> put_flash(:info, "User successfully updated.")
       |> redirect(to: ~p"/profiles/#{user}")

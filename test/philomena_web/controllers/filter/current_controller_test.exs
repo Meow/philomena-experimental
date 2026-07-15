@@ -78,9 +78,9 @@ defmodule PhilomenaWeb.Filter.CurrentControllerTest do
     end
 
     test "an unknown filter id redirects with the not-found flash", %{conn: conn} do
-      # NOTE: unlike the :index/:create nil pass-through, load_resource runs
-      # its not_found_handler for :update actions, so this 404s instead of
-      # falling back to the default filter.
+      # NOTE: unlike the :index/:create nil pass-through, the :update action
+      # resolves an unknown filter id to not_found, so it redirects with the
+      # not-found flash instead of falling back to the default filter.
       conn = patch(conn, ~p"/filters/current?#{[id: 999_999_999]}")
 
       assert redirected_to(conn) == "/"

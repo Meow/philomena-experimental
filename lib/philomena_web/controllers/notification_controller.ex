@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.NotificationController do
   def index(conn, _params) do
     notifications =
       Notifications.unread_notifications_for_user(
-        conn.assigns.current_user,
+        conn.assigns.actor,
         page_size: 10
       )
 

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.ApprovalController do
 
   def index(conn, _params) do
     with {:ok, images} <-
-           Images.load_approval_queue(conn.assigns.current_user, conn.assigns.scrivener) do
+           Images.load_approval_queue(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html", title: "Admin - Approval Queue", images: images)
     end
   end

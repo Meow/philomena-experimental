@@ -6,11 +6,11 @@ defmodule Philomena.ModNotes do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Repo
   alias Philomena.Loader
   alias Philomena.ModNotes.ModNote
   alias Philomena.Polymorphic
-  alias Philomena.Users.User
 
   @doc """
   Returns a list of 2-tuples of mod notes and rendered output for the notable type and id.
@@ -117,9 +117,9 @@ defmodule Philomena.ModNotes do
   Returns `{:ok, mod_notes}` as a `m:Scrivener.Page` of `{note, rendered}`
   2-tuples, or `{:error, :unauthorized}`.
   """
-  @spec load_mod_note_index(User.t() | nil, map(), (list() -> list()), map() | keyword()) ::
+  @spec load_mod_note_index(Actor.t(), map(), (list() -> list()), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_mod_note_index(actor, params, collection_renderer, pagination) do
+  def load_mod_note_index(%Actor{} = actor, params, collection_renderer, pagination) do
     with :ok <- authorize(actor, :index, ModNote) do
       mod_notes =
         case params do
@@ -141,9 +141,9 @@ defmodule Philomena.ModNotes do
   Authorizes `:new` against the mod-note model. Returns `{:ok, changeset}` or
   `{:error, :unauthorized}`.
   """
-  @spec new_mod_note(User.t() | nil, map()) ::
+  @spec new_mod_note(Actor.t(), map()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_mod_note(actor, params) do
+  def new_mod_note(%Actor{} = actor, params) do
     with :ok <- authorize(actor, :new, ModNote) do
       changeset =
         change_mod_note(%ModNote{
@@ -187,11 +187,11 @@ defmodule Philomena.ModNotes do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec create_mod_note(User.t() | nil, map()) ::
+  @spec create_mod_note(Actor.t(), map()) ::
           {:ok, ModNote.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_mod_note(actor, attrs \\ %{}) do
+  def create_mod_note(%Actor{} = actor, attrs \\ %{}) do
     with :ok <- authorize(actor, :create, ModNote) do
-      %ModNote{moderator_id: actor.id}
+      %ModNote{moderator_id: actor.user.id}
       |> ModNote.changeset(attrs)
       |> Repo.insert()
     end
@@ -210,9 +210,9 @@ defmodule Philomena.ModNotes do
   Returns `{:ok, {mod_note, changeset}}`, `{:error, :unauthorized}`, or
   `{:error, :not_found}`.
   """
-  @spec load_mod_note_for_edit(User.t() | nil, any()) ::
+  @spec load_mod_note_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {ModNote.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_mod_note_for_edit(actor, id) do
+  def load_mod_note_for_edit(%Actor{} = actor, id) do
     with {:ok, mod_note} <- load_mod_note(actor, id, :edit) do
       {:ok, {mod_note, change_mod_note(mod_note)}}
     end
@@ -225,9 +225,9 @@ defmodule Philomena.ModNotes do
   `:update`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`,
   `{:error, :not_found}`, or `{:error, %Ecto.Changeset{}}`.
   """
-  @spec update_mod_note(User.t() | nil, any(), map()) ::
+  @spec update_mod_note(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, ModNote.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_mod_note(actor, id, attrs) do
+  def update_mod_note(%Actor{} = actor, id, attrs) do
     with {:ok, mod_note} <- load_mod_note(actor, id, :update) do
       update_mod_note(mod_note, attrs)
     end
@@ -258,9 +258,9 @@ defmodule Philomena.ModNotes do
   `:delete`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`, or
   `{:error, :not_found}`.
   """
-  @spec delete_mod_note(User.t() | nil, any()) ::
+  @spec delete_mod_note(Actor.t(), Loader.integer_id()) ::
           {:ok, ModNote.t()} | {:error, :unauthorized | :not_found}
-  def delete_mod_note(actor, id) do
+  def delete_mod_note(%Actor{} = actor, id) do
     with {:ok, mod_note} <- load_mod_note(actor, id, :delete) do
       delete_mod_note(mod_note)
     end

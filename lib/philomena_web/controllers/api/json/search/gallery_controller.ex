@@ -4,9 +4,7 @@ defmodule PhilomenaWeb.Api.Json.Search.GalleryController do
   alias Philomena.Galleries
 
   def index(conn, params) do
-    user = conn.assigns.current_user
-
-    case Galleries.search_galleries(user, params["q"], conn.assigns.pagination) do
+    case Galleries.search_galleries(conn.assigns.actor, params["q"], conn.assigns.pagination) do
       {:ok, galleries} ->
         conn
         |> put_view(PhilomenaWeb.Api.Json.GalleryView)

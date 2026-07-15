@@ -2,15 +2,10 @@ defmodule PhilomenaWeb.Image.CommentController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.MarkdownRenderer
+  alias PhilomenaWeb.RateLimitedResponse
   alias Philomena.Comments
 
   action_fallback PhilomenaWeb.FallbackController
-
-  plug PhilomenaWeb.LimitPlug,
-       [time: 15, error: "You may only create a comment once every 15 seconds."]
-       when action in [:create]
-
-  plug PhilomenaWeb.UserAttributionPlug when action in [:create, :edit, :update]
 
   plug :load_commentable_image when action in [:index, :show, :create, :edit, :update]
 
@@ -19,7 +14,7 @@ defmodule PhilomenaWeb.Image.CommentController do
   def index(conn, %{"comment_id" => comment_id}) do
     page =
       Comments.find_comment_page(
-        conn.assigns.current_user,
+        conn.assigns.actor,
         conn.assigns.image,
         comment_id,
         conn.assigns.comment_scrivener
@@ -72,6 +67,9 @@ defmodule PhilomenaWeb.Image.CommentController do
         |> put_flash(:error, "There was an error posting your comment")
         |> redirect(to: ~p"/images/#{conn.assigns.image}")
 
+      {:error, :rate_limited} ->
+        RateLimitedResponse.call(conn, "You may only create a comment once every 15 seconds.")
+
       {:error, _} = error ->
         error
     end
@@ -119,7 +117,7 @@ defmodule PhilomenaWeb.Image.CommentController do
   # A load or authorization failure renders the global error and halts.
   defp load_commentable_image(conn, _opts) do
     case Comments.load_commentable_image(
-           conn.assigns.current_user,
+           conn.assigns.actor,
            conn.params["image_id"],
            action_name(conn)
          ) do

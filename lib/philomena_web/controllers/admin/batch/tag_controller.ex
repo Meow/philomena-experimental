@@ -5,8 +5,6 @@ defmodule PhilomenaWeb.Admin.Batch.TagController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   def update(conn, %{"tags" => tag_list, "image_ids" => image_ids})
       when is_binary(tag_list) and is_list(image_ids) do
     case Images.batch_update_tags(conn.assigns.actor, tag_list, image_ids) do

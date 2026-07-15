@@ -150,10 +150,9 @@ defmodule PhilomenaWeb.Tag.AliasControllerTest do
     end
 
     test "an unknown slug is the not-found redirect for an admin", %{conn: conn} do
-      # NOTE: can?(admin, _, nil) is true, but load_and_authorize_resource has
-      # persisted: true, so Canary's not_found_handler fires on the nil
-      # resource before delete/2 runs - a clean "Couldn't find" redirect, NOT
-      # a crash.
+      # NOTE: can?(admin, _, nil) is true, so the admin is authorized on the
+      # nil load and the context returns not_found before delete/2 runs - a
+      # clean "Couldn't find" redirect, NOT a crash.
       conn = log_in_user(conn, admin_user_fixture())
       conn = delete(conn, ~p"/tags/nonexistent-tag/alias")
 

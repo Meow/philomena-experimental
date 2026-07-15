@@ -2,17 +2,12 @@ defmodule PhilomenaWeb.Image.TagController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Images
-  alias Plug.Conn
+  alias PhilomenaWeb.RateLimitedResponse
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.LimitPlug,
-       [time: 5, error: "You may only update metadata once every 5 seconds."]
-       when action in [:update]
-
   plug PhilomenaWeb.CaptchaPlug
   plug PhilomenaWeb.CheckCaptchaPlug
-  plug PhilomenaWeb.UserAttributionPlug
 
   def update(conn, %{"image" => image_params} = params) do
     case Images.update_tags(conn.assigns.actor, params["image_id"], image_params) do
@@ -64,30 +59,16 @@ defmodule PhilomenaWeb.Image.TagController do
         )
 
       {:error, :rate_limited} ->
-        error_response(conn, "Too many tags changed. Change fewer tags or try again later.")
+        RateLimitedResponse.call(
+          conn,
+          "Too many tags changed. Change fewer tags or try again later."
+        )
 
       {:error, :update_failed} ->
-        error_response(conn, "Failed to update tags!")
+        RateLimitedResponse.call(conn, "Failed to update tags!")
 
       {:error, _} = error ->
         error
-    end
-  end
-
-  # Matches the behavior of PhilomenaWeb.LimitPlug: AJAX requests get an
-  # empty 300 response (ujs.ts reloads the page so the flash renders),
-  # everything else is redirected back to the referrer.
-  defp error_response(conn, message) do
-    conn = put_flash(conn, :error, message)
-
-    if conn.assigns.ajax? do
-      conn
-      |> Conn.send_resp(:multiple_choices, "")
-      |> Conn.halt()
-    else
-      conn
-      |> redirect(external: conn.assigns.referrer)
-      |> Conn.halt()
     end
   end
 end

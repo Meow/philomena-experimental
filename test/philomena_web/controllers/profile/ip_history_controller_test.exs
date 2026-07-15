@@ -51,9 +51,9 @@ defmodule PhilomenaWeb.Profile.IpHistoryControllerTest do
       assert response =~ subject.name
     end
 
-    # NOTE: `:index` loads the profile with `load_and_authorize_resource`, so an
-    # unknown slug authorizes a `nil` resource (no `:show_details` rule matches
-    # for `nil`) and takes the not-authorized redirect - not the not-found one.
+    # NOTE: `:index` loads the profile and authorizes it, so an unknown slug
+    # authorizes a `nil` load (no `:show_details` rule matches for `nil`) and
+    # takes the not-authorized redirect - not the not-found one.
     test "redirects an unknown profile slug with the authorization flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 

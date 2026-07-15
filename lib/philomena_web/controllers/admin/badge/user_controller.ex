@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.Badge.UserController do
 
   def index(conn, %{"badge_id" => id}) do
     with {:ok, {badge, users}} <-
-           Badges.load_badge_users(conn.assigns.current_user, id, conn.assigns.scrivener) do
+           Badges.load_badge_users(conn.assigns.actor, id, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "Users with badge #{badge.title}",
         badge: badge,

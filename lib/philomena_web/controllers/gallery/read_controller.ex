@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Gallery.ReadController do
 
   def create(conn, params) do
     with {:ok, _gallery} <-
-           Galleries.mark_gallery_read(conn.assigns.current_user, params["gallery_id"]) do
+           Galleries.mark_gallery_read(conn.assigns.actor, params["gallery_id"]) do
       send_resp(conn, :ok, "")
     end
   end

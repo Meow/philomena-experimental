@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.Profile.Commission.ItemController do
 
   alias Philomena.Commissions
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"profile_id" => slug}) do

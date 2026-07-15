@@ -7,19 +7,19 @@ defmodule PhilomenaWeb.Admin.SiteNoticeController do
 
   def index(conn, _params) do
     with {:ok, site_notices} <-
-           SiteNotices.load_site_notices(conn.assigns.current_user, conn.assigns.scrivener) do
+           SiteNotices.load_site_notices(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html", title: "Admin - Site Notices", admin_site_notices: site_notices)
     end
   end
 
   def new(conn, _params) do
-    with {:ok, changeset} <- SiteNotices.new_site_notice(conn.assigns.current_user) do
+    with {:ok, changeset} <- SiteNotices.new_site_notice(conn.assigns.actor) do
       render(conn, "new.html", title: "New Site Notice", changeset: changeset)
     end
   end
 
   def create(conn, %{"site_notice" => site_notice_params}) do
-    case SiteNotices.create_site_notice(conn.assigns.current_user, site_notice_params) do
+    case SiteNotices.create_site_notice(conn.assigns.actor, site_notice_params) do
       {:ok, _site_notice} ->
         conn
         |> put_flash(:info, "Successfully created site notice.")
@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.Admin.SiteNoticeController do
 
   def edit(conn, params) do
     with {:ok, {site_notice, changeset}} <-
-           SiteNotices.load_site_notice_for_edit(conn.assigns.current_user, params["id"]) do
+           SiteNotices.load_site_notice_for_edit(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html",
         title: "Editing Site Notices",
         site_notice: site_notice,
@@ -45,7 +45,7 @@ defmodule PhilomenaWeb.Admin.SiteNoticeController do
   end
 
   def update(conn, %{"id" => id, "site_notice" => site_notice_params}) do
-    case SiteNotices.update_site_notice(conn.assigns.current_user, id, site_notice_params) do
+    case SiteNotices.update_site_notice(conn.assigns.actor, id, site_notice_params) do
       {:ok, _site_notice} ->
         conn
         |> put_flash(:info, "Successfully updated site notice.")
@@ -61,7 +61,7 @@ defmodule PhilomenaWeb.Admin.SiteNoticeController do
 
   def delete(conn, params) do
     with {:ok, _site_notice} <-
-           SiteNotices.delete_site_notice(conn.assigns.current_user, params["id"]) do
+           SiteNotices.delete_site_notice(conn.assigns.actor, params["id"]) do
       conn
       |> put_flash(:info, "Successfully deleted site notice.")
       |> redirect(to: ~p"/admin/site_notices")

@@ -7,13 +7,13 @@ defmodule PhilomenaWeb.PageController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with {:ok, static_pages} <- StaticPages.load_page_listing(conn.assigns.current_user) do
+    with {:ok, static_pages} <- StaticPages.load_page_listing(conn.assigns.actor) do
       render(conn, "index.html", title: "Pages", static_pages: static_pages)
     end
   end
 
   def show(conn, %{"id" => slug}) do
-    with {:ok, static_page} <- StaticPages.load_page_for_show(conn.assigns.current_user, slug) do
+    with {:ok, static_page} <- StaticPages.load_page_for_show(conn.assigns.actor, slug) do
       rendered = MarkdownRenderer.render_unsafe(static_page.body, conn)
 
       render(conn, "show.html",
@@ -25,13 +25,13 @@ defmodule PhilomenaWeb.PageController do
   end
 
   def new(conn, _params) do
-    with {:ok, changeset} <- StaticPages.new_page(conn.assigns.current_user) do
+    with {:ok, changeset} <- StaticPages.new_page(conn.assigns.actor) do
       render(conn, "new.html", title: "New Page", changeset: changeset)
     end
   end
 
   def create(conn, %{"static_page" => static_page_params}) do
-    case StaticPages.create_page(conn.assigns.current_user, static_page_params) do
+    case StaticPages.create_page(conn.assigns.actor, static_page_params) do
       {:ok, %{static_page: static_page}} ->
         conn
         |> put_flash(:info, "Static page successfully created.")
@@ -47,7 +47,7 @@ defmodule PhilomenaWeb.PageController do
 
   def edit(conn, %{"id" => slug}) do
     with {:ok, {static_page, changeset}} <-
-           StaticPages.load_page_for_edit(conn.assigns.current_user, slug) do
+           StaticPages.load_page_for_edit(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing Page",
         static_page: static_page,
@@ -57,7 +57,7 @@ defmodule PhilomenaWeb.PageController do
   end
 
   def update(conn, %{"id" => slug, "static_page" => static_page_params}) do
-    case StaticPages.update_page(conn.assigns.current_user, slug, static_page_params) do
+    case StaticPages.update_page(conn.assigns.actor, slug, static_page_params) do
       {:ok, %{static_page: static_page}} ->
         conn
         |> put_flash(:info, "Static page successfully updated.")

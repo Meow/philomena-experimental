@@ -3,13 +3,11 @@ defmodule PhilomenaWeb.Profile.ArtistLinkController do
 
   alias Philomena.ArtistLinks
 
-  plug PhilomenaWeb.UserAttributionPlug when action in [:new, :create]
-
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"profile_id" => slug}) do
     with {:ok, {user, artist_links}} <-
-           ArtistLinks.list_artist_links(conn.assigns.current_user, slug) do
+           ArtistLinks.list_artist_links(conn.assigns.actor, slug) do
       render(conn, "index.html", title: "Artist Links", user: user, artist_links: artist_links)
     end
   end
@@ -41,7 +39,7 @@ defmodule PhilomenaWeb.Profile.ArtistLinkController do
 
   def show(conn, %{"profile_id" => slug, "id" => id}) do
     with {:ok, {user, artist_link}} <-
-           ArtistLinks.load_artist_link_for_show(conn.assigns.current_user, slug, id) do
+           ArtistLinks.load_artist_link_for_show(conn.assigns.actor, slug, id) do
       render(conn, "show.html",
         title: "Showing Artist Link",
         user: user,
@@ -52,7 +50,7 @@ defmodule PhilomenaWeb.Profile.ArtistLinkController do
 
   def edit(conn, %{"profile_id" => slug, "id" => id}) do
     with {:ok, {artist_link, changeset}} <-
-           ArtistLinks.load_artist_link_for_edit(conn.assigns.current_user, slug, id) do
+           ArtistLinks.load_artist_link_for_edit(conn.assigns.actor, slug, id) do
       render(conn, "edit.html",
         title: "Editing Artist Link",
         artist_link: artist_link,
@@ -62,7 +60,7 @@ defmodule PhilomenaWeb.Profile.ArtistLinkController do
   end
 
   def update(conn, %{"profile_id" => slug, "id" => id, "artist_link" => artist_link_params}) do
-    case ArtistLinks.update_artist_link(conn.assigns.current_user, slug, id, artist_link_params) do
+    case ArtistLinks.update_artist_link(conn.assigns.actor, slug, id, artist_link_params) do
       {:ok, {user, artist_link}} ->
         conn
         |> put_flash(:info, "Link successfully updated.")

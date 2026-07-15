@@ -1,6 +1,7 @@
 defmodule Philomena.Interactions do
   import Ecto.Query
 
+  alias Philomena.Attribution.Actor
   alias Philomena.ImageHides.ImageHide
   alias Philomena.ImageFaves.ImageFave
   alias Philomena.ImageVotes.ImageVote
@@ -19,10 +20,14 @@ defmodule Philomena.Interactions do
 
   ## Parameters
     * images - List of images or image IDs to get interactions for
-    * user - The user to get interactions for, or nil
+    * user - The user to get interactions for, `nil`, or a
+      `Philomena.Attribution.Actor` whose `:user` is used
   """
   def user_interactions(_images, nil),
     do: []
+
+  def user_interactions(images, %Actor{} = actor),
+    do: user_interactions(images, actor.user)
 
   def user_interactions(images, user) do
     ids =

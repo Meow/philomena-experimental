@@ -15,7 +15,10 @@ defmodule Philomena.FiltersFixtures do
   """
   def filter_fixture(user, attrs \\ %{}) do
     {:ok, filter} =
-      Filters.create_filter(user, Enum.into(attrs, %{name: unique_filter_name()}))
+      Filters.create_filter(
+        Philomena.AttributionFixtures.actor(user),
+        Enum.into(attrs, %{name: unique_filter_name()})
+      )
 
     filter
   end

@@ -7,7 +7,6 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
 
   plug PhilomenaWeb.ScraperCachePlug
   plug PhilomenaWeb.ApiRequireAuthorizationPlug when action in [:create]
-  plug PhilomenaWeb.UserAttributionPlug when action in [:create]
 
   plug PhilomenaWeb.ScraperPlug,
        [params_name: "image", params_key: "image"] when action in [:create]
@@ -15,7 +14,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
   def show(conn, %{"id" => id}) do
     case Images.load_image(id) do
       {:ok, image} ->
-        interactions = Interactions.user_interactions([image], conn.assigns.current_user)
+        interactions = Interactions.user_interactions([image], conn.assigns.actor)
 
         render(conn, "show.json", image: image, interactions: interactions)
 

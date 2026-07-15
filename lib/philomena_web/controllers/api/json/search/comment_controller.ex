@@ -4,10 +4,10 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentController do
   alias Philomena.Comments
 
   def index(conn, params) do
-    user = conn.assigns.current_user
+    actor = conn.assigns.actor
     filter = conn.assigns.current_filter
 
-    case Comments.search_comments(user, filter, params["q"], conn.assigns.pagination,
+    case Comments.search_comments(actor, filter, params["q"], conn.assigns.pagination,
            preload: [:image, :user]
          ) do
       {:ok, comments} ->

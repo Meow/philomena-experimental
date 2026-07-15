@@ -4,18 +4,14 @@ defmodule PhilomenaWeb.ImageController do
   alias PhilomenaWeb.ImageScope
   alias PhilomenaWeb.NotificationCountPlug
   alias PhilomenaWeb.MarkdownRenderer
+  alias PhilomenaWeb.RateLimitedResponse
   alias Philomena.Images
   alias Philomena.Interactions
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.LimitPlug,
-       [time: 5, error: "You may only upload images once every 5 seconds."]
-       when action in [:create]
-
   plug :load_image when action in [:show]
 
-  plug PhilomenaWeb.UserAttributionPlug when action in [:new, :create]
   plug PhilomenaWeb.CaptchaPlug when action in [:new, :show, :create]
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
 
@@ -27,7 +23,7 @@ defmodule PhilomenaWeb.ImageController do
   def index(conn, _params) do
     images = Images.load_image_index(ImageScope.search_scope(conn))
 
-    interactions = Interactions.user_interactions(images, conn.assigns.current_user)
+    interactions = Interactions.user_interactions(images, conn.assigns.actor)
 
     render(conn, "index.html",
       title: "Images",
@@ -43,7 +39,7 @@ defmodule PhilomenaWeb.ImageController do
 
     page =
       Images.load_image_page(
-        conn.assigns.current_user,
+        conn.assigns.actor,
         image,
         conn.assigns.comment_scrivener
       )
@@ -99,13 +95,16 @@ defmodule PhilomenaWeb.ImageController do
       {:error, :image, changeset, _} ->
         render(conn, "new.html", changeset: changeset)
 
+      {:error, :rate_limited} ->
+        RateLimitedResponse.call(conn, "You may only upload images once every 5 seconds.")
+
       {:error, _} = error ->
         error
     end
   end
 
   defp load_image(conn, _opts) do
-    case Images.load_image_for_show(conn.assigns.current_user, conn.params["id"]) do
+    case Images.load_image_for_show(conn.assigns.actor, conn.params["id"]) do
       {:ok, %{image: image} = loaded} ->
         conn
         |> assign(:image, image)

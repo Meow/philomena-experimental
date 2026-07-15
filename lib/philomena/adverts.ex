@@ -10,6 +10,7 @@ defmodule Philomena.Adverts do
   alias Philomena.Repo
   alias Philomena.Loader
 
+  alias Philomena.Attribution.Actor
   alias Philomena.ModerationLogs
   alias Philomena.Adverts.Advert
   alias Philomena.Adverts.Restrictions
@@ -182,9 +183,9 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec load_adverts(Loader.actor(), Repo.pagination_params()) ::
+  @spec load_adverts(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Advert.t())} | {:error, :unauthorized}
-  def load_adverts(actor, pagination) do
+  def load_adverts(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, Advert) do
       adverts =
         Advert
@@ -209,8 +210,8 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec new_advert(Loader.actor()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_advert(actor) do
+  @spec new_advert(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  def new_advert(%Actor{} = actor) do
     with :ok <- authorize(actor, :index, Advert) do
       {:ok, change_advert(%Advert{})}
     end
@@ -230,9 +231,9 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec create_advert(Loader.actor(), map()) ::
+  @spec create_advert(Actor.t(), map()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def create_advert(actor, attrs) do
+  def create_advert(%Actor{} = actor, attrs) do
     with :ok <- authorize(actor, :index, Advert),
          {:ok, advert} <- create_advert(attrs) do
       advert_log(actor, :create, advert)
@@ -256,9 +257,9 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec load_advert_for_edit(Loader.actor(), Loader.integer_id()) ::
+  @spec load_advert_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Advert.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
-  def load_advert_for_edit(actor, id) do
+  def load_advert_for_edit(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :index, Advert),
          {:ok, advert} <- authorized_advert(actor, :edit, id) do
       {:ok, {advert, change_advert(advert)}}
@@ -286,9 +287,9 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec update_advert(Loader.actor(), Loader.integer_id(), map()) ::
+  @spec update_advert(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_advert(actor, id, attrs) do
+  def update_advert(%Actor{} = actor, id, attrs) do
     with :ok <- authorize(actor, :index, Advert),
          {:ok, advert} <- authorized_advert(actor, :update, id),
          {:ok, advert} <- update_advert(advert, attrs) do
@@ -314,9 +315,9 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec delete_advert(Loader.actor(), Loader.integer_id()) ::
+  @spec delete_advert(Actor.t(), Loader.integer_id()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | :not_found}
-  def delete_advert(actor, id) do
+  def delete_advert(%Actor{} = actor, id) do
     with :ok <- authorize(actor, :index, Advert),
          {:ok, advert} <- authorized_advert(actor, :delete, id) do
       {:ok, advert} = delete_advert(advert)
@@ -346,9 +347,9 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec update_advert_image(Loader.actor(), Loader.integer_id(), map()) ::
+  @spec update_advert_image(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_advert_image(actor, id, attrs) do
+  def update_advert_image(%Actor{} = actor, id, attrs) do
     with :ok <- authorize(actor, :index, Advert),
          {:ok, advert} <- authorized_advert(actor, :update, id),
          {:ok, advert} <- update_advert_image(advert, attrs) do

@@ -7,9 +7,7 @@ defmodule PhilomenaWeb.Tag.ImageController do
 
   def edit(conn, params) do
     with {:ok, {tag, changeset}} <-
-           Tags.load_tag_for_edit(conn.assigns.current_user, params["tag_id"],
-             preload: [:implied_tags]
-           ) do
+           Tags.load_tag_for_edit(conn.assigns.actor, params["tag_id"], preload: [:implied_tags]) do
       render(conn, "edit.html",
         title: "Editing Tag Spoiler Image",
         tag: tag,
@@ -19,7 +17,7 @@ defmodule PhilomenaWeb.Tag.ImageController do
   end
 
   def update(conn, %{"tag_id" => slug, "tag" => tag_params}) do
-    case Tags.update_tag_image(conn.assigns.current_user, slug, tag_params) do
+    case Tags.update_tag_image(conn.assigns.actor, slug, tag_params) do
       {:ok, tag} ->
         conn
         |> put_flash(:info, "Tag image successfully updated.")
@@ -34,7 +32,7 @@ defmodule PhilomenaWeb.Tag.ImageController do
   end
 
   def delete(conn, params) do
-    with {:ok, tag} <- Tags.remove_tag_image(conn.assigns.current_user, params["tag_id"]) do
+    with {:ok, tag} <- Tags.remove_tag_image(conn.assigns.actor, params["tag_id"]) do
       conn
       |> put_flash(:info, "Tag image successfully removed.")
       |> redirect(to: ~p"/tags/#{tag}")

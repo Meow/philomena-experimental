@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.Registration.NameController do
 
   alias Philomena.Users
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   action_fallback PhilomenaWeb.FallbackController
 
   def edit(conn, _params) do

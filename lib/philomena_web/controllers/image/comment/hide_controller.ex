@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.Comment.HideController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"comment_id" => comment_id, "comment" => comment_params}) do
-    case Comments.hide_comment(conn.assigns.current_user, comment_id, comment_params) do
+    case Comments.hide_comment(conn.assigns.actor, comment_id, comment_params) do
       {:ok, comment} ->
         conn
         |> put_flash(:info, "Comment successfully deleted!")
@@ -24,7 +24,7 @@ defmodule PhilomenaWeb.Image.Comment.HideController do
   end
 
   def delete(conn, %{"comment_id" => comment_id}) do
-    case Comments.unhide_comment(conn.assigns.current_user, comment_id) do
+    case Comments.unhide_comment(conn.assigns.actor, comment_id) do
       {:ok, comment} ->
         conn
         |> put_flash(:info, "Comment successfully restored!")

@@ -54,9 +54,9 @@ defmodule PhilomenaWeb.Admin.DnpEntry.TransitionControllerTest do
   describe "POST /admin/dnp_entries/:dnp_entry_id/transition (create) failure paths" do
     setup [:register_and_log_in_moderator]
 
-    # NOTE: load_resource now uses required: true, so Canary's not_found handler
-    # runs on :create too - an unknown entry id redirects rather than crashing
-    # in transition_dnp_entry/3.
+    # NOTE: the context authorizes the loaded entry on :create; an unknown entry
+    # id loads nil, the moderator is authorized on it, so it returns not_found
+    # and redirects rather than crashing in transition_dnp_entry/3.
     test "redirects with the not-found flash for an unknown entry id", %{conn: conn} do
       conn = post(conn, ~p"/admin/dnp_entries/#{0}/transition", state: "claimed")
 

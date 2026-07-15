@@ -31,9 +31,9 @@ defmodule PhilomenaWeb.ForumControllerTest do
     test "renders an empty index when the user can see no forums", %{conn: conn} do
       _staff = forum_fixture(name: "Staff Lounge", access_level: "staff")
 
-      # NOTE: the empty ForumListPlug assign is now handled - Canary no longer
-      # probes Enum.at(resources, 0).__struct__ on the empty list, so a user
-      # who can see zero forums gets an empty index instead of a 500.
+      # NOTE: an empty forum list renders cleanly - nothing probes the first
+      # element of the loaded list, so a user who can see zero forums gets an
+      # empty index rather than a 500.
       conn = get(conn, ~p"/forums")
       response = html_response(conn, 200)
 

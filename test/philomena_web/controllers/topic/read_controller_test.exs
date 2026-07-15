@@ -52,8 +52,8 @@ defmodule PhilomenaWeb.Topic.ReadControllerTest do
   end
 
   test "POST for a hidden topic still clears the notification", %{conn: conn} do
-    # LoadTopicPlug passes show_hidden: true here, so hidden topics can be
-    # marked read
+    # the context loads the topic with show_hidden: true here, so hidden topics
+    # can be marked read
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     forum = forum_fixture()
     topic = topic_fixture(forum)

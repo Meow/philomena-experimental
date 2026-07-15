@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Tag.WatchController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Tags.watch_tag(conn.assigns.current_user, params["tag_id"]) do
+    case Tags.watch_tag(conn.assigns.actor, params["tag_id"]) do
       {:ok, _user} ->
         conn
         |> put_status(:ok)
@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.Tag.WatchController do
   end
 
   def delete(conn, params) do
-    case Tags.unwatch_tag(conn.assigns.current_user, params["tag_id"]) do
+    case Tags.unwatch_tag(conn.assigns.actor, params["tag_id"]) do
       {:ok, _user} ->
         conn
         |> put_status(:ok)

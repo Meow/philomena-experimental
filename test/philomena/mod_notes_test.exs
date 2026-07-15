@@ -14,6 +14,7 @@ defmodule Philomena.ModNotesTest do
 
   use Philomena.DataCase, async: true
 
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
   import Philomena.ModNotesFixtures
   import Philomena.UsersFixtures
 
@@ -34,18 +35,18 @@ defmodule Philomena.ModNotesTest do
 
   describe "load_mod_note_index/4" do
     test "an anonymous viewer is unauthorized" do
-      assert ModNotes.load_mod_note_index(nil, %{}, & &1, @pagination) ==
+      assert ModNotes.load_mod_note_index(actor(), %{}, & &1, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "a regular user is unauthorized" do
-      assert ModNotes.load_mod_note_index(confirmed_user_fixture(), %{}, & &1, @pagination) ==
+      assert ModNotes.load_mod_note_index(actor(confirmed_user_fixture()), %{}, & &1, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an assistant, a moderator, and an admin are all authorized" do
-      for actor <- [assistant_user_fixture(), moderator_user_fixture(), admin_user_fixture()] do
-        assert {:ok, page} = ModNotes.load_mod_note_index(actor, %{}, & &1, @pagination)
+      for user <- [assistant_user_fixture(), moderator_user_fixture(), admin_user_fixture()] do
+        assert {:ok, page} = ModNotes.load_mod_note_index(actor(user), %{}, & &1, @pagination)
         assert %Scrivener.Page{} = page
       end
     end
@@ -54,7 +55,7 @@ defmodule Philomena.ModNotesTest do
       moderator = moderator_user_fixture()
       note = mod_note_fixture(moderator)
 
-      assert {:ok, page} = ModNotes.load_mod_note_index(moderator, %{}, & &1, @pagination)
+      assert {:ok, page} = ModNotes.load_mod_note_index(actor(moderator), %{}, & &1, @pagination)
 
       # The identity renderer pairs each note with itself.
       assert note.id in Enum.map(page.entries, fn {loaded, _rendered} -> loaded.id end)
@@ -67,7 +68,7 @@ defmodule Philomena.ModNotesTest do
 
       assert {:ok, page} =
                ModNotes.load_mod_note_index(
-                 moderator,
+                 actor(moderator),
                  %{"notable_type" => "Report", "notable_id" => "12345"},
                  & &1,
                  @pagination
@@ -82,7 +83,7 @@ defmodule Philomena.ModNotesTest do
   describe "new_mod_note/2" do
     test "a moderator gets a changeset seeded from the params" do
       assert {:ok, changeset} =
-               ModNotes.new_mod_note(moderator_user_fixture(), %{
+               ModNotes.new_mod_note(actor(moderator_user_fixture()), %{
                  "notable_type" => "Report",
                  "notable_id" => "7"
                })
@@ -92,15 +93,16 @@ defmodule Philomena.ModNotesTest do
     end
 
     test "an assistant is authorized" do
-      assert {:ok, _changeset} = ModNotes.new_mod_note(assistant_user_fixture(), %{})
+      assert {:ok, _changeset} = ModNotes.new_mod_note(actor(assistant_user_fixture()), %{})
     end
 
     test "a regular user is unauthorized" do
-      assert ModNotes.new_mod_note(confirmed_user_fixture(), %{}) == {:error, :unauthorized}
+      assert ModNotes.new_mod_note(actor(confirmed_user_fixture()), %{}) ==
+               {:error, :unauthorized}
     end
 
     test "an anonymous actor is unauthorized" do
-      assert ModNotes.new_mod_note(nil, %{}) == {:error, :unauthorized}
+      assert ModNotes.new_mod_note(actor(), %{}) == {:error, :unauthorized}
     end
   end
 
@@ -108,7 +110,7 @@ defmodule Philomena.ModNotesTest do
     test "a moderator creates a note attributed to themselves" do
       moderator = moderator_user_fixture()
 
-      assert {:ok, %ModNote{} = note} = ModNotes.create_mod_note(moderator, note_attrs())
+      assert {:ok, %ModNote{} = note} = ModNotes.create_mod_note(actor(moderator), note_attrs())
       assert note.moderator_id == moderator.id
       assert note.body == "Watching this one"
     end
@@ -116,22 +118,25 @@ defmodule Philomena.ModNotesTest do
     test "an assistant creates a note" do
       assistant = assistant_user_fixture()
 
-      assert {:ok, %ModNote{} = note} = ModNotes.create_mod_note(assistant, note_attrs())
+      assert {:ok, %ModNote{} = note} = ModNotes.create_mod_note(actor(assistant), note_attrs())
       assert note.moderator_id == assistant.id
     end
 
     test "a regular user is unauthorized" do
-      assert ModNotes.create_mod_note(confirmed_user_fixture(), note_attrs()) ==
+      assert ModNotes.create_mod_note(actor(confirmed_user_fixture()), note_attrs()) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous actor is unauthorized" do
-      assert ModNotes.create_mod_note(nil, note_attrs()) == {:error, :unauthorized}
+      assert ModNotes.create_mod_note(actor(), note_attrs()) == {:error, :unauthorized}
     end
 
     test "a blank body is a rejected changeset" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               ModNotes.create_mod_note(moderator_user_fixture(), note_attrs(%{"body" => ""}))
+               ModNotes.create_mod_note(
+                 actor(moderator_user_fixture()),
+                 note_attrs(%{"body" => ""})
+               )
 
       assert %{body: ["can't be blank"]} = errors_on(changeset)
     end
@@ -143,7 +148,7 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator)
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               ModNotes.load_mod_note_for_edit(moderator, to_string(note.id))
+               ModNotes.load_mod_note_for_edit(actor(moderator), to_string(note.id))
 
       assert loaded.id == note.id
     end
@@ -151,7 +156,7 @@ defmodule Philomena.ModNotesTest do
     test "a moderator may not edit another moderator's note" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.load_mod_note_for_edit(moderator_user_fixture(), to_string(note.id)) ==
+      assert ModNotes.load_mod_note_for_edit(actor(moderator_user_fixture()), to_string(note.id)) ==
                {:error, :unauthorized}
     end
 
@@ -159,7 +164,7 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator_user_fixture())
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               ModNotes.load_mod_note_for_edit(admin_user_fixture(), to_string(note.id))
+               ModNotes.load_mod_note_for_edit(actor(admin_user_fixture()), to_string(note.id))
 
       assert loaded.id == note.id
     end
@@ -167,20 +172,20 @@ defmodule Philomena.ModNotesTest do
     test "a regular user is unauthorized" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.load_mod_note_for_edit(confirmed_user_fixture(), to_string(note.id)) ==
+      assert ModNotes.load_mod_note_for_edit(actor(confirmed_user_fixture()), to_string(note.id)) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
-      assert ModNotes.load_mod_note_for_edit(moderator_user_fixture(), "2147483647") ==
+      assert ModNotes.load_mod_note_for_edit(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert ModNotes.load_mod_note_for_edit(admin_user_fixture(), "2147483647") ==
+      assert ModNotes.load_mod_note_for_edit(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert ModNotes.load_mod_note_for_edit(admin_user_fixture(), "not-a-number") ==
+      assert ModNotes.load_mod_note_for_edit(actor(admin_user_fixture()), "not-a-number") ==
                {:error, :not_found}
     end
   end
@@ -191,7 +196,9 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator)
 
       assert {:ok, %ModNote{} = updated} =
-               ModNotes.update_mod_note(moderator, to_string(note.id), %{"body" => "Edited body"})
+               ModNotes.update_mod_note(actor(moderator), to_string(note.id), %{
+                 "body" => "Edited body"
+               })
 
       assert updated.body == "Edited body"
     end
@@ -200,7 +207,7 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator_user_fixture())
 
       assert {:ok, %ModNote{body: "Edited by admin"}} =
-               ModNotes.update_mod_note(admin_user_fixture(), to_string(note.id), %{
+               ModNotes.update_mod_note(actor(admin_user_fixture()), to_string(note.id), %{
                  "body" => "Edited by admin"
                })
     end
@@ -210,7 +217,7 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator)
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               ModNotes.update_mod_note(moderator, to_string(note.id), %{"body" => ""})
+               ModNotes.update_mod_note(actor(moderator), to_string(note.id), %{"body" => ""})
 
       assert %{body: ["can't be blank"]} = errors_on(changeset)
     end
@@ -218,7 +225,7 @@ defmodule Philomena.ModNotesTest do
     test "a moderator may not update another moderator's note" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.update_mod_note(moderator_user_fixture(), to_string(note.id), %{
+      assert ModNotes.update_mod_note(actor(moderator_user_fixture()), to_string(note.id), %{
                "body" => "Edited body"
              }) == {:error, :unauthorized}
     end
@@ -226,21 +233,25 @@ defmodule Philomena.ModNotesTest do
     test "a regular user is unauthorized" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.update_mod_note(confirmed_user_fixture(), to_string(note.id), %{
+      assert ModNotes.update_mod_note(actor(confirmed_user_fixture()), to_string(note.id), %{
                "body" => "Edited body"
              }) == {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
-      assert ModNotes.update_mod_note(moderator_user_fixture(), "2147483647", %{"body" => "x"}) ==
+      assert ModNotes.update_mod_note(actor(moderator_user_fixture()), "2147483647", %{
+               "body" => "x"
+             }) ==
                {:error, :unauthorized}
 
-      assert ModNotes.update_mod_note(admin_user_fixture(), "2147483647", %{"body" => "x"}) ==
+      assert ModNotes.update_mod_note(actor(admin_user_fixture()), "2147483647", %{"body" => "x"}) ==
                {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert ModNotes.update_mod_note(admin_user_fixture(), "not-a-number", %{"body" => "x"}) ==
+      assert ModNotes.update_mod_note(actor(admin_user_fixture()), "not-a-number", %{
+               "body" => "x"
+             }) ==
                {:error, :not_found}
     end
   end
@@ -250,7 +261,7 @@ defmodule Philomena.ModNotesTest do
       moderator = moderator_user_fixture()
       note = mod_note_fixture(moderator)
 
-      assert {:ok, %ModNote{}} = ModNotes.delete_mod_note(moderator, to_string(note.id))
+      assert {:ok, %ModNote{}} = ModNotes.delete_mod_note(actor(moderator), to_string(note.id))
       refute Repo.get(ModNote, note.id)
     end
 
@@ -258,7 +269,7 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator_user_fixture())
 
       assert {:ok, %ModNote{}} =
-               ModNotes.delete_mod_note(admin_user_fixture(), to_string(note.id))
+               ModNotes.delete_mod_note(actor(admin_user_fixture()), to_string(note.id))
 
       refute Repo.get(ModNote, note.id)
     end
@@ -266,7 +277,7 @@ defmodule Philomena.ModNotesTest do
     test "a moderator may not delete another moderator's note" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.delete_mod_note(moderator_user_fixture(), to_string(note.id)) ==
+      assert ModNotes.delete_mod_note(actor(moderator_user_fixture()), to_string(note.id)) ==
                {:error, :unauthorized}
 
       assert Repo.get(ModNote, note.id)
@@ -275,19 +286,20 @@ defmodule Philomena.ModNotesTest do
     test "a regular user is unauthorized" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.delete_mod_note(confirmed_user_fixture(), to_string(note.id)) ==
+      assert ModNotes.delete_mod_note(actor(confirmed_user_fixture()), to_string(note.id)) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
-      assert ModNotes.delete_mod_note(moderator_user_fixture(), "2147483647") ==
+      assert ModNotes.delete_mod_note(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert ModNotes.delete_mod_note(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert ModNotes.delete_mod_note(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert ModNotes.delete_mod_note(admin_user_fixture(), "not-a-number") ==
+      assert ModNotes.delete_mod_note(actor(admin_user_fixture()), "not-a-number") ==
                {:error, :not_found}
     end
   end

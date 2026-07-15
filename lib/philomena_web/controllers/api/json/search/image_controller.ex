@@ -12,7 +12,7 @@ defmodule PhilomenaWeb.Api.Json.Search.ImageController do
            hits: false
          ) do
       {:ok, %{images: images}} ->
-        interactions = Interactions.user_interactions(images, conn.assigns.current_user)
+        interactions = Interactions.user_interactions(images, conn.assigns.actor)
 
         conn
         |> put_view(PhilomenaWeb.Api.Json.ImageView)

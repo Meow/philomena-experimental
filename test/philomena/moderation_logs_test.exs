@@ -29,6 +29,7 @@ defmodule Philomena.ModerationLogsTest do
   end
 
   describe "load_moderation_logs/2" do
+    import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
     import Philomena.UsersFixtures
 
     alias Scrivener.Page
@@ -51,23 +52,23 @@ defmodule Philomena.ModerationLogsTest do
       log = logged_entry()
 
       assert {:ok, %Page{} = page} =
-               ModerationLogs.load_moderation_logs(moderator_user_fixture(), @pagination)
+               ModerationLogs.load_moderation_logs(actor(moderator_user_fixture()), @pagination)
 
       assert log.id in Enum.map(page.entries, & &1.id)
     end
 
     test "an admin gets the paginated logs" do
       assert {:ok, %Page{}} =
-               ModerationLogs.load_moderation_logs(admin_user_fixture(), @pagination)
+               ModerationLogs.load_moderation_logs(actor(admin_user_fixture()), @pagination)
     end
 
     test "a regular user is unauthorized" do
-      assert ModerationLogs.load_moderation_logs(confirmed_user_fixture(), @pagination) ==
+      assert ModerationLogs.load_moderation_logs(actor(confirmed_user_fixture()), @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert ModerationLogs.load_moderation_logs(nil, @pagination) == {:error, :unauthorized}
+      assert ModerationLogs.load_moderation_logs(actor(), @pagination) == {:error, :unauthorized}
     end
   end
 end

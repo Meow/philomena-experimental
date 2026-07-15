@@ -5,8 +5,6 @@ defmodule PhilomenaWeb.Gallery.OrderController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.UserAttributionPlug
-
   def update(conn, %{"gallery_id" => gallery_id, "image_ids" => image_ids})
       when is_list(image_ids) do
     with {:ok, _gallery} <- Galleries.reorder_gallery(conn.assigns.actor, gallery_id, image_ids) do

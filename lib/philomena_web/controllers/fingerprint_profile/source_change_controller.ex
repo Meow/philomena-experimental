@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.FingerprintProfile.SourceChangeController do
   def index(conn, %{"fingerprint_profile_id" => fingerprint} = params) do
     with {:ok, source_changes} <-
            SourceChanges.fingerprint_source_changes(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              fingerprint,
              params,
              conn.assigns.scrivener

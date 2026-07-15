@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.ModerationLogController do
 
   def index(conn, _params) do
     with {:ok, moderation_logs} <-
-           ModerationLogs.load_moderation_logs(conn.assigns.current_user, conn.assigns.scrivener) do
+           ModerationLogs.load_moderation_logs(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html", title: "Moderation Logs", moderation_logs: moderation_logs)
     end
   end

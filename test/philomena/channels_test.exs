@@ -11,9 +11,9 @@ defmodule Philomena.ChannelsTest do
   unauthorized for a non-admin, not-found for an admin), and the preserved
   oddity that an update ignores the fetcher-managed fields.
 
-  The read/subscription actor is a plain `User.t()` or `nil`, matching what the
-  controller hands in as `conn.assigns.current_user`; the CRUD form loaders take
-  a `%User{}` only.
+  Every controller-facing function takes a `%Philomena.Attribution.Actor{}`,
+  matching what the controller hands in as `conn.assigns.actor`; its `:user` is
+  `nil` for an anonymous visitor.
   """
 
   use Philomena.DataCase, async: true
@@ -22,6 +22,7 @@ defmodule Philomena.ChannelsTest do
   alias Philomena.Channels.Channel
   alias Philomena.Repo
 
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
   import Philomena.ChannelsFixtures
   import Philomena.TagsFixtures
   import Philomena.UsersFixtures
@@ -119,7 +120,7 @@ defmodule Philomena.ChannelsTest do
     test "an anonymous visitor visits a channel" do
       channel = channel_fixture()
 
-      assert {:ok, loaded} = Channels.visit_channel(nil, to_string(channel.id))
+      assert {:ok, loaded} = Channels.visit_channel(actor(), to_string(channel.id))
       assert loaded.id == channel.id
     end
 
@@ -127,7 +128,7 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:ok, loaded} =
-               Channels.visit_channel(confirmed_user_fixture(), to_string(channel.id))
+               Channels.visit_channel(actor(confirmed_user_fixture()), to_string(channel.id))
 
       assert loaded.id == channel.id
     end
@@ -135,20 +136,21 @@ defmodule Philomena.ChannelsTest do
     test "an unknown well-formed id is unauthorized for an anonymous visitor" do
       # No :show rule matches the nil load, so a missing channel surfaces as
       # unauthorized rather than not found.
-      assert Channels.visit_channel(nil, "2147483647") == {:error, :unauthorized}
+      assert Channels.visit_channel(actor(), "2147483647") == {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is unauthorized for a regular user" do
-      assert Channels.visit_channel(confirmed_user_fixture(), "2147483647") ==
+      assert Channels.visit_channel(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      assert Channels.visit_channel(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Channels.visit_channel(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
 
     test "a non-integer id is not found" do
-      assert Channels.visit_channel(nil, "not-an-integer") == {:error, :not_found}
+      assert Channels.visit_channel(actor(), "not-an-integer") == {:error, :not_found}
     end
   end
 
@@ -157,40 +159,40 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:ok, loaded} =
-               Channels.clear_notification(confirmed_user_fixture(), to_string(channel.id))
+               Channels.clear_notification(actor(confirmed_user_fixture()), to_string(channel.id))
 
       assert loaded.id == channel.id
     end
 
     test "an unknown well-formed id is not found, with no authorization involved" do
-      assert Channels.clear_notification(confirmed_user_fixture(), "2147483647") ==
+      assert Channels.clear_notification(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-integer id is not found" do
-      assert Channels.clear_notification(confirmed_user_fixture(), "not-an-integer") ==
+      assert Channels.clear_notification(actor(confirmed_user_fixture()), "not-an-integer") ==
                {:error, :not_found}
     end
   end
 
   describe "new_channel/1" do
     test "a regular user is unauthorized" do
-      assert Channels.new_channel(confirmed_user_fixture()) == {:error, :unauthorized}
+      assert Channels.new_channel(actor(confirmed_user_fixture())) == {:error, :unauthorized}
     end
 
     test "a moderator gets a blank changeset" do
       assert {:ok, %Ecto.Changeset{data: %Channel{id: nil}}} =
-               Channels.new_channel(moderator_user_fixture())
+               Channels.new_channel(actor(moderator_user_fixture()))
     end
 
     test "an admin gets a blank changeset" do
-      assert {:ok, %Ecto.Changeset{}} = Channels.new_channel(admin_user_fixture())
+      assert {:ok, %Ecto.Changeset{}} = Channels.new_channel(actor(admin_user_fixture()))
     end
   end
 
   describe "create_channel/2" do
     test "a regular user is unauthorized" do
-      assert Channels.create_channel(confirmed_user_fixture(), %{
+      assert Channels.create_channel(actor(confirmed_user_fixture()), %{
                "type" => "PicartoChannel",
                "short_name" => unique_channel_short_name()
              }) == {:error, :unauthorized}
@@ -198,7 +200,7 @@ defmodule Philomena.ChannelsTest do
 
     test "a moderator creates a channel" do
       assert {:ok, %Channel{} = channel} =
-               Channels.create_channel(moderator_user_fixture(), %{
+               Channels.create_channel(actor(moderator_user_fixture()), %{
                  "type" => "PicartoChannel",
                  "short_name" => unique_channel_short_name()
                })
@@ -208,7 +210,7 @@ defmodule Philomena.ChannelsTest do
 
     test "an invalid type is a rejected changeset" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Channels.create_channel(moderator_user_fixture(), %{
+               Channels.create_channel(actor(moderator_user_fixture()), %{
                  "type" => "NotARealChannel",
                  "short_name" => unique_channel_short_name()
                })
@@ -220,7 +222,7 @@ defmodule Philomena.ChannelsTest do
       tag = tag_fixture(%{name: "artist:createwithtag"})
 
       assert {:ok, %Channel{} = channel} =
-               Channels.create_channel(moderator_user_fixture(), %{
+               Channels.create_channel(actor(moderator_user_fixture()), %{
                  "type" => "PicartoChannel",
                  "short_name" => unique_channel_short_name(),
                  "artist_tag" => tag.name
@@ -235,7 +237,10 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:ok, {%Channel{} = loaded, %Ecto.Changeset{} = changeset}} =
-               Channels.load_channel_for_edit(moderator_user_fixture(), to_string(channel.id))
+               Channels.load_channel_for_edit(
+                 actor(moderator_user_fixture()),
+                 to_string(channel.id)
+               )
 
       assert loaded.id == channel.id
       assert changeset.data.id == channel.id
@@ -244,20 +249,23 @@ defmodule Philomena.ChannelsTest do
     test "a regular user is unauthorized" do
       channel = channel_fixture()
 
-      assert Channels.load_channel_for_edit(confirmed_user_fixture(), to_string(channel.id)) ==
+      assert Channels.load_channel_for_edit(
+               actor(confirmed_user_fixture()),
+               to_string(channel.id)
+             ) ==
                {:error, :unauthorized}
     end
 
     test "a non-integer id is not found" do
-      assert Channels.load_channel_for_edit(moderator_user_fixture(), "not-an-integer") ==
+      assert Channels.load_channel_for_edit(actor(moderator_user_fixture()), "not-an-integer") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not found for an admin" do
-      assert Channels.load_channel_for_edit(moderator_user_fixture(), "2147483647") ==
+      assert Channels.load_channel_for_edit(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Channels.load_channel_for_edit(admin_user_fixture(), "2147483647") ==
+      assert Channels.load_channel_for_edit(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -268,7 +276,7 @@ defmodule Philomena.ChannelsTest do
       new_name = unique_channel_short_name()
 
       assert {:ok, %Channel{} = updated} =
-               Channels.update_channel(moderator_user_fixture(), to_string(channel.id), %{
+               Channels.update_channel(actor(moderator_user_fixture()), to_string(channel.id), %{
                  "short_name" => new_name
                })
 
@@ -283,7 +291,7 @@ defmodule Philomena.ChannelsTest do
       channel = listed_channel_fixture(%{}, %{title: "Original Title"})
 
       assert {:ok, %Channel{} = updated} =
-               Channels.update_channel(moderator_user_fixture(), to_string(channel.id), %{
+               Channels.update_channel(actor(moderator_user_fixture()), to_string(channel.id), %{
                  "title" => "Crafted Title"
                })
 
@@ -295,7 +303,7 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Channels.update_channel(moderator_user_fixture(), to_string(channel.id), %{
+               Channels.update_channel(actor(moderator_user_fixture()), to_string(channel.id), %{
                  "type" => "NotARealChannel"
                })
 
@@ -305,7 +313,7 @@ defmodule Philomena.ChannelsTest do
     test "a regular user is unauthorized and leaves the row unchanged" do
       channel = channel_fixture()
 
-      assert Channels.update_channel(confirmed_user_fixture(), to_string(channel.id), %{
+      assert Channels.update_channel(actor(confirmed_user_fixture()), to_string(channel.id), %{
                "short_name" => "hijacked"
              }) == {:error, :unauthorized}
 
@@ -313,17 +321,19 @@ defmodule Philomena.ChannelsTest do
     end
 
     test "a non-integer id is not found" do
-      assert Channels.update_channel(moderator_user_fixture(), "not-an-integer", %{
+      assert Channels.update_channel(actor(moderator_user_fixture()), "not-an-integer", %{
                "short_name" => "x"
              }) == {:error, :not_found}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not found for an admin" do
-      assert Channels.update_channel(moderator_user_fixture(), "2147483647", %{
+      assert Channels.update_channel(actor(moderator_user_fixture()), "2147483647", %{
                "short_name" => "x"
              }) == {:error, :unauthorized}
 
-      assert Channels.update_channel(admin_user_fixture(), "2147483647", %{"short_name" => "x"}) ==
+      assert Channels.update_channel(actor(admin_user_fixture()), "2147483647", %{
+               "short_name" => "x"
+             }) ==
                {:error, :not_found}
     end
   end
@@ -333,7 +343,7 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:ok, %Channel{}} =
-               Channels.delete_channel(moderator_user_fixture(), to_string(channel.id))
+               Channels.delete_channel(actor(moderator_user_fixture()), to_string(channel.id))
 
       assert Repo.reload(channel) == nil
     end
@@ -341,22 +351,23 @@ defmodule Philomena.ChannelsTest do
     test "a regular user is unauthorized and leaves the row" do
       channel = channel_fixture()
 
-      assert Channels.delete_channel(confirmed_user_fixture(), to_string(channel.id)) ==
+      assert Channels.delete_channel(actor(confirmed_user_fixture()), to_string(channel.id)) ==
                {:error, :unauthorized}
 
       refute Repo.reload(channel) == nil
     end
 
     test "a non-integer id is not found" do
-      assert Channels.delete_channel(moderator_user_fixture(), "not-an-integer") ==
+      assert Channels.delete_channel(actor(moderator_user_fixture()), "not-an-integer") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is unauthorized for a moderator, not found for an admin" do
-      assert Channels.delete_channel(moderator_user_fixture(), "2147483647") ==
+      assert Channels.delete_channel(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Channels.delete_channel(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Channels.delete_channel(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
   end
 
@@ -365,11 +376,11 @@ defmodule Philomena.ChannelsTest do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert {:ok, subscribed} = Channels.subscribe(user, to_string(channel.id))
+      assert {:ok, subscribed} = Channels.subscribe(actor(user), to_string(channel.id))
       assert subscribed.id == channel.id
       assert Channels.subscribed?(channel, user)
 
-      assert {:ok, unsubscribed} = Channels.unsubscribe(user, to_string(channel.id))
+      assert {:ok, unsubscribed} = Channels.unsubscribe(actor(user), to_string(channel.id))
       assert unsubscribed.id == channel.id
       refute Channels.subscribed?(channel, user)
     end
@@ -378,8 +389,8 @@ defmodule Philomena.ChannelsTest do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert {:ok, _} = Channels.subscribe(user, to_string(channel.id))
-      assert {:ok, _} = Channels.subscribe(user, to_string(channel.id))
+      assert {:ok, _} = Channels.subscribe(actor(user), to_string(channel.id))
+      assert {:ok, _} = Channels.subscribe(actor(user), to_string(channel.id))
       assert Channels.subscribed?(channel, user)
     end
 
@@ -387,27 +398,28 @@ defmodule Philomena.ChannelsTest do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert {:ok, loaded} = Channels.unsubscribe(user, to_string(channel.id))
+      assert {:ok, loaded} = Channels.unsubscribe(actor(user), to_string(channel.id))
       assert loaded.id == channel.id
     end
 
     test "an unknown well-formed id is unauthorized for a user, not found for an admin" do
-      assert Channels.subscribe(confirmed_user_fixture(), "2147483647") ==
+      assert Channels.subscribe(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Channels.subscribe(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Channels.subscribe(actor(admin_user_fixture()), "2147483647") == {:error, :not_found}
     end
 
     test "a non-integer id is not found on subscribe" do
-      assert Channels.subscribe(confirmed_user_fixture(), "not-an-integer") ==
+      assert Channels.subscribe(actor(confirmed_user_fixture()), "not-an-integer") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is unauthorized for a user on unsubscribe" do
-      assert Channels.unsubscribe(confirmed_user_fixture(), "2147483647") ==
+      assert Channels.unsubscribe(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :unauthorized}
 
-      assert Channels.unsubscribe(admin_user_fixture(), "2147483647") == {:error, :not_found}
+      assert Channels.unsubscribe(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
   end
 end

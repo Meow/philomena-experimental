@@ -9,6 +9,7 @@ defmodule Philomena.Rules do
   alias Philomena.IntegerId
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Rules.Rule
   alias Philomena.Rules.RuleVersion
   alias Philomena.Users.User
@@ -219,8 +220,8 @@ defmodule Philomena.Rules do
   A viewer who may edit rules sees every rule; everyone else sees only the
   visible (non-hidden, non-internal) rules.
   """
-  @spec list_rules_for(User.t() | nil) :: [Rule.t()]
-  def list_rules_for(user) do
+  @spec list_rules_for(Actor.t()) :: [Rule.t()]
+  def list_rules_for(%Actor{user: user}) do
     if Canada.Can.can?(user, :edit, Rule) do
       list_rules()
     else
@@ -238,9 +239,9 @@ defmodule Philomena.Rules do
   not edit it (a distinct case from an ordinary authorization failure).
   Otherwise `{:ok, rule}`.
   """
-  @spec load_rule_for_show(User.t() | nil, any()) ::
+  @spec load_rule_for_show(Actor.t(), any()) ::
           {:ok, Rule.t()} | {:error, :not_found | :unauthorized | :rule_hidden}
-  def load_rule_for_show(user, position) do
+  def load_rule_for_show(%Actor{user: user}, position) do
     with {:ok, rule} <- load_authorized_rule(user, position, :show) do
       if (rule.hidden or rule.internal) and not Canada.Can.can?(user, :edit, rule) do
         {:error, :rule_hidden}
@@ -256,10 +257,10 @@ defmodule Philomena.Rules do
   Returns `{:error, :unauthorized}` when the viewer may not create rules,
   otherwise `{:ok, changeset}`.
   """
-  @spec load_new_rule(User.t() | nil) ::
+  @spec load_new_rule(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def load_new_rule(user) do
-    with :ok <- authorize(user, :new, Rule) do
+  def load_new_rule(%Actor{} = actor) do
+    with :ok <- authorize(actor, :new, Rule) do
       {:ok, change_rule(%Rule{})}
     end
   end
@@ -271,13 +272,13 @@ defmodule Philomena.Rules do
   `{:error, %Ecto.Changeset{}}` on a validation failure, and
   `{:ok, [rule, rule_version]}` on success.
   """
-  @spec create_rule(User.t() | nil, map()) ::
+  @spec create_rule(Actor.t(), map()) ::
           {:ok, [Rule.t() | RuleVersion.t()]}
           | {:error, Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def create_rule(user, attrs) do
-    with :ok <- authorize(user, :create, Rule) do
-      create_rule_with_version(attrs, user)
+  def create_rule(%Actor{} = actor, attrs) do
+    with :ok <- authorize(actor, :create, Rule) do
+      create_rule_with_version(attrs, actor.user)
     end
   end
 
@@ -288,10 +289,10 @@ defmodule Philomena.Rules do
   `{:error, :unauthorized}` when the viewer may not edit the rule, and otherwise
   `{:ok, {rule, changeset}}`.
   """
-  @spec load_rule_for_edit(User.t() | nil, any()) ::
+  @spec load_rule_for_edit(Actor.t(), any()) ::
           {:ok, {Rule.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_rule_for_edit(user, position) do
-    with {:ok, rule} <- load_authorized_rule(user, position, :edit) do
+  def load_rule_for_edit(%Actor{} = actor, position) do
+    with {:ok, rule} <- load_authorized_rule(actor, position, :edit) do
       {:ok, {rule, change_rule(rule)}}
     end
   end
@@ -305,13 +306,13 @@ defmodule Philomena.Rules do
   `{:error, {rule, changeset}}` on a validation failure (carrying the unchanged
   rule), and `{:ok, [rule, rule_version]}` on success.
   """
-  @spec update_rule(User.t() | nil, any(), map()) ::
+  @spec update_rule(Actor.t(), any(), map()) ::
           {:ok, [Rule.t() | RuleVersion.t()]}
           | {:error, {Rule.t(), Ecto.Changeset.t()}}
           | {:error, :not_found | :unauthorized}
-  def update_rule(user, position, attrs) do
-    with {:ok, rule} <- load_authorized_rule(user, position, :update) do
-      case update_rule_with_version(rule, user, attrs) do
+  def update_rule(%Actor{} = actor, position, attrs) do
+    with {:ok, rule} <- load_authorized_rule(actor, position, :update) do
+      case update_rule_with_version(rule, actor.user, attrs) do
         {:ok, [updated_rule, rule_version]} -> {:ok, [updated_rule, rule_version]}
         {:error, changeset} -> {:error, {rule, changeset}}
       end

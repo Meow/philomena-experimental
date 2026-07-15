@@ -5,9 +5,6 @@ defmodule PhilomenaWeb.Profile.CommissionController do
   alias Philomena.Commissions
   alias PhilomenaWeb.MarkdownRenderer
 
-  plug PhilomenaWeb.UserAttributionPlug
-       when action in [:new, :create, :edit, :update, :delete]
-
   action_fallback PhilomenaWeb.FallbackController
 
   def show(conn, %{"profile_id" => slug}) do

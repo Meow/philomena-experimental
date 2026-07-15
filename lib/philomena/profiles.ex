@@ -9,6 +9,7 @@ defmodule Philomena.Profiles do
   import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Repo
+  alias Philomena.Attribution.Actor
   alias Philomena.Profiles.ProfilePage
   alias Philomena.Users.User
   alias Philomena.UserIps.UserIp
@@ -245,15 +246,15 @@ defmodule Philomena.Profiles do
   defp map_fetch(map, field_name), do: Map.get(map, field_name)
 
   @doc """
-  Returns the admin metadata about `user` for `viewer`, or `nil` when the viewer
+  Returns the admin metadata about `user` for `actor`, or `nil` when the viewer
   may not list users.
 
   The metadata is the user's current filter and the most recent IP and
   fingerprint rows.
   """
-  @spec admin_metadata(User.t() | nil, User.t()) :: map() | nil
-  def admin_metadata(viewer, user) do
-    if Canada.Can.can?(viewer, :index, User) do
+  @spec admin_metadata(Actor.t(), User.t()) :: map() | nil
+  def admin_metadata(%Actor{} = actor, user) do
+    if Canada.Can.can?(actor.user, :index, User) do
       user = Repo.preload(user, [:current_filter])
 
       last_ip =
@@ -275,23 +276,23 @@ defmodule Philomena.Profiles do
   end
 
   @doc """
-  Returns the mod notes on `user` for `viewer`, processed through `collection_renderer`,
+  Returns the mod notes on `user` for `actor`, processed through `collection_renderer`,
   or `nil` when the viewer may not read mod notes.
   """
-  @spec mod_notes(User.t() | nil, User.t(), (list() -> list())) :: list() | nil
-  def mod_notes(viewer, user, collection_renderer) do
-    if Canada.Can.can?(viewer, :index, ModNote) do
+  @spec mod_notes(Actor.t(), User.t(), (list() -> list())) :: list() | nil
+  def mod_notes(%Actor{} = actor, user, collection_renderer) do
+    if Canada.Can.can?(actor.user, :index, ModNote) do
       ModNotes.list_all_mod_notes_by_type_and_id("User", user.id, collection_renderer)
     end
   end
 
   @doc """
-  Returns the name changes of `user` for `viewer`, or `nil` when the viewer may
+  Returns the name changes of `user` for `actor`, or `nil` when the viewer may
   not see them.
   """
-  @spec name_changes(User.t() | nil, User.t()) :: [UserNameChange.t()] | nil
-  def name_changes(viewer, user) do
-    if Canada.Can.can?(viewer, :index, UserNameChange) do
+  @spec name_changes(Actor.t(), User.t()) :: [UserNameChange.t()] | nil
+  def name_changes(%Actor{} = actor, user) do
+    if Canada.Can.can?(actor.user, :index, UserNameChange) do
       UserNameChange
       |> where(user_id: ^user.id)
       |> order_by(desc: :id)
@@ -311,9 +312,9 @@ defmodule Philomena.Profiles do
 
   Returns `{:ok, %{user: user, user_ips: [...], other_users: %{ip => [...]}}}`.
   """
-  @spec load_ip_history(User.t() | nil, String.t()) ::
+  @spec load_ip_history(Actor.t(), String.t()) ::
           {:ok, map()} | {:error, :unauthorized | :not_found}
-  def load_ip_history(actor, slug) do
+  def load_ip_history(%Actor{} = actor, slug) do
     with {:ok, user} <- load_detailed_profile(actor, slug) do
       user_ips =
         UserIp
@@ -351,9 +352,9 @@ defmodule Philomena.Profiles do
 
   Returns `{:ok, %{user: user, user_fps: [...], other_users: %{fp => [...]}}}`.
   """
-  @spec load_fp_history(User.t() | nil, String.t()) ::
+  @spec load_fp_history(Actor.t(), String.t()) ::
           {:ok, map()} | {:error, :unauthorized | :not_found}
-  def load_fp_history(actor, slug) do
+  def load_fp_history(%Actor{} = actor, slug) do
     with {:ok, user} <- load_detailed_profile(actor, slug) do
       user_fps =
         UserFingerprint

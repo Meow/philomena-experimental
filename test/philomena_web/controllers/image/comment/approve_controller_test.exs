@@ -89,7 +89,7 @@ defmodule PhilomenaWeb.Image.Comment.ApproveControllerTest do
     end
 
     # NOTE: a non-integer comment_id short-circuits to NotFoundPlug via the
-    # central IntegerId guard before Canary authorizes.
+    # central IntegerId guard before authorization runs.
     test "for a non-integer comment_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()

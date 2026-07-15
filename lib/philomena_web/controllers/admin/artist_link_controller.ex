@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Admin.ArtistLinkController do
   def index(conn, params) do
     with {:ok, artist_links} <-
            ArtistLinks.load_artist_links_index(
-             conn.assigns.current_user,
+             conn.assigns.actor,
              params,
              conn.assigns.scrivener
            ) do

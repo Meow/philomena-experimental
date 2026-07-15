@@ -56,8 +56,8 @@ defmodule PhilomenaWeb.Topic.SubscriptionControllerTest do
 
   test "a hidden topic cannot be subscribed to but can be unsubscribed from",
        %{conn: conn} do
-    # NOTE: LoadTopicPlug passes show_hidden: true for :delete only, so the
-    # two actions diverge on hidden topics
+    # NOTE: the context's load_forum_topic passes show_hidden: true for
+    # unsubscribe (:delete) only, so the two actions diverge on hidden topics
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     forum = forum_fixture()
     topic = topic_fixture(forum)
