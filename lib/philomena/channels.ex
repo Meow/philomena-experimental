@@ -27,21 +27,45 @@ defmodule Philomena.Channels do
     AutomaticUpdater.update_tracked_channels!()
   end
 
-  @doc """
-  Gets a single channel.
+  # Creates a channel. Visible for testing.
+  @doc false
+  @spec create_channel(map()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
+  def create_channel(attrs \\ %{}) do
+    %Channel{}
+    |> update_artist_tag(attrs)
+    |> Channel.changeset(attrs)
+    |> Repo.insert()
+  end
 
-  Raises `Ecto.NoResultsError` if the Channel does not exist.
+  # Updates a channel.
+  @spec update_channel(Channel.t(), map()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
+  defp update_channel(%Channel{} = channel, attrs) do
+    channel
+    |> update_artist_tag(attrs)
+    |> Channel.changeset(attrs)
+    |> Repo.update()
+  end
 
-  ## Examples
+  # Adds the artist tag from the `"artist_tag"` tag name attribute.
+  defp update_artist_tag(%Channel{} = channel, attrs) do
+    tag =
+      attrs
+      |> Map.get("artist_tag", "")
+      |> Tags.get_tag_by_name()
 
-      iex> get_channel!(123)
-      %Channel{}
+    Channel.artist_tag_changeset(channel, tag)
+  end
 
-      iex> get_channel!(456)
-      ** (Ecto.NoResultsError)
+  # Deletes a channel.
+  @spec delete_channel(Channel.t()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
+  defp delete_channel(%Channel{} = channel) do
+    Repo.delete(channel)
+  end
 
-  """
-  def get_channel!(id), do: Repo.get!(Channel, id)
+  # Returns an `%Ecto.Changeset{}` for tracking channel changes.
+  defp change_channel(%Channel{} = channel) do
+    Channel.changeset(channel, %{})
+  end
 
   @doc """
   Returns a page of channels for the livestreams listing.
@@ -58,7 +82,7 @@ defmodule Philomena.Channels do
       %Scrivener.Page{}
 
   """
-  @spec list_channels(boolean(), map(), map()) :: Scrivener.Page.t()
+  @spec list_channels(boolean(), map(), Repo.pagination_params()) :: Scrivener.Page.t()
   def list_channels(show_nsfw?, params, pagination) do
     Channel
     |> maybe_show_nsfw(show_nsfw?)
@@ -74,12 +98,6 @@ defmodule Philomena.Channels do
   Clears the acting user's live notification for the channel named by the
   `id`, returning the channel and its external stream URL.
 
-  The channel is loaded by id and authorized for `:show`; every user may view a
-  channel, so a visible channel always succeeds. A non-castable id is
-  `{:error, :not_found}`. An unknown id authorizes `nil`: no ordinary rule
-  permits it, so a non-admin gets `{:error, :unauthorized}` while an admin gets
-  `{:error, :not_found}`.
-
   ## Examples
 
       iex> visit_channel(user, "1")
@@ -88,10 +106,14 @@ defmodule Philomena.Channels do
       iex> visit_channel(user, "999999999")
       {:error, :unauthorized}
 
+      iex> visit_channel(admin, "999999999")
+      {:error, :not_found}
+
   """
   @spec visit_channel(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
   def visit_channel(%Actor{} = actor, id) do
+    # TODO: why do we ever return unauthorized?
     with {:ok, channel} <- load_channel(actor, id, :show) do
       clear_channel_notification(channel, actor.user)
       {:ok, channel}
@@ -101,9 +123,6 @@ defmodule Philomena.Channels do
   @doc """
   Clears the acting user's live notification for the channel named by the
   `id`, returning the channel.
-
-  No authorization is performed - any signed-in user may mark a channel's live
-  notification read. A non-castable or unknown id is `{:error, :not_found}`.
 
   ## Examples
 
@@ -129,9 +148,6 @@ defmodule Philomena.Channels do
   @doc """
   Builds the changeset for a new channel, on behalf of `actor`.
 
-  Authorizes `:new` against the channel model. Returns
-  `{:ok, %Ecto.Changeset{}}` or `{:error, :unauthorized}`.
-
   ## Examples
 
       iex> new_channel(moderator)
@@ -151,16 +167,18 @@ defmodule Philomena.Channels do
   @doc """
   Creates a channel on behalf of `actor`.
 
-  Authorizes `:create` against the channel model, then inserts the channel with
-  the artist tag resolved from the `"artist_tag"` attribute.
-
-  Returns `{:ok, channel}`, `{:error, :unauthorized}`, or
-  `{:error, %Ecto.Changeset{}}` if the insert is rejected.
+  Inserts the channel with the artist tag resolved from the `"artist_tag"` attribute.
 
   ## Examples
 
       iex> create_channel(moderator, %{"type" => "PicartoChannel", "short_name" => "x"})
       {:ok, %Channel{}}
+
+      iex> create_channel(moderator, invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> create_channel(user, channel_params)
+      {:error, :unauthorized}
 
   """
   @spec create_channel(Actor.t(), map()) ::
@@ -172,38 +190,19 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Creates a channel.
-
-  This is the authorization-free engine used by `create_channel/2` and by
-  fetcher tooling.
-
-  ## Examples
-
-      iex> create_channel(%{field: value})
-      {:ok, %Channel{}}
-
-      iex> create_channel(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  @spec create_channel(map()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
-  def create_channel(attrs \\ %{}) do
-    %Channel{}
-    |> update_artist_tag(attrs)
-    |> Channel.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
   Loads the channel named by the `id` for editing, on behalf of
   `actor`, pairing it with a change-tracking changeset.
-
-  Loading and authorization follow `update_channel/3`, authorizing `:edit`.
 
   ## Examples
 
       iex> load_channel_for_edit(moderator, "1")
       {:ok, {%Channel{}, %Ecto.Changeset{}}}
+
+      iex> load_channel_for_edit(moderator, "999999999")
+      {:error, :not_found}
+
+      iex> load_channel_for_edit(user, "1")
+      {:error, :unauthorized}
 
   """
   @spec load_channel_for_edit(Actor.t(), Loader.integer_id()) ::
@@ -217,20 +216,22 @@ defmodule Philomena.Channels do
   @doc """
   Updates the channel named by the `id`, on behalf of `actor`.
 
-  The channel is loaded and `:update` is authorized: a non-castable id is
-  `{:error, :not_found}`, an unknown id authorizes `nil` and comes back
-  `{:error, :unauthorized}` for a non-admin (admins get `{:error, :not_found}`),
-  and an actor without edit rights on a real channel gets
-  `{:error, :unauthorized}`. On success only the `:type` and `:short_name`
-  fields are applied; the fetcher-managed fields are ignored.
-
-  Returns `{:ok, channel}`, `{:error, :not_found}`, `{:error, :unauthorized}`,
-  or `{:error, %Ecto.Changeset{}}`.
+  On success only the `:type` and `:short_name` fields are applied;
+  the fetcher-managed fields are ignored.
 
   ## Examples
 
       iex> update_channel(moderator, "1", %{"short_name" => "renamed"})
       {:ok, %Channel{}}
+
+      iex> update_channel(moderator, "1", invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> update_channel(moderator, "999999999", channel_params)
+      {:error, :not_found}
+
+      iex> update_channel(user, "1", channel_params)
+      {:error, :unauthorized}
 
   """
   @spec update_channel(Actor.t(), Loader.integer_id(), map()) ::
@@ -239,44 +240,6 @@ defmodule Philomena.Channels do
     with {:ok, channel} <- load_channel(actor, id, :update) do
       update_channel(channel, attrs)
     end
-  end
-
-  @doc """
-  Updates a channel.
-
-  ## Examples
-
-      iex> update_channel(channel, %{field: new_value})
-      {:ok, %Channel{}}
-
-      iex> update_channel(channel, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  @spec update_channel(Channel.t(), map()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
-  def update_channel(%Channel{} = channel, attrs) do
-    channel
-    |> update_artist_tag(attrs)
-    |> Channel.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Adds the artist tag from the `"artist_tag"` tag name attribute.
-
-  ## Examples
-
-      iex> update_artist_tag(%Channel{}, %{"artist_tag" => "artist:nighty"})
-      %Ecto.Changeset{}
-
-  """
-  def update_artist_tag(%Channel{} = channel, attrs) do
-    tag =
-      attrs
-      |> Map.get("artist_tag", "")
-      |> Tags.get_tag_by_name()
-
-    Channel.artist_tag_changeset(channel, tag)
   end
 
   @doc """
@@ -320,36 +283,6 @@ defmodule Philomena.Channels do
   end
 
   @doc """
-  Deletes a Channel.
-
-  ## Examples
-
-      iex> delete_channel(channel)
-      {:ok, %Channel{}}
-
-      iex> delete_channel(channel)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  @spec delete_channel(Channel.t()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
-  def delete_channel(%Channel{} = channel) do
-    Repo.delete(channel)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking channel changes.
-
-  ## Examples
-
-      iex> change_channel(channel)
-      %Ecto.Changeset{source: %Channel{}}
-
-  """
-  def change_channel(%Channel{} = channel) do
-    Channel.changeset(channel, %{})
-  end
-
-  @doc """
   Removes all channel notifications for a given channel and user.
 
   ## Examples
@@ -366,13 +299,7 @@ defmodule Philomena.Channels do
   @doc """
   Subscribes `actor` to the channel named by the `id`.
 
-  The channel is loaded by id and authorized for `:show`. A non-castable id is
-  `{:error, :not_found}`. A well-formed but unknown id is authorized as a `nil`
-  load: a non-admin gets `{:error, :unauthorized}` and an admin
-  `{:error, :not_found}`. Subscribing is idempotent.
-
-  Returns `{:ok, channel}`, or `{:error, %Ecto.Changeset{}}` if the subscription
-  insert is rejected.
+  Subscribing is idempotent.
 
   ## Examples
 
@@ -382,10 +309,15 @@ defmodule Philomena.Channels do
       iex> subscribe(user, "999999999")
       {:error, :unauthorized}
 
+      iex> subscribe(admin, "999999999")
+      {:error, :not_found}
+
   """
   @spec subscribe(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def subscribe(%Actor{} = actor, id) do
+    # TODO: why do we ever return unauthorized?
+    # TODO: pretty sure it's not possible for the subscription insert to fail
     with {:ok, channel} <- load_channel(actor, id, :show),
          {:ok, _subscription} <- create_subscription(channel, actor.user) do
       {:ok, channel}
@@ -395,21 +327,24 @@ defmodule Philomena.Channels do
   @doc """
   Unsubscribes `actor` from the channel named by the `id`.
 
-  Loading and authorization mirror `subscribe/2`. Unsubscribing is idempotent
-  and cannot fail.
-
-  Returns `{:ok, channel}`, `{:error, :not_found}`, or
-  `{:error, :unauthorized}`.
+  Unsubscribing is idempotent.
 
   ## Examples
 
       iex> unsubscribe(user, "1")
       {:ok, %Channel{}}
 
+      iex> unsubscribe(user, "999999999")
+      {:error, :unauthorized}
+
+      iex> unsubscribe(admin, "999999999")
+      {:error, :not_found}
+
   """
   @spec unsubscribe(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
   def unsubscribe(%Actor{} = actor, id) do
+    # TODO: why do we ever return unauthorized?
     with {:ok, channel} <- load_channel(actor, id, :show) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(channel, actor.user)
@@ -417,9 +352,9 @@ defmodule Philomena.Channels do
     end
   end
 
-  # Loads a channel by id and authorizes `action` against it. A
-  # non-castable id is not found; an unknown id authorizes the `nil` load, which
-  # only an admin may act on, and the nil then reports not found.
+  # Loads a channel by id and authorizes `action` against it.
+  @spec load_channel(Actor.t(), Loader.integer_id(), atom()) ::
+          Loader.fetch_and_authorize_result(Channel.t())
   defp load_channel(actor, id, action) do
     Loader.fetch_and_authorize(Channel, actor, action, id)
   end
