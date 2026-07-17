@@ -7,6 +7,7 @@ defmodule Philomena.Commissions do
 
   import Philomena.Authorization, only: [verify_write_access: 1, verify_not_banned: 1]
 
+  alias Philomena.IntegerId
   alias Ecto.Multi
   alias Philomena.Repo
 
@@ -26,83 +27,29 @@ defmodule Philomena.Commissions do
     ]
   ]
 
-  @doc """
-  Gets a single commission.
-
-  Raises `Ecto.NoResultsError` if the Commission does not exist.
-
-  ## Examples
-
-      iex> get_commission!(123)
-      %Commission{}
-
-      iex> get_commission!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_commission!(id), do: Repo.get!(Commission, id)
-
-  @doc """
-  Creates a commission.
-
-  ## Examples
-
-      iex> create_commission(%{field: value})
-      {:ok, %Commission{}}
-
-      iex> create_commission(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
+  # Creates a commission. Visible for testing.
+  @doc false
   def create_commission(user, attrs \\ %{}) do
     Ecto.build_assoc(user, :commission)
     |> Commission.changeset(attrs)
     |> Repo.insert()
   end
 
-  @doc """
-  Updates a commission.
-
-  ## Examples
-
-      iex> update_commission(commission, %{field: new_value})
-      {:ok, %Commission{}}
-
-      iex> update_commission(commission, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_commission(%Commission{} = commission, attrs) do
+  # Updates a commission.
+  defp update_commission(%Commission{} = commission, attrs) do
     commission
     |> Commission.changeset(attrs)
     |> Repo.update()
   end
 
-  @doc """
-  Deletes a Commission.
-
-  ## Examples
-
-      iex> delete_commission(commission)
-      {:ok, %Commission{}}
-
-      iex> delete_commission(commission)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_commission(%Commission{} = commission) do
+  # Deletes a commission.
+  defp delete_commission(%Commission{} = commission) do
     Repo.delete(commission)
   end
 
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking commission changes.
-
-  ## Examples
-
-      iex> change_commission(commission)
-      %Ecto.Changeset{source: %Commission{}}
-
-  """
+  # Returns an `%Ecto.Changeset{}` for tracking commission changes.
+  # Visible for testing.
+  @doc false
   def change_commission(%Commission{} = commission) do
     Commission.changeset(commission, %{})
   end
@@ -110,11 +57,17 @@ defmodule Philomena.Commissions do
   @doc """
   Loads the commission of the user named by the profile `slug`.
 
-  The commission sheet is public. An unknown slug, or a user without a
-  commission, is `{:error, :not_found}`.
+  ## Examples
 
-  Returns `{:ok, {user, commission}}` with the commission's items, sheet image,
-  and owner preloaded.
+      iex> load_commission_for_show(user.slug)
+      {:ok, {%User{}, %Commission{}}}
+
+      iex> load_commission_for_show(user_without_commission.slug)
+      {:error, :not_found}
+
+      iex> load_commission_for_show(invalid_slug)
+      {:error, :not_found}
+
   """
   @spec load_commission_for_show(String.t()) ::
           {:ok, {User.t(), Commission.t()}} | {:error, :not_found}
@@ -129,14 +82,26 @@ defmodule Philomena.Commissions do
   Loads the user named by the profile `slug` for creating a commission, on
   behalf of `actor`.
 
-  A banned actor is rejected first with `{:error, :ban}`. An unknown slug is
-  `{:error, :not_found}`. Creating a commission requires the profile to have no
-  existing commission, the actor to be the profile owner or staff, and the
-  profile to hold a verified artist link; the respective failures are
-  `{:error, :unauthorized}`, `{:error, :unauthorized}`, and
-  `{:error, :no_verified_links}`.
+  ## Examples
 
-  Returns `{:ok, user}`.
+      iex> load_commission_for_new(user, user.slug)
+      {:ok, %User{}}
+
+      iex> load_commission_for_new(admin, user.slug)
+      {:ok, %User{}}
+
+      iex> load_commission_for_new(admin, invalid_slug)
+      {:error, :not_found}
+
+      iex> load_commission_for_new(banned_user, banned_user.slug)
+      {:error, :ban}
+
+      iex> load_commission_for_new(user, other_user.slug)
+      {:error, :unauthorized}
+
+      iex> load_commission_for_new(user_without_links, user_without_links.slug)
+      {:error, :no_verified_links}
+
   """
   @spec load_commission_for_new(Actor.t(), String.t()) ::
           {:ok, User.t()}
@@ -151,13 +116,26 @@ defmodule Philomena.Commissions do
   Creates a commission for the user named by the profile `slug`, on behalf of
   `actor`, from `attrs`.
 
-  The actor's write access is verified first (`{:error, :ban}` /
-  `{:error, :unauthorized}`); then the same gating as
-  `load_commission_for_new/2` applies. On success the commission is created for
-  the profile user.
+  ## Examples
 
-  Returns `{:ok, {user, commission}}` on success, or
-  `{:error, {user, changeset}}` when the insert is rejected.
+      iex> create_commission(user, user.slug, commission_params)
+      {:ok, {%User{}, %Commission{}}}
+
+      iex> create_commission(user, user.slug, invalid_params)
+      {:error, {%User{}, %Ecto.Changeset{}}}
+
+      iex> create_commission(admin, invalid_slug, commission_params)
+      {:error, :not_found}
+
+      iex> create_commission(banned_user, banned_user.slug, commission_params)
+      {:error, :ban}
+
+      iex> create_commission(user, other_user.slug, commission_params)
+      {:error, :unauthorized}
+
+      iex> create_commission(user_without_links, user_without_links.slug, commission_params)
+      {:error, :no_verified_links}
+
   """
   @spec create_commission(Actor.t(), String.t(), map()) ::
           {:ok, {User.t(), Commission.t()}}
@@ -177,12 +155,23 @@ defmodule Philomena.Commissions do
   Loads the commission of the user named by the profile `slug` for editing, on
   behalf of `actor`.
 
-  A banned actor is rejected first with `{:error, :ban}`. A missing commission
-  (or unknown slug) is `{:error, :not_found}`. Editing requires the actor to be
-  the profile owner or staff (`{:error, :unauthorized}`) and the profile to hold
-  a verified artist link (`{:error, :no_verified_links}`).
+  ## Examples
 
-  Returns `{:ok, {user, commission, changeset}}`.
+      iex> load_commission_for_edit(user, user.slug)
+      {:ok, {%User{}, %Commission{}, %Ecto.Changeset{}}}
+
+      iex> load_commission_for_edit(admin, invalid_slug)
+      {:error, :not_found}
+
+      iex> load_commission_for_edit(banned_user, banned_user.slug)
+      {:error, :ban}
+
+      iex> load_commission_for_edit(user, other_user.slug)
+      {:error, :unauthorized}
+
+      iex> load_commission_for_edit(user_without_links, user_without_links.slug)
+      {:error, :no_verified_links}
+
   """
   @spec load_commission_for_edit(Actor.t(), String.t()) ::
           {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
@@ -198,12 +187,26 @@ defmodule Philomena.Commissions do
   Updates the commission of the user named by the profile `slug`, on behalf of
   `actor`, from `attrs`.
 
-  The actor's write access is verified first (`{:error, :ban}` /
-  `{:error, :unauthorized}`); then the same gating as
-  `load_commission_for_edit/2` applies.
+  ## Examples
 
-  Returns `{:ok, {user, commission}}` on success, or
-  `{:error, {user, changeset}}` when the update is rejected.
+      iex> update_commission(user, user.slug, commission_params)
+      {:ok, {%User{}, %Commission{}}}
+
+      iex> update_commission(user, user.slug, invalid_params)
+      {:error, {%User{}, %Ecto.Changeset{}}}
+
+      iex> update_commission(admin, invalid_slug, commission_params)
+      {:error, :not_found}
+
+      iex> update_commission(banned_user, banned_user.slug, commission_params)
+      {:error, :ban}
+
+      iex> update_commission(user, other_user.slug, commission_params)
+      {:error, :unauthorized}
+
+      iex> update_commission(user_without_links, user_without_links.slug, commission_params)
+      {:error, :no_verified_links}
+
   """
   @spec update_commission(Actor.t(), String.t(), map()) ::
           {:ok, {User.t(), Commission.t()}}
@@ -223,11 +226,23 @@ defmodule Philomena.Commissions do
   Deletes the commission of the user named by the profile `slug`, on behalf of
   `actor`.
 
-  The actor's write access is verified first (`{:error, :ban}` /
-  `{:error, :unauthorized}`); then the same gating as
-  `load_commission_for_edit/2` applies.
+  ## Examples
 
-  Returns `{:ok, commission}`.
+      iex> delete_commission(user, user.slug)
+      {:ok, %Commission{}}
+
+      iex> delete_commission(admin, invalid_slug)
+      {:error, :not_found}
+
+      iex> delete_commission(banned_user, banned_user.slug)
+      {:error, :ban}
+
+      iex> delete_commission(user, other_user.slug)
+      {:error, :unauthorized}
+
+      iex> delete_commission(user_without_links, user_without_links.slug)
+      {:error, :no_verified_links}
+
   """
   @spec delete_commission(Actor.t(), String.t()) ::
           {:ok, Commission.t()}
@@ -294,8 +309,13 @@ defmodule Philomena.Commissions do
     end
   end
 
+  # Returns an `%Ecto.Changeset{}` for tracking search query changes.
+  defp change_search_query(%SearchQuery{} = search_query) do
+    SearchQuery.changeset(search_query, %{})
+  end
+
   @doc """
-  Searches commissions based on the given parameters.
+  Generates a search query based on the given parameters.
 
   ## Parameters
 
@@ -306,10 +326,16 @@ defmodule Philomena.Commissions do
       * price_min - Minimum base price
       * price_max - Maximum base price
 
-  Returns `{:ok, query}` with a queryable that can be used with Repo.paginate/2,
-  or `{:error, changeset}` if the provided parameters are invalid.
+  ## Examples
+
+      iex> commission_search_query(params)
+      {:ok, #Ecto.Query<...>}
+
+      iex> commission_search_query(invalid_params)
+      {:error, %Ecto.Changeset{}}
+
   """
-  def execute_search_query(params \\ %{}) do
+  def commission_search_query(params \\ %{}) do
     QueryBuilder.search_commissions(params)
   end
 
@@ -320,10 +346,20 @@ defmodule Philomena.Commissions do
   commissions with a fresh search changeset on success, or an empty page with the
   invalid search changeset when the parameters are rejected. The empty page keeps
   callers that paginate the results from receiving a bare list.
+
+  ## Examples
+
+      iex> search_directory(params, pagination)
+      {%Scrivener.Page{}, %Ecto.Changeset{}}
+
+      iex> search_directory(invalid_params, pagination)
+      {%Scrivener.Page{}, %Ecto.Changeset{}}
+
   """
-  @spec search_directory(map(), map() | keyword()) :: {Scrivener.Page.t(), Ecto.Changeset.t()}
+  @spec search_directory(map(), Repo.pagination_params()) ::
+          {Scrivener.Page.t(Commission.t()), Ecto.Changeset.t()}
   def search_directory(params, pagination) do
-    case execute_search_query(params) do
+    case commission_search_query(params) do
       {:ok, commissions} ->
         {Repo.paginate(commissions, pagination), change_search_query(%SearchQuery{})}
 
@@ -349,47 +385,8 @@ defmodule Philomena.Commissions do
   def preload_commission(nil), do: nil
   def preload_commission(%User{} = user), do: Repo.preload(user, :commission)
 
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking search query changes.
-
-  ## Examples
-
-      iex> change_search_query(search_query)
-      %Ecto.Changeset{source: %SearchQuery{}}
-
-  """
-  def change_search_query(%SearchQuery{} = search_query) do
-    SearchQuery.changeset(search_query, %{})
-  end
-
-  @doc """
-  Gets a single item.
-
-  Raises `Ecto.NoResultsError` if the Item does not exist.
-
-  ## Examples
-
-      iex> get_item!(123)
-      %Item{}
-
-      iex> get_item!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_item!(id), do: Repo.get!(Item, id)
-
-  @doc """
-  Creates a item.
-
-  ## Examples
-
-      iex> create_item(%{field: value})
-      {:ok, %Item{}}
-
-      iex> create_item(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
+  # Creates an item. Visible for testing.
+  @doc false
   def create_item(commission, attrs \\ %{}) do
     changeset =
       Ecto.build_assoc(commission, :items)
@@ -413,37 +410,15 @@ defmodule Philomena.Commissions do
     end
   end
 
-  @doc """
-  Updates a item.
-
-  ## Examples
-
-      iex> update_item(item, %{field: new_value})
-      {:ok, %Item{}}
-
-      iex> update_item(item, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_item(%Item{} = item, attrs) do
+  # Updates an item.
+  defp update_item(%Item{} = item, attrs) do
     item
     |> Item.changeset(attrs)
     |> Repo.update()
   end
 
-  @doc """
-  Deletes a Item.
-
-  ## Examples
-
-      iex> delete_item(item)
-      {:ok, %Item{}}
-
-      iex> delete_item(item)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_item(%Item{} = item) do
+  # Deletes an item.
+  defp delete_item(%Item{} = item) do
     update =
       Commission
       |> where(id: ^item.commission_id)
@@ -455,16 +430,8 @@ defmodule Philomena.Commissions do
     |> Repo.transaction()
   end
 
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking item changes.
-
-  ## Examples
-
-      iex> change_item(item)
-      %Ecto.Changeset{source: %Item{}}
-
-  """
-  def change_item(%Item{} = item) do
+  # Returns an `%Ecto.Changeset{}` for tracking item changes.
+  defp change_item(%Item{} = item) do
     Item.changeset(item, %{})
   end
 
@@ -472,11 +439,23 @@ defmodule Philomena.Commissions do
   Loads the commission of the user named by the profile `slug` for adding an
   item, on behalf of `actor`.
 
-  A banned actor is rejected first with `{:error, :ban}`. A missing commission
-  (or unknown slug) is `{:error, :not_found}`. Items are strictly owner-only, so
-  an actor who is not the profile owner is `{:error, :unauthorized}`.
+  Items are strictly owner-only, so an actor who is not the profile owner is
+  `{:error, :unauthorized}`.
 
-  Returns `{:ok, {user, commission, changeset}}`.
+  ## Examples
+
+      iex> load_item_for_new(user, user.slug)
+      {:ok, {%User{}, %Commission{}, %Ecto.Changeset{}}}
+
+      iex> load_item_for_new(admin, other_user.slug)
+      {:error, :unauthorized}
+
+      iex> load_item_for_new(banned_user, banned_user.slug)
+      {:error, :ban}
+
+      iex> load_item_for_new(user_without_commission, user_without_commission.slug)
+      {:error, :not_found}
+
   """
   @spec load_item_for_new(Actor.t(), String.t()) ::
           {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
@@ -492,12 +471,26 @@ defmodule Philomena.Commissions do
   Adds an item to the commission of the user named by the profile `slug`, on
   behalf of `actor`, from `attrs`.
 
-  The actor's write access is verified first (`{:error, :ban}` /
-  `{:error, :unauthorized}`); then the same gating as `load_item_for_new/2`
-  applies.
+  Items are strictly owner-only, so an actor who is not the profile owner is
+  `{:error, :unauthorized}`.
 
-  Returns `{:ok, user}` on success, or `{:error, {user, commission, changeset}}`
-  when the insert is rejected.
+  ## Examples
+
+      iex> create_item(user, user.slug, item_params)
+      {:ok, %User{}}
+
+      iex> create_item(user, user.slug, invalid_params)
+      {:error, {%User{}, %Commission{}, %Ecto.Changeset{}}}
+
+      iex> create_item(admin, other_user.slug, item_params)
+      {:error, :unauthorized}
+
+      iex> create_item(banned_user, banned_user.slug, item_params)
+      {:error, :ban}
+
+      iex> create_item(user_without_commission, user_without_commission.slug, item_params)
+      {:error, :not_found}
+
   """
   @spec create_item(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
@@ -517,19 +510,31 @@ defmodule Philomena.Commissions do
   Loads the item named by `id` under the commission of the user named by the
   profile `slug` for editing, on behalf of `actor`.
 
-  A banned actor is rejected first with `{:error, :ban}`. A missing commission
-  (or unknown slug) is `{:error, :not_found}`, and a non-owner is
-  `{:error, :unauthorized}`. An item id that does not belong to this commission
-  raises `Ecto.NoResultsError`.
+  Items are strictly owner-only, so an actor who is not the profile owner is
+  `{:error, :unauthorized}`.
 
-  Returns `{:ok, {user, commission, item, changeset}}`.
+  ## Examples
+
+      iex> load_item_for_edit(user, user.slug, item_id)
+      {:ok, {%User{}, %Commission{}, %Item{}, %Ecto.Changeset{}}}
+
+      iex> load_item_for_edit(admin, other_user.slug, item_id)
+      {:error, :unauthorized}
+
+      iex> load_item_for_edit(banned_user, banned_user.slug, item_id)
+      {:error, :ban}
+
+      iex> load_item_for_edit(user_without_commission, user_without_commission.slug, invalid_id)
+      {:error, :not_found}
+
   """
-  @spec load_item_for_edit(Actor.t(), String.t(), String.t()) ::
+  @spec load_item_for_edit(Actor.t(), String.t(), IntegerId.integer_id()) ::
           {:ok, {User.t(), Commission.t(), Item.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_item_for_edit(%Actor{} = actor, slug, id) do
     with :ok <- verify_not_banned(actor),
          {:ok, {user, commission}} <- authorize_item(actor, slug) do
+      # TODO: fix raise when invalid item is passed here
       item = fetch_item!(commission, id)
       {:ok, {user, commission, item, change_item(item)}}
     end
@@ -539,14 +544,28 @@ defmodule Philomena.Commissions do
   Updates the item named by `id` under the commission of the user named by the
   profile `slug`, on behalf of `actor`, from `attrs`.
 
-  The actor's write access is verified first (`{:error, :ban}` /
-  `{:error, :unauthorized}`); then the same gating as `load_item_for_edit/3`
-  applies, including the raising item lookup.
+  Items are strictly owner-only, so an actor who is not the profile owner is
+  `{:error, :unauthorized}`.
 
-  Returns `{:ok, user}` on success, or
-  `{:error, {user, commission, item, changeset}}` when the update is rejected.
+  ## Examples
+
+      iex> update_item(user, user.slug, item_id, item_params)
+      {:ok, %User{}}
+
+      iex> update_item(user, user.slug, item_id, invalid_params)
+      {:error, {%User{}, %Commission{}, %Item{}, %Ecto.Changeset{}}}
+
+      iex> update_item(admin, other_user.slug, item_id, item_params)
+      {:error, :unauthorized}
+
+      iex> update_item(banned_user, banned_user.slug, item_id, item_params)
+      {:error, :ban}
+
+      iex> update_item(user_without_commission, user_without_commission.slug, invalid_id, item_params)
+      {:error, :not_found}
+
   """
-  @spec update_item(Actor.t(), String.t(), String.t(), map()) ::
+  @spec update_item(Actor.t(), String.t(), IntegerId.integer_id(), map()) ::
           {:ok, User.t()}
           | {:error, {User.t(), Commission.t(), Item.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
@@ -566,13 +585,25 @@ defmodule Philomena.Commissions do
   Deletes the item named by `id` under the commission of the user named by the
   profile `slug`, on behalf of `actor`.
 
-  The actor's write access is verified first (`{:error, :ban}` /
-  `{:error, :unauthorized}`); then the same gating as `load_item_for_edit/3`
-  applies, including the raising item lookup.
+  Items are strictly owner-only, so an actor who is not the profile owner is
+  `{:error, :unauthorized}`.
 
-  Returns `{:ok, user}`.
+  ## Examples
+
+      iex> delete_item(user, user.slug, item_id)
+      {:ok, %User{}}
+
+      iex> delete_item(admin, other_user.slug, item_id)
+      {:error, :unauthorized}
+
+      iex> delete_item(banned_user, banned_user.slug, item_id)
+      {:error, :ban}
+
+      iex> delete_item(user_without_commission, user_without_commission.slug, invalid_id)
+      {:error, :not_found}
+
   """
-  @spec delete_item(Actor.t(), String.t(), String.t()) ::
+  @spec delete_item(Actor.t(), String.t(), IntegerId.integer_id()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def delete_item(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
