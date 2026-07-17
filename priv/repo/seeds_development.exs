@@ -99,7 +99,6 @@ for comment_body <- resources["comments"] do
   |> case do
     {:ok, %Comment{} = comment} ->
       Comments.approve_comment(comment, pleb)
-      Comments.reindex_comment(comment)
       Images.reindex_image(image)
 
     {:error, :comment, changeset, _so_far} ->

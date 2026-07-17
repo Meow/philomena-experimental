@@ -2,6 +2,7 @@ defmodule Philomena.Comments.Comment do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Images.Image
   alias Philomena.Users.User
   alias Philomena.Schema.Approval
@@ -28,13 +29,13 @@ defmodule Philomena.Comments.Comment do
   end
 
   @doc false
-  def creation_changeset(comment, attrs, attribution) do
+  def creation_changeset(comment, attrs, %Actor{} = actor) do
     comment
     |> cast(attrs, [:body, :anonymous])
     |> validate_required([:body])
     |> validate_length(:body, min: 1, max: 300_000, count: :bytes)
-    |> change(attribution)
-    |> Approval.maybe_put_approval(attribution[:user], :external_links)
+    |> change(Map.take(actor, [:ip, :fingerprint, :user]))
+    |> Approval.maybe_put_approval(actor.user, :external_links)
   end
 
   def changeset(comment, attrs, edited_at \\ nil) do

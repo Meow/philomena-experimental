@@ -35,31 +35,163 @@ defmodule Philomena.Comments do
   alias Philomena.Reports
   alias Philomena.Reports.Report
 
-  @doc """
-  Gets a single comment.
+  # Inserts a comment built on `image` from `params` by the given `actor`,
+  # incrementing the image's comment count, notifying subscribers, and
+  # subscribing the author on reply.
+  #
+  # This is the internal insertion engine shared with `create_comment/3`; it
+  # performs no authorization and no post-insert reindex or bookkeeping.
+  #
+  # Visible for testing.
+  @doc false
+  def create_loaded_comment(image, %Actor{} = actor, params \\ %{}) do
+    comment =
+      Ecto.build_assoc(image, :comments)
+      |> Comment.creation_changeset(params, actor)
 
-  Raises `Ecto.NoResultsError` if the Comment does not exist.
+    image_query =
+      Image
+      |> where(id: ^image.id)
 
-  ## Examples
+    image_lock_query =
+      lock(image_query, "FOR UPDATE")
 
-      iex> get_comment!(123)
-      %Comment{}
+    Multi.new()
+    |> Multi.one(:image, image_lock_query)
+    |> Multi.insert(:comment, comment)
+    |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
+    |> Multi.run(:notification, &notify_comment/2)
+    |> Images.maybe_subscribe_on(:image, actor.user, :watch_on_reply)
+    |> Repo.transaction()
+  end
 
-      iex> get_comment!(456)
-      ** (Ecto.NoResultsError)
+  defp notify_comment(_repo, %{image: image, comment: comment}) do
+    Notifications.create_image_comment_notification(comment.user, image, comment)
+  end
 
-  """
-  def get_comment!(id), do: Repo.get!(Comment, id)
+  # Updates a comment. Visible for testing.
+  @doc false
+  def update_comment(%Comment{} = comment, editor, attrs) do
+    now = DateTime.utc_now(:second)
+    current_body = comment.body
+    current_reason = comment.edit_reason
+
+    comment_changes = Comment.changeset(comment, attrs, now)
+
+    Multi.new()
+    |> Multi.update(:comment, comment_changes)
+    |> Multi.run(:version, fn _repo, _changes ->
+      Versions.create_version("Comment", comment.id, editor.id, %{
+        "body" => current_body,
+        "edit_reason" => current_reason
+      })
+    end)
+    |> Repo.transaction()
+  end
+
+  # Returns an `%Ecto.Changeset{}` for tracking comment changes.
+  @doc false
+  def change_comment(%Comment{} = comment) do
+    Comment.changeset(comment, %{})
+  end
+
+  # Hides a comment and handles associated reports.
+  #
+  # - comment: The comment to hide
+  # - attrs: Attributes for the hide operation
+  # - user: The user performing the hide action
+  #
+  # Visible for testing.
+  @doc false
+  def hide_loaded_comment(%Comment{} = comment, attrs, user) do
+    # Also used by Users.Eraser (TODO what API should be exposed for that?)
+    report_query = Reports.close_report_query({"Comment", comment.id}, user)
+    comment = Comment.hide_changeset(comment, attrs, user)
+
+    Multi.new()
+    |> Multi.update(:comment, comment)
+    |> Multi.update_all(:reports, report_query, [])
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{comment: comment, reports: {_count, reports}}} ->
+        Reports.reindex_reports(reports)
+        reindex_comment(comment)
+
+        {:ok, comment}
+
+      error ->
+        error
+    end
+  end
+
+  # Unhides a previously hidden comment.
+  defp unhide_comment(%Comment{} = comment) do
+    comment
+    |> Comment.unhide_changeset()
+    |> Repo.update()
+    |> reindex_after_update()
+  end
+
+  # Marks a comment as destroyed and removes its text (hard deletion).
+  # Visible for testing.
+  @doc false
+  def destroy_comment(%Comment{} = comment) do
+    comment = comment |> Repo.preload(:user)
+
+    Multi.new()
+    |> Multi.update(:comment, Comment.destroy_changeset(comment))
+    |> Multi.update_all(
+      :image,
+      Image |> where(id: ^comment.image_id),
+      inc: [comments_count: -1]
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{comment: comment}} ->
+        UserStatistics.inc_stat(comment.user_id, :comments_count, -1)
+        reindex_comment(comment)
+
+        {:ok, comment}
+
+      error ->
+        error
+    end
+  end
+
+  defp reindex_after_update(result) do
+    case result do
+      {:ok, comment} ->
+        reindex_comment(comment)
+
+        {:ok, comment}
+
+      error ->
+        error
+    end
+  end
+
+  # Creates a system report for non-approved comments containing external images.
+  #
+  # Returns:
+  # - `false`: If the comment is already approved
+  # - `{:ok, %Report{}}`: If a system report was created
+  defp report_non_approved(%Comment{approved: true}), do: false
+
+  defp report_non_approved(comment) do
+    Reports.create_system_report(
+      {"Comment", comment.id},
+      "Approval",
+      "Comment contains external links"
+    )
+  end
 
   @doc """
   Loads the comment named by `id`, with its image and author preloaded.
 
   A comment that does not exist, or whose content has been destroyed, is
   `{:error, :not_found}`. A comment whose image is hidden from users is
-  `{:error, :hidden_image}`. Otherwise the comment is returned, including comments
-  hidden from users.
-
-  Returns `{:ok, comment}`, `{:error, :not_found}`, or `{:error, :hidden_image}`.
+  `{:error, :hidden_image}`. Otherwise the comment is returned, including
+  comments hidden from users.
 
   ## Examples
 
@@ -70,11 +202,12 @@ defmodule Philomena.Comments do
       {:error, :not_found}
 
   """
-  @spec load_comment(any()) ::
+  @spec load_comment(IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, :not_found} | {:error, :hidden_image}
   def load_comment(id) do
     # The id is interpolated without casting, so a non-integer id raises
     # Ecto.Query.CastError.
+    # TODO: maybe don't raise an error here?
     comment =
       Comment
       |> where(id: ^id)
@@ -95,15 +228,13 @@ defmodule Philomena.Comments do
 
   @doc """
   Loads the edit history of the comment named by `comment_id` on
-  the image named by `image_id`, on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor). This is a public read with no ban check.
+  the image named by `image_id`, on behalf of `actor`.
 
   The image is loaded by id and authorized for `:show`, so a missing or
   non-visible image is `{:error, :unauthorized}`. The comment is then loaded by
-  id scoped to that image: a
-  missing comment is `{:error, :not_found}`, and a comment hidden from users is
-  visible only when `actor` may `:show` it, otherwise `{:error, :unauthorized}`.
+  id scoped to that image: a missing comment is `{:error, :not_found}`, and a
+  comment hidden from users is visible only when `actor` may `:show` it,
+  otherwise `{:error, :unauthorized}`.
 
   Returns `{:ok, {image, comment, versions}}` carrying the last 25 versions,
   newest first, with diffs and version authors resolved.
@@ -117,7 +248,11 @@ defmodule Philomena.Comments do
       {:error, :not_found}
 
   """
-  @spec comment_history(Actor.t(), any(), any()) ::
+  @spec comment_history(
+          actor :: Actor.t(),
+          image_id :: IntegerId.integer_id(),
+          comment_id :: IntegerId.integer_id()
+        ) ::
           {:ok, {Image.t(), Comment.t(), [Version.t()]}}
           | {:error, :unauthorized | :not_found}
   def comment_history(%Actor{} = actor, image_id, comment_id) do
@@ -128,9 +263,8 @@ defmodule Philomena.Comments do
   end
 
   # The comment is loaded by id scoped to the image, a missing row is
-  # `{:error, :not_found}`, and a comment
-  # hidden from users is authorized for `:show` - visible to staff, otherwise
-  # `{:error, :unauthorized}`.
+  # `{:error, :not_found}`, and a comment hidden from users is authorized
+  # for `:show` - visible to staff, otherwise `{:error, :unauthorized}`.
   defp load_image_comment(actor, %Image{} = image, comment_id) do
     Comment
     |> where(image_id: ^image.id, id: ^to_string(comment_id))
@@ -153,13 +287,13 @@ defmodule Philomena.Comments do
 
   @doc """
   Searches comments on behalf of `actor`, applying the viewing user's
-  hidden-tag `filter`, the compiled query string `cq_string`, and `pagination`,
+  hidden-tag `filter`, the compiled query string `query_string`, and `pagination`,
   sorted newest first.
 
   Hidden and non-approved comments are excluded from the results unless the
   viewing user is staff. Results carry the associations named by
   `opts[:preload]`, defaulting to the listing-display preloads. Returns
-  `{:ok, results}`, or `{:error, msg}` when `cq_string` fails to compile.
+  `{:ok, results}`, or `{:error, msg}` when `query_string` fails to compile.
 
   ## Examples
 
@@ -172,7 +306,7 @@ defmodule Philomena.Comments do
   """
   @spec search_comments(Actor.t(), Filter.t(), String.t(), map(), Keyword.t()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_comments(%Actor{user: user}, filter, cq_string, pagination, opts \\ []) do
+  def search_comments(%Actor{user: user}, filter, query_string, pagination, opts \\ []) do
     preloads =
       Keyword.get(opts, :preload, [
         :deleted_by,
@@ -180,7 +314,7 @@ defmodule Philomena.Comments do
         user: [awards: :badge]
       ])
 
-    case Query.compile(cq_string, user: user) do
+    case Query.compile(query_string, user: user) do
       {:ok, query} ->
         results =
           user
@@ -205,6 +339,7 @@ defmodule Philomena.Comments do
     |> hide_non_approved(user, show_hidden?)
   end
 
+  # TODO: explicit role checks. Use authorization instead?
   defp staff?(%{role: role}) when role in ~W(assistant moderator admin), do: true
   defp staff?(_user), do: false
 
@@ -241,10 +376,14 @@ defmodule Philomena.Comments do
   Builds an unexecuted comment search definition for `user`, excluding
   comments the viewer's `filter` hides.
 
-  `body` is one or more compiled query clauses. Options: `:pagination` sets
-  the result window; `:show_hidden` (default `true`) lets staff viewers see
-  deleted and non-approved comments - pass `false` for listings that stay
-  clean regardless of who is looking. Results sort newest first.
+  `body` is one or more compiled query clauses.
+
+  ## Options
+  - `pagination` - sets the result window
+  - `show_hidden` (default `true`) - enables staff viewers to see deleted
+    and non-approved comments
+
+  Results sort newest first.
 
   The definition is meant for batching into
   `PhilomenaQuery.Search.msearch_records/2` alongside other page content;
@@ -280,10 +419,10 @@ defmodule Philomena.Comments do
   @doc """
   Loads a page of `image`'s comments for `user`.
 
-  `scrivener` is the `page`/`page_size` keyword list. Comments order by
+  `pagination` is the `page`/`page_size` keyword list. Comments order by
   creation time, oldest first for users who read oldest-first and newest
   first otherwise. Staff see destroyed and non-approved comments; a
-  signed-in user still sees their own non-approved ones.
+  signed-in user still sees their own non-approved comments.
 
   ## Examples
 
@@ -291,14 +430,15 @@ defmodule Philomena.Comments do
       %Scrivener.Page{}
 
   """
-  @spec paginate_image_comments(User.t() | nil, Image.t(), Keyword.t()) :: Scrivener.Page.t()
-  def paginate_image_comments(user, image, scrivener) do
+  @spec paginate_image_comments(Actor.t(), Image.t(), Repo.pagination_params()) ::
+          Scrivener.Page.t()
+  def paginate_image_comments(%Actor{user: user}, image, pagination) do
     direction = load_direction(user)
 
     visible_image_comments(user, image)
     |> order_by([{^direction, :created_at}])
     |> preload([:image, :deleted_by, user: [awards: :badge]])
-    |> Repo.paginate(scrivener)
+    |> Repo.paginate(pagination)
   end
 
   @doc """
@@ -313,8 +453,9 @@ defmodule Philomena.Comments do
       3
 
   """
-  @spec find_comment_page(Actor.t(), Image.t(), integer(), Keyword.t()) :: pos_integer()
-  def find_comment_page(%Actor{user: user}, image, comment_id, scrivener) do
+  @spec find_comment_page(Actor.t(), Image.t(), integer(), Repo.pagination_params()) ::
+          pos_integer()
+  def find_comment_page(%Actor{user: user}, image, comment_id, pagination) do
     comment =
       Comment
       |> where(image_id: ^image.id)
@@ -326,7 +467,7 @@ defmodule Philomena.Comments do
       |> filter_direction(comment.created_at, user)
       |> Repo.aggregate(:count, :id)
 
-    page_size = scrivener[:page_size]
+    page_size = pagination[:page_size]
 
     # Pagination starts at page 1
     div(offset, page_size) + 1
@@ -342,13 +483,13 @@ defmodule Philomena.Comments do
       4
 
   """
-  @spec last_comment_page(User.t() | nil, Image.t(), Keyword.t()) :: pos_integer()
-  def last_comment_page(user, image, scrivener) do
+  @spec last_comment_page(User.t() | nil, Image.t(), Repo.pagination_params()) :: pos_integer()
+  def last_comment_page(user, image, pagination) do
     offset =
       visible_image_comments(user, image)
       |> Repo.aggregate(:count, :id)
 
-    page_size = scrivener[:page_size]
+    page_size = pagination[:page_size]
 
     # Pagination starts at page 1
     div(offset, page_size) + 1
@@ -388,17 +529,12 @@ defmodule Philomena.Comments do
 
   @doc """
   Loads the image named by `image_id` for the comment `action`
-  (`:index`, `:show`, `:create`, `:edit`, or `:update`), on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
+  (`:index`, `:show`, `:create`, `:edit`, or `:update`), on behalf of `actor`.
 
   The image is loaded with `:sources` and `tags: :aliases` preloaded, and
   authorized for the action's semantic ability: `:index` for a listing, `:show`
-  for a single
-  comment (resolving a duplicate image to its target and authorizing `:show` on
-  it), and `:create_comment` for posting, editing, or updating. A non-castable
-  id is `{:error, :not_found}`; a well-formed id that names no row authorizes
-  `nil`, which no rule permits, so it is `{:error, :unauthorized}`.
+  for a single comment (resolving a duplicate image to its target and authorizing
+  `:show` on it), and `:create_comment` for posting, editing, or updating.
 
   ## Examples
 
@@ -409,7 +545,7 @@ defmodule Philomena.Comments do
       {:error, :unauthorized}
 
   """
-  @spec load_commentable_image(Actor.t(), any(), atom()) ::
+  @spec load_commentable_image(Actor.t(), IntegerId.integer_id(), atom()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def load_commentable_image(%Actor{user: user}, image_id, action) do
     case IntegerId.parse(image_id) do
@@ -452,22 +588,15 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Creates a comment on `image` from `params`, on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
+  Creates a comment on `image` from `params`, on behalf of `actor`.
 
-  This is a write, so `actor`'s write access is verified first (banned actor
-  `{:error, :ban}`, no fingerprint `{:error, :unauthorized}`), then a non-exempt
-  actor who has commented within the last 15 seconds gets
-  `{:error, :rate_limited}`; `image` is expected to have been authorized for
-  `:create_comment` by the caller. On a successful insert the comment and image
-  are reindexed and post-insert bookkeeping runs: an approved comment increments
-  its author's comment count (a no-op for an anonymous author), an unapproved one
-  is reported for external links.
+  Limit 1 comment per actor per 15 seconds.
 
-  Returns `{:ok, comment}` on success, `{:error, :creation_failed}` when the
-  insert is rejected, `{:error, :rate_limited}` when the actor is over the limit,
-  or `{:error, :ban}` / `{:error, :unauthorized}` from the write-access check.
+  `image` is expected to have been authorized for `:create_comment` by the caller.
+
+  On success, the comment and image are reindexed. An approved comment increments
+  its author's comment count (a no-op for an anonymous author), and an unapproved
+  comment is automatically reported for external links.
 
   ## Examples
 
@@ -477,6 +606,15 @@ defmodule Philomena.Comments do
       iex> create_comment(actor, image, %{"body" => ""})
       {:error, :creation_failed}
 
+      iex> create_comment(banned_actor, image, %{"body" => ""})
+      {:error, :ban}
+
+      iex> create_comment(missing_fingerprint_actor, image, %{"body" => ""})
+      {:error, :unauthorized}
+
+      iex> create_comment(limited_actor, image, %{"body" => ""})
+      {:error, :rate_limited}
+
   """
   @spec create_comment(Actor.t(), Image.t(), map()) ::
           {:ok, Comment.t()}
@@ -484,7 +622,7 @@ defmodule Philomena.Comments do
   def create_comment(%Actor{} = actor, %Image{} = image, params) do
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
-      case create_loaded_comment(image, actor_attributes(actor), params) do
+      case create_loaded_comment(image, actor, params) do
         {:ok, %{comment: comment}} ->
           reindex_comment(comment)
           Images.reindex_image(image)
@@ -498,11 +636,6 @@ defmodule Philomena.Comments do
     end
   end
 
-  # The IP/fingerprint/user attribution `create_loaded_comment/3` records,
-  # rebuilt from the actor into the keyword list it expects.
-  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
-    do: [ip: ip, fingerprint: fingerprint, user: user]
-
   # Post-insert bookkeeping: an approved comment counts toward its author's
   # comment total (a no-op for an anonymous author, whose user is nil), an
   # unapproved one is reported for external links.
@@ -511,45 +644,6 @@ defmodule Philomena.Comments do
 
   defp record_comment_creation(_actor, comment),
     do: report_non_approved(comment)
-
-  @doc """
-  Inserts a comment built on `image` from `params` with the `attribution`
-  keyword list (`:user`, `:ip`, `:fingerprint`), incrementing the image's comment
-  count, notifying subscribers, and subscribing the author on reply.
-
-  This is the internal insertion engine shared with `create_comment/3`; it
-  performs no authorization and no post-insert reindex or bookkeeping.
-
-  ## Examples
-
-      iex> create_loaded_comment(image, [user: user], %{"body" => "Hi"})
-      {:ok, %{comment: %Comment{}}}
-
-  """
-  def create_loaded_comment(image, attribution, params \\ %{}) do
-    comment =
-      Ecto.build_assoc(image, :comments)
-      |> Comment.creation_changeset(params, attribution)
-
-    image_query =
-      Image
-      |> where(id: ^image.id)
-
-    image_lock_query =
-      lock(image_query, "FOR UPDATE")
-
-    Multi.new()
-    |> Multi.one(:image, image_lock_query)
-    |> Multi.insert(:comment, comment)
-    |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
-    |> Multi.run(:notification, &notify_comment/2)
-    |> Images.maybe_subscribe_on(:image, attribution[:user], :watch_on_reply)
-    |> Repo.transaction()
-  end
-
-  defp notify_comment(_repo, %{image: image, comment: comment}) do
-    Notifications.create_image_comment_notification(comment.user, image, comment)
-  end
 
   @doc """
   Loads the comment named by `comment_id` on `image`. A missing comment is
@@ -564,7 +658,7 @@ defmodule Philomena.Comments do
       {:error, :not_found}
 
   """
-  @spec load_comment_for_show(Image.t(), any()) ::
+  @spec load_comment_for_show(Image.t(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, :not_found}
   def load_comment_for_show(%Image{} = image, comment_id) do
     case load_scoped_comment(image, comment_id, [:image, :deleted_by, user: [awards: :badge]]) do
@@ -575,28 +669,30 @@ defmodule Philomena.Comments do
 
   @doc """
   Loads the comment named by `comment_id` on `image` for editing, on behalf of
-  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+  `actor`.
 
-  This is a read that precedes an edit: a banned actor is rejected with
-  `{:error, :ban}` first, but the fingerprint requirement that the write itself
-  enforces does not apply here. The comment is then loaded and authorized for
-  `:edit`.
-
-  Returns `{:ok, {comment, changeset}}` - the loaded comment and a change-tracking
-  changeset for it - `{:error, :ban}` for a banned actor,
-  `{:error, :not_found}` when the comment does not exist, or
-  `{:error, :unauthorized}` when it may not be edited.
+  The fingerprint requirement that the write itself enforces does not apply here.
 
   ## Examples
 
       iex> load_comment_for_edit(actor, image, "1")
       {:ok, {%Comment{}, %Ecto.Changeset{}}}
 
+      iex> load_comment_for_edit(banned_actor, image, "1")
+      {:error, :ban}
+
+      iex> load_comment_for_edit(actor, hidden_image, "1")
+      {:error, :unauthorized}
+
+      iex> load_comment_for_edit(actor, image, invalid_id)
+      {:error, :not_found}
+
   """
-  @spec load_comment_for_edit(Actor.t(), Image.t(), any()) ::
+  @spec load_comment_for_edit(Actor.t(), Image.t(), IntegerId.integer_id()) ::
           {:ok, {Comment.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_comment_for_edit(%Actor{} = actor, %Image{} = image, comment_id) do
+    # TODO: inconsistency in the fingerprint requirement?
     with :ok <- verify_not_banned(actor),
          {:ok, comment} <- load_editable_comment(actor.user, image, comment_id) do
       {:ok, {comment, change_comment(comment)}}
@@ -617,6 +713,7 @@ defmodule Philomena.Comments do
   end
 
   defp load_scoped_comment(image, comment_id, preloads) do
+    # TODO: raises on non-integer ID?
     Comment
     |> where(image_id: ^image.id, id: ^to_string(comment_id))
     |> preload(^preloads)
@@ -625,30 +722,35 @@ defmodule Philomena.Comments do
 
   @doc """
   Loads the comment named by `comment_id` on the image named by `image_id` for
-  reporting, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may
-  be `nil` for an anonymous visitor).
+  reporting, on behalf of `actor`.
 
-  This is a read that precedes a report: a banned actor is rejected with
-  `{:error, :ban}` first, but the fingerprint requirement that the write itself
-  enforces does not apply here. The image is authorized for `:show` and the
-  comment loaded within it (a hidden comment visible only to actors who may
-  `:show` it).
-
-  Returns `{:ok, {comment, changeset}}` - the comment with its image preloaded,
-  and a changeset for reporting it - `{:error, :ban}` for a banned actor,
-  `{:error, :unauthorized}` when the image or hidden comment is not visible, or
-  `{:error, :not_found}` when the comment does not exist.
+  The image is authorized for `:show` as well as the comment loaded within it
+  (a hidden comment is reportable only to actors who may `:show` it).
 
   ## Examples
 
       iex> load_comment_for_report(actor, "1", "1")
       {:ok, {%Comment{}, %Ecto.Changeset{}}}
 
+      iex> load_comment_for_report(banned_actor, "1", "1")
+      {:error, :ban}
+
+      iex> load_comment_for_report(actor, invalid_image_id, "1")
+      {:error, :not_found}
+
+      iex> load_comment_for_report(actor, "1", hidden_comment_id)
+      {:error, :unauthorized}
+
   """
-  @spec load_comment_for_report(Actor.t(), any(), any()) ::
+  @spec load_comment_for_report(
+          actor :: Actor.t(),
+          image_id :: IntegerId.integer_id(),
+          comment_id :: IntegerId.integer_id()
+        ) ::
           {:ok, {Comment.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_comment_for_report(%Actor{} = actor, image_id, comment_id) do
+    # TODO: inconsistency in the fingerprint requirement?
     with :ok <- verify_not_banned(actor),
          {:ok, comment} <- load_reportable_comment(actor.user, image_id, comment_id) do
       changeset =
@@ -660,26 +762,31 @@ defmodule Philomena.Comments do
 
   @doc """
   Loads the comment named by `comment_id` on the image named by `image_id` for
-  creating its report, on behalf of `actor` (a `Philomena.Attribution.Actor`
-  whose user may be `nil`).
+  creating its report, on behalf of `actor`.
 
-  This is the write path, so `actor`'s write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint is
-  `{:error, :unauthorized}`. The image is then authorized for `:show` and the
-  comment loaded within it, as `load_comment_for_report/3` does.
-
-  Returns `{:ok, comment}` - the comment with its image preloaded - `{:error, :ban}`
-  or `{:error, :unauthorized}` from the write-access check,
-  `{:error, :unauthorized}` when the image or hidden comment is not visible, or
-  `{:error, :not_found}` when the comment does not exist.
+  The image is authorized for `:show` as well as the comment loaded within it
+  (a hidden comment is reportable only to actors who may `:show` it).
 
   ## Examples
 
       iex> load_comment_for_report_creation(actor, "1", "1")
       {:ok, %Comment{}}
 
+      iex> load_comment_for_report(banned_actor, "1", "1")
+      {:error, :ban}
+
+      iex> load_comment_for_report(actor, invalid_image_id, "1")
+      {:error, :not_found}
+
+      iex> load_comment_for_report(actor, "1", hidden_comment_id)
+      {:error, :unauthorized}
+
   """
-  @spec load_comment_for_report_creation(Actor.t(), any(), any()) ::
+  @spec load_comment_for_report_creation(
+          actor :: Actor.t(),
+          image_id :: IntegerId.integer_id(),
+          comment_id :: IntegerId.integer_id()
+        ) ::
           {:ok, Comment.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_comment_for_report_creation(%Actor{} = actor, image_id, comment_id) do
     with :ok <- verify_write_access(actor) do
@@ -700,21 +807,12 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Updates the comment named by `comment_id` on `image` from
-  `params`, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may
-  be `nil`).
+  Updates the comment named by `comment_id` on `image` from `params`, on behalf
+  of `actor`.
 
-  This is a write, so `actor`'s write access is verified first (banned actor
-  `{:error, :ban}`, no fingerprint `{:error, :unauthorized}`), before the comment
-  is loaded within the image and authorized for `:edit`. The edit is then applied,
-  recording a version attributed to `actor`'s user; an unapproved result is
-  reported for containing external links, and the comment is reindexed.
-
-  Returns `{:ok, comment}` on success, `{:error, {comment, changeset}}` when the
-  edit is rejected, `{:error, :ban}` or
-  `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
-  when the comment may not be edited, or `{:error, :not_found}` when it does not
-  exist.
+  After applying the edit, a version is attributed to `actor`'s user is created,
+  an unapproved result is reported for containing external links, and the comment
+  is reindexed.
 
   ## Examples
 
@@ -724,8 +822,17 @@ defmodule Philomena.Comments do
       iex> update_comment(actor, image, "1", %{"body" => ""})
       {:error, {%Comment{}, %Ecto.Changeset{}}}
 
+      iex> update_comment(banned_actor, image_id, "1", %{"body" => "Edited"})
+      {:error, :ban}
+
+      iex> update_comment(actor, hidden_image_id, "1", %{"body" => "Edited"})
+      {:error, :unauthorized}
+
+      iex> update_comment(actor, invalid_image_id, "1", %{"body" => "Edited"})
+      {:error, :not_found}
+
   """
-  @spec update_comment(Actor.t(), Image.t(), any(), map() | nil) ::
+  @spec update_comment(Actor.t(), Image.t(), IntegerId.integer_id(), map()) ::
           {:ok, Comment.t()}
           | {:error, {Comment.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
@@ -745,66 +852,10 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Updates a comment.
+  Hides the comment named by `comment_id` with `params` on behalf of `actor`.
 
-  ## Examples
-
-      iex> update_comment(comment, %{field: new_value})
-      {:ok, %Comment{}}
-
-      iex> update_comment(comment, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_comment(%Comment{} = comment, editor, attrs) do
-    now = DateTime.utc_now(:second)
-    current_body = comment.body
-    current_reason = comment.edit_reason
-
-    comment_changes = Comment.changeset(comment, attrs, now)
-
-    Multi.new()
-    |> Multi.update(:comment, comment_changes)
-    |> Multi.run(:version, fn _repo, _changes ->
-      Versions.create_version("Comment", comment.id, editor.id, %{
-        "body" => current_body,
-        "edit_reason" => current_reason
-      })
-    end)
-    |> Repo.transaction()
-  end
-
-  @doc """
-  Deletes a Comment.
-
-  ## Examples
-
-      iex> delete_comment(comment)
-      {:ok, %Comment{}}
-
-      iex> delete_comment(comment)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_comment(%Comment{} = comment) do
-    Repo.delete(comment)
-  end
-
-  @doc """
-  Hides the comment named by `comment_id` with `params`
-  (carrying the deletion reason), on behalf of `actor` (a
-  `Philomena.Attribution.Actor`).
-
-  Authorization (`:hide` on the loaded comment) happens here; on success the
-  comment is hidden, its associated reports are closed, it is reindexed, and a
-  moderation log is written attributing the hide to `actor`. An id that cannot
-  name a row is `{:error, :not_found}`, while a well-formed id that names no row
-  authorizes `nil` - which no rule permits - and is therefore
-  `{:error, :unauthorized}`.
-
-  A blank deletion reason fails the hide changeset and returns
-  `{:error, %Comment{}}` carrying the loaded comment so the caller can still
-  act on it.
+  On success the comment is hidden, its associated reports are closed, it is
+  reindexed, and a moderation log is written attributing the hide to `actor`.
 
   ## Examples
 
@@ -818,7 +869,7 @@ defmodule Philomena.Comments do
       {:error, :not_found}
 
   """
-  @spec hide_comment(Actor.t(), any(), map()) ::
+  @spec hide_comment(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Comment.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Comment.t()}
@@ -857,52 +908,14 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Hides a comment and handles associated reports.
+  Restores the comment named by `comment_id`, on behalf of `actor`.
 
-  ## Parameters
-  - comment: The comment to hide
-  - attrs: Attributes for the hide operation
-  - user: The user performing the hide action
-
-  ## Examples
-
-      iex> hide_loaded_comment(comment, %{staff_note: "Rule violation"}, user)
-      {:ok, %Comment{}}
-
-  """
-  def hide_loaded_comment(%Comment{} = comment, attrs, user) do
-    report_query = Reports.close_report_query({"Comment", comment.id}, user)
-    comment = Comment.hide_changeset(comment, attrs, user)
-
-    Multi.new()
-    |> Multi.update(:comment, comment)
-    |> Multi.update_all(:reports, report_query, [])
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{comment: comment, reports: {_count, reports}}} ->
-        Reports.reindex_reports(reports)
-        reindex_comment(comment)
-
-        {:ok, comment}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Restores the comment named by `comment_id`, on behalf of
-  `actor` (a `Philomena.Attribution.Actor`).
-
-  Authorization (`:hide` on the loaded comment) happens here; on success the
-  comment is unhidden, reindexed, and a moderation log is written attributing
-  the restore to `actor`. An id that cannot name a row is `{:error, :not_found}`,
-  while a well-formed id that names no row authorizes `nil` - which no rule
-  permits - and is therefore `{:error, :unauthorized}`.
+  On success, the comment is unhidden, reindexed, and a moderation log is
+  written attributing the restore to `actor`.
 
   Restoring an already-visible comment succeeds and re-logs; the restore is
-  idempotent. A failed restore returns `{:error, %Comment{}}` carrying the loaded
-  comment so the caller can still act on it.
+  idempotent. A failed restore returns `{:error, %Comment{}}` carrying the
+  loaded comment so the caller can still act on it.
 
   ## Examples
 
@@ -916,7 +929,7 @@ defmodule Philomena.Comments do
       {:error, :not_found}
 
   """
-  @spec unhide_comment(Actor.t(), any()) ::
+  @spec unhide_comment(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Comment.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Comment.t()}
@@ -955,31 +968,11 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Unhides a previously hidden comment.
+  Destroys the content of the comment named by `comment_id`, on behalf of `actor`.
 
-  ## Examples
-
-      iex> unhide_comment(comment)
-      {:ok, %Comment{}}
-
-  """
-  def unhide_comment(%Comment{} = comment) do
-    comment
-    |> Comment.unhide_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Destroys the content of the comment named by `comment_id`, on
-  behalf of `actor` (a `Philomena.Attribution.Actor`).
-
-  Authorization (`:hide` on the loaded comment) happens here; on success the
-  comment's text is removed, its image's comment count is decremented, the
-  comment is reindexed, and a moderation log is written attributing the
-  destruction to `actor`. An id that cannot name a row is `{:error, :not_found}`,
-  while a well-formed id that names no row authorizes `nil` - which no rule
-  permits - and is therefore `{:error, :unauthorized}`.
+  On success, the comment's text is removed, its image's comment count is
+  decremented, the comment is reindexed, and a moderation log is written
+  attributing the destruction to `actor`.
 
   A failed destruction returns `{:error, %Comment{}}` carrying the loaded comment
   so the caller can still act on it.
@@ -996,7 +989,7 @@ defmodule Philomena.Comments do
       {:error, :not_found}
 
   """
-  @spec destroy_comment(Actor.t(), any()) ::
+  @spec destroy_comment(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Comment.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Comment.t()}
@@ -1037,63 +1030,15 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Marks a comment as destroyed and removes its text (hard deletion).
+  Approves the comment named by `comment_id`, on behalf of `actor`.
 
-  ## Examples
-
-      iex> destroy_comment(comment)
-      {:ok, %Comment{}}
-
-  """
-  def destroy_comment(%Comment{} = comment) do
-    comment = comment |> Repo.preload(:user)
-
-    Multi.new()
-    |> Multi.update(:comment, Comment.destroy_changeset(comment))
-    |> Multi.update_all(
-      :image,
-      Image |> where(id: ^comment.image_id),
-      inc: [comments_count: -1]
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{comment: comment}} ->
-        UserStatistics.inc_stat(comment.user_id, :comments_count, -1)
-        reindex_comment(comment)
-
-        {:ok, comment}
-
-      error ->
-        error
-    end
-  end
-
-  defp reindex_after_update(result) do
-    case result do
-      {:ok, comment} ->
-        reindex_comment(comment)
-
-        {:ok, comment}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Approves the comment named by `comment_id`, on behalf of
-  `actor` (a `Philomena.Attribution.Actor`).
-
-  Authorization (`:approve` on the loaded comment) happens here; on success the
-  comment's associated reports are closed, the author's comment count is
-  incremented, the comment is reindexed, and a moderation log is written
-  attributing the approval to `actor`. An id that cannot name a row is
-  `{:error, :not_found}`, while a well-formed id that names no row authorizes
-  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`.
+  On success the comment's associated reports are closed, the author's comment
+  count is incremented, the comment is reindexed, and a moderation log is written
+  attributing the approval to `actor`.
 
   Approving an already-approved comment succeeds and re-logs; the approval is
-  idempotent. A failed approval changeset returns
-  `{:error, %Comment{}}` carrying the loaded comment.
+  idempotent. A failed approval changeset returns `{:error, %Comment{}}`
+  carrying the loaded comment.
 
   ## Examples
 
@@ -1107,7 +1052,7 @@ defmodule Philomena.Comments do
       {:error, :not_found}
 
   """
-  @spec approve_comment(Actor.t(), any()) ::
+  @spec approve_comment(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Comment.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Comment.t()}
@@ -1159,33 +1104,6 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Creates a system report for non-approved comments containing external images.
-  Returns false for already approved comments.
-
-  ## Returns
-  - `false`: If the comment is already approved
-  - `{:ok, %Report{}}`: If a system report was created
-
-  ## Examples
-
-      iex> report_non_approved(approved_comment)
-      false
-
-      iex> report_non_approved(unapproved_comment)
-      {:ok, %Report{}}
-
-  """
-  def report_non_approved(%Comment{approved: true}), do: false
-
-  def report_non_approved(comment) do
-    Reports.create_system_report(
-      {"Comment", comment.id},
-      "Approval",
-      "Comment contains external links"
-    )
-  end
-
-  @doc """
   Migrates comments from one image to another when handling duplicate images.
   Returns the duplicate image parameter unchanged, for use in a pipeline.
 
@@ -1210,19 +1128,6 @@ defmodule Philomena.Comments do
     |> Repo.update_all(inc: [comments_count: count])
 
     reindex_comments_on_image(duplicate_of_image)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking comment changes.
-
-  ## Examples
-
-      iex> change_comment(comment)
-      %Ecto.Changeset{source: %Comment{}}
-
-  """
-  def change_comment(%Comment{} = comment) do
-    Comment.changeset(comment, %{})
   end
 
   @doc """

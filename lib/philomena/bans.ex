@@ -598,7 +598,7 @@ defmodule Philomena.Bans do
 
   """
   @spec admin_user_bans(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(User.t())} | {:error, :unauthorized}
   def admin_user_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, User) do
       user_bans =

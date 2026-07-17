@@ -26,7 +26,7 @@ defmodule PhilomenaWeb.Image.CommentController do
   def index(conn, _params) do
     comments =
       Comments.paginate_image_comments(
-        conn.assigns.current_user,
+        conn.assigns.actor,
         conn.assigns.image,
         conn.assigns.comment_scrivener
       )

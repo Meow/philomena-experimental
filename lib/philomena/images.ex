@@ -404,17 +404,19 @@ defmodule Philomena.Images do
 
   """
   @spec load_image_page(Actor.t(), Image.t(), Keyword.t()) :: ImagePage.t()
-  def load_image_page(%Actor{user: user}, %Image{} = image, comment_scrivener) do
+  def load_image_page(%Actor{user: user} = actor, %Image{} = image, comment_scrivener) do
     clear_image_notification(image, user)
 
     comment_scrivener = maybe_jump_to_last_page(user, image, comment_scrivener)
 
     %ImagePage{
       image: image,
-      comments: Comments.paginate_image_comments(user, image, comment_scrivener),
+      comments: Comments.paginate_image_comments(actor, image, comment_scrivener),
       watching: subscribed?(image, user),
       user_galleries: Galleries.user_image_galleries(user, image),
       interactions: Interactions.user_interactions([image], user),
+      # TODO: this should probably be actor-gated, so actors who can't currently interact
+      # with the image don't receive changesets.
       comment_changeset: Comments.change_comment(%Comment{}),
       image_changeset: change_image(%{image | sources: sources_for_edit(image.sources)})
     }

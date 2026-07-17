@@ -1308,7 +1308,7 @@ defmodule Philomena.CommentsTest do
       c2 = comment_at(image, 2)
       c3 = comment_at(image, 3)
 
-      page = Comments.paginate_image_comments(nil, image, page: 1, page_size: 25)
+      page = Comments.paginate_image_comments(actor(nil), image, page: 1, page_size: 25)
 
       assert %Scrivener.Page{} = page
       assert Enum.map(page.entries, & &1.id) == [c3.id, c2.id, c1.id]
@@ -1319,7 +1319,11 @@ defmodule Philomena.CommentsTest do
       c2 = comment_at(image, 2)
       c3 = comment_at(image, 3)
 
-      page = Comments.paginate_image_comments(oldest_first_user(), image, page: 1, page_size: 25)
+      page =
+        Comments.paginate_image_comments(actor(oldest_first_user()), image,
+          page: 1,
+          page_size: 25
+        )
 
       assert Enum.map(page.entries, & &1.id) == [c1.id, c2.id, c3.id]
     end
@@ -1329,7 +1333,7 @@ defmodule Philomena.CommentsTest do
       _pending = pending_comment(image)
       _destroyed = destroyed_comment(image)
 
-      page = Comments.paginate_image_comments(nil, image, page: 1, page_size: 25)
+      page = Comments.paginate_image_comments(actor(nil), image, page: 1, page_size: 25)
 
       assert Enum.map(page.entries, & &1.id) == [approved.id]
     end
@@ -1341,7 +1345,7 @@ defmodule Philomena.CommentsTest do
       own_pending = pending_comment(image, author)
       others_pending = pending_comment(image)
 
-      page = Comments.paginate_image_comments(author, image, page: 1, page_size: 25)
+      page = Comments.paginate_image_comments(actor(author), image, page: 1, page_size: 25)
       ids = Enum.map(page.entries, & &1.id)
 
       assert approved.id in ids
@@ -1355,7 +1359,10 @@ defmodule Philomena.CommentsTest do
       destroyed = destroyed_comment(image)
 
       page =
-        Comments.paginate_image_comments(moderator_user_fixture(), image, page: 1, page_size: 25)
+        Comments.paginate_image_comments(actor(moderator_user_fixture()), image,
+          page: 1,
+          page_size: 25
+        )
 
       ids = Enum.map(page.entries, & &1.id)
 
