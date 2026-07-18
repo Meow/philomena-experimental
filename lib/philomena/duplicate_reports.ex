@@ -24,6 +24,96 @@ defmodule Philomena.DuplicateReports do
 
   @valid_states ~w(open rejected accepted claimed)
 
+  # Creates a duplicate report. Visible for testing.
+  @doc false
+  def create_duplicate_report(source, target, user, attrs) do
+    %DuplicateReport{image_id: source.id, duplicate_of_image_id: target.id}
+    |> DuplicateReport.creation_changeset(attrs, user)
+    |> Repo.insert()
+  end
+
+  defp reject_report(%DuplicateReport{} = duplicate_report, user) do
+    duplicate_report
+    |> DuplicateReport.reject_changeset(user)
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking duplicate report changes.
+
+  ## Examples
+
+      iex> change_duplicate_report(duplicate_report)
+      %Ecto.Changeset{source: %DuplicateReport{}}
+
+  """
+  def change_duplicate_report(%DuplicateReport{} = duplicate_report) do
+    DuplicateReport.changeset(duplicate_report, %{})
+  end
+
+  # Merges the duplicate image of `duplicate_report` into its target image.
+  #
+  # Takes an optional `Ecto.Multi`, the duplicate report to accept, and the user
+  # accepting the report. Rejects any other duplicate reports between the same two
+  # images and merges the images.
+  defp accept_report_multi(multi \\ nil, %DuplicateReport{} = duplicate_report, user) do
+    duplicate_report = Repo.preload(duplicate_report, [:image, :duplicate_of_image])
+
+    other_duplicate_reports =
+      DuplicateReport
+      |> where(
+        [dr],
+        (dr.image_id == ^duplicate_report.image_id and
+           dr.duplicate_of_image_id == ^duplicate_report.duplicate_of_image_id) or
+          (dr.image_id == ^duplicate_report.duplicate_of_image_id and
+             dr.duplicate_of_image_id == ^duplicate_report.image_id)
+      )
+      |> where([dr], dr.id != ^duplicate_report.id)
+      |> update(set: [state: "rejected"])
+
+    changeset = DuplicateReport.accept_changeset(duplicate_report, user)
+
+    multi = multi || Multi.new()
+
+    multi
+    |> Multi.update(:duplicate_report, changeset)
+    |> Multi.update_all(:other_reports, other_duplicate_reports, [])
+    |> Images.merge_image(duplicate_report.image, duplicate_report.duplicate_of_image, user)
+  end
+
+  # Merges the target of `duplicate_report` into its reported image.
+  #
+  # Creates a duplicate report with the reversed image relationship if one does not
+  # already exist, rejects the original report, and accepts the reversed report.
+  defp accept_reverse_report_multi(%DuplicateReport{} = duplicate_report, user) do
+    new_report =
+      DuplicateReport
+      |> where(duplicate_of_image_id: ^duplicate_report.image_id)
+      |> where(image_id: ^duplicate_report.duplicate_of_image_id)
+      |> limit(1)
+      |> Repo.one()
+
+    new_report =
+      if new_report do
+        new_report
+      else
+        %DuplicateReport{
+          image_id: duplicate_report.duplicate_of_image_id,
+          duplicate_of_image_id: duplicate_report.image_id,
+          reason: Enum.join([duplicate_report.reason, "(Reverse accepted)"], "\n"),
+          user_id: user.id
+        }
+        |> DuplicateReport.changeset(%{})
+        |> Repo.insert!()
+      end
+
+    Multi.new()
+    |> Multi.run(:reject_duplicate_report, fn _, %{} ->
+      reject_report(duplicate_report, user)
+    end)
+    |> accept_report_multi(new_report, user)
+  end
+
   @doc """
   Returns a paginated list of duplicate reports for the report index.
 
@@ -40,7 +130,7 @@ defmodule Philomena.DuplicateReports do
       %Scrivener.Page{}
 
   """
-  @spec list_duplicate_reports(map(), Scrivener.Config.t() | keyword()) :: Scrivener.Page.t()
+  @spec list_duplicate_reports(map(), Repo.pagination_params()) :: Scrivener.Page.t()
   def list_duplicate_reports(params, pagination) do
     states =
       (presence(params["states"]) || ~w(open claimed))
@@ -62,11 +152,8 @@ defmodule Philomena.DuplicateReports do
   @doc """
   Loads the duplicate report named by `id`.
 
-  A non-castable or out-of-range id, and a well-formed but unknown id, are both
-  `{:error, :not_found}`. The report carries its reported and claimed-duplicate
-  images preloaded. Any visitor may view a report; there is no authorization.
-
-  Returns `{:ok, duplicate_report}` or `{:error, :not_found}`.
+  The report carries its reported and claimed-duplicate images preloaded.
+  Any visitor may view a report; there is no authorization.
 
   ## Examples
 
@@ -109,7 +196,7 @@ defmodule Philomena.DuplicateReports do
     |> where([i, _it], i.id != ^source.id)
     |> Repo.all()
     |> Enum.map(fn target ->
-      create_duplicate_report(source, target, %{}, %{
+      create_duplicate_report(source, target, nil, %{
         "reason" => "Automated Perceptual dedupe match"
       })
     end)
@@ -220,18 +307,16 @@ defmodule Philomena.DuplicateReports do
 
   @doc """
   Lists the duplicate reports involving the image named by `image_id`, on behalf
-  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
-  anonymous visitor).
+  of `actor`.
 
   The image is loaded by id (with its sources and tags preloaded) and
   authorized for `:show`. A non-castable or out-of-range id is
   `{:error, :not_found}`. A well-formed but unknown id is authorized as a `nil`
   load: an actor who may not `:show` it gets `{:error, :unauthorized}`, while an
-  actor permitted to act on the `nil` load gets `{:error, :not_found}`. Reports
-  where the image is either the reported image or the claimed duplicate are
-  returned, with their user, modifier, and image associations preloaded.
+  actor permitted to act on the `nil` load gets `{:error, :not_found}`.
 
-  Returns `{:ok, {image, duplicate_reports}}`.
+  Reports where the image is either the reported image or the claimed duplicate
+  are returned, with their user, modifier, and image associations preloaded.
 
   ## Examples
 
@@ -242,7 +327,7 @@ defmodule Philomena.DuplicateReports do
       {:error, :unauthorized}
 
   """
-  @spec image_duplicate_reports(Actor.t(), String.t() | integer()) ::
+  @spec image_duplicate_reports(Actor.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), [DuplicateReport.t()]}} | {:error, :unauthorized | :not_found}
   def image_duplicate_reports(%Actor{} = actor, image_id) do
     with {:ok, id} <- IntegerId.parse(image_id),
@@ -269,22 +354,6 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Gets a single duplicate_report.
-
-  Raises `Ecto.NoResultsError` if the Duplicate report does not exist.
-
-  ## Examples
-
-      iex> get_duplicate_report!(123)
-      %DuplicateReport{}
-
-      iex> get_duplicate_report!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_duplicate_report!(id), do: Repo.get!(DuplicateReport, id)
-
-  @doc """
   Submits a duplicate report from `params["duplicate_report"]`, on behalf of
   `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
   anonymous visitor).
@@ -299,9 +368,6 @@ defmodule Philomena.DuplicateReports do
   to reuse. On success the report is inserted with the actor's user recorded as
   the reporter.
 
-  Returns `{:ok, duplicate_report}`, `{:error, :ban}`, `{:error, :unauthorized}`,
-  `{:error, :not_found}`, or `{:error, :report_failed, source}`.
-
   ## Examples
 
       iex> create_duplicate_report(actor, %{"duplicate_report" => %{"image_id" => "1", "duplicate_of_image_id" => "2"}})
@@ -309,6 +375,12 @@ defmodule Philomena.DuplicateReports do
 
       iex> create_duplicate_report(actor, %{"duplicate_report" => %{"image_id" => "1", "duplicate_of_image_id" => "1"}})
       {:error, :report_failed, %Image{}}
+
+      iex> create_duplicate_report(banned_actor, duplicate_report_params)
+      {:error, :ban}
+
+      iex> create_duplicate_report(actor, invalid_source_params)
+      {:error, :not_found}
 
   """
   @spec create_duplicate_report(Actor.t(), map()) ::
@@ -338,8 +410,8 @@ defmodule Philomena.DuplicateReports do
   defp build_duplicate_report(_actor, source, nil, _params),
     do: {:error, :report_failed, source}
 
-  defp build_duplicate_report(actor, source, target, report_params) do
-    case create_duplicate_report(source, target, actor_attributes(actor), report_params) do
+  defp build_duplicate_report(%Actor{user: user}, source, target, report_params) do
+    case create_duplicate_report(source, target, user, report_params) do
       {:ok, duplicate_report} -> {:ok, duplicate_report}
       {:error, _changeset} -> {:error, :report_failed, source}
     end
@@ -352,10 +424,6 @@ defmodule Philomena.DuplicateReports do
     end
   end
 
-  # The user attribution the report changeset records, rebuilt from the actor.
-  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
-    do: [ip: ip, fingerprint: fingerprint, user: user]
-
   defp presence(""), do: nil
   defp presence(x), do: x
 
@@ -363,45 +431,30 @@ defmodule Philomena.DuplicateReports do
   defp wrap(not_a_list), do: [not_a_list]
 
   @doc """
-  Creates a duplicate_report.
-
-  ## Examples
-
-      iex> create_duplicate_report(%{field: value})
-      {:ok, %DuplicateReport{}}
-
-      iex> create_duplicate_report(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_duplicate_report(source, target, attribution, attrs \\ %{}) do
-    %DuplicateReport{image_id: source.id, duplicate_of_image_id: target.id}
-    |> DuplicateReport.creation_changeset(attrs, attribution)
-    |> Repo.insert()
-  end
-
-  @doc """
   Accepts the duplicate report named by `id` and merges the duplicate image into
   the target, on behalf of `actor` (the acting user).
 
-  The report is authorized for `:edit` after being loaded by id. A non-castable
-  id, and a well-formed unknown id an admin is otherwise permitted to act on, are
-  `{:error, :not_found}`; an unknown id for a non-admin actor is
-  `{:error, :unauthorized}`. Any other duplicate reports between the same two
-  images are rejected, the images are merged, and a moderation log is written on
-  success. A merge that cannot complete (such as a report already accepted by
-  someone else) is `{:error, :report_failed}`.
-
-  Returns `{:ok, results}` (the transaction result map), `{:error, :not_found}`,
-  `{:error, :unauthorized}`, or `{:error, :report_failed}`.
+  The report is authorized for `:edit` after being loaded by id. Any other
+  duplicate reports between the same two images are rejected, the images are
+  merged, and a moderation log is written on success. A merge that cannot complete
+  (such as a report already accepted by someone else) is `{:error, :report_failed}`.
 
   ## Examples
 
       iex> accept_duplicate_report(moderator, "42")
       {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
 
+      iex> accept_duplicate_report(moderator, "42")
+      {:error, :report_failed}
+
+      iex> accept_duplicate_report(admin, "999999999")
+      {:error, :not_found}
+
+      iex> accept_duplicate_report(user, "42")
+      {:error, :unauthorized}
+
   """
-  @spec accept_duplicate_report(Actor.t(), String.t() | integer()) ::
+  @spec accept_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
   def accept_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
@@ -427,48 +480,6 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Merges the duplicate image of `duplicate_report` into its target image.
-
-  Takes an optional `Ecto.Multi`, the duplicate report to accept, and the user
-  accepting the report. Rejects any other duplicate reports between the same two
-  images and merges the images. Runs the transaction unless composed into a
-  larger multi.
-
-  ## Examples
-
-      iex> accept_report_multi(nil, duplicate_report, user)
-      {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
-
-      iex> accept_report_multi(existing_multi, duplicate_report, user)
-      %Ecto.Multi{}
-
-  """
-  def accept_report_multi(multi \\ nil, %DuplicateReport{} = duplicate_report, user) do
-    duplicate_report = Repo.preload(duplicate_report, [:image, :duplicate_of_image])
-
-    other_duplicate_reports =
-      DuplicateReport
-      |> where(
-        [dr],
-        (dr.image_id == ^duplicate_report.image_id and
-           dr.duplicate_of_image_id == ^duplicate_report.duplicate_of_image_id) or
-          (dr.image_id == ^duplicate_report.duplicate_of_image_id and
-             dr.duplicate_of_image_id == ^duplicate_report.image_id)
-      )
-      |> where([dr], dr.id != ^duplicate_report.id)
-      |> update(set: [state: "rejected"])
-
-    changeset = DuplicateReport.accept_changeset(duplicate_report, user)
-
-    multi = multi || Multi.new()
-
-    multi
-    |> Multi.update(:duplicate_report, changeset)
-    |> Multi.update_all(:other_reports, other_duplicate_reports, [])
-    |> Images.merge_image(duplicate_report.image, duplicate_report.duplicate_of_image, user)
-  end
-
-  @doc """
   Accepts the duplicate report named by `id` in reverse, making the reported
   image the duplicate of the target instead, on behalf of `actor` (the acting
   user).
@@ -476,19 +487,24 @@ defmodule Philomena.DuplicateReports do
   The report is authorized for `:edit` after being loaded by id, with the same
   not-found/unauthorized shapes as `accept_duplicate_report/2`. The original
   report is rejected, the images are merged the other way, and a moderation log
-  is written on success. A merge that cannot complete is
-  `{:error, :report_failed}`.
-
-  Returns `{:ok, results}` (the transaction result map), `{:error, :not_found}`,
-  `{:error, :unauthorized}`, or `{:error, :report_failed}`.
+  is written on success. A merge that cannot complete is `{:error, :report_failed}`.
 
   ## Examples
 
       iex> accept_reverse_duplicate_report(moderator, "42")
       {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
 
+      iex> accept_reverse_duplicate_report(moderator, "42")
+      {:error, :report_failed}
+
+      iex> accept_reverse_duplicate_report(admin, "999999999")
+      {:error, :not_found}
+
+      iex> accept_reverse_duplicate_report(user, "42")
+      {:error, :unauthorized}
+
   """
-  @spec accept_reverse_duplicate_report(Actor.t(), String.t() | integer()) ::
+  @spec accept_reverse_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
   def accept_reverse_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
@@ -514,48 +530,6 @@ defmodule Philomena.DuplicateReports do
   end
 
   @doc """
-  Merges the target of `duplicate_report` into its reported image.
-
-  Creates a duplicate report with the reversed image relationship if one does not
-  already exist, rejects the original report, and accepts the reversed report,
-  running the transaction.
-
-  ## Examples
-
-      iex> accept_reverse_report_multi(duplicate_report, user)
-      {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
-
-  """
-  def accept_reverse_report_multi(%DuplicateReport{} = duplicate_report, user) do
-    new_report =
-      DuplicateReport
-      |> where(duplicate_of_image_id: ^duplicate_report.image_id)
-      |> where(image_id: ^duplicate_report.duplicate_of_image_id)
-      |> limit(1)
-      |> Repo.one()
-
-    new_report =
-      if new_report do
-        new_report
-      else
-        %DuplicateReport{
-          image_id: duplicate_report.duplicate_of_image_id,
-          duplicate_of_image_id: duplicate_report.image_id,
-          reason: Enum.join([duplicate_report.reason, "(Reverse accepted)"], "\n"),
-          user_id: user.id
-        }
-        |> DuplicateReport.changeset(%{})
-        |> Repo.insert!()
-      end
-
-    Multi.new()
-    |> Multi.run(:reject_duplicate_report, fn _, %{} ->
-      reject_report(duplicate_report, user)
-    end)
-    |> accept_report_multi(new_report, user)
-  end
-
-  @doc """
   Claims the duplicate report named by `id` for review, on behalf of `actor`
   (the acting user).
 
@@ -563,16 +537,21 @@ defmodule Philomena.DuplicateReports do
   not-found/unauthorized shapes as `accept_duplicate_report/2`. The report is
   marked claimed by the actor and a moderation log is written on success.
 
-  Returns `{:ok, duplicate_report}`, `{:error, :not_found}`, or
-  `{:error, :unauthorized}`.
+  Does not fail if the report is claimed, or claimed by a different user.
 
   ## Examples
 
       iex> claim_duplicate_report(moderator, "42")
       {:ok, %DuplicateReport{}}
 
+      iex> claim_duplicate_report(admin, "999999999")
+      {:error, :not_found}
+
+      iex> claim_duplicate_report(user, "42")
+      {:error, :unauthorized}
+
   """
-  @spec claim_duplicate_report(Actor.t(), String.t() | integer()) ::
+  @spec claim_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
   def claim_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
@@ -604,16 +583,21 @@ defmodule Philomena.DuplicateReports do
   returned to the open, unclaimed state and a moderation log is written on
   success.
 
-  Returns `{:ok, duplicate_report}`, `{:error, :not_found}`, or
-  `{:error, :unauthorized}`.
+  Does not fail if the report is not claimed, or claimed by a different user.
 
   ## Examples
 
       iex> unclaim_duplicate_report(moderator, "42")
       {:ok, %DuplicateReport{}}
 
+      iex> unclaim_duplicate_report(admin, "999999999")
+      {:error, :not_found}
+
+      iex> unclaim_duplicate_report(user, "42")
+      {:error, :unauthorized}
+
   """
-  @spec unclaim_duplicate_report(Actor.t(), String.t() | integer()) ::
+  @spec unclaim_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
   def unclaim_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
@@ -645,16 +629,19 @@ defmodule Philomena.DuplicateReports do
   `accept_duplicate_report/2`. The report is marked rejected by the actor and a
   moderation log is written on success.
 
-  Returns `{:ok, duplicate_report}`, `{:error, :not_found}`, or
-  `{:error, :unauthorized}`.
-
   ## Examples
 
       iex> reject_duplicate_report(moderator, "42")
       {:ok, %DuplicateReport{}}
 
+      iex> reject_duplicate_report(admin, "999999999")
+      {:error, :not_found}
+
+      iex> reject_duplicate_report(user, "42")
+      {:error, :unauthorized}
+
   """
-  @spec reject_duplicate_report(Actor.t(), String.t() | integer()) ::
+  @spec reject_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
   def reject_duplicate_report(%Actor{} = actor, id) do
     with {:ok, report_id} <- IntegerId.parse(id),
@@ -675,41 +662,6 @@ defmodule Philomena.DuplicateReports do
       shape when shape in [:error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
-  end
-
-  defp reject_report(%DuplicateReport{} = duplicate_report, user) do
-    duplicate_report
-    |> DuplicateReport.reject_changeset(user)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes a DuplicateReport.
-
-  ## Examples
-
-      iex> delete_duplicate_report(duplicate_report)
-      {:ok, %DuplicateReport{}}
-
-      iex> delete_duplicate_report(duplicate_report)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_duplicate_report(%DuplicateReport{} = duplicate_report) do
-    Repo.delete(duplicate_report)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking duplicate_report changes.
-
-  ## Examples
-
-      iex> change_duplicate_report(duplicate_report)
-      %Ecto.Changeset{source: %DuplicateReport{}}
-
-  """
-  def change_duplicate_report(%DuplicateReport{} = duplicate_report) do
-    DuplicateReport.changeset(duplicate_report, %{})
   end
 
   @doc """

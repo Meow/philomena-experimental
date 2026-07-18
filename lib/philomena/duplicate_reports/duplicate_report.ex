@@ -27,10 +27,10 @@ defmodule Philomena.DuplicateReports.DuplicateReport do
   end
 
   @doc false
-  def creation_changeset(duplicate_report, attrs, attribution) do
+  def creation_changeset(duplicate_report, attrs, user) do
     duplicate_report
     |> cast(attrs, [:reason])
-    |> put_assoc(:user, attribution[:user])
+    |> put_assoc(:user, user)
     |> validate_length(:reason, max: 250, count: :bytes)
     |> validate_source_is_not_target()
   end
