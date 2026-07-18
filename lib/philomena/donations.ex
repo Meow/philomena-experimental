@@ -11,26 +11,31 @@ defmodule Philomena.Donations do
   alias Philomena.Donations.Donation
   alias Philomena.Users.User
 
-  @doc """
-  Returns the list of donations.
+  # Inserts a donation from `attrs`. Visible for testing.
+  @doc false
+  def insert_donation(attrs \\ %{}) do
+    %Donation{}
+    |> Donation.changeset(attrs)
+    |> Repo.insert()
+  end
 
-  ## Examples
-
-      iex> list_donations()
-      [%Donation{}, ...]
-
-  """
-  def list_donations do
-    Repo.all(Donation)
+  # Returns an `%Ecto.Changeset{}` for tracking donation changes.
+  defp change_donation(%Donation{} = donation) do
+    Donation.changeset(donation, %{})
   end
 
   @doc """
   Returns the paginated donation listing for the admin index, on behalf of
   `actor`, newest first, with each donation's user preloaded.
 
-  Authorizes `:index` against the donation model, so a viewer without donation
-  access is `{:error, :unauthorized}`. Returns `{:ok, donations}` as a
-  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  ## Examples
+
+      iex> load_donations(admin, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_donations(user,  pagination)
+      {:error, :unauthorized}
+
   """
   @spec load_donations(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
@@ -50,12 +55,17 @@ defmodule Philomena.Donations do
   Loads the user named by `slug` together with their donations, on behalf of
   `actor`, pairing them with a changeset for adding a donation.
 
-  Authorizes `:index` against the donation model first, so a viewer without
-  donation access is `{:error, :unauthorized}`. An unknown slug is
-  `{:error, :not_found}`.
+  ## Examples
 
-  Returns `{:ok, {user, changeset}}`, `{:error, :unauthorized}`, or
-  `{:error, :not_found}`.
+      iex> load_user_donations(admin, user.slug)
+      {:ok, {%User{}, %Ecto.Changeset{}}}
+
+      iex> load_user_donations(admin, invalid_slug)
+      {:error, :not_found}
+
+      iex> load_user_donations(user, user.slug)
+      {:error, :unauthorized}
+
   """
   @spec load_user_donations(Actor.t(), String.t()) ::
           {:ok, {User.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
@@ -75,35 +85,18 @@ defmodule Philomena.Donations do
   end
 
   @doc """
-  Gets a single donation.
-
-  Raises `Ecto.NoResultsError` if the Donation does not exist.
-
-  ## Examples
-
-      iex> get_donation!(123)
-      %Donation{}
-
-      iex> get_donation!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_donation!(id), do: Repo.get!(Donation, id)
-
-  @doc """
   Creates a donation on behalf of `actor` from `attrs`.
 
-  Authorizes `:index` against the donation model, then inserts the donation.
-  Returns `{:ok, donation}`, `{:error, :unauthorized}`, or
-  `{:error, %Ecto.Changeset{}}` (e.g. a `user_id` naming no user).
-
   ## Examples
 
-      iex> create_donation(admin, %{field: value})
+      iex> create_donation(admin, donation_params)
       {:ok, %Donation{}}
 
-      iex> create_donation(admin, %{field: bad_value})
+      iex> create_donation(admin, invalid_params)
       {:error, %Ecto.Changeset{}}
+
+      iex> create_donation(user, donation_params)
+      {:error, :unauthorized}
 
   """
   @spec create_donation(Actor.t(), map()) ::
@@ -112,70 +105,5 @@ defmodule Philomena.Donations do
     with :ok <- authorize(actor, :index, Donation) do
       insert_donation(attrs)
     end
-  end
-
-  @doc """
-  Inserts a donation from `attrs` without authorization.
-
-  ## Examples
-
-      iex> insert_donation(%{field: value})
-      {:ok, %Donation{}}
-
-      iex> insert_donation(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def insert_donation(attrs \\ %{}) do
-    %Donation{}
-    |> Donation.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Updates a donation.
-
-  ## Examples
-
-      iex> update_donation(donation, %{field: new_value})
-      {:ok, %Donation{}}
-
-      iex> update_donation(donation, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_donation(%Donation{} = donation, attrs) do
-    donation
-    |> Donation.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes a Donation.
-
-  ## Examples
-
-      iex> delete_donation(donation)
-      {:ok, %Donation{}}
-
-      iex> delete_donation(donation)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_donation(%Donation{} = donation) do
-    Repo.delete(donation)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking donation changes.
-
-  ## Examples
-
-      iex> change_donation(donation)
-      %Ecto.Changeset{source: %Donation{}}
-
-  """
-  def change_donation(%Donation{} = donation) do
-    Donation.changeset(donation, %{})
   end
 end
