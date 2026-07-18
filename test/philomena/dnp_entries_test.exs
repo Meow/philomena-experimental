@@ -314,7 +314,8 @@ defmodule Philomena.DnpEntriesTest do
                  }
                )
 
-      assert DnpEntries.get_dnp_entry!(entry.id).reason == "Updated reason"
+      assert elem(DnpEntries.load_dnp_entry(actor(moderator_user_fixture()), entry.id), 1).reason ==
+               "Updated reason"
     end
 
     test "an invalid update re-renders with the entry, changeset, and selectable tags" do

@@ -19,34 +19,31 @@ defmodule Philomena.DnpEntries do
   import Philomena.Authorization,
     only: [authorize: 3, verify_not_banned: 1, verify_write_access: 1]
 
-  @doc """
-  Returns the list of dnp_entries.
+  # Inserts a DNP entry for `user`, filed against whichever of `tags` matches the
+  # `"tag_id"` in `attrs`. Visible for testing.
+  @doc false
+  @spec insert_dnp_entry(User.t(), [Tag.t()], map()) ::
+          {:ok, DnpEntry.t()} | {:error, Ecto.Changeset.t()}
+  def insert_dnp_entry(user, tags, attrs \\ %{}) do
+    tag = Enum.find(tags, &(to_string(&1.id) == attrs["tag_id"]))
 
-  ## Examples
-
-      iex> list_dnp_entries()
-      [%DnpEntry{}, ...]
-
-  """
-  def list_dnp_entries do
-    Repo.all(DnpEntry)
+    %DnpEntry{}
+    |> DnpEntry.creation_changeset(attrs, tag, user)
+    |> Repo.insert()
   end
 
-  @doc """
-  Gets a single dnp_entry.
+  # Transitions a DNP entry to a new state. Visible for testing.
+  @doc false
+  def transition_loaded_dnp_entry(%DnpEntry{} = dnp_entry, user, new_state) do
+    dnp_entry
+    |> DnpEntry.transition_changeset(user, new_state)
+    |> Repo.update()
+  end
 
-  Raises `Ecto.NoResultsError` if the Dnp entry does not exist.
-
-  ## Examples
-
-      iex> get_dnp_entry!(123)
-      %DnpEntry{}
-
-      iex> get_dnp_entry!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_dnp_entry!(id), do: Repo.get!(DnpEntry, id)
+  # Returns an `%Ecto.Changeset{}` for tracking DNP entry changes.
+  defp change_dnp_entry(%DnpEntry{} = dnp_entry) do
+    DnpEntry.changeset(dnp_entry, %{})
+  end
 
   @doc """
   Assembles the Do-Not-Post listing for `actor` (the current viewer, whose user
@@ -58,8 +55,27 @@ defmodule Philomena.DnpEntries do
   The `status_column` flag records which of the two listings was produced.
 
   This listing is public; no authorization is performed.
+
+  ## Examples
+
+      iex> load_dnp_listing(user, %{"mine" => "1"}, pagination)
+      %DnpListing{
+        entries: %Scrivener.Page{},
+        linked_tags: [%Tag{}, ...],
+        status_column: true
+      }
+
+      iex> load_dnp_listing(user, params, pagination)
+      %DnpListing{
+        entries: %Scrivener.Page{},
+        linked_tags: [%Tag{}, ...],
+        status_column: false
+      }
+
   """
   @spec load_dnp_listing(Actor.t(), map(), Repo.pagination_params()) :: DnpListing.t()
+  def load_dnp_listing(actor, params, pagination)
+
   def load_dnp_listing(%Actor{user: %User{} = user}, %{"mine" => _mine}, pagination) do
     entries =
       DnpEntry
@@ -87,18 +103,22 @@ defmodule Philomena.DnpEntries do
   Assembles the admin Do-Not-Post listing, on behalf of `actor`, for the given
   `params` and `pagination`, newest update first.
 
-  Authorizes `:index` against the DNP entry model first, so a viewer without DNP
-  access is `{:error, :unauthorized}`. A list `"states"` param restricts to
-  those states; a string `"eq"` param filters by requesting user, tag, reason,
-  conditions, or instructions; otherwise the active states (requested, claimed,
-  rescinded, acknowledged) are listed.
+  A viewer without DNP access is `{:error, :unauthorized}`. A list `"states"`
+  param restricts to those states; a string `"eq"` param filters by requesting
+  user, tag, reason, conditions, or instructions; otherwise the active states
+  (requested, claimed, rescinded, acknowledged) are listed.
 
-  Returns `{:ok, dnp_entries}` as a `m:Scrivener.Page` of entries with their
-  tag, requesting user, and modifying user preloaded, or
-  `{:error, :unauthorized}`.
+  ## Examples
+
+      iex> load_admin_dnp_entries(admin, params, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_admin_dnp_entries(user, params, pagination)
+      {:error, :unauthorized}
+
   """
   @spec load_admin_dnp_entries(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(DnpEntry.t())} | {:error, :unauthorized}
   def load_admin_dnp_entries(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, DnpEntry) do
       entries =
@@ -140,6 +160,18 @@ defmodule Philomena.DnpEntries do
   The tag is preloaded. Returns `{:error, :not_found}` for an id no row could
   have, `{:error, :unauthorized}` when the viewer may not see the entry, and
   otherwise `{:ok, dnp_entry}`.
+
+  ## Examples
+
+      iex> load_dnp_entry(admin, dnp_entry_id)
+      {:ok, %DnpEntry{}}
+
+      iex> load_dnp_entry(admin, invalid_id)
+      {:error, :not_found}
+
+      iex> load_dnp_entry(user, unlisted_dnp_entry_id)
+      {:error, :unauthorized}
+
   """
   @spec load_dnp_entry(Actor.t(), Loader.integer_id()) ::
           {:ok, DnpEntry.t()} | {:error, :not_found} | {:error, :unauthorized}
@@ -150,6 +182,15 @@ defmodule Philomena.DnpEntries do
   @doc """
   Returns the mod notes on `dnp_entry` for `viewer`, rendered with
   `collection_renderer`, or `nil` when the viewer may not read mod notes.
+
+  ## Examples
+
+      iex> mod_notes(admin, dnp_entry, &(&1))
+      [%ModNote{}, ...]
+
+      iex> mod_notes(user, dnp_entry, &(&1))
+      nil
+
   """
   @spec mod_notes(Actor.t(), DnpEntry.t(), (list() -> list())) :: list() | nil
   def mod_notes(%Actor{} = viewer, %DnpEntry{} = dnp_entry, collection_renderer) do
@@ -161,16 +202,30 @@ defmodule Philomena.DnpEntries do
   @doc """
   Prepares a new DNP request on behalf of `actor`.
 
-  Returns `{:error, :ban}` for a banned actor and `{:error, :unauthorized}` when
-  the actor has no tag to file a request against. Otherwise returns
-  `{:ok, %{changeset: changeset, selectable_tags: tags}}` with the offered
-  tags.
+  Returns `{:error, :unauthorized}` when `actor` has no selectable tag.
+
+  ## Examples
+
+      iex> load_new_dnp_entry(user, params)
+      {:ok,
+        %{
+          changeset: %Ecto.Changeset{},
+          selectable_tags: [%Tag{}, ...]
+        }}
+
+      iex> load_new_dnp_entry(user_with_no_selectable_tags, params)
+      {:error, :unauthorized}
+
+      iex> load_new_dnp_entry(banned_user, params)
+      {:error, :ban}
+
   """
   @spec load_new_dnp_entry(Actor.t(), map()) ::
           {:ok, %{changeset: Ecto.Changeset.t(), selectable_tags: [Tag.t()]}}
           | {:error, :ban}
           | {:error, :unauthorized}
   def load_new_dnp_entry(%Actor{} = actor, params) do
+    # TODO: weird success shape?
     with :ok <- verify_not_banned(actor),
          {:ok, tags} <- selectable_tags(actor.user, params) do
       {:ok, %{changeset: change_dnp_entry(%DnpEntry{}), selectable_tags: tags}}
@@ -184,9 +239,26 @@ defmodule Philomena.DnpEntries do
   otherwise the actor's linked tags) and files the request against the tag named
   by the nested `"dnp_entry"` attrs.
 
-  Returns `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the
-  actor has no selectable tag, `{:error, %{changeset: changeset, selectable_tags:
-  tags}}` when the request is invalid, and `{:ok, dnp_entry}` on success.
+  Returns `{:error, :unauthorized}` when `actor` has no selectable tag.
+
+  ## Examples
+
+      iex> create_dnp_entry(user, params)
+      {:ok, %DnpEntry{}}
+
+      iex> create_dnp_entry(user, invalid_params)
+      {:error,
+        %{
+          changeset: %Ecto.Changeset{},
+          selectable_tags: [%Tag{}, ...]
+        }}
+
+      iex> create_dnp_entry(user_with_no_selectable_tags, params)
+      {:error, :unauthorized}
+
+      iex> create_dnp_entry(banned_user, params)
+      {:error, :ban}
+
   """
   @spec create_dnp_entry(Actor.t(), map()) ::
           {:ok, DnpEntry.t()}
@@ -194,6 +266,7 @@ defmodule Philomena.DnpEntries do
           | {:error, :ban}
           | {:error, :unauthorized}
   def create_dnp_entry(%Actor{} = actor, params) do
+    # TODO: weird success shape?
     with :ok <- verify_write_access(actor),
          {:ok, tags} <- selectable_tags(actor.user, params) do
       attrs = params["dnp_entry"] || %{}
@@ -209,10 +282,25 @@ defmodule Philomena.DnpEntries do
   Prepares the moderator edit of the DNP entry named by `id`, on behalf of
   `actor`.
 
-  Returns `{:error, :unauthorized}` when the viewer has no selectable tag or may
-  not edit the entry, `{:error, :not_found}` for an id no row could have, and
-  otherwise `{:ok, %{dnp_entry: dnp_entry, changeset: changeset, selectable_tags:
-  tags}}`.
+  Returns `{:error, :unauthorized}` when `actor` has no selectable tag or may
+  not edit the entry.
+
+  ## Examples
+
+      iex> load_dnp_entry_for_edit(admin, dnp_entry_id, params)
+      {:ok,
+        %{
+          dnp_entry: %DnpEntry{},
+          changeset: %Ecto.Changeset{},
+          selectable_tags: [%Tag{}, ...]
+        }}
+
+      iex> load_dnp_entry_for_edit(admin, invalid_id, params)
+      {:error, :not_found}
+
+      iex> load_dnp_entry_for_edit(user, dnp_entry_id, params)
+      {:error, :unauthorized}
+
   """
   @spec load_dnp_entry_for_edit(Actor.t(), Loader.integer_id(), map()) ::
           {:ok,
@@ -220,6 +308,7 @@ defmodule Philomena.DnpEntries do
           | {:error, :not_found}
           | {:error, :unauthorized}
   def load_dnp_entry_for_edit(%Actor{} = actor, id, params) do
+    # TODO: weird success shape?
     with {:ok, tags} <- selectable_tags(actor.user, params),
          {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :edit) do
       {:ok,
@@ -231,10 +320,28 @@ defmodule Philomena.DnpEntries do
   Updates the DNP entry named by `id` on behalf of `actor` from
   `params`.
 
-  Returns `{:error, :unauthorized}` when the viewer has no selectable tag or may
-  not edit the entry, `{:error, :not_found}` for an id no row could have,
-  `{:error, %{dnp_entry: dnp_entry, changeset: changeset, selectable_tags: tags}}`
-  when the update is invalid, and `{:ok, dnp_entry}` on success.
+  Returns `{:error, :unauthorized}` when `actor` has no selectable tag or may
+  not edit the entry.
+
+  ## Examples
+
+      iex> update_dnp_entry(admin, dnp_entry_id, params)
+      {:ok, %DnpEntry{}}
+
+      iex> update_dnp_entry(admin, dnp_entry_id, invalid_params)
+      {:error,
+        %{
+          dnp_entry: %DnpEntry{},
+          changeset: %Ecto.Changeset{},
+          selectable_tags: [%Tag{}, ...]
+        }}
+
+      iex> update_dnp_entry(admin, invalid_id, params)
+      {:error, :not_found}
+
+      iex> update_dnp_entry(user, dnp_entry_id, params)
+      {:error, :unauthorized}
+
   """
   @spec update_dnp_entry(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, DnpEntry.t()}
@@ -257,6 +364,7 @@ defmodule Philomena.DnpEntries do
           {:ok, dnp_entry}
 
         {:error, changeset} ->
+          # TODO: weird shape?
           {:error, %{dnp_entry: dnp_entry, changeset: changeset, selectable_tags: tags}}
       end
     end
@@ -267,17 +375,19 @@ defmodule Philomena.DnpEntries do
   behalf of `actor` (the acting staff user), and writes a moderation log on
   success.
 
-  Authorizes `:index` against the DNP entry model first, so a viewer without DNP
-  access is `{:error, :unauthorized}`. The entry is then loaded (with its tag) by
-  id; a non-castable id or a well-formed id naming no row is `{:error, :not_found}`.
-
-  Returns `{:ok, dnp_entry}`, `{:error, :unauthorized}`, `{:error, :not_found}`,
-  or `{:error, %Ecto.Changeset{}}` when the target state is invalid.
-
   ## Examples
 
       iex> transition_dnp_entry(moderator, "1", "acknowledged")
       {:ok, %DnpEntry{}}
+
+      iex> transition_dnp_entry(moderator, "1", "invalid state name")
+      {:error, %Ecto.Changeset{}}
+
+      iex> transition_dnp_entry(admin, invalid_id, "acknowledged")
+      {:error, :not_found}
+
+      iex> transition_dnp_entry(user, "1", "acknowledged")
+      {:error, :unauthorized}
 
   """
   @spec transition_dnp_entry(Actor.t(), Loader.integer_id(), String.t()) ::
@@ -297,57 +407,10 @@ defmodule Philomena.DnpEntries do
     end
   end
 
-  @doc """
-  Transitions a DNP entry to a new state.
-
-  ## Examples
-
-      iex> transition_loaded_dnp_entry(dnp_entry, user, "acknowledged")
-      {:ok, %DnpEntry{}}
-
-      iex> transition_loaded_dnp_entry(dnp_entry, user, "invalid_state")
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def transition_loaded_dnp_entry(%DnpEntry{} = dnp_entry, user, new_state) do
-    dnp_entry
-    |> DnpEntry.transition_changeset(user, new_state)
-    |> Repo.update()
-  end
-
   # Loads the DNP entry named by `id` with its tag preloaded, answering
   # `{:error, :not_found}` for a non-castable id or an id naming no row.
   defp load_required_dnp_entry(id) do
     Loader.fetch(DnpEntry, id, [:tag])
-  end
-
-  @doc """
-  Deletes a DnpEntry.
-
-  ## Examples
-
-      iex> delete_dnp_entry(dnp_entry)
-      {:ok, %DnpEntry{}}
-
-      iex> delete_dnp_entry(dnp_entry)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_dnp_entry(%DnpEntry{} = dnp_entry) do
-    Repo.delete(dnp_entry)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking dnp_entry changes.
-
-  ## Examples
-
-      iex> change_dnp_entry(dnp_entry)
-      %Ecto.Changeset{source: %DnpEntry{}}
-
-  """
-  def change_dnp_entry(%DnpEntry{} = dnp_entry) do
-    DnpEntry.changeset(dnp_entry, %{})
   end
 
   @doc """
@@ -371,24 +434,6 @@ defmodule Philomena.DnpEntries do
     else
       nil
     end
-  end
-
-  @doc """
-  Inserts a DNP entry for `user`, filed against whichever of `tags` matches the
-  `"tag_id"` in `attrs`. A blank match records the "must be one of your linked
-  tags" error.
-
-  This is the raw insert used by fixtures and by `create_dnp_entry/2` after it
-  has resolved the actor's selectable tags; it performs no authorization.
-  """
-  @spec insert_dnp_entry(User.t(), [Tag.t()], map()) ::
-          {:ok, DnpEntry.t()} | {:error, Ecto.Changeset.t()}
-  def insert_dnp_entry(user, tags, attrs \\ %{}) do
-    tag = Enum.find(tags, &(to_string(&1.id) == attrs["tag_id"]))
-
-    %DnpEntry{}
-    |> DnpEntry.creation_changeset(attrs, tag, user)
-    |> Repo.insert()
   end
 
   # The tags a DNP request may be filed against: for a viewer who may see the DNP
