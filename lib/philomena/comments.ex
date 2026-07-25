@@ -752,7 +752,7 @@ defmodule Philomena.Comments do
   def load_comment_for_report(%Actor{} = actor, image_id, comment_id) do
     # TODO: inconsistency in the fingerprint requirement?
     with :ok <- verify_not_banned(actor),
-         {:ok, comment} <- load_reportable_comment(actor.user, image_id, comment_id) do
+         {:ok, comment} <- load_reportable_comment(actor, image_id, comment_id) do
       changeset =
         Reports.change_report(%Report{reportable_type: "Comment", reportable_id: comment.id})
 
@@ -790,7 +790,7 @@ defmodule Philomena.Comments do
           {:ok, Comment.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_comment_for_report_creation(%Actor{} = actor, image_id, comment_id) do
     with :ok <- verify_write_access(actor) do
-      load_reportable_comment(actor.user, image_id, comment_id)
+      load_reportable_comment(actor, image_id, comment_id)
     end
   end
 
@@ -798,8 +798,8 @@ defmodule Philomena.Comments do
   # image is authorized for `:show`, the comment is loaded within it (a missing
   # row is `{:error, :not_found}`), and a comment hidden from users is visible
   # only to a user who may `:show` it.
-  defp load_reportable_comment(user, image_id, comment_id) do
-    with {:ok, image} <- Images.load_visible_image(user, image_id) do
+  defp load_reportable_comment(%Actor{user: user} = actor, image_id, comment_id) do
+    with {:ok, image} <- Images.load_visible_image(actor, image_id) do
       image
       |> load_scoped_comment(comment_id, [:image, :deleted_by, user: [awards: :badge]])
       |> authorize_comment_visibility(user)

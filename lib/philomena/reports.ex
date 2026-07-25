@@ -280,7 +280,7 @@ defmodule Philomena.Reports do
   def load_image_for_report(%Actor{} = actor, image_id) do
     with :ok <- verify_not_banned(actor),
          {:ok, image} <-
-           Images.load_visible_image(actor.user, image_id, [:sources, tags: :aliases]) do
+           Images.load_visible_image(actor, image_id, [:sources, tags: :aliases]) do
       changeset = change_report(%Report{reportable_type: "Image", reportable_id: image.id})
       {:ok, {image, changeset}}
     end
@@ -309,7 +309,7 @@ defmodule Philomena.Reports do
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_image_for_report_creation(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor) do
-      Images.load_visible_image(actor.user, image_id, [:sources, tags: :aliases])
+      Images.load_visible_image(actor, image_id, [:sources, tags: :aliases])
     end
   end
 
