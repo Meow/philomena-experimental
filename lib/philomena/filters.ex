@@ -242,7 +242,7 @@ defmodule Philomena.Filters do
       {:error, "There was an error parsing your query."}
 
   """
-  @spec search_filters(Actor.t(), String.t(), Repo.pagination_params()) ::
+  @spec search_filters(Actor.t(), String.t(), Search.pagination_params()) ::
           {:ok, Scrivener.Page.t(Filter.t())} | {:error, String.t()}
   def search_filters(%Actor{user: user}, query_string, pagination) do
     with {:ok, query} <- Query.compile(query_string, user: user) do

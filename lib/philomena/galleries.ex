@@ -33,21 +33,157 @@ defmodule Philomena.Galleries do
     on_delete: :clear_gallery_notification,
     id_name: :gallery_id
 
-  @doc """
-  Gets a single gallery.
+  # Gets a single gallery.
+  defp get_gallery!(id), do: Repo.get!(Gallery, id)
 
-  Raises `Ecto.NoResultsError` if the Gallery does not exist.
+  # Creates a gallery. Visible for testing.
+  @doc false
+  def create_gallery(%User{} = user, attrs, _unused) do
+    %Gallery{}
+    |> Gallery.creation_changeset(attrs, user)
+    |> Repo.insert()
+    |> reindex_after_update()
+  end
 
-  ## Examples
+  # Returns an `%Ecto.Changeset{}` for tracking gallery changes.
+  defp change_gallery(%Gallery{} = gallery) do
+    Gallery.changeset(gallery, %{})
+  end
 
-      iex> get_gallery!(123)
-      %Gallery{}
+  # Updates a gallery.
+  defp update_gallery(%Gallery{} = gallery, attrs) do
+    gallery
+    |> Gallery.changeset(attrs)
+    |> Repo.update()
+    |> reindex_after_update()
+  end
 
-      iex> get_gallery!(456)
-      ** (Ecto.NoResultsError)
+  # Deletes a gallery.
+  @spec delete_gallery(Gallery.t()) :: {:ok, Gallery.t()} | Ecto.Multi.failure()
+  @doc false
+  def delete_gallery(%Gallery{} = gallery) do
+    # TODO: Visible for Eraser.erase_permanently!/2
+    images =
+      Interaction
+      |> where(gallery_id: ^gallery.id)
+      |> select([i], i.image_id)
+      |> Repo.all()
 
-  """
-  def get_gallery!(id), do: Repo.get!(Gallery, id)
+    Multi.new()
+    |> Multi.delete(:gallery, gallery)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{gallery: gallery}} ->
+        unindex_gallery(gallery)
+        Images.reindex_images(images)
+
+        {:ok, gallery}
+
+      error ->
+        error
+    end
+  end
+
+  # Adds the specified image to the gallery, updates image count, triggers
+  # notifications, and performs necessary reindexing. The image is added at
+  # the last position. Visible for testing.
+  @doc false
+  def add_image_to_gallery(gallery, image) do
+    Multi.new()
+    |> Multi.run(:gallery, fn repo, %{} ->
+      gallery =
+        Gallery
+        |> where(id: ^gallery.id)
+        |> lock("FOR UPDATE")
+        |> repo.one()
+
+      {:ok, gallery}
+    end)
+    |> Multi.run(:interaction, fn repo, %{} ->
+      position = (last_position(gallery.id) || -1) + 1
+
+      %Interaction{gallery_id: gallery.id}
+      |> Interaction.changeset(%{"image_id" => image.id, "position" => position})
+      |> repo.insert()
+    end)
+    |> Multi.run(:image_count, fn repo, %{} ->
+      now = DateTime.utc_now()
+
+      {count, nil} =
+        Gallery
+        |> where(id: ^gallery.id)
+        |> repo.update_all(inc: [image_count: 1], set: [updated_at: now])
+
+      {:ok, count}
+    end)
+    |> Multi.run(:notification, &notify_gallery/2)
+    |> Repo.transaction()
+    |> case do
+      {:ok, result} ->
+        Images.reindex_image(image)
+        reindex_gallery(gallery)
+
+        {:ok, result}
+
+      error ->
+        error
+    end
+  end
+
+  # Removes the specified image from the gallery, updates image count,
+  # and performs necessary reindexing. Visible for testing.
+  @doc false
+  def remove_image_from_gallery(gallery, image) do
+    Multi.new()
+    |> Multi.run(:gallery, fn repo, %{} ->
+      gallery =
+        Gallery
+        |> where(id: ^gallery.id)
+        |> lock("FOR UPDATE")
+        |> repo.one()
+
+      {:ok, gallery}
+    end)
+    |> Multi.run(:interaction, fn repo, %{} ->
+      {count, nil} =
+        Interaction
+        |> where(gallery_id: ^gallery.id, image_id: ^image.id)
+        |> repo.delete_all()
+
+      {:ok, count}
+    end)
+    |> Multi.run(:image_count, fn repo, %{interaction: interaction_count} ->
+      now = DateTime.utc_now()
+
+      {count, nil} =
+        Gallery
+        |> where(id: ^gallery.id)
+        |> repo.update_all(inc: [image_count: -interaction_count], set: [updated_at: now])
+
+      {:ok, count}
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, result} ->
+        Images.reindex_image(image)
+        reindex_gallery(gallery)
+
+        {:ok, result}
+
+      error ->
+        error
+    end
+  end
+
+  defp notify_gallery(_repo, %{gallery: gallery}) do
+    Notifications.create_gallery_image_notification(gallery)
+  end
+
+  defp last_position(gallery_id) do
+    Interaction
+    |> where(gallery_id: ^gallery_id)
+    |> Repo.aggregate(:max, :position)
+  end
 
   @doc """
   Builds a change-tracking changeset for a new gallery, on behalf of `actor`.
@@ -71,61 +207,53 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Creates a gallery.
-
-  With a `Philomena.Attribution.Actor` this acts on the actor's behalf: the
-  actor's write access is verified (banned actors get `{:error, :ban}`, actors
-  without a fingerprint `{:error, :unauthorized}`) and creation is authorized
-  before the gallery is inserted for the actor's user and reindexed.
-
-  With a `User` it is the authorization-free engine: the gallery is inserted
-  for that user and reindexed.
+  Creates a gallery, on behalf of `actor`.
 
   ## Examples
 
-      iex> create_gallery(actor, %{field: value})
+      iex> create_gallery(user, gallery_params)
       {:ok, %Gallery{}}
 
-      iex> create_gallery(user, %{field: bad_value})
+      iex> create_gallery(user, invalid_params)
       {:error, %Ecto.Changeset{}}
+
+      iex> create_gallery(banned_user, invalid_params)
+      {:error, :ban}
 
   """
   @spec create_gallery(Actor.t(), map()) ::
           {:ok, Gallery.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def create_gallery(%Actor{} = actor, attrs) do
+  def create_gallery(%Actor{user: user} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Gallery) do
-      create_gallery(actor.user, attrs)
+      create_gallery(user, attrs, nil)
     end
   end
 
-  @spec create_gallery(User.t(), map()) :: {:ok, Gallery.t()} | {:error, Ecto.Changeset.t()}
-  def create_gallery(%User{} = user, attrs) do
-    %Gallery{}
-    |> Gallery.creation_changeset(attrs, user)
-    |> Repo.insert()
-    |> reindex_after_update()
-  end
-
   @doc """
-  Updates the gallery named by `gallery_id`, on behalf of
-  `actor`.
+  Updates the gallery named by `gallery_id`, on behalf of `actor`.
 
-  The actor's write access is verified first (banned actors get
-  `{:error, :ban}`, actors without a fingerprint `{:error, :unauthorized}`),
-  then the gallery is loaded and `:update` is authorized: a non-castable id is
-  `{:error, :not_found}`, an unknown id authorizes `nil` and comes back
-  `{:error, :unauthorized}` for a non-admin (admins get `{:error, :not_found}`),
-  and an actor without edit rights on a real gallery gets
-  `{:error, :unauthorized}`. On success the gallery is updated and reindexed.
+  On success the gallery is updated and reindexed.
 
   ## Examples
 
-      iex> update_gallery(actor, "1", %{field: new_value})
+      iex> update_gallery(user, "1", gallery_params)
       {:ok, %Gallery{}}
 
+      iex> update_gallery(user, "1", invalid_params)
+      {:error, %Ecto.Changeset{}}
+
+      iex> update_gallery(banned_user, "1", gallery_params)
+      {:error, :ban}
+
+      iex> update_gallery(other_user, "1", gallery_params)
+      {:error, :unauthorized}
+
+      iex> update_gallery(admin, "999999999", gallery_params)
+      {:error, :not_found}
+
   """
-  @spec update_gallery(Actor.t(), any(), map() | nil) ::
+  @spec update_gallery(Actor.t(), Loader.integer_id(), map() | nil) ::
           {:ok, Gallery.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_gallery(%Actor{} = actor, gallery_id, attrs) do
     with :ok <- verify_write_access(actor),
@@ -135,31 +263,9 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Updates a gallery.
+  Deletes the gallery named by `gallery_id`, on behalf of `actor`.
 
-  ## Examples
-
-      iex> update_gallery(gallery, %{field: new_value})
-      {:ok, %Gallery{}}
-
-      iex> update_gallery(gallery, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  @spec update_gallery(Gallery.t(), map() | nil) ::
-          {:ok, Gallery.t()} | {:error, Ecto.Changeset.t()}
-  def update_gallery(%Gallery{} = gallery, attrs) do
-    gallery
-    |> Gallery.changeset(attrs)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Deletes the gallery named by `gallery_id`, on behalf of
-  `actor`.
-
-  Loading and authorization follow `update_gallery/3`, authorizing `:delete`.
+  Loading and authorization follow `update_gallery/3`.
 
   ## Examples
 
@@ -167,7 +273,7 @@ defmodule Philomena.Galleries do
       {:ok, %Gallery{}}
 
   """
-  @spec delete_gallery(Actor.t(), any()) ::
+  @spec delete_gallery(Actor.t(), Loader.integer_id()) ::
           {:ok, Gallery.t()} | {:error, :ban | :unauthorized | :not_found}
   def delete_gallery(%Actor{} = actor, gallery_id) do
     with :ok <- verify_write_access(actor),
@@ -177,67 +283,27 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Deletes a Gallery.
-
-  ## Examples
-
-      iex> delete_gallery(gallery)
-      {:ok, %Gallery{}}
-
-      iex> delete_gallery(gallery)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  @spec delete_gallery(Gallery.t()) :: {:ok, Gallery.t()} | Ecto.Multi.failure()
-  def delete_gallery(%Gallery{} = gallery) do
-    images =
-      Interaction
-      |> where(gallery_id: ^gallery.id)
-      |> select([i], i.image_id)
-      |> Repo.all()
-
-    Multi.new()
-    |> Multi.delete(:gallery, gallery)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{gallery: gallery}} ->
-        unindex_gallery(gallery)
-        Images.reindex_images(images)
-
-        {:ok, gallery}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking gallery changes.
-
-  ## Examples
-
-      iex> change_gallery(gallery)
-      %Ecto.Changeset{source: %Gallery{}}
-
-  """
-  def change_gallery(%Gallery{} = gallery) do
-    Gallery.changeset(gallery, %{})
-  end
-
-  @doc """
   Loads the gallery named by `gallery_id` for editing, on
   behalf of `actor`, pairing it with a change-tracking changeset for it.
 
-  A banned actor gets `{:error, :ban}`. Loading and authorization otherwise
-  follow `update_gallery/3`, authorizing `:edit`.
+  Loading and authorization otherwise follow `update_gallery/3`, authorizing `:edit`.
 
   ## Examples
 
-      iex> load_gallery_for_edit(actor, "1")
+      iex> load_gallery_for_edit(user, "1")
       {:ok, {%Gallery{}, %Ecto.Changeset{}}}
 
+      iex> load_gallery_for_edit(banned_user, "1")
+      {:error, :ban}
+
+      iex> load_gallery_for_edit(other_user, "1")
+      {:error, :unauthorized}
+
+      iex> load_gallery_for_edit(admin, "999999999")
+      {:error, :not_found}
+
   """
-  @spec load_gallery_for_edit(Actor.t(), any()) ::
+  @spec load_gallery_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Gallery.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_gallery_for_edit(%Actor{} = actor, gallery_id) do
@@ -260,7 +326,7 @@ defmodule Philomena.Galleries do
       %Scrivener.Page{}
 
   """
-  @spec load_gallery_index(map(), map()) :: Scrivener.Page.t()
+  @spec load_gallery_index(map(), Search.pagination_params()) :: Scrivener.Page.t(Gallery.t())
   def load_gallery_index(params, pagination) do
     Gallery
     |> Search.search_definition(
@@ -295,7 +361,7 @@ defmodule Philomena.Galleries do
 
   """
   @spec search_galleries(Actor.t(), String.t() | nil, Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t()} | {:error, String.t()}
+          {:ok, Scrivener.Page.t(Gallery.t())} | {:error, String.t()}
   def search_galleries(%Actor{user: user}, query_string, pagination) do
     case Philomena.Galleries.Query.compile(query_string, user: user) do
       {:ok, query} ->
@@ -318,9 +384,6 @@ defmodule Philomena.Galleries do
   Assembles the `GalleryPage` for the viewer described by `scope`, from
   `gallery_id`.
 
-  The gallery is loaded and `:show` is authorized: a non-castable id is
-  `{:error, :not_found}`, and an unknown id authorizes `nil`, which comes back
-  `{:error, :unauthorized}` for a non-admin (admins get `{:error, :not_found}`).
   The gallery's position order is merged into the scope's parameters so the
   images list, and the previous/next page probes flanking it, run in gallery
   order; interactions and subscription state are computed for the viewer, and
@@ -329,11 +392,17 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> load_gallery_page(scope, "1")
+      iex> load_gallery_page(user_scope, "1")
       {:ok, %GalleryPage{}}
 
+      iex> load_gallery_page(user_scope, "999999999")
+      {:error, :unauthorized}
+
+      iex> load_gallery_page(admin_scope, "999999999")
+      {:error, :not_found}
+
   """
-  @spec load_gallery_page(Scope.t(), any()) ::
+  @spec load_gallery_page(Scope.t(), Loader.integer_id()) ::
           {:ok, GalleryPage.t()} | {:error, :unauthorized | :not_found}
   def load_gallery_page(%Scope{} = scope, gallery_id) do
     with {:ok, gallery} <- load_authorized_gallery(scope.user, gallery_id, :show) do
@@ -506,6 +575,7 @@ defmodule Philomena.Galleries do
   def user_image_galleries(nil, _image), do: []
 
   def user_image_galleries(user, image) do
+    # FIXME: unbounded query.
     Gallery
     |> where(user_id: ^user.id)
     |> join(
@@ -618,19 +688,28 @@ defmodule Philomena.Galleries do
   Adds the image named by `image_id` to the gallery named by
   `gallery_id`, on behalf of `actor`.
 
-  The actor's write access is verified first (banned actors get
-  `{:error, :ban}`, actors without a fingerprint `{:error, :unauthorized}`),
-  then the gallery is loaded and `:edit` is authorized and the image is loaded
-  and `:show` is authorized, each following the unknown-id rules of
-  `update_gallery/3`. On success the image is added at the last position.
+  On success, the image is added at the last position.
 
   ## Examples
 
       iex> add_image_to_gallery(actor, "1", "42")
       {:ok, %{gallery: %Gallery{}, ...}}
 
+      iex> add_image_to_gallery(banned_actor, "1", "42")
+      {:error, :ban}
+
+      iex> add_image_to_gallery(other_actor, "1", "42")
+      {:error, :unauthorized}
+
+      iex> add_image_to_gallery(admin_actor, "999999999", "42")
+      {:error, :not_found}
+
   """
-  @spec add_image_to_gallery(Actor.t(), any(), any()) ::
+  @spec add_image_to_gallery(
+          actor :: Actor.t(),
+          gallery_id :: Loader.integer_id(),
+          image_id :: Loader.integer_id()
+        ) ::
           {:ok, map()}
           | {:error, :ban | :unauthorized | :not_found}
           | Ecto.Multi.failure()
@@ -639,66 +718,6 @@ defmodule Philomena.Galleries do
          {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :edit),
          {:ok, image} <- load_authorized_image(actor, image_id) do
       add_image_to_gallery(gallery, image)
-    end
-  end
-
-  @doc """
-  Adds the specified image to the gallery, updates image count, triggers
-  notifications, and performs necessary reindexing.
-
-  The image is added at the last position.
-
-  ## Examples
-
-      iex> add_image_to_gallery(gallery, image)
-      {:ok,
-       %{
-         gallery: %Gallery{},
-         interaction: %Interaction{},
-         image_count: 1,
-         notification: %Notification{}
-       }}
-
-  """
-  def add_image_to_gallery(gallery, image) do
-    Multi.new()
-    |> Multi.run(:gallery, fn repo, %{} ->
-      gallery =
-        Gallery
-        |> where(id: ^gallery.id)
-        |> lock("FOR UPDATE")
-        |> repo.one()
-
-      {:ok, gallery}
-    end)
-    |> Multi.run(:interaction, fn repo, %{} ->
-      position = (last_position(gallery.id) || -1) + 1
-
-      %Interaction{gallery_id: gallery.id}
-      |> Interaction.changeset(%{"image_id" => image.id, "position" => position})
-      |> repo.insert()
-    end)
-    |> Multi.run(:image_count, fn repo, %{} ->
-      now = DateTime.utc_now()
-
-      {count, nil} =
-        Gallery
-        |> where(id: ^gallery.id)
-        |> repo.update_all(inc: [image_count: 1], set: [updated_at: now])
-
-      {:ok, count}
-    end)
-    |> Multi.run(:notification, &notify_gallery/2)
-    |> Repo.transaction()
-    |> case do
-      {:ok, result} ->
-        Images.reindex_image(image)
-        reindex_gallery(gallery)
-
-        {:ok, result}
-
-      error ->
-        error
     end
   end
 
@@ -715,7 +734,11 @@ defmodule Philomena.Galleries do
       {:ok, %{gallery: %Gallery{}, ...}}
 
   """
-  @spec remove_image_from_gallery(Actor.t(), any(), any()) ::
+  @spec remove_image_from_gallery(
+          actor :: Actor.t(),
+          gallery_id :: Loader.integer_id(),
+          image_id :: Loader.integer_id()
+        ) ::
           {:ok, map()}
           | {:error, :ban | :unauthorized | :not_found}
           | Ecto.Multi.failure()
@@ -728,80 +751,8 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Removes the specified image from the gallery, updates image count,
-  and performs necessary reindexing.
-
-  ## Examples
-
-      iex> remove_image_from_gallery(gallery, image)
-      {:ok,
-       %{
-         gallery: %Gallery{},
-         interaction: 1,
-         image_count: 0
-       }}
-
-  """
-  def remove_image_from_gallery(gallery, image) do
-    Multi.new()
-    |> Multi.run(:gallery, fn repo, %{} ->
-      gallery =
-        Gallery
-        |> where(id: ^gallery.id)
-        |> lock("FOR UPDATE")
-        |> repo.one()
-
-      {:ok, gallery}
-    end)
-    |> Multi.run(:interaction, fn repo, %{} ->
-      {count, nil} =
-        Interaction
-        |> where(gallery_id: ^gallery.id, image_id: ^image.id)
-        |> repo.delete_all()
-
-      {:ok, count}
-    end)
-    |> Multi.run(:image_count, fn repo, %{interaction: interaction_count} ->
-      now = DateTime.utc_now()
-
-      {count, nil} =
-        Gallery
-        |> where(id: ^gallery.id)
-        |> repo.update_all(inc: [image_count: -interaction_count], set: [updated_at: now])
-
-      {:ok, count}
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, result} ->
-        Images.reindex_image(image)
-        reindex_gallery(gallery)
-
-        {:ok, result}
-
-      error ->
-        error
-    end
-  end
-
-  defp notify_gallery(_repo, %{gallery: gallery}) do
-    Notifications.create_gallery_image_notification(gallery)
-  end
-
-  defp last_position(gallery_id) do
-    Interaction
-    |> where(gallery_id: ^gallery_id)
-    |> Repo.aggregate(:max, :position)
-  end
-
-  @doc """
   Queues a reorder of the gallery named by `gallery_id` to the
   order given by `image_ids`, on behalf of `actor`.
-
-  The actor's write access is verified first (banned actors get
-  `{:error, :ban}`, actors without a fingerprint `{:error, :unauthorized}`),
-  then the gallery is loaded and `:edit` is authorized following the
-  unknown-id rules of `update_gallery/3`. On success the reorder is enqueued.
 
   ## Examples
 
@@ -809,7 +760,7 @@ defmodule Philomena.Galleries do
       {:ok, %Gallery{}}
 
   """
-  @spec reorder_gallery(Actor.t(), any(), [integer()]) ::
+  @spec reorder_gallery(Actor.t(), Loader.integer_id(), [integer()]) ::
           {:ok, Gallery.t()} | {:error, :ban | :unauthorized | :not_found}
   def reorder_gallery(%Actor{} = actor, gallery_id, image_ids) do
     with :ok <- verify_write_access(actor),
@@ -919,10 +870,7 @@ defmodule Philomena.Galleries do
   `gallery_id`.
 
   The gallery is loaded by id with no authorization: any authenticated user may
-  mark any gallery read. A non-castable or unknown id is `{:error, :not_found}`.
-
-  Returns `{:ok, gallery}` after clearing `user`'s gallery image notifications
-  for it.
+  mark any gallery read.
 
   ## Examples
 
@@ -948,13 +896,6 @@ defmodule Philomena.Galleries do
   @doc """
   Subscribes `user` to the gallery named by `gallery_id`.
 
-  The gallery is loaded by id and authorized for `:show`: a non-castable id is
-  `{:error, :not_found}`, and an unknown id authorizes `nil`, which comes back
-  `{:error, :unauthorized}` for a non-admin.
-
-  Returns `{:ok, gallery}`, or `{:error, %Ecto.Changeset{}}` if the subscription
-  insert is rejected.
-
   ## Examples
 
       iex> subscribe_gallery(user, "1")
@@ -972,11 +913,6 @@ defmodule Philomena.Galleries do
 
   @doc """
   Unsubscribes `user` from the gallery named by `gallery_id`.
-
-  Loading and authorization mirror `subscribe_gallery/2`. Unsubscribing is
-  idempotent and cannot fail, so there is no changeset error shape.
-
-  Returns `{:ok, gallery}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
 
   ## Examples
 

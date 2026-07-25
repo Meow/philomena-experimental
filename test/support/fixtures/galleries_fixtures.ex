@@ -20,7 +20,7 @@ defmodule Philomena.GalleriesFixtures do
       |> Enum.into(%{title: unique_gallery_title()})
       |> Map.put_new_lazy(:thumbnail_id, fn -> Philomena.ImagesFixtures.image_fixture().id end)
 
-    {:ok, gallery} = Galleries.create_gallery(user, attrs)
+    {:ok, gallery} = Galleries.create_gallery(user, attrs, nil)
 
     gallery
   end
