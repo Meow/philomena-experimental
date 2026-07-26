@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.Profile.SourceChangeControllerTest do
     image = image_fixture()
 
     {:ok, _} =
-      Images.update_loaded_sources(image, attribution(user), %{
+      Images.update_loaded_sources(image, actor(user), %{
         "old_sources" => %{},
         "sources" => %{"0" => %{"source" => source}}
       })

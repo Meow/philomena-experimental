@@ -569,14 +569,9 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Updates the sources of the given already-loaded image with attribution
-  tracking. This is the internal source engine; it performs no authorization,
-  so callers needing authorization go through `update_sources/3`.
-
+  Updates the sources of the given already-loaded image, on behalf of `actor`.
   Handles both added and removed sources. Automatically determines the user's
-  intended source changes based on the provided previous image state. `attribution`
-  is the keyword-list principal (`[ip:, fingerprint:, user:]`) attributed to the
-  created source change records.
+  intended source changes based on the provided previous image state.
 
   This will update the image's sources and create source change records for
   tracking.
@@ -585,7 +580,7 @@ defmodule Philomena.Images do
 
       iex> update_loaded_sources(
       ...>   image,
-      ...>   [ip: ip, fingerprint: fp, user: user],
+      ...>   actor,
       ...>   %{
       ...>     "old_sources" => %{},
       ...>     "sources" => %{"0" => "http://example.com"}
@@ -599,7 +594,7 @@ defmodule Philomena.Images do
        }}
 
   """
-  def update_loaded_sources(%Image{} = image, attribution, attrs) do
+  def update_loaded_sources(%Image{} = image, %Actor{} = actor, attrs) do
     old_sources = attrs["old_sources"]
     new_sources = attrs["sources"]
 
@@ -621,7 +616,7 @@ defmodule Philomena.Images do
     |> Multi.run(:added_source_changes, fn repo, %{image: {image, added_sources, _removed}} ->
       source_changes =
         added_sources
-        |> Enum.map(&source_change_attributes(attribution, image, &1, true, attribution[:user]))
+        |> Enum.map(&source_change_attributes(actor, image, &1, true))
 
       {count, nil} = repo.insert_all(SourceChange, source_changes)
 
@@ -630,7 +625,7 @@ defmodule Philomena.Images do
     |> Multi.run(:removed_source_changes, fn repo, %{image: {image, _added, removed_sources}} ->
       source_changes =
         removed_sources
-        |> Enum.map(&source_change_attributes(attribution, image, &1, false, attribution[:user]))
+        |> Enum.map(&source_change_attributes(actor, image, &1, false))
 
       {count, nil} = repo.insert_all(SourceChange, source_changes)
 
@@ -639,16 +634,33 @@ defmodule Philomena.Images do
     |> Repo.transaction()
   end
 
+  defp source_change_attributes(%Actor{user: user} = actor, image, source, added) do
+    now = DateTime.utc_now(:second)
+
+    user_id =
+      case user do
+        nil -> nil
+        user -> user.id
+      end
+
+    %{
+      image_id: image.id,
+      source_url: source,
+      user_id: user_id,
+      created_at: now,
+      updated_at: now,
+      ip: actor.ip,
+      fingerprint: actor.fingerprint,
+      added: added
+    }
+  end
+
   @doc """
-  Updates the tags of the given already-loaded image with attribution tracking.
-  This is the internal tag engine; it performs no authorization, so
-  callers needing authorization go through `update_tags/3`.
+  Updates the tags of the given already-loaded image, on behalf of `actor`.
 
   Handles both added and removed tags. Automatically determines the user's
-  intended tag changes based on the provided previous image state. `attribution`
-  is the keyword-list principal (`[ip:, fingerprint:, user:]`) attributed to the
-  created tag change records; it also enforces the per-identity tag-change rate
-  limit inside the transaction.
+  intended tag changes based on the provided previous image state. Internally,
+  this enforces the per-identity tag-change rate limit inside the transaction.
 
   This will update the image's tags and create tag change records for tracking.
 
@@ -656,7 +668,7 @@ defmodule Philomena.Images do
 
       iex> update_loaded_tags(
       ...>   image,
-      ...>   [ip: ip, fingerprint: fp, user: user],
+      ...>   actor,
       ...>   %{
       ...>     "old_tag_input" => "safe",
       ...>     "tag_input" => "safe, cute"
@@ -669,7 +681,7 @@ defmodule Philomena.Images do
        }}
 
   """
-  def update_loaded_tags(%Image{} = image, attribution, attrs) do
+  def update_loaded_tags(%Image{} = image, %Actor{} = actor, attrs) do
     old_tags = Tags.get_or_create_tags(attrs["old_tag_input"])
     new_tags = Tags.get_or_create_tags(attrs["tag_input"])
 
@@ -689,7 +701,7 @@ defmodule Philomena.Images do
       end
     end)
     |> Multi.run(:check_limits, fn _repo, %{image: {image, _added, _removed}} ->
-      check_tag_change_limits_before_commit(image, attribution)
+      check_tag_change_limits_before_commit(image, actor)
     end)
     |> Multi.run(:tag_changes, fn
       _repo, %{image: {_image, [], []}} ->
@@ -698,7 +710,7 @@ defmodule Philomena.Images do
       _repo, %{image: {image, added_tags, removed_tags}} ->
         TagChanges.create_tag_change(
           image,
-          attribution,
+          actor,
           added_tags,
           removed_tags
         )
@@ -728,13 +740,38 @@ defmodule Philomena.Images do
     |> Repo.transaction()
     |> case do
       {:ok, %{image: {image, _added, _removed}}} = res ->
-        update_tag_change_limits_after_commit(image, attribution)
+        update_tag_change_limits_after_commit(image, actor)
 
         res
 
       err ->
         err
     end
+  end
+
+  defp check_tag_change_limits_before_commit(image, %Actor{ip: ip, user: user}) do
+    tag_changed_count = length(image.added_tags) + length(image.removed_tags)
+    rating_changed = image.ratings_changed
+
+    cond do
+      Limits.limited_for_tag_count?(user, ip, tag_changed_count) ->
+        {:error, :limit_exceeded}
+
+      rating_changed and Limits.limited_for_rating_count?(user, ip) ->
+        {:error, :limit_exceeded}
+
+      true ->
+        {:ok, 0}
+    end
+  end
+
+  defp update_tag_change_limits_after_commit(image, %Actor{ip: ip, user: user}) do
+    rating_changed_count = if(image.ratings_changed, do: 1, else: 0)
+    tag_changed_count = length(image.added_tags) + length(image.removed_tags)
+
+    :ok = Limits.update_tag_count_after_update(user, ip, tag_changed_count)
+    :ok = Limits.update_rating_count_after_update(user, ip, rating_changed_count)
+    :ok
   end
 
   # Updates the locked tags on an image.
@@ -2181,8 +2218,6 @@ defmodule Philomena.Images do
            }}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited | Ecto.Changeset.t()}
   def update_sources(%Actor{} = actor, image_id, attrs) do
-    attribution = [ip: actor.ip, fingerprint: actor.fingerprint, user: actor.user]
-
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :source_update),
          {:ok, id} <- IntegerId.parse(image_id),
@@ -2190,7 +2225,7 @@ defmodule Philomena.Images do
          :ok <- authorize(actor, :edit_metadata, image),
          %Image{} <- image,
          {:ok, %{image: {image, added, removed}}} <-
-           update_loaded_sources(image, attribution, attrs) do
+           update_loaded_sources(image, actor, attrs) do
       if Enum.any?(added) or Enum.any?(removed) do
         UserStatistics.inc_stat(actor.user, :metadata_updates_count)
       end
@@ -2213,27 +2248,6 @@ defmodule Philomena.Images do
       shape when shape in [:error, nil] -> {:error, :not_found}
       {:error, :image, changeset, _changes} -> {:error, changeset}
     end
-  end
-
-  defp source_change_attributes(attribution, image, source, added, user) do
-    now = DateTime.utc_now(:second)
-
-    user_id =
-      case user do
-        nil -> nil
-        user -> user.id
-      end
-
-    %{
-      image_id: image.id,
-      source_url: source,
-      user_id: user_id,
-      created_at: now,
-      updated_at: now,
-      ip: attribution[:ip],
-      fingerprint: attribution[:fingerprint],
-      added: added
-    }
   end
 
   @doc """
@@ -2336,8 +2350,6 @@ defmodule Philomena.Images do
              | :update_failed
              | Ecto.Changeset.t()}
   def update_tags(%Actor{} = actor, image_id, attrs) do
-    attribution = [ip: actor.ip, fingerprint: actor.fingerprint, user: actor.user]
-
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :tag_update),
          {:ok, id} <- IntegerId.parse(image_id),
@@ -2345,7 +2357,7 @@ defmodule Philomena.Images do
          :ok <- authorize(actor, :edit_metadata, image),
          %Image{} <- image,
          {:ok, %{image: {image, added, removed}}} <-
-           update_loaded_tags(image, attribution, attrs) do
+           update_loaded_tags(image, actor, attrs) do
       Comments.reindex_comments_on_image(image)
       reindex_image(image)
       Tags.reindex_tags(added ++ removed)
@@ -2378,47 +2390,6 @@ defmodule Philomena.Images do
       {:error, :check_limits, _value, _changes} -> {:error, :rate_limited}
       _other -> {:error, :update_failed}
     end
-  end
-
-  defp check_tag_change_limits_before_commit(image, attribution) do
-    tag_changed_count = length(image.added_tags) + length(image.removed_tags)
-    rating_changed = image.ratings_changed
-    user = attribution[:user]
-    ip = attribution[:ip]
-
-    cond do
-      Limits.limited_for_tag_count?(user, ip, tag_changed_count) ->
-        {:error, :limit_exceeded}
-
-      rating_changed and Limits.limited_for_rating_count?(user, ip) ->
-        {:error, :limit_exceeded}
-
-      true ->
-        {:ok, 0}
-    end
-  end
-
-  @doc """
-  Updates the tag change tracking after committing updates to an image.
-
-  This updates the rate limit counters for total tag change count and rating change count
-  based on the changes made to the image.
-
-  ## Examples
-
-      iex> update_tag_change_limits_after_commit(image, %{user: user, ip: "127.0.0.1"})
-      :ok
-
-  """
-  def update_tag_change_limits_after_commit(image, attribution) do
-    rating_changed_count = if(image.ratings_changed, do: 1, else: 0)
-    tag_changed_count = length(image.added_tags) + length(image.removed_tags)
-    user = attribution[:user]
-    ip = attribution[:ip]
-
-    :ok = Limits.update_tag_count_after_update(user, ip, tag_changed_count)
-    :ok = Limits.update_rating_count_after_update(user, ip, rating_changed_count)
-    :ok
   end
 
   @doc """
@@ -2685,8 +2656,7 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Applies a batch tag edit to `image_ids` on behalf of `actor`, an
-  `m:Philomena.Attribution.Actor`.
+  Applies a batch tag edit to `image_ids` on behalf of `actor`.
 
   Authorizes `:batch_update` against the tag model, parses the tag list into the
   added and removed tags (resolving aliases and implications for additions),

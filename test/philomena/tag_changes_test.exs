@@ -44,7 +44,7 @@ defmodule Philomena.TagChangesTest do
     image = image_fixture()
 
     {:ok, _} =
-      Images.update_loaded_tags(image, attribution(user), %{
+      Images.update_loaded_tags(image, actor(user), %{
         "old_tag_input" => "safe",
         "tag_input" => "safe, added test tag, other added tag"
       })

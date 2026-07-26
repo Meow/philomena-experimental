@@ -2,6 +2,7 @@ defmodule Philomena.Users.Eraser do
   import Ecto.Query
   alias Philomena.Repo
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Bans
   alias Philomena.Comments.Comment
   alias Philomena.Comments
@@ -117,12 +118,12 @@ defmodule Philomena.Users.Eraser do
   defp revert_source_change(source_change, user, old_sources, new_sources) do
     attrs = %{"old_sources" => old_sources, "sources" => new_sources}
 
-    attribution = [
+    actor = %Actor{
       user: user,
       ip: @wipe_ip,
       fingerprint: @wipe_fp
-    ]
+    }
 
-    {:ok, _} = Images.update_loaded_sources(source_change.image, attribution, attrs)
+    {:ok, _} = Images.update_loaded_sources(source_change.image, actor, attrs)
   end
 end

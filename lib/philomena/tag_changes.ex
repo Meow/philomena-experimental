@@ -317,16 +317,15 @@ defmodule Philomena.TagChanges do
   @doc """
   Creates a tag_change.
   """
-  def create_tag_change(image, attrs, added_tags, removed_tags) do
-    user = attrs[:user]
+  def create_tag_change(image, %Actor{user: user} = actor, added_tags, removed_tags) do
     user_id = if user, do: user.id, else: nil
 
     {:ok, tc} =
       %TagChange{
         image_id: image.id,
         user_id: user_id,
-        ip: attrs[:ip],
-        fingerprint: attrs[:fingerprint]
+        ip: actor.ip,
+        fingerprint: actor.fingerprint
       }
       |> Repo.insert()
 
