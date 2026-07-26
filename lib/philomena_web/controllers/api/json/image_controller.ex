@@ -24,9 +24,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
   end
 
   def create(conn, %{"image" => image_params}) do
-    attributes = conn.assigns.attributes
-
-    case Images.create_image(attributes, image_params) do
+    case Images.create_image(conn.assigns.actor, image_params) do
       {:ok, %{image: image}} ->
         image = Images.preload_created_image(image)
 

@@ -23,4 +23,23 @@ defmodule Philomena.Attribution.Actor do
           fingerprint: String.t() | nil,
           ban: map() | nil
         }
+
+  @doc """
+  Converts an `Actor` to a map of changes suitable for passing as the second argument
+  to `Ecto.Changeset.change/2`.
+
+  ## Examples
+
+      iex> to_changes(actor)
+      %{fingerprint: "abcdef", ip: %Postgrex.INET{}, user: %User{}}
+
+  """
+  @spec to_changes(t()) :: %{
+          fingerprint: String.t() | nil,
+          ip: EctoNetwork.INET.t(),
+          user: User.t() | nil
+        }
+  def to_changes(%__MODULE__{fingerprint: fingerprint, ip: ip, user: user}) do
+    %{fingerprint: fingerprint, ip: ip, user: user}
+  end
 end

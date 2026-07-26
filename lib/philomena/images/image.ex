@@ -4,6 +4,7 @@ defmodule Philomena.Images.Image do
   import Bitwise
   import Ecto.Changeset
 
+  alias Philomena.Attribution.Actor
   alias Philomena.ImageIntensities.ImageIntensity
   alias Philomena.ImageVotes.ImageVote
   alias Philomena.ImageFaves.ImageFave
@@ -116,11 +117,11 @@ defmodule Philomena.Images.Image do
     |> validate_required([])
   end
 
-  def creation_changeset(image, attrs, attribution) do
+  def creation_changeset(image, attrs, %Actor{} = actor) do
     image
     |> cast(attrs, [:anonymous, :source_url, :description])
     |> change(first_seen_at: DateTime.utc_now(:second))
-    |> change(attribution)
+    |> change(Actor.to_changes(actor))
     |> validate_length(:description, max: 50_000, count: :bytes)
     |> validate_format(:source_url, ~r/\Ahttps?:\/\//)
   end

@@ -27,7 +27,8 @@ resources =
   |> File.read!()
   |> JSON.decode!()
 
-IO.puts "---- Generating users"
+IO.puts("---- Generating users")
+
 for user_def <- resources["users"] do
   {:ok, user} = Users.register_user(user_def)
 
@@ -39,12 +40,7 @@ for user_def <- resources["users"] do
 end
 
 pleb = Repo.get_by!(User, name: "Pleb")
-request_attributes = [
-  fingerprint: "c1836832948",
-  ip: ip,
-  user_id: pleb.id,
-  user: pleb
-]
+
 pleb_actor = %Philomena.Attribution.Actor{
   user: pleb,
   ip: ip,
@@ -52,12 +48,13 @@ pleb_actor = %Philomena.Attribution.Actor{
   ban: nil
 }
 
-IO.puts "---- Generating images"
+IO.puts("---- Generating images")
+
 for image_def <- resources["remote_images"] do
   file = Briefly.create!(extname: ".png")
   now = DateTime.utc_now() |> DateTime.to_unix(:microsecond)
 
-  IO.puts "Fetching #{image_def["url"]} ..."
+  IO.puts("Fetching #{image_def["url"]} ...")
   {:ok, %{body: body}} = PhilomenaProxy.Http.get(image_def["url"])
 
   File.write!(file, body)
@@ -68,10 +65,10 @@ for image_def <- resources["remote_images"] do
     filename: "fixtures-#{now}"
   }
 
-  IO.puts "Inserting ..."
+  IO.puts("Inserting ...")
 
   Images.create_image(
-    request_attributes,
+    pleb_actor,
     Map.merge(image_def, %{"image" => upload})
   )
   |> case do
@@ -80,14 +77,15 @@ for image_def <- resources["remote_images"] do
       Images.reindex_image(image)
       Tags.reindex_tags(image.added_tags)
 
-      IO.puts "Created image ##{image.id}"
+      IO.puts("Created image ##{image.id}")
 
     {:error, :image, changeset, _so_far} ->
-      IO.inspect changeset.errors
+      IO.inspect(changeset.errors)
   end
 end
 
-IO.puts "---- Generating comments for image #1"
+IO.puts("---- Generating comments for image #1")
+
 for comment_body <- resources["comments"] do
   image = Images.get_image!(1)
 
@@ -102,11 +100,12 @@ for comment_body <- resources["comments"] do
       Images.reindex_image(image)
 
     {:error, :comment, changeset, _so_far} ->
-      IO.inspect changeset.errors
+      IO.inspect(changeset.errors)
   end
 end
 
-IO.puts "---- Generating forum posts"
+IO.puts("---- Generating forum posts")
+
 for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
   forum = Repo.get_by!(Forum, short_name: forum_name)
 
@@ -118,7 +117,7 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
         "title" => topic_name,
         "posts" => %{
           "0" => %{
-            "body" => first_post,
+            "body" => first_post
           }
         }
       }
@@ -138,14 +137,14 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
               Posts.reindex_post(post)
 
             {:error, :post, changeset, _so_far} ->
-              IO.inspect changeset.errors
+              IO.inspect(changeset.errors)
           end
         end
 
       {:error, :topic, changeset, _so_far} ->
-        IO.inspect changeset.errors
+        IO.inspect(changeset.errors)
     end
   end
 end
 
-IO.puts "---- Done."
+IO.puts("---- Done.")

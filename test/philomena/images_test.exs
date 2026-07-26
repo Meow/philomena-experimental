@@ -198,7 +198,7 @@ defmodule Philomena.ImagesTest do
       attrs = %{"image" => png_upload(), "tag_input" => "safe, solo, mare"}
 
       assert {:error, :image, changeset, _changes} =
-               Images.create_image(attribution(user), attrs)
+               Images.create_image(actor(user), attrs)
 
       assert "has already been uploaded: it's image #{existing.id}" in errors_on(changeset).image
     end

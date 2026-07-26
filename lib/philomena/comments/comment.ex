@@ -34,7 +34,7 @@ defmodule Philomena.Comments.Comment do
     |> cast(attrs, [:body, :anonymous])
     |> validate_required([:body])
     |> validate_length(:body, min: 1, max: 300_000, count: :bytes)
-    |> change(Map.take(actor, [:ip, :fingerprint, :user]))
+    |> change(Actor.to_changes(actor))
     |> Approval.maybe_put_approval(actor.user, :external_links)
   end
 

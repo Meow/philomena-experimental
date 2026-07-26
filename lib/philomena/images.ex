@@ -57,7 +57,6 @@ defmodule Philomena.Images do
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
   alias Philomena.Users.User
-  alias Philomena.Users
 
   use Philomena.Subscriptions,
     on_delete: :clear_image_notification,
@@ -101,7 +100,7 @@ defmodule Philomena.Images do
   def load_image(id) do
     # The id is interpolated without parsing, so a non-integer value raises
     # Ecto.Query.CastError.
-    # TODO: don't raise an error?
+    # TODO: maybe don't raise an error instead?
     Image
     |> where(id: ^id)
     |> preload([:user, :intensity, :sources, tags: :aliases])
@@ -143,31 +142,19 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Creates a image.
-
-  ## Examples
-
-      iex> create_image(%{field: value})
-      {:ok, %Image{}}
-
-      iex> create_image(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  @spec create_image(Users.principal(), %{String.t() => any()}) ::
-          {:ok, image_upload()} | Ecto.Multi.failure()
-  def create_image(attribution, attrs \\ %{}) do
-    # FIXME: attribution use. use Actor.t()
+  # Creates an image. Visible for testing.
+  @spec create_image(Actor.t(), map()) :: {:ok, image_upload()} | Ecto.Multi.failure()
+  @doc false
+  def create_image(%Actor{user: user} = actor, attrs \\ %{}) do
     tags = Tags.get_or_create_tags(attrs["tag_input"])
     sources = attrs["sources"]
 
     image =
       %Image{}
-      |> Image.creation_changeset(attrs, attribution)
+      |> Image.creation_changeset(attrs, actor)
       |> Image.source_changeset(attrs, [], sources)
       |> Image.tag_changeset(attrs, [], tags)
-      |> Image.dnp_changeset(attribution[:user])
+      |> Image.dnp_changeset(user)
       |> Uploader.analyze_upload(attrs)
 
     Multi.new()
@@ -179,14 +166,14 @@ defmodule Philomena.Images do
 
       {:ok, count}
     end)
-    |> maybe_subscribe_on(:image, attribution[:user], :watch_on_upload)
+    |> maybe_subscribe_on(:image, user, :watch_on_upload)
     |> Repo.transaction()
     |> case do
       {:ok, %{image: image}} ->
         upload_pid = async_upload(image, attrs["image"])
         reindex_image(image)
         Tags.reindex_tags(image.added_tags)
-        maybe_approve_image(image, attribution[:user])
+        maybe_approve_image(image, user)
 
         # Return the upload PID along with the created image so that the caller
         # can control the lifecycle of the upload if needed. It's useful, for
@@ -199,65 +186,34 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Updates an image's description.
-
-  ## Examples
-
-      iex> update_description(image, %{"description" => "New description"})
-      {:ok, %Image{}}
-
-  """
-  def update_description(%Image{} = image, attrs) do
+  # Updates an image's description.
+  defp update_description(%Image{} = image, attrs) do
     image
     |> Image.description_changeset(attrs)
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Changes the uploader of an image.
-
-  ## Examples
-
-      iex> update_uploader(image, %{"username" => "Admin"})
-      {:ok, %Image{}}
-
-  """
-  def update_uploader(%Image{} = image, attrs) do
+  # Changes the uploader of an image.
+  defp update_uploader(%Image{} = image, attrs) do
     image
     |> Image.uploader_changeset(attrs)
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Updates the anonymous status of an image.
-
-  ## Examples
-
-      iex> update_anonymous(image, %{"anonymous" => "true"})
-      {:ok, %Image{}}
-
-  """
-  def update_anonymous(%Image{} = image, attrs) do
+  # Updates the anonymous status of an image.
+  defp update_anonymous(%Image{} = image, attrs) do
     image
     |> Image.anonymous_changeset(attrs)
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Approves an image for public viewing.
-
-  This will make the image visible to users and update necessary statistics.
-
-  ## Examples
-
-      iex> approve_image(image)
-      {:ok, %Image{}}
-  """
-  def approve_image(image) do
+  # Approves an image for public viewing.
+  #
+  # This will make the image visible to users and update necessary statistics.
+  defp approve_image(image) do
     image
     |> Repo.preload(:user)
     |> Image.approve_changeset()
@@ -275,30 +231,18 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Hides the given already-loaded image from public view. This is the internal
-  hide engine; it performs no authorization and writes no moderation log, so
-  callers needing those go through `hide_image/3`.
-
-  This will:
-  1. Mark the image as hidden
-  2. Close all reports and duplicate reports
-  3. Delete all gallery interactions containing the image
-  4. Decrement all tag counts with the image
-  5. Hide the image's thumbnails and purge them from the CDN
-  6. Reindex the image and all of its comments
-
-  ## Examples
-
-      iex> hide_loaded_image(image, moderator, %{reason: "Rule violation"})
-      {:ok,
-       %{
-         image: image,
-         tags: tags,
-         reports: {count, reports}
-       }}
-
-  """
+  # Hides the given already-loaded image from public view.
+  #
+  # This will:
+  # 1. Mark the image as hidden
+  # 2. Close all reports and duplicate reports
+  # 3. Delete all gallery interactions containing the image
+  # 4. Decrement all tag counts with the image
+  # 5. Hide the image's thumbnails and purge them from the CDN
+  # 6. Reindex the image and all of its comments
+  #
+  # Visible for testing.
+  @doc false
   def hide_loaded_image(%Image{} = image, user, attrs) do
     duplicate_reports =
       DuplicateReport
@@ -314,27 +258,16 @@ defmodule Philomena.Images do
     |> process_after_hide()
   end
 
-  @doc """
-  Unhides an image, making it visible to users again.
-
-  This will:
-  1. Remove the hidden status from the image
-  2. Increment tag counts
-  3. Unhide thumbnails
-  4. Reindex the image and related content
-
-  Returns {:ok, image} if successful, or returns the image unchanged if it's not hidden.
-
-  ## Examples
-
-      iex> unhide_image(hidden_image)
-      {:ok, %Image{hidden_from_users: false}}
-
-      iex> unhide_image(visible_image)
-      {:ok, %Image{}}
-
-  """
-  def unhide_image(%Image{hidden_from_users: true} = image) do
+  # Idempontently unhides an image, making it visible to users again.
+  #
+  # If the image is hidden, this will:
+  # 1. Remove the hidden status from the image
+  # 2. Increment tag counts
+  # 3. Unhide thumbnails
+  # 4. Reindex the image and related content
+  #
+  # Otherwise, it will do nothing.
+  defp unhide_image(%Image{hidden_from_users: true} = image) do
     key = image.hidden_image_key
 
     Multi.new()
@@ -368,7 +301,7 @@ defmodule Philomena.Images do
     end
   end
 
-  def unhide_image(image), do: {:ok, image}
+  defp unhide_image(image), do: {:ok, image}
 
   @doc """
   Merges one image into another, combining their metadata and content.
@@ -523,22 +456,14 @@ defmodule Philomena.Images do
     {:ok, image}
   end
 
-  @doc """
-  Destroys the contents of an image (hard deletion) by marking it as hidden
-  and deleting up associated files.
-
-  This will:
-  1. Mark the image as removed in the database
-  2. Purge associated files
-  3. Remove thumbnails
-
-  ## Examples
-
-      iex> destroy_image(image)
-      {:ok, %Image{}}
-
-  """
-  def destroy_image(%Image{} = image) do
+  # Destroys the contents of an image (hard deletion) by marking it as hidden
+  # and deleting the associated files.
+  #
+  # This will:
+  # 1. Mark the image as removed in the database
+  # 2. Purge associated files
+  # 3. Remove thumbnails
+  defp destroy_image(%Image{} = image) do
     image
     |> Image.remove_image_changeset()
     |> Repo.update()
@@ -554,97 +479,49 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Locks or unlocks comments on an image.
-
-  ## Examples
-
-      iex> lock_comments(image, true)
-      {:ok, %Image{}}
-
-  """
-  def lock_comments(%Image{} = image, locked) do
+  # Locks or unlocks comments on an image.
+  defp lock_comments(%Image{} = image, locked) do
     image
     |> Image.lock_comments_changeset(locked)
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Locks or unlocks the description of an image.
-
-  ## Examples
-
-      iex> lock_description(image, true)
-      {:ok, %Image{}}
-
-  """
-  def lock_description(%Image{} = image, locked) do
+  # Locks or unlocks the description of an image.
+  defp lock_description(%Image{} = image, locked) do
     image
     |> Image.lock_description_changeset(locked)
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Locks or unlocks the tags on an image.
-
-  ## Examples
-
-      iex> lock_tags(image, true)
-      {:ok, %Image{}}
-
-  """
-  def lock_tags(%Image{} = image, locked) do
+  # Locks or unlocks the tags on an image.
+  defp lock_tags(%Image{} = image, locked) do
     image
     |> Image.lock_tags_changeset(locked)
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Removes the original SHA-512 hash from an image, allowing users to upload
-  the same file again.
-
-  ## Examples
-
-      iex> remove_hash(image)
-      {:ok, %Image{}}
-
-  """
-  def remove_hash(%Image{} = image) do
+  # Removes the original SHA-512 hash from an image, allowing users to upload
+  # the same file again.
+  defp remove_hash(%Image{} = image) do
     image
     |> Image.remove_hash_changeset()
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Updates the scratchpad notes on an image.
-
-  ## Examples
-
-      iex> update_scratchpad(image, %{"scratchpad" => "New notes"})
-      {:ok, %Image{}}
-
-  """
-  def update_scratchpad(%Image{} = image, attrs) do
+  # Updates the scratchpad notes on an image.
+  defp update_scratchpad(%Image{} = image, attrs) do
     image
     |> Image.scratchpad_changeset(attrs)
     |> Repo.update()
     |> reindex_after_update()
   end
 
-  @doc """
-  Removes all source change history for an image.
-
-  ## Examples
-
-      iex> remove_source_history(image)
-      {:ok, %Image{}}
-
-  """
-  def remove_source_history(%Image{} = image) do
+  # Removes all source change history for an image.
+  defp remove_source_history(%Image{} = image) do
     image
     |> Repo.preload(:source_changes)
     |> Image.remove_source_history_changeset()
@@ -652,22 +529,17 @@ defmodule Philomena.Images do
     |> reindex_after_update()
   end
 
-  @doc """
-  Updates the file content of an image.
-
-  This will:
-  1. Update the image metadata
-  2. Save the new file
-  3. Generate new thumbnails
-  4. Purge old files
-  5. Reindex the image
-
-  ## Examples
-
-      iex> update_file(image, %{"image" => upload})
-      {:ok, %Image{}}
-
-  """
+  # Updates the file content of an image.
+  #
+  # This will:
+  # 1. Update the image metadata
+  # 2. Save the new file
+  # 3. Generate new thumbnails
+  # 4. Purge old files
+  # 5. Reindex the image
+  #
+  # Visible for testing.
+  @doc false
   def update_file(%Image{} = image, attrs) do
     image
     |> Image.changeset(attrs)
@@ -688,19 +560,8 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Updates the hide reason for an image.
-
-  ## Examples
-
-      iex> update_hide_reason(image, %{hide_reason: "Duplicate of #1234"})
-      {:ok, %Image{}}
-
-      iex> update_hide_reason(image, %{hide_reason: ""})
-      {:ok, %Image{}}
-
-  """
-  def update_hide_reason(%Image{} = image, attrs) do
+  # Updates the hide reason for an image.
+  defp update_hide_reason(%Image{} = image, attrs) do
     image
     |> Image.hide_reason_changeset(attrs)
     |> Repo.update()
@@ -876,17 +737,12 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Updates the locked tags on an image.
-
-  Locked tags can only be added or removed by privileged users.
-
-  ## Examples
-
-      iex> update_locked_tags(image, %{tag_input: "safe, validated"})
-      {:ok, %Image{}}
-
-  """
+  # Updates the locked tags on an image.
+  #
+  # Locked tags can only be added or removed by privileged users.
+  #
+  # Visible for testing.
+  @doc false
   def update_locked_tags(%Image{} = image, attrs) do
     new_tags = Tags.get_or_create_tags(attrs["tag_input"])
 
@@ -897,30 +753,18 @@ defmodule Philomena.Images do
     |> reindex_after_update()
   end
 
-  @doc """
-  Migrates source URLs from one image to another.
-
-  This function is used during image merging to combine source URLs from both images.
-  It will:
-
-  1. Combine sources from both images
-  2. Remove duplicates
-  3. Take up to 15 sources (the system limit)
-  4. Update the target image with the combined sources
-
-  Returns the result of updating the target image with the combined sources.
-
-  ## Parameters
-  - source: The source image containing sources to migrate
-  - target: The target image to receive the combined sources
-
-  ## Examples
-
-      iex> migrate_sources(source_image, target_image)
-      {:ok, %Image{}}
-
-  """
-  def migrate_sources(source, target) do
+  # Migrates source URLs from one image to another.
+  #
+  # This function is used during image merging to combine source URLs from both images.
+  # It will:
+  #
+  # 1. Combine sources from both images
+  # 2. Remove duplicates
+  # 3. Take up to 15 sources (the system limit)
+  # 4. Update the target image with the combined sources
+  #
+  # Returns the result of updating the target image with the combined sources.
+  defp migrate_sources(source, target) do
     sources =
       (source.sources ++ target.sources)
       |> Enum.map(fn s -> %Source{image_id: target.id, source: s.source} end)
@@ -1290,14 +1134,11 @@ defmodule Philomena.Images do
   def upload_image(%Actor{} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :image_create),
-         {:ok, result} <- create_image(actor_attributes(actor), params) do
+         {:ok, result} <- create_image(actor, params) do
       RateLimiter.record_action(actor, :image_create, @image_create_window)
       {:ok, result}
     end
   end
-
-  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
-    do: [ip: ip, fingerprint: fingerprint, user: user]
 
   @doc """
   Finds the image adjacent to the one `image_id` names in the listing the
@@ -1534,7 +1375,7 @@ defmodule Philomena.Images do
 
   @typedoc """
   Result of the `create_image/3` function. The image was created in a DB but an
-  upload process could still running in the background with its PID given in the
+  upload process could still be running in the background with its PID given in the
   `upload_pid` field.
   """
   @type image_upload :: %{
