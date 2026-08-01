@@ -859,8 +859,7 @@ defmodule Philomena.Images do
   Returns the paginated approval queue for `actor`: unapproved images, oldest
   first, with the listing preloads.
 
-  Authorizes `:approve` against the image model. Returns `{:ok, images}` as a
-  `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  Returns `{:ok, images}` as a `m:Scrivener.Page` or `{:error, :unauthorized}`.
 
   ## Examples
 
@@ -988,8 +987,8 @@ defmodule Philomena.Images do
   Loads the image named by `id` for showing, on behalf of `actor`.
 
   The image carries its preloads plus these counts: distinct tag changes, tags
-  touched by those changes, and source changes. Viewing needs no permission - a
-  hidden image is still returned - but an image merged into a duplicate is only
+  touched by those changes, and source changes. Viewing needs no permission. A
+  hidden image is still returned. However, an image merged into a duplicate is only
   shown to viewers permitted to `:show` it; anyone else gets
   `{:duplicate_of, image}` so the caller can act on `image.duplicate_id`. A
   malformed or unknown id is `{:error, :not_found}`.
@@ -998,6 +997,9 @@ defmodule Philomena.Images do
 
       iex> load_image_for_show(actor, "1")
       {:ok, %{image: %Image{}, tag_change_count: 2, tag_change_tag_count: 5, source_change_count: 1}}
+
+      iex> load_image_for_show(actor, "2")
+      {:duplicate_of, %Image{}}
 
       iex> load_image_for_show(actor, "bad")
       {:error, :not_found}
@@ -1077,8 +1079,8 @@ defmodule Philomena.Images do
   editing its metadata.
 
   Clears the viewer's notification for the image as a side effect, so the
-  caller must read any notification counts afterwards. `comment_scrivener`
-  is the `page`/`page_size` keyword list; viewers who read oldest-first and
+  caller must read any notification counts afterwards. `comment_pagination`
+  is the `page`/`page_size` keyword list. Viewers who read oldest-first and
   prefer jumping to the newest comments land on the last page unless they
   asked for a specific one.
 
@@ -1088,15 +1090,15 @@ defmodule Philomena.Images do
       %ImagePage{}
 
   """
-  @spec load_image_page(Actor.t(), Image.t(), Keyword.t()) :: ImagePage.t()
-  def load_image_page(%Actor{user: user} = actor, %Image{} = image, comment_scrivener) do
+  @spec load_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: ImagePage.t()
+  def load_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
     clear_image_notification(image, user)
 
-    comment_scrivener = maybe_jump_to_last_page(user, image, comment_scrivener)
+    comment_pagination = maybe_jump_to_last_page(user, image, comment_pagination)
 
     %ImagePage{
       image: image,
-      comments: Comments.paginate_image_comments(actor, image, comment_scrivener),
+      comments: Comments.paginate_image_comments(actor, image, comment_pagination),
       watching: subscribed?(image, user),
       user_galleries: Galleries.user_image_galleries(user, image),
       interactions: Interactions.user_interactions([image], user),
@@ -1150,8 +1152,8 @@ defmodule Philomena.Images do
   `{:error, :unauthorized}`. A non-exempt actor who has uploaded within the last
   5 seconds gets `{:error, :rate_limited}`.
 
-  On success the image row exists and processing continues in the
-  background; see `create_image/2` for the result shape and failure tuples.
+  Upon success, the image row has been created and processing continues in the
+  background.
 
   ## Examples
 
@@ -1179,17 +1181,16 @@ defmodule Philomena.Images do
 
   @doc """
   Finds the image adjacent to the one `image_id` names in the listing the
-  scope's parameters describe, for prev/next navigation on behalf of the
+  scope's parameters describe, for prev/next navigation, on behalf of the
   scope's viewer.
 
   The image is loaded by id and authorized for `:show`: a non-castable id is
   `{:error, :not_found}`, and an unknown id authorizes `nil`, which no
   ordinary rule permits, so it is `{:error, :unauthorized}`. The scope's "q"
-  parameter (blank means everything) is compiled for the viewer; a malformed
-  query crashes, as navigation never supplies one.
+  parameter (blank means everything) is compiled for the viewer.
 
-  Returns `{:ok, {image, {adjacent, hit}}}` - the hit carries the sort cursor
-  for the caller to reuse - or `{:ok, {image, nil}}` at the end of the sequence.
+  Returns `{:ok, {image, {adjacent, hit}}}`, where the hit carries the sort cursor
+  for the caller to reuse, or `{:ok, {image, nil}}` at the end of the sequence.
 
   ## Examples
 
@@ -1201,6 +1202,7 @@ defmodule Philomena.Images do
           {:ok, {Image.t(), {Image.t(), map()} | nil}}
           | {:error, :unauthorized | :not_found}
   def find_consecutive_image(scope, image_id) do
+    # TODO: don't crash on invalid query
     with {:ok, image} <- load_image_for_navigation(scope.user, image_id) do
       {:ok, {image, ImageSearch.find_consecutive(scope, image, navigation_query(scope))}}
     end
@@ -1261,9 +1263,9 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Loads images related to the one `image_id` names - sharing its
+  Loads images related to the one `image_id` names. Related images share its
   lowest-population tags, weighted towards its most distinctive ones and the
-  favers it has in common - on behalf of the scope's viewer.
+  favers it has in common.
 
   Loading and authorization follow `find_consecutive_image/2`; the image
   carries the faves, sources, and tags the scoring reads.
@@ -1381,10 +1383,6 @@ defmodule Philomena.Images do
   Loads the image named by `image_id`, applying `preloads`, and authorizes
   `actor` for `:show` on it.
 
-  A well-formed id that names no row is authorized as `nil` - which no rule
-  permits - so it is `{:error, :unauthorized}`; an id that no `integer` column
-  could hold is `{:error, :not_found}`.
-
   Returns `{:ok, image}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
 
   ## Examples
@@ -1431,6 +1429,7 @@ defmodule Philomena.Images do
   """
   @spec preload_created_image(Image.t()) :: Image.t()
   def preload_created_image(image) do
+    # FIXME: why is this function public
     Repo.preload(image, tags: :aliases)
   end
 
@@ -1478,14 +1477,9 @@ defmodule Philomena.Images do
   Approves the image named by `image_id` for public viewing, on behalf of
   `actor`.
 
-  The image is loaded by id and authorized for `:approve`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:approve` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. An image that is already approved is
-  `{:error, :already_approved}` and is left untouched. On success the image is
-  made visible, statistics are updated, the image is reindexed, and a moderation
-  log is written attributing the approval to `actor`.
+  An image that is already approved is `{:error, :already_approved}` and is left
+  untouched. On success the image is made visible, statistics are updated, the
+  image is reindexed, and a moderation log is written attributing the approval to `actor`.
 
   Returns `{:ok, image}` with the approved image.
 
@@ -1568,18 +1562,9 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Marks the given already-loaded image as the current featured image.
-
-  This is the internal feature engine; it performs no authorization and writes
-  no moderation log, so callers needing those go through `feature_image/2`.
-
-  ## Examples
-
-      iex> feature_loaded_image(user, image)
-      {:ok, %ImageFeature{}}
-
-  """
+  # Marks the given already-loaded image as the current featured image.
+  # Visible for testing.
+  @doc false
   def feature_loaded_image(featurer, %Image{} = image) do
     %ImageFeature{user_id: featurer.id, image_id: image.id}
     |> ImageFeature.changeset(%{})
@@ -1590,13 +1575,9 @@ defmodule Philomena.Images do
   Marks the image named by `image_id` as the current featured image, on behalf
   of `actor`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. A deleted image (hidden from users) cannot be
-  featured and is `{:error, :deleted}`, left untouched. On success the feature
-  is recorded and a moderation log is written attributing it to `actor`.
+  The image is loaded by id and authorized for `:hide`. A deleted image (hidden from users)
+  cannot be featured and is `{:error, :deleted}`, left untouched. On success the feature is
+  recorded and a moderation log is written attributing it to `actor`.
 
   Returns `{:ok, feature}` with the created feature.
 
@@ -1637,15 +1618,10 @@ defmodule Philomena.Images do
   Hard-deletes the contents of the image named by `image_id`, on behalf of
   `actor`, purging its stored file and thumbnails.
 
-  The image is loaded by id and authorized for `:destroy` - a capability plain
-  moderators lack (it requires an Image-admin role grant or the admin role). A
-  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
-  unknown id is authorized as a `nil` load: an actor who may not `:destroy` it
-  gets `{:error, :unauthorized}`, while an actor permitted to act on the `nil`
-  load gets `{:error, :not_found}`. Only an already-deleted image (hidden from
-  users) may be destroyed; a still-visible image is `{:error, :not_deleted}`,
-  left untouched. On success the file and thumbnails are purged and a moderation
-  log is written attributing the destruction to `actor`.
+  The image is loaded by id and authorized for `:destroy`. Only an already-deleted
+  image (hidden from users) may be destroyed; a still-visible image is
+  `{:error, :not_deleted}`, left untouched. On success the file and thumbnails are
+  purged and a moderation log is written attributing the destruction to `actor`.
 
   Returns `{:ok, image}` with the destroyed image, or
   `{:error, %Ecto.Changeset{}}` if the destruction is rejected.
@@ -1689,12 +1665,9 @@ defmodule Philomena.Images do
   Locks (`locked?` true) or unlocks (`locked?` false) comments on the image
   named by `image_id`, on behalf of `actor`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. On success commenting is toggled, the image is
-  reindexed, and a moderation log is written attributing the change to `actor`.
+  The image is loaded by id and authorized for `:hide`. On success commenting
+  is toggled, the image is reindexed, and a moderation log is written attributing
+  the change to `actor`.
 
   Returns `{:ok, image}` with the updated image.
 
@@ -1736,13 +1709,9 @@ defmodule Philomena.Images do
   Locks (`locked?` true) or unlocks (`locked?` false) description editing on the
   image named by `image_id`, on behalf of `actor`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. On success description editing is toggled, the
-  image is reindexed, and a moderation log is written attributing the change to
-  `actor`.
+  The image is loaded by id and authorized for `:hide`. On success description
+  editing is toggled, the image is reindexed, and a moderation log is written
+  attributing the change to `actor`.
 
   Returns `{:ok, image}` with the updated image.
 
@@ -1784,12 +1753,9 @@ defmodule Philomena.Images do
   Locks (`locked?` true) or unlocks (`locked?` false) tag editing on the image
   named by `image_id`, on behalf of `actor`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. On success tag editing is toggled, the image is
-  reindexed, and a moderation log is written attributing the change to `actor`.
+  The image is loaded by id and authorized for `:hide`. On success tag editing
+  is toggled, the image is reindexed, and a moderation log is written attributing
+  the change to `actor`.
 
   Returns `{:ok, image}` with the updated image.
 
@@ -1831,13 +1797,9 @@ defmodule Philomena.Images do
   Clears the original SHA-512 hash of the image named by `image_id`, on behalf
   of `actor`, allowing the same file to be uploaded again.
 
-  The image is loaded by id and the `:hide` permission is checked before it is
-  modified. A non-castable or out-of-range id is `{:error, :not_found}`. A
-  well-formed but unknown id is authorized as a `nil` load: an actor who may not
-  `:hide` it gets `{:error, :unauthorized}`, while an actor permitted to act on
-  the `nil` load gets `{:error, :not_found}`. On success the hash is cleared, the
-  image is reindexed, and a moderation log is written attributing the change to
-  `actor`.
+  The image is loaded by id and authorized for `:hide`. On success the hash is
+  cleared, the image is reindexed, and a moderation log is written attributing the
+  change to `actor`.
 
   Returns `{:ok, image}` with the updated image.
 
@@ -1876,11 +1838,7 @@ defmodule Philomena.Images do
   @doc """
   Loads the image named by `image_id` for moderation, on behalf of `actor`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`.
+  The image is loaded by id and authorized for `:hide`.
 
   Returns `{:ok, image}` with the loaded image, carrying the associations
   named by `opts[:preload]` (none by default).
@@ -1913,13 +1871,9 @@ defmodule Philomena.Images do
   Updates the moderation notes on the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with a `"scratchpad"` key).
 
-  The image is loaded by id and authorized for `:hide` before it is modified. A
-  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
-  unknown id is authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. A blank value clears the notes. On success the
-  notes are updated, the image is reindexed, and a moderation log is written
-  attributing the change to `actor`.
+  The image is loaded by id and authorized for `:hide`. On success the notes are
+  updated, the image is reindexed, and a moderation log is written attributing the
+  change to `actor`.
 
   Returns `{:ok, image}` with the updated image.
 
@@ -1959,12 +1913,8 @@ defmodule Philomena.Images do
   Deletes the source change history of the image named by `image_id`, on behalf
   of `actor`.
 
-  The image is loaded by id and the `:hide` permission is checked before it is
-  modified. A non-castable or out-of-range id is `{:error, :not_found}`. A
-  well-formed but unknown id is authorized as a `nil` load: an actor who may not
-  `:hide` it gets `{:error, :unauthorized}`, while an actor permitted to act on
-  the `nil` load gets `{:error, :not_found}`. On success the source history is
-  removed, the image is reindexed, and a moderation log is written attributing
+  The image is loaded by id and authorized for `:hide`. On success the source history
+  is removed, the image is reindexed, and a moderation log is written attributing
   the deletion to `actor`.
 
   Returns `{:ok, image}` with the updated image.
@@ -2007,13 +1957,9 @@ defmodule Philomena.Images do
   Repairs the image named by `image_id`, on behalf of `actor`, by regenerating
   its thumbnails and purging its cached files.
 
-  The image is loaded by id and the `:hide` permission is checked before any
-  work is enqueued. A non-castable or out-of-range id is `{:error, :not_found}`.
-  A well-formed but unknown id is authorized as a `nil` load: an actor who may
-  not `:hide` it gets `{:error, :unauthorized}`, while an actor permitted to act
-  on the `nil` load gets `{:error, :not_found}`. On success the thumbnail
-  regeneration job is enqueued, the image's CDN files are purged, and a
-  moderation log is written attributing the repair to `actor`.
+  The image is loaded by id and authorized for `:hide`. On success the thumbnail
+  regeneration job is enqueued, the image's CDN files are purged, and a moderation
+  log is written attributing the repair to `actor`.
 
   Returns `{:ok, image}` with the loaded image.
 
@@ -2082,14 +2028,11 @@ defmodule Philomena.Images do
   Replaces the file content of the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with an `"image"` upload).
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. A deleted image (hidden from users) cannot be
-  replaced and is `{:error, :deleted}`, left untouched. On success the file is
-  replaced, thumbnails are regenerated, old files are purged, the image is
-  reindexed, and a moderation log is written attributing the change to `actor`.
+  The image is loaded by id and authorized for `:hide`. A deleted image (hidden
+  from users) cannot be replaced and is `{:error, :deleted}`, left untouched.
+  On success the file is replaced, thumbnails are regenerated, old files are
+  purged, the image is reindexed, and a moderation log is written attributing
+  the change to `actor`.
 
   Returns `{:ok, image}` with the updated image, or
   `{:error, %Ecto.Changeset{}}` when the replacement is rejected (e.g. no file,
@@ -2134,14 +2077,9 @@ defmodule Philomena.Images do
   `actor`, from `attrs` (a map with a `"description"` key).
 
   Banned actors are rejected first with `{:error, :ban}` (a write with no
-  fingerprint is `{:error, :unauthorized}`), before the image is loaded, so the
-  ban decision does not depend on the id. The image is then loaded by id and
-  authorized for `:edit_description` - the uploader may edit a non-hidden image
-  whose description editing is allowed, and staff may edit any image. A
-  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
-  unknown id is authorized as a `nil` load: an actor who may not
-  `:edit_description` it gets `{:error, :unauthorized}`, while an actor permitted
-  to act on the `nil` load gets `{:error, :not_found}`.
+  fingerprint is `{:error, :unauthorized}`). The image is then loaded by id and
+  authorized for `:edit_description`. The uploader may edit a non-hidden image
+  whose description editing is allowed, and staff may edit any image.
 
   Returns `{:ok, {image, old_description}}` with the updated image (its author,
   sources, and tags preloaded) and the description it replaced
@@ -2161,6 +2099,7 @@ defmodule Philomena.Images do
           {:ok, {Image.t(), String.t() | nil}}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_description(%Actor{} = actor, image_id, attrs) do
+    # FIXME: we call broadcast elsewhere in Philomena namespace but not here? Why was it not moved?
     with :ok <- verify_write_access(actor),
          {:ok, id} <- IntegerId.parse(image_id),
          image = Repo.get(preload(Image, [:user, :sources, tags: :aliases]), id),
@@ -2188,13 +2127,10 @@ defmodule Philomena.Images do
   fingerprint is `{:error, :unauthorized}`), before the image is loaded. A
   non-exempt actor who has updated metadata within the last 5 seconds gets
   `{:error, :rate_limited}`. The image is then loaded by id (with its author,
-  sources, and tags preloaded) and authorized for `:edit_metadata` - editable on
-  a non-hidden image by anyone (anonymous included), so a hidden image is
-  `{:error, :unauthorized}`. A non-castable or out-of-range id is
-  `{:error, :not_found}`; a well-formed but unknown id is authorized as a `nil`
-  load, normally `{:error, :unauthorized}`. On success the sources are updated and
-  attributed, the actor's metadata-update stat is incremented when sources
-  actually changed, and the image is reindexed.
+  sources, and tags preloaded) and authorized for `:edit_metadata`. Sources are
+  editable on a non-hidden image by anyone (anonymous included). On success the
+  sources are updated and attributed, the actor's metadata-update stat is
+  incremented when sources actually changed, and the image is reindexed.
 
   Returns `{:ok, %{image: image, added: added_sources, removed: removed_sources,
   source_change_count: count}}` - everything the caller needs to broadcast the
@@ -2218,6 +2154,7 @@ defmodule Philomena.Images do
            }}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited | Ecto.Changeset.t()}
   def update_sources(%Actor{} = actor, image_id, attrs) do
+    # FIXME: we call broadcast elsewhere in Philomena namespace but not here? Why was it not moved?
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :source_update),
          {:ok, id} <- IntegerId.parse(image_id),
@@ -2254,13 +2191,9 @@ defmodule Philomena.Images do
   Updates the locked tag list of the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with a `"tag_input"` key).
 
-  The image is loaded by id and authorized for `:hide` before it is modified. A
-  non-castable or out-of-range id is `{:error, :not_found}`. A well-formed but
-  unknown id is authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. A blank `tag_input` clears the list. On success
-  the locked tags are replaced, the image is reindexed, and a moderation log is
-  written attributing the change to `actor`.
+  The image is loaded by id and authorized for `:hide`. A blank `tag_input` clears
+  the list. On success the locked tags are replaced, the image is reindexed, and a
+  moderation log is written attributing the change to `actor`.
 
   Returns `{:ok, image}` with the updated image.
 
@@ -2310,22 +2243,26 @@ defmodule Philomena.Images do
   loaded by id (with its author, locked tags, sources, and tags preloaded) and
   authorized for `:edit_metadata` - editable on a non-hidden image whose tag
   editing is allowed by anyone (anonymous included), so an image with tag editing
-  disabled is `{:error, :unauthorized}`. A non-castable or out-of-range id is
-  `{:error, :not_found}`; a well-formed but unknown id is authorized as a `nil`
-  load, normally `{:error, :unauthorized}`. On success the tags are updated and
+  disabled is `{:error, :unauthorized}`. On success the tags are updated and
   attributed, the image, its comments, and the affected tags are reindexed, and
   the actor's metadata-update stat is incremented when tags actually changed.
 
-  Returns `{:ok, %{image: image, added: added_tags, removed: removed_tags,
+  On success, returns `{:ok, %{image: image, added: added_tags, removed: removed_tags,
   tag_change_count: count, tag_change_tag_count: tag_count}}` - everything the
-  caller needs to broadcast the change. Failure
-  shapes: `{:error, %Ecto.Changeset{}}` when the update is rejected (e.g. the
-  image would drop below the minimum tag count), `{:error, :update_failed}` for
-  any other rollback, or `{:error, :rate_limited}` from either of two independent
-  counters - the once-per-window check above (`rl:tag_update:*`), or the
-  in-transaction `TagChanges.Limits` check that caps the number of tag and rating
-  changes over ten minutes (`rltcn:`/`rltcr:`) and rolls back at the
-  `:check_limits` step. All failures leave the image untouched.
+  caller needs to broadcast the change.
+
+  ## Failure shapes
+
+  - `{:error, %Ecto.Changeset{}}` when the update is rejected (e.g. the
+    image would drop below the minimum tag count)
+  - `{:error, :update_failed}` for any other rollback
+  - `{:error, :rate_limited}` from either of two independent
+    counters - the once-per-window check above, or the
+    in-transaction `TagChanges.Limits` check that caps the number of tag and rating
+    changes over ten minutes and rolls back at the
+    `:check_limits` step.
+
+  All failures leave the image untouched.
 
   ## Examples
 
@@ -2350,6 +2287,7 @@ defmodule Philomena.Images do
              | :update_failed
              | Ecto.Changeset.t()}
   def update_tags(%Actor{} = actor, image_id, attrs) do
+    # FIXME: we call broadcast elsewhere in Philomena namespace but not here? Why was it not moved?
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :tag_update),
          {:ok, id} <- IntegerId.parse(image_id),
@@ -2394,14 +2332,15 @@ defmodule Philomena.Images do
 
   @doc """
   Reassigns the uploader of the image named by `image_id`, on behalf of `actor`,
-  from `image_params` (a map with a `"username"` key; a
-  blank username clears the uploader, anonymizing it).
+  from `image_params`.
+
+  `image_params` is a map with a `"username"` key. A blank username clears the
+  uploader, anonymizing it.
 
   Authorization is `:show` on `:ip_address` - a moderator-and-above capability -
   and is checked before the image is loaded, so an actor without it gets
   `{:error, :unauthorized}` regardless of the id. The image is then loaded by id
-  with no per-image authorization: a non-castable, out-of-range, or unknown id is
-  `{:error, :not_found}`. On success the uploader is reassigned, the image is
+  with no per-image authorization. On success the uploader is reassigned, the image is
   reindexed, and a moderation log is written attributing the change to `actor`.
 
   Returns `{:ok, image}` with the updated image (its new uploader and their awards
@@ -2449,14 +2388,13 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Sets (`anonymous?` true) or clears (`anonymous?` false) the anonymity of the
-  image named by `image_id`, on behalf of `actor`.
+  Sets or clears the anonymity status of the image named by `image_id`,
+  on behalf of `actor`.
 
   Authorization is `:show` on `:ip_address` - a moderator-and-above capability -
   and is checked before the image is loaded, so an actor without it gets
   `{:error, :unauthorized}` regardless of the id. The image is then loaded by id
-  with no per-image authorization: a non-castable, out-of-range, or unknown id is
-  `{:error, :not_found}`. On success the anonymity is toggled, the image is
+  with no per-image authorization. On success the anonymity is toggled, the image is
   reindexed, and a moderation log is written attributing the change to `actor`.
 
   Returns `{:ok, image}` with the updated image.
@@ -2501,14 +2439,10 @@ defmodule Philomena.Images do
   Updates the deletion reason of the image named by `image_id`, on behalf of
   `actor`, from `attrs`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. Only an already-hidden image may have its reason
-  changed; a visible image is `{:error, :not_deleted}`, left untouched. On success
-  the reason is updated, the image is reindexed, and a moderation log is written
-  attributing the change to `actor`.
+  The image is loaded by id and authorized for `:hide`. Only an already-hidden
+  image may have its reason changed; a visible image is `{:error, :not_deleted}`,
+  left untouched. On success the reason is updated, the image is reindexed, and
+  a moderation log is written attributing the change to `actor`.
 
   Returns `{:ok, image}` with the updated image, or `{:error, %Ecto.Changeset{}}`
   when the new reason is rejected (e.g. blank), leaving the image untouched.
@@ -2564,13 +2498,10 @@ defmodule Philomena.Images do
   Hides (soft-deletes) the image named by `image_id` from public view, on behalf
   of `actor`, recording the deletion reason from `attrs`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. On success the image is hidden (its reports and
-  duplicate reports closed, tag counts decremented, thumbnails purged, everything
-  reindexed) and a moderation log is written attributing the deletion to `actor`.
+  The image is loaded by id and authorized for `:hide`. On success the image is
+  hidden (its reports and duplicate reports closed, tag counts decremented,
+  thumbnails purged, everything reindexed) and a moderation log is written attributing
+  the deletion to `actor`.
 
   Returns `{:ok, image}` with the hidden image, or `{:error, :hide_failed}` when
   the hide is rejected (e.g. a blank deletion reason), leaving the image visible.
@@ -2612,14 +2543,10 @@ defmodule Philomena.Images do
   Restores (unhides) the image named by `image_id` from moderation hiding, on
   behalf of `actor`.
 
-  The image is loaded by id and authorized for `:hide`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:hide` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. Restoring an image that is not hidden still
-  succeeds (it is left visible). On success the image is made visible again, its
-  content reindexed, and a moderation log is written attributing the restore to
-  `actor`.
+  The image is loaded by id and authorized for `:hide`. Restoring an image that
+  is not hidden still succeeds (it is left visible). On success the image is
+  made visible, its content reindexed, and a moderation log is written
+  attributing the restore to `actor`.
 
   Returns `{:ok, image}` with the restored image.
 
@@ -2661,7 +2588,7 @@ defmodule Philomena.Images do
   Authorizes `:batch_update` against the tag model, parses the tag list into the
   added and removed tags (resolving aliases and implications for additions),
   splits the raw ids into castable integers and unparsable leftovers, and runs
-  the batch through `batch_update/4`. Batch tagging is a staff surface and is
+  the batch through `batch_update/4`. Batch tagging is a staff feature and is
   not rate-limited. Writes an `"Admin.Batch.Tag:update"` moderation log, whose
   subject is the acting user's own profile, on success.
 
@@ -2967,13 +2894,10 @@ defmodule Philomena.Images do
   `image_id`, on behalf of `actor`.
 
   The image is loaded by id and authorized for `:tamper`; the target user is then
-  loaded by id. A non-castable or out-of-range image id is `{:error, :not_found}`,
-  and a well-formed but unknown image id is authorized as a `nil` load (an actor
-  who may not `:tamper` gets `{:error, :unauthorized}`, one permitted to act on
-  the `nil` load gets `{:error, :not_found}`). A non-castable or unknown user id
-  is `{:error, :not_found}`, checked after image authorization. Removing a vote
-  the user never cast still succeeds. On success the image is reindexed and a
-  moderation log recording the removed vote type and target user is written.
+  loaded by id. A non-castable or unknown user is is `{:error, :not_found}`, checked
+  after image authorization. Removing a vote the user never cast still succeeds.
+  On success the image is reindexed and a moderation log recording the removed vote
+  type and target user is written.
 
   Returns `{:ok, image}` with the image.
 
@@ -3243,11 +3167,7 @@ defmodule Philomena.Images do
   Subscribes `actor` to the image named by `image_id`, so they are notified of
   new comments on it.
 
-  The image is loaded by id and authorized for `:show`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:show` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. Subscribing is idempotent.
+  The image is loaded by id and authorized for `:show`. Subscribing is idempotent.
 
   Returns `{:ok, image}`, or `{:error, %Ecto.Changeset{}}` if the subscription
   insert is rejected.
@@ -3316,10 +3236,8 @@ defmodule Philomena.Images do
 
   Banned actors are rejected first with `{:error, :ban}` (a write with no
   fingerprint is `{:error, :unauthorized}`), before the image is loaded. The
-  image is then loaded by id and authorized for `:vote`. A non-castable or
-  out-of-range id is `{:error, :not_found}`; a well-formed but unknown id is
-  authorized as a `nil` load, normally `{:error, :unauthorized}`. Hiding is
-  idempotent (an existing hide is replaced).
+  image is then loaded by id and authorized for `:vote`. Hiding is
+  idempotent.
 
   Returns `{:ok, image}` with the image reloaded and reindexed (so its hide count
   is current), or `{:error, :hide_failed}` if the hide transaction is rolled back.
@@ -3348,7 +3266,7 @@ defmodule Philomena.Images do
   per-user unhide interaction, distinct from the moderator unhide `unhide_image/2`.
 
   Loading, authorization, and ban semantics mirror `create_image_hide/2`.
-  Removing a hide that does not exist still succeeds.
+  Removing a hide is idempotent.
 
   Returns `{:ok, image}` with the image reloaded and reindexed, or
   `{:error, :hide_failed}` if the transaction is rolled back.
@@ -3526,11 +3444,7 @@ defmodule Philomena.Images do
   of `actor`.
 
   The image is loaded by id and authorized for `:index` (visible for any
-  non-hidden image, and to staff for hidden ones). A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:index` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`.
+  non-hidden image, and to staff for hidden ones).
 
   The image is returned with its faves preloaded. Votes and hides are loaded and
   `has_votes` is `true` only when `actor` may `:tamper` with the image;

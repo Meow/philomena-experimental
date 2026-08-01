@@ -10,6 +10,10 @@ defmodule Philomena.Images.Search.Scope do
   filter and is excluded from every result set.
   """
 
+  # FIXME: this gets used as a replacement for Actor.
+  # It is not a replacement for Actor. Actor must always be the mechanism
+  # via which authorization is performed.
+
   alias Philomena.Users.User
 
   @enforce_keys [:user, :filter]
