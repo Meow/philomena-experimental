@@ -49,6 +49,9 @@ defmodule Philomena.Authorization do
   end
 
   @doc """
+  FIXME: get rid of this. I am not aware of any location where we want this to succeed
+  where verify_write_access would fail.
+
   Verifies that `actor` is not banned.
 
   Returns `:ok` when the actor carries no active ban, otherwise `{:error, :ban}`.

@@ -10,9 +10,9 @@ defmodule Philomena.RateLimiter do
 
   The check boundary is inclusive: an operation is refused only once its
   counter exceeds the limit of 1, so with recording done once per successful
-  write, two writes may land inside a single window and the third is refused. Staff (admins, moderators, assistants) and users with
-  `bypass_rate_limits` set are never limited and record no counters; see
-  `considered_for_limit?/1`.
+  write, two writes may land inside a single window and the third is refused.
+  Staff (admins, moderators, assistants) and users with `bypass_rate_limits`
+  set are never limited and record no counters; see `considered_for_limit?/1`.
   """
 
   alias Philomena.Attribution.Actor

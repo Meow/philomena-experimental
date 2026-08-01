@@ -35,36 +35,199 @@ defmodule Philomena.Posts do
 
   @post_create_window 15
 
-  @doc """
-  Gets a single post.
+  # Creates a post. Visible for testing.
+  @doc false
+  def create_post(topic, %Actor{user: user} = actor, params \\ %{}) do
+    now = DateTime.utc_now(:second)
 
-  Raises `Ecto.NoResultsError` if the Post does not exist.
+    topic_query =
+      Topic
+      |> where(id: ^topic.id)
+
+    topic_lock_query =
+      topic_query
+      |> lock("FOR UPDATE")
+
+    forum_query =
+      Forum
+      |> where(id: ^topic.forum_id)
+
+    Multi.new()
+    |> Multi.one(:topic, topic_lock_query)
+    |> Multi.run(:post, fn repo, _ ->
+      last_position =
+        Post
+        |> where(topic_id: ^topic.id)
+        |> order_by(desc: :topic_position)
+        |> select([p], p.topic_position)
+        |> limit(1)
+        |> repo.one()
+
+      Ecto.build_assoc(topic, :posts, topic_position: (last_position || -1) + 1)
+      |> Post.creation_changeset(params, actor)
+      |> repo.insert()
+    end)
+    |> Multi.run(:update_topic, fn repo, %{post: %{id: post_id}} ->
+      {count, nil} =
+        repo.update_all(topic_query,
+          inc: [post_count: 1],
+          set: [last_post_id: post_id, last_replied_to_at: now]
+        )
+
+      {:ok, count}
+    end)
+    |> Multi.run(:update_forum, fn repo, %{post: %{id: post_id}} ->
+      {count, nil} =
+        repo.update_all(forum_query, inc: [post_count: 1], set: [last_post_id: post_id])
+
+      {:ok, count}
+    end)
+    |> Multi.run(:notification, &notify_post/2)
+    |> Topics.maybe_subscribe_on(:topic, user, :watch_on_reply)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{post: post}} = result ->
+        reindex_post(post)
+
+        result
+
+      error ->
+        error
+    end
+  end
+
+  # Updates a post. Visible for testing.
+  @doc false
+  def update_post(%Post{} = post, editor, attrs) do
+    now = DateTime.utc_now(:second)
+    current_body = post.body
+    current_reason = post.edit_reason
+
+    post_changes = Post.changeset(post, attrs, now)
+
+    Multi.new()
+    |> Multi.update(:post, post_changes)
+    |> Multi.run(:version, fn _repo, _changes ->
+      Versions.create_version("Post", post.id, editor.id, %{
+        "body" => current_body,
+        "edit_reason" => current_reason
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{post: post}} = result ->
+        reindex_post(post)
+
+        result
+
+      error ->
+        error
+    end
+  end
+
+  # Hides an already-loaded post and handles associated reports. Visible for testing.
+  @doc false
+  def hide_loaded_post(%Post{} = post, attrs, user) do
+    post = post |> Repo.preload(:topic)
+
+    Multi.new()
+    |> Multi.update(:post, Post.hide_changeset(post, attrs, user))
+    |> Multi.update_all(:reports, Reports.close_report_query({"Post", post.id}, user), [])
+    |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
+    |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{post: post, reports: {_count, reports}}} ->
+        Reports.reindex_reports(reports)
+        reindex_post(post)
+
+        {:ok, post}
+
+      error ->
+        normalize_multi_error(error)
+    end
+  end
+
+  # Unhides a previously hidden post.
+  defp unhide_post(%Post{} = post) do
+    post = post |> Repo.preload(:topic)
+
+    Multi.new()
+    |> Multi.update(:post, Post.unhide_changeset(post))
+    |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
+    |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{post: post}} ->
+        reindex_post(post)
+
+        {:ok, post}
+
+      error ->
+        error
+    end
+  end
+
+  # Marks a post as destroyed and removes its text (hard deletion).
+  #
+  # This is the internal destroy engine shared with `destroy_post/2` and
+  # `Philomena.Users.Eraser`.
+  @doc false
+  def destroy_post(%Post{} = post) do
+    post = post |> Repo.preload([:topic, :user])
+
+    Multi.new()
+    |> Multi.update(:post, Post.destroy_changeset(post))
+    |> Multi.update_all(
+      :topic,
+      Topic |> where(id: ^post.topic_id),
+      inc: [post_count: -1]
+    )
+    |> Multi.update_all(
+      :forum,
+      Forum |> where(id: ^post.topic.forum_id),
+      inc: [post_count: -1]
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{post: post}} ->
+        UserStatistics.inc_stat(post.user_id, :posts_count, -1)
+        reindex_post(post)
+
+        {:ok, post}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking post changes.
 
   ## Examples
 
-      iex> get_post!(123)
-      %Post{}
-
-      iex> get_post!(456)
-      ** (Ecto.NoResultsError)
+      iex> change_post(post)
+      %Ecto.Changeset{source: %Post{}}
 
   """
-  def get_post!(id), do: Repo.get!(Post, id)
+  def change_post(%Post{} = post) do
+    Post.changeset(post, %{})
+  end
 
   @doc """
   Lists the publicly visible posts of a topic, on behalf of any requester.
 
-  The topic is loaded by its `topic_slug` within the forum named by
-  `forum_short_name`, requiring the topic to be visible (not hidden from users)
-  and the forum's access level to be `"normal"` - for every requester alike, so
-  restricted forums are never exposed here. When the topic cannot be found under
-  those constraints, `{:error, :not_found}` is returned.
+  The topic is loaded by its `topic_slug` within the forum named by `forum_slug`,
+  requiring the topic to be visible (not hidden from users) and the forum's access
+  level to be `"normal"` - for every requester alike, so restricted forums are never
+  exposed here. When the topic cannot be found under those constraints,
+  `{:error, :not_found}` is returned.
 
   Otherwise the topic's posts are windowed by `pagination`'s page number and
   size over their `topic_position`, ordered ascending, with authors preloaded.
   Posts with destroyed content are excluded; posts merely hidden from users stay
-  in the list. Each returned post carries
-  the loaded topic so callers can read its post count for the response total.
+  in the list. Each returned post carries the loaded topic so callers can read
+  its post count for the response total.
 
   Returns `{:ok, {topic, posts}}` or `{:error, :not_found}`.
 
@@ -77,14 +240,21 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec list_public_topic_posts(String.t(), String.t(), map()) ::
+  @spec list_public_topic_posts(
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          pagination :: map()
+        ) ::
           {:ok, {Topic.t(), [Post.t()]}} | {:error, :not_found}
-  def list_public_topic_posts(forum_short_name, topic_slug, pagination) do
-    case public_topic(forum_short_name, topic_slug) do
+  def list_public_topic_posts(forum_slug, topic_slug, pagination) do
+    # FIXME: Delete this function. Replace callers with actor-scoped version of this function.
+    case public_topic(forum_slug, topic_slug) do
       nil ->
         {:error, :not_found}
 
       topic ->
+        # FIXME: special case pagination structure. Use generic Repo.pagination_params()
+        # and Scrivener.Page return
         %{page_number: page, page_size: page_size} = pagination
 
         posts =
@@ -111,7 +281,7 @@ defmodule Philomena.Posts do
 
   `post_id` is integer-guarded first, so a non-integer id is reported as missing
   before any query runs. The post is then loaded by id within the topic named by
-  `topic_slug` and the forum named by `forum_short_name`, requiring the post to
+  `topic_slug` and the forum named by `forum_slug`, requiring the post to
   have non-destroyed content, the topic to be visible (not hidden from users),
   and the forum's access level to be `"normal"` - for every requester alike. The
   author and topic are preloaded. A hidden topic, a restricted forum, a slug
@@ -129,9 +299,14 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec load_public_topic_post(String.t(), String.t(), any()) ::
+  @spec load_public_topic_post(
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          post_id :: Loader.integer_id()
+        ) ::
           {:ok, Post.t()} | {:error, :not_found}
-  def load_public_topic_post(forum_short_name, topic_slug, post_id) do
+  def load_public_topic_post(forum_slug, topic_slug, post_id) do
+    # FIXME: Delete this function. Replace callers with actor-scoped version of this function.
     case IntegerId.parse(post_id) do
       {:ok, post_id} ->
         Post
@@ -140,7 +315,7 @@ defmodule Philomena.Posts do
         |> where(id: ^post_id)
         |> where(destroyed_content: false)
         |> where([_p, t], t.hidden_from_users == false and t.slug == ^topic_slug)
-        |> where([_p, _t, f], f.access_level == "normal" and f.short_name == ^forum_short_name)
+        |> where([_p, _t, f], f.access_level == "normal" and f.short_name == ^forum_slug)
         |> preload([:user, :topic])
         |> Repo.one()
         |> case do
@@ -156,11 +331,11 @@ defmodule Philomena.Posts do
   # Loads a topic by slug within the named forum, requiring the topic to be
   # visible and the forum's access level to be `"normal"` - for every
   # requester alike. Returns the topic or `nil`.
-  defp public_topic(forum_short_name, topic_slug) do
+  defp public_topic(forum_slug, topic_slug) do
     Topic
     |> join(:inner, [t], _ in assoc(t, :forum))
     |> where([t], t.hidden_from_users == false and t.slug == ^topic_slug)
-    |> where([_t, f], f.access_level == "normal" and f.short_name == ^forum_short_name)
+    |> where([_t, f], f.access_level == "normal" and f.short_name == ^forum_slug)
     |> Repo.one()
   end
 
@@ -190,8 +365,9 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec load_public_post(any()) :: {:ok, Post.t()} | {:error, :not_found}
+  @spec load_public_post(Loader.integer_id()) :: {:ok, Post.t()} | {:error, :not_found}
   def load_public_post(post_id) do
+    # FIXME: Delete this function. Replace callers with actor-scoped version of this function.
     Post
     |> join(:inner, [p], _ in assoc(p, :topic))
     |> join(:inner, [_p, t], _ in assoc(t, :forum))
@@ -231,9 +407,10 @@ defmodule Philomena.Posts do
       {:error, "Imbalanced parentheses."}
 
   """
-  @spec search_public_posts(Actor.t(), String.t() | nil, map()) ::
+  @spec search_public_posts(Actor.t(), String.t() | nil, Search.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
   def search_public_posts(%Actor{user: user}, query_string, pagination) do
+    # FIXME: Delete this function. Replace callers with actor-scoped version of this function.
     case Posts.Query.compile(query_string, user: user) do
       {:ok, query} ->
         results =
@@ -262,108 +439,33 @@ defmodule Philomena.Posts do
     end
   end
 
-  @doc """
-  Creates a post.
-
-  ## Examples
-
-      iex> create_post(%{field: value})
-      {:ok, %Post{}}
-
-      iex> create_post(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_post(topic, attributes, params \\ %{}) do
-    now = DateTime.utc_now(:second)
-
-    topic_query =
-      Topic
-      |> where(id: ^topic.id)
-
-    topic_lock_query =
-      topic_query
-      |> lock("FOR UPDATE")
-
-    forum_query =
-      Forum
-      |> where(id: ^topic.forum_id)
-
-    Multi.new()
-    |> Multi.one(:topic, topic_lock_query)
-    |> Multi.run(:post, fn repo, _ ->
-      last_position =
-        Post
-        |> where(topic_id: ^topic.id)
-        |> order_by(desc: :topic_position)
-        |> select([p], p.topic_position)
-        |> limit(1)
-        |> repo.one()
-
-      Ecto.build_assoc(topic, :posts, [topic_position: (last_position || -1) + 1] ++ attributes)
-      |> Post.creation_changeset(params, attributes)
-      |> repo.insert()
-    end)
-    |> Multi.run(:update_topic, fn repo, %{post: %{id: post_id}} ->
-      {count, nil} =
-        repo.update_all(topic_query,
-          inc: [post_count: 1],
-          set: [last_post_id: post_id, last_replied_to_at: now]
-        )
-
-      {:ok, count}
-    end)
-    |> Multi.run(:update_forum, fn repo, %{post: %{id: post_id}} ->
-      {count, nil} =
-        repo.update_all(forum_query, inc: [post_count: 1], set: [last_post_id: post_id])
-
-      {:ok, count}
-    end)
-    |> Multi.run(:notification, &notify_post/2)
-    |> Topics.maybe_subscribe_on(:topic, attributes[:user], :watch_on_reply)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{post: post}} = result ->
-        reindex_post(post)
-
-        result
-
-      error ->
-        error
-    end
-  end
-
   defp notify_post(_repo, %{post: post, topic: topic}) do
     Notifications.create_forum_post_notification(post.user, topic, post)
   end
 
   @doc """
-  Creates a reply on behalf of `actor` (a `Philomena.Attribution.Actor` whose
-  user may be `nil` for an anonymous visitor) in the topic named by `topic_slug`
-  within the forum named by `forum_slug`, from `post_params` (which may be `nil`
-  when none was submitted).
+  Creates a reply on behalf of `actor` in the topic named by `topic_slug`
+  within the forum named by `forum_slug`, from `post_params`.
 
-  This is a write, so `actor`'s write access is verified first, before any
-  loading: a banned actor is `{:error, :ban}` and an actor with no fingerprint is
-  `{:error, :unauthorized}`, neither having touched the topic. Then the forum is
+  `actor`'s write access is verified first. Then the forum is
   loaded by short name and authorized for `:show`, the topic is loaded by slug
   with hidden topics kept invisible unless the actor may `:show` them, and the
   actor is authorized for `:create_post` on the topic (which no rule permits on a
-  locked or hidden topic). The reply is then inserted by `create_post/3` with the
-  IP, fingerprint, and user carried by `actor`.
+  locked or hidden topic). The reply is then inserted.
 
-  On a successful insert an approved post increments its author's forum post
+  On a successful insert, an approved post increments its author's forum post
   count and an unapproved one is reported for containing external links. The
   returned map carries the post, topic, and forum needed for the firehose
   broadcast and for the caller to reuse.
 
-  Returns `{:ok, %{post: post, topic: topic, forum: forum}}` on success,
-  `{:error, forum, topic}` when the insert is rejected (both carry the topic
-  for the caller to reuse), `{:error, :ban}` or
-  `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
-  when the forum or topic is not visible or the topic may not be posted in,
-  `{:error, :not_found}` when the topic does not exist, or `{:error, :rate_limited}`
-  when a non-exempt actor has posted within the last 15 seconds.
+  ## Return shapes
+
+  - `{:ok, %{post: post, topic: topic, forum: forum}}` on success
+  - `{:error, forum, topic}` when the insert is rejected (both carry the topic for the caller to reuse)
+  - `{:error, :ban}` or `{:error, :unauthorized}` from the write-access check
+  - `{:error, :unauthorized}` when the forum or topic is not visible or the topic may not be posted in
+  - `{:error, :not_found}` when the topic does not exist
+  - `{:error, :rate_limited}` when a non-exempt actor has posted within the last 15 seconds
 
   ## Examples
 
@@ -374,7 +476,12 @@ defmodule Philomena.Posts do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec create_post(Actor.t(), String.t(), String.t(), map() | nil) ::
+  @spec create_post(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          post_params :: map() | nil
+        ) ::
           {:ok, %{post: Post.t(), topic: Topic.t(), forum: Forum.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited}
@@ -384,12 +491,13 @@ defmodule Philomena.Posts do
          {:ok, forum, topic} <-
            Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor.user, :create_post, topic) do
-      case create_post(topic, actor_attributes(actor), post_params || %{}) do
+      case create_post(topic, actor, post_params || %{}) do
         {:ok, %{post: post}} ->
           RateLimiter.record_action(actor, :post_create, @post_create_window)
           record_post_creation(actor, post)
           # The firehose broadcast needs the topic's author, so the topic
           # carries its `:user` here.
+          # FIXME: we call broadcast elsewhere in Philomena namespace but not here? Why was it not moved?
           {:ok, %{post: post, topic: Repo.preload(topic, :user), forum: forum}}
 
         _error ->
@@ -397,11 +505,6 @@ defmodule Philomena.Posts do
       end
     end
   end
-
-  # The IP/fingerprint/user attribution `create_post/3` records, rebuilt from the
-  # actor into the keyword list it expects.
-  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
-    do: [ip: ip, fingerprint: fingerprint, user: user]
 
   # Post-insert bookkeeping: an approved post counts toward its author's forum
   # post total (a no-op for an anonymous author, whose user is nil), an
@@ -440,52 +543,12 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Updates a post.
-
-  ## Examples
-
-      iex> update_post(post, %{field: new_value})
-      {:ok, %Post{}}
-
-      iex> update_post(post, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_post(%Post{} = post, editor, attrs) do
-    now = DateTime.utc_now(:second)
-    current_body = post.body
-    current_reason = post.edit_reason
-
-    post_changes = Post.changeset(post, attrs, now)
-
-    Multi.new()
-    |> Multi.update(:post, post_changes)
-    |> Multi.run(:version, fn _repo, _changes ->
-      Versions.create_version("Post", post.id, editor.id, %{
-        "body" => current_body,
-        "edit_reason" => current_reason
-      })
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{post: post}} = result ->
-        reindex_post(post)
-
-        result
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
   Loads the post named by `post_id` within the topic named by
   `topic_slug` in the forum named by `forum_slug` for editing, on behalf of
-  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+  `actor`.
 
-  This is a read that precedes an edit: a banned actor is rejected
-  with `{:error, :ban}` first, but the fingerprint requirement that the write
-  itself enforces does not apply here. The forum, topic, and post are then loaded
+  A banned actor is rejected with `{:error, :ban}` first, but the fingerprint requirement
+  that the write itself enforces does not apply here. The forum, topic, and post are then loaded
   and authorized (see `load_editable_post/4`).
 
   Returns `{:ok, {post, changeset}}` - the post (with its topic, forum, and
@@ -500,7 +563,12 @@ defmodule Philomena.Posts do
       {:ok, {%Post{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_post_for_edit(Actor.t(), String.t(), String.t(), any()) ::
+  @spec load_post_for_edit(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          Loader.integer_id()
+        ) ::
           {:ok, {Post.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_edit(actor, forum_slug, topic_slug, post_id) do
@@ -513,22 +581,20 @@ defmodule Philomena.Posts do
   @doc """
   Updates the post named by `post_id` within the topic named by
   `topic_slug` in the forum named by `forum_slug` from `post_params`, on behalf
-  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+  of `actor`.
 
-  This is a write, so `actor`'s write access is verified first (banned actor
-  `{:error, :ban}`, no fingerprint `{:error, :unauthorized}`), before the same
-  load-and-authorize chain `load_post_for_edit/4` uses (see
-  `load_editable_post/4`). The edit is then applied by `update_post/3`, recording
-  a version attributed to `actor`'s user; an unapproved result is reported for
-  containing external links (an approved result is a no-op).
+  `actor`'s write access is verified first, before the same load-and-authorize chain
+  `load_post_for_edit/4` uses (see `load_editable_post/4`). The edit is then applied
+  by `update_post/3`, recording a version attributed to `actor`'s user; an unapproved
+  result is reported for containing external links (an approved result is a no-op).
 
-  Returns `{:ok, post}` on success (the post carries its topic and forum for the
-  caller to reuse), `{:error, {post, changeset}}` when the edit is rejected,
-  `{:error, :ban}` or
-  `{:error, :unauthorized}` from the
-  write-access check, `{:error, :unauthorized}` when the forum, topic, or post is
-  not visible or may not be edited, or `{:error, :not_found}` when the topic or
-  post does not exist.
+  ## Return shapes
+
+  - `{:ok, post}` on success (the post carries its topic and forum for the caller to reuse)
+  - `{:error, {post, changeset}}` when the edit is rejected
+  - `{:error, :ban}` or `{:error, :unauthorized}` from the write-access check
+  - `{:error, :unauthorized}` when the forum, topic, or post is not visible or may not be edited
+  - `{:error, :not_found}` when the topic or post does not exist
 
   ## Examples
 
@@ -539,7 +605,13 @@ defmodule Philomena.Posts do
       {:error, {%Post{}, %Ecto.Changeset{}}}
 
   """
-  @spec update_post(Actor.t(), String.t(), String.t(), any(), map() | nil) ::
+  @spec update_post(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          post_id :: Loader.integer_id(),
+          post_params :: map() | nil
+        ) ::
           {:ok, Post.t()}
           | {:error, {Post.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
@@ -575,38 +647,18 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Deletes a Post.
-
-  ## Examples
-
-      iex> delete_post(post)
-      {:ok, %Post{}}
-
-      iex> delete_post(post)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_post(%Post{} = post) do
-    Repo.delete(post)
-  end
-
-  @doc """
   Hides the post named by `post_id`, recording the
-  `"deletion_reason"` carried in `post_params`, on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
+  `"deletion_reason"` carried in `post_params`, on behalf of `actor`.
 
-  Authorization (`:hide` on the loaded post) happens here; on success the post's
+  The post is authorized for `:hide`. On success, the post's
   associated reports are closed, the topic's and forum's last-post pointers are
   refreshed, the post is reindexed, and a moderation log is written attributing
-  the deletion to `actor`. An id that cannot name a row is `{:error, :not_found}`,
-  while a well-formed id that names no row authorizes `nil` - which no rule
-  permits - and is therefore `{:error, :unauthorized}`.
+  the deletion to `actor`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
   preloaded so the caller can reuse them for either outcome.
   A rejected hide changeset (e.g. a blank deletion reason) returns
-  `{:error, %Post{}}` carrying that loaded post.
+  `{:error, %Post{}}` carrying the loaded post.
 
   ## Examples
 
@@ -652,44 +704,6 @@ defmodule Philomena.Posts do
     end
   end
 
-  @doc """
-  Hides an already-loaded post and handles associated reports.
-
-  This is the internal hide engine shared with `hide_post/3` and
-  `Philomena.Users.Eraser`; it performs no authorization and writes no
-  moderation log, so callers needing authorization and a moderation log go
-  through `hide_post/3`.
-
-  ## Examples
-
-      iex> hide_loaded_post(post, %{staff_note: "Rule violation"}, user)
-      {:ok, %Post{}}
-
-      iex> hide_loaded_post(post, %{deletion_reason: ""}, user)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def hide_loaded_post(%Post{} = post, attrs, user) do
-    post = post |> Repo.preload(:topic)
-
-    Multi.new()
-    |> Multi.update(:post, Post.hide_changeset(post, attrs, user))
-    |> Multi.update_all(:reports, Reports.close_report_query({"Post", post.id}, user), [])
-    |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
-    |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{post: post, reports: {_count, reports}}} ->
-        Reports.reindex_reports(reports)
-        reindex_post(post)
-
-        {:ok, post}
-
-      error ->
-        normalize_multi_error(error)
-    end
-  end
-
   defp log_post_hide(actor, %Post{topic: topic} = post) do
     ModerationLogs.create_moderation_log(
       actor,
@@ -700,20 +714,15 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Restores the post named by `post_id`, on behalf of `actor`
-  (a `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
+  Restores the post named by `post_id`, on behalf of `actor`.
 
-  Loading and authorization mirror `hide_post/3` (`:hide` on the loaded post -
-  a moderator can still see the hidden post here). On success the topic's and
+  Loading and authorization mirror `hide_post/3`. On success the topic's and
   forum's last-post pointers are refreshed, the post is reindexed, and a
-  moderation log is written attributing the restore to `actor`. An id that
-  cannot name a row is `{:error, :not_found}`; a well-formed id naming no row
-  authorizes `nil` and is `{:error, :unauthorized}`.
+  moderation log is written attributing the restore to `actor`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
   preloaded so the caller can reuse them. A rejected restore
-  returns `{:error, %Post{}}` carrying that loaded post.
+  returns `{:error, %Post{}}` carrying the loaded post.
 
   ## Examples
 
@@ -766,52 +775,17 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Unhides a previously hidden post.
-
-  This is the internal restore engine shared with `unhide_post/2`; it performs
-  no authorization and writes no moderation log, so callers needing
-  authorization and a moderation log go through `unhide_post/2`.
-
-  ## Examples
-
-      iex> unhide_post(post)
-      {:ok, %Post{}}
-
-  """
-  def unhide_post(%Post{} = post) do
-    post = post |> Repo.preload(:topic)
-
-    Multi.new()
-    |> Multi.update(:post, Post.unhide_changeset(post))
-    |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
-    |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{post: post}} ->
-        reindex_post(post)
-
-        {:ok, post}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
   Destroys (permanently wipes the text of) the post named by
-  `post_id`, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user
-  may be `nil` for an anonymous visitor).
+  `post_id`, on behalf of `actor`.
 
-  Authorization (`:hide` on the loaded post) happens here; on success the post's
+  The post is authorized for `:hide`. On success, the post's
   text is blanked, the topic's and forum's post counts and the author's forum
   post count are decremented, the post is reindexed, and a moderation log is
-  written attributing the destruction to `actor`. An id that cannot name a row is
-  `{:error, :not_found}`, while a well-formed id that names no row authorizes
-  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`.
+  written attributing the destruction to `actor`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
   preloaded so the caller can reuse them for either outcome.
-  A failed destroy returns `{:error, %Post{}}` carrying that loaded post.
+  A failed destroy returns `{:error, %Post{}}` carrying the loaded post.
 
   ## Examples
 
@@ -867,63 +841,15 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Marks a post as destroyed and removes its text (hard deletion).
+  Approves the post named by `post_id`, on behalf of `actor`.
 
-  This is the internal destroy engine shared with `destroy_post/2` and
-  `Philomena.Users.Eraser`; it performs no authorization and writes no
-  moderation log, so callers needing authorization and a moderation log go
-  through `destroy_post/2`.
-
-  ## Examples
-
-      iex> destroy_post(post)
-      {:ok, %Post{}}
-
-  """
-  def destroy_post(%Post{} = post) do
-    post = post |> Repo.preload([:topic, :user])
-
-    Multi.new()
-    |> Multi.update(:post, Post.destroy_changeset(post))
-    |> Multi.update_all(
-      :topic,
-      Topic |> where(id: ^post.topic_id),
-      inc: [post_count: -1]
-    )
-    |> Multi.update_all(
-      :forum,
-      Forum |> where(id: ^post.topic.forum_id),
-      inc: [post_count: -1]
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{post: post}} ->
-        UserStatistics.inc_stat(post.user_id, :posts_count, -1)
-        reindex_post(post)
-
-        {:ok, post}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Approves the post named by `post_id`, on behalf of `actor`
-  (a `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
-
-  Authorization (`:approve` on the loaded post) happens here; on success the
-  post's associated reports are closed, the author's forum post count is
-  incremented, the post is reindexed, and a moderation log is written
-  attributing the approval to `actor`. An id that cannot name a row is
-  `{:error, :not_found}`, while a well-formed id that names no row authorizes
-  `nil` - which no rule permits - and is therefore `{:error, :unauthorized}`.
+  The post is authorized for `:approve`. On success, the post's associated
+  reports are closed, the author's forum post count is incremented, the post
+  is reindexed, and a moderation log is written attributing the approval to `actor`.
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
-  preloaded so the caller can reuse them for either
-  outcome. A failed approval changeset returns `{:error, %Post{}}` carrying
-  that loaded post.
+  preloaded so the caller can reuse them for either outcome. A failed approval
+  changeset returns `{:error, %Post{}}` carrying the loaded post.
 
   ## Examples
 
@@ -995,8 +921,7 @@ defmodule Philomena.Posts do
   @doc """
   Loads the edit history of the post named by `post_id` within
   the topic named by `topic_slug` in the forum named by `forum_slug`, on behalf
-  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
-  anonymous visitor). This is a public read with no ban check.
+  of `actor`. This is a public read with no ban check.
 
   The forum is loaded by short name and authorized for `:show`, and the topic is
   loaded by slug with hidden topics visible only to actors who may `:show` them.
@@ -1004,7 +929,7 @@ defmodule Philomena.Posts do
   `{:error, :not_found}`, and a post hidden from users is visible only when
   `actor` may `:show` it, otherwise `{:error, :unauthorized}`. The post id is not
   integer-guarded before the query, so a non-integer id raises
-  `Ecto.Query.CastError`.
+  `Ecto.Query.CastError`. (FIXME.)
 
   On success the loaded post (with its topic, forum, and author associations
   preloaded) is returned alongside the topic
@@ -1024,7 +949,12 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec post_history(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
+  @spec post_history(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          post_id :: Loader.integer_id()
+        ) ::
           {:ok, {Topic.t(), Post.t(), [Version.t()]}}
           | {:error, :unauthorized | :not_found}
   def post_history(%Actor{} = actor, forum_slug, topic_slug, post_id) do
@@ -1062,14 +992,15 @@ defmodule Philomena.Posts do
   @doc """
   Loads the post named by `post_id` within the topic named by
   `topic_slug` in the forum named by `forum_slug` for reporting, on behalf
-  of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
-  anonymous visitor).
+  of `actor`.
 
-  This is a read that precedes a report: a banned actor is
-  rejected with `{:error, :ban}` first, but the fingerprint requirement that the
-  write itself enforces does not apply here. The forum, topic, and post are then
-  loaded and authorized exactly as `post_history/4` does (forum `:show`, topic
-  visibility, and a hidden post visible only to actors who may `:show` it).
+  The forum is loaded by short name and authorized for `:show`, and the topic is
+  loaded by slug with hidden topics visible only to actors who may `:show` them.
+  The post is then loaded by id within that topic: a missing post is
+  `{:error, :not_found}`, and a post hidden from users is visible only when
+  `actor` may `:show` it, otherwise `{:error, :unauthorized}`. The post id is not
+  integer-guarded before the query, so a non-integer id raises
+  `Ecto.Query.CastError`. (FIXME.)
 
   Returns `{:ok, {topic, post, changeset}}` - the topic (with its forum
   preloaded), the post, and a changeset for reporting the post -
@@ -1083,7 +1014,12 @@ defmodule Philomena.Posts do
       {:ok, {%Topic{}, %Post{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_post_for_report(Actor.t(), String.t(), String.t(), any()) ::
+  @spec load_post_for_report(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          Loader.integer_id()
+        ) ::
           {:ok, {Topic.t(), Post.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_report(%Actor{user: user} = actor, forum_slug, topic_slug, post_id) do
@@ -1098,12 +1034,15 @@ defmodule Philomena.Posts do
   @doc """
   Loads the post named by `post_id` within the topic named by
   `topic_slug` in the forum named by `forum_slug` for creating its report, on
-  behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+  behalf of `actor`.
 
-  This is the write path, so `actor`'s write
-  access is verified first: a banned actor is `{:error, :ban}` and an actor with
-  no fingerprint is `{:error, :unauthorized}`. The forum, topic, and post are
-  then loaded and authorized exactly as `post_history/4` does.
+  The forum is loaded by short name and authorized for `:show`, and the topic is
+  loaded by slug with hidden topics visible only to actors who may `:show` them.
+  The post is then loaded by id within that topic: a missing post is
+  `{:error, :not_found}`, and a post hidden from users is visible only when
+  `actor` may `:show` it, otherwise `{:error, :unauthorized}`. The post id is not
+  integer-guarded before the query, so a non-integer id raises
+  `Ecto.Query.CastError`. (FIXME.)
 
   Returns `{:ok, {topic, post}}` - the topic (with its forum preloaded) and post
   - `{:error, :ban}` or
@@ -1111,13 +1050,20 @@ defmodule Philomena.Posts do
   when the forum, topic, or hidden post is not visible, or `{:error, :not_found}`
   when the topic or post does not exist.
 
+  FIXME: this function looks like a duplicate of the one above?
+
   ## Examples
 
       iex> load_post_for_report_creation(actor, "dis", "some-topic", "1")
       {:ok, {%Topic{}, %Post{}}}
 
   """
-  @spec load_post_for_report_creation(Actor.t(), String.t(), String.t(), any()) ::
+  @spec load_post_for_report_creation(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          Loader.integer_id()
+        ) ::
           {:ok, {Topic.t(), Post.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_report_creation(%Actor{user: user} = actor, forum_slug, topic_slug, post_id) do
@@ -1138,19 +1084,6 @@ defmodule Philomena.Posts do
          {:ok, post} <- load_topic_post(user, topic, post_id) do
       {:ok, {post.topic, post}}
     end
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking post changes.
-
-  ## Examples
-
-      iex> change_post(post)
-      %Ecto.Changeset{source: %Post{}}
-
-  """
-  def change_post(%Post{} = post) do
-    Post.changeset(post, %{})
   end
 
   @doc """

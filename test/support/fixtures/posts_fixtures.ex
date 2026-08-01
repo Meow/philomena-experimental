@@ -15,7 +15,7 @@ defmodule Philomena.PostsFixtures do
   def post_fixture(topic, user \\ nil, attrs \\ %{}) do
     attrs = Enum.into(attrs, %{"body" => "Test post body"})
 
-    {:ok, %{post: post}} = Posts.create_post(topic, attribution(user), attrs)
+    {:ok, %{post: post}} = Posts.create_post(topic, actor(user), attrs)
 
     post
   end

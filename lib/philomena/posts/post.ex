@@ -2,6 +2,7 @@ defmodule Philomena.Posts.Post do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Users.User
   alias Philomena.Topics.Topic
   alias Philomena.Schema.Approval
@@ -40,13 +41,13 @@ defmodule Philomena.Posts.Post do
   end
 
   @doc false
-  def creation_changeset(post, attrs, attribution) do
+  def creation_changeset(post, attrs, %Actor{} = actor) do
     post
     |> cast(attrs, [:body, :anonymous])
     |> validate_required([:body])
     |> validate_length(:body, min: 1, max: 300_000, count: :bytes)
-    |> change(attribution)
-    |> Approval.maybe_put_approval(attribution[:user], :external_links)
+    |> change(Actor.to_changes(actor))
+    |> Approval.maybe_put_approval(actor.user, :external_links)
   end
 
   @doc false

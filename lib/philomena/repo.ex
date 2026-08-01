@@ -5,5 +5,6 @@ defmodule Philomena.Repo do
 
   use Scrivener, page_size: 250
 
+  # TODO: unify this with the Search version
   @type pagination_params :: map() | keyword()
 end
