@@ -18,6 +18,7 @@ defmodule Philomena.RateLimiter do
   alias Philomena.Attribution.Actor
   alias Philomena.Users.User
 
+  @key_prefix "rl:"
   @limit 1
 
   @doc """
@@ -39,7 +40,10 @@ defmodule Philomena.RateLimiter do
   @spec check_rate_limit(Actor.t(), atom()) :: :ok | {:error, :rate_limited}
   def check_rate_limit(%Actor{} = actor, operation) do
     if considered_for_limit?(actor.user) do
-      amt = String.to_integer(Redix.command!(:redix, ["GET", key(actor, operation)]) || "0")
+      amt =
+        String.to_integer(
+          Redix.command!(redix_connection(), ["GET", key(actor, operation)]) || "0"
+        )
 
       if amt <= @limit, do: :ok, else: {:error, :rate_limited}
     else
@@ -63,10 +67,26 @@ defmodule Philomena.RateLimiter do
   @spec record_action(Actor.t(), atom(), pos_integer()) :: :ok
   def record_action(%Actor{} = actor, operation, window) do
     if considered_for_limit?(actor.user) do
-      Redix.pipeline!(:redix, [
+      Redix.pipeline!(redix_connection(), [
         ["INCR", key(actor, operation)],
         ["EXPIRE", key(actor, operation), window]
       ])
+    end
+
+    :ok
+  end
+
+  @doc """
+  Resets all rate limits. Visible for testing.
+  """
+  @spec reset_limits_globally!() :: :ok
+  def reset_limits_globally! do
+    case Redix.command!(redix_connection(), ["KEYS", "#{@key_prefix}*"]) do
+      [] ->
+        :ok
+
+      keys ->
+        Redix.command!(redix_connection(), ["DEL" | keys])
     end
 
     :ok
@@ -82,8 +102,10 @@ defmodule Philomena.RateLimiter do
   defp considered_for_limit?(%User{bypass_rate_limits: true}), do: false
   defp considered_for_limit?(%User{}), do: true
 
-  defp key(%Actor{} = actor, operation), do: "rl:#{operation}:#{scope(actor)}"
+  defp key(%Actor{} = actor, operation), do: "#{@key_prefix}#{operation}:#{scope(actor)}"
 
   defp scope(%Actor{user: nil, ip: ip}), do: "i:#{ip}"
   defp scope(%Actor{user: user}), do: "u:#{user.id}"
+
+  defp redix_connection, do: :redix
 end

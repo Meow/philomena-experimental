@@ -16,8 +16,7 @@ alias Philomena.Comments.Comment
 alias Philomena.Images
 alias Philomena.Topics
 alias Philomena.Posts
-alias Philomena.Posts.Post
-alias Philomena.Tags
+alias Philomena.RateLimiter
 
 {:ok, ip} = EctoNetwork.INET.cast({203, 0, 113, 0})
 {:ok, _} = Application.ensure_all_started(:plug)
@@ -40,9 +39,17 @@ for user_def <- resources["users"] do
 end
 
 pleb = Repo.get_by!(User, name: "Pleb")
+admin = Repo.get_by!(User, name: "Administrator")
 
 pleb_actor = %Philomena.Attribution.Actor{
   user: pleb,
+  ip: ip,
+  fingerprint: "c1836832948",
+  ban: nil
+}
+
+admin_actor = %Philomena.Attribution.Actor{
+  user: admin,
   ip: ip,
   fingerprint: "c1836832948",
   ban: nil
@@ -73,15 +80,15 @@ for image_def <- resources["remote_images"] do
   )
   |> case do
     {:ok, %{image: image}} ->
-      Images.approve_image(image)
-      Images.reindex_image(image)
-      Tags.reindex_tags(image.added_tags)
+      Images.approve_image(admin_actor, image.id)
 
       IO.puts("Created image ##{image.id}")
 
     {:error, :image, changeset, _so_far} ->
       IO.inspect(changeset.errors)
   end
+
+  RateLimiter.reset_limits_globally!()
 end
 
 IO.puts("---- Generating comments for image #1")
@@ -96,12 +103,13 @@ for comment_body <- resources["comments"] do
   )
   |> case do
     {:ok, %Comment{} = comment} ->
-      Comments.approve_comment(comment, pleb)
-      Images.reindex_image(image)
+      Comments.approve_comment(admin_actor, comment.id)
 
     {:error, :comment, changeset, _so_far} ->
       IO.inspect(changeset.errors)
   end
+
+  RateLimiter.reset_limits_globally!()
 end
 
 IO.puts("---- Generating forum posts")
@@ -133,17 +141,20 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
           )
           |> case do
             {:ok, %{post: post}} ->
-              Posts.approve_post(post, pleb)
-              Posts.reindex_post(post)
+              Posts.approve_post(admin_actor, post.id)
 
             {:error, :post, changeset, _so_far} ->
               IO.inspect(changeset.errors)
           end
+
+          RateLimiter.reset_limits_globally!()
         end
 
       {:error, :topic, changeset, _so_far} ->
         IO.inspect(changeset.errors)
     end
+
+    RateLimiter.reset_limits_globally!()
   end
 end
 
