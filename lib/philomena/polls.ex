@@ -13,52 +13,32 @@ defmodule Philomena.Polls do
   alias Philomena.Topics.Topic
   alias Philomena.Polls.Poll
 
-  @doc """
-  Returns the list of polls.
+  # Updates a poll.
+  defp update_poll(%Poll{} = poll, attrs) do
+    poll
+    |> Poll.changeset(attrs)
+    |> Repo.update()
+  end
 
-  ## Examples
-
-      iex> list_polls()
-      [%Poll{}, ...]
-
-  """
-  def list_polls do
-    Repo.all(Poll)
+  # Returns an `%Ecto.Changeset{}` for tracking poll changes.
+  defp change_poll(%Poll{} = poll) do
+    Poll.changeset(poll, %{})
   end
 
   @doc """
-  Gets a single poll.
-
-  Raises `Ecto.NoResultsError` if the Poll does not exist.
-
-  ## Examples
-
-      iex> get_poll!(123)
-      %Poll{}
-
-      iex> get_poll!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_poll!(id), do: Repo.get!(Poll, id)
-
-  @doc """
   Loads the poll attached to the topic named by `topic_slug` within the forum
-  named by `forum_slug` for editing, on behalf of `actor` (the acting user).
+  named by `forum_slug` for editing, on behalf of `actor`.
 
-  In order: the forum is loaded by short name and authorized for `:show`, the
-  topic is loaded by slug with hidden topics kept invisible unless the actor may
-  `:show` them, the poll is loaded (a topic with no poll is
-  `{:error, :not_found}`), and only then is the `:hide` permission on the topic
-  checked. Because the poll load precedes the `:hide` check, a topic with no poll
-  answers not-found even for an actor who could not otherwise edit it. The poll's
-  options are preloaded so the existing choices are available.
+  The forum is loaded by short name and authorized for `:show`, the topic is
+  loaded by slug with hidden topics kept invisible unless the actor may `:show` them,
+  the poll is loaded, and the `:hide` permission on the topic is checked.
+  The poll's options are preloaded so the existing choices are available.
 
   Returns `{:ok, {forum, topic, poll, changeset}}` (the forum and topic are
   returned for the caller to reuse, and the changeset tracks changes to the
-  poll),
-  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
-  the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
+  poll), `{:error, :unauthorized}` when the actor may not see the forum/topic
+  or hide the topic, or `{:error, :not_found}` when the topic or its poll does
+  not exist.
 
   ## Examples
 
@@ -66,7 +46,7 @@ defmodule Philomena.Polls do
       {:ok, {%Forum{}, %Topic{}, %Poll{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_poll_for_edit(Actor.t(), String.t(), String.t()) ::
+  @spec load_poll_for_edit(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
           {:ok, {Forum.t(), Topic.t(), Poll.t(), Ecto.Changeset.t()}}
           | {:error, :unauthorized | :not_found}
   def load_poll_for_edit(%Actor{} = actor, forum_slug, topic_slug) do
@@ -104,38 +84,18 @@ defmodule Philomena.Polls do
   end
 
   @doc """
-  Creates a poll.
-
-  ## Examples
-
-      iex> create_poll(%{field: value})
-      {:ok, %Poll{}}
-
-      iex> create_poll(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_poll(attrs \\ %{}) do
-    %Poll{}
-    |> Poll.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
   Updates the poll attached to the topic named by `topic_slug` within the forum
   named by `forum_slug` from `poll_params`, on behalf of `actor` (the acting
   user).
 
-  Loading and authorization mirror `load_poll_for_edit/3` exactly (forum
-  `:show`, topic visibility, poll existence, then topic `:hide`), so an actor
+  Loading and authorization mirror `load_poll_for_edit/3` exactly, so an actor
   who may not edit the poll never reaches the update.
 
   Returns `{:ok, {forum, topic}}` on success (both are returned for the caller
   to reuse), `{:error, forum, topic, changeset}` when the poll changeset is
   rejected (the forum, topic, and changeset are returned for the caller to
-  reuse),
-  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
-  the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
+  reuse), `{:error, :unauthorized}` when the actor may not see the forum/topic or
+  hide the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
 
   ## Examples
 
@@ -146,7 +106,12 @@ defmodule Philomena.Polls do
       {:error, %Forum{}, %Topic{}, %Ecto.Changeset{}}
 
   """
-  @spec update_poll(Actor.t(), String.t(), String.t(), map()) ::
+  @spec update_poll(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          poll_params :: map()
+        ) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t(), Ecto.Changeset.t()}
           | {:error, :unauthorized | :not_found}
@@ -163,56 +128,16 @@ defmodule Philomena.Polls do
   end
 
   @doc """
-  Updates a poll.
-
-  This is the internal update engine shared with `update_poll/4`; it performs no
-  authorization, so callers needing authorization go through `update_poll/4`.
+  Returns whether the given poll is currently active.
 
   ## Examples
 
-      iex> update_poll(poll, %{field: new_value})
-      {:ok, %Poll{}}
-
-      iex> update_poll(poll, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
+      iex> active?(poll)
+      true
 
   """
-  def update_poll(%Poll{} = poll, attrs) do
-    poll
-    |> Poll.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes a Poll.
-
-  ## Examples
-
-      iex> delete_poll(poll)
-      {:ok, %Poll{}}
-
-      iex> delete_poll(poll)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_poll(%Poll{} = poll) do
-    Repo.delete(poll)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking poll changes.
-
-  ## Examples
-
-      iex> change_poll(poll)
-      %Ecto.Changeset{source: %Poll{}}
-
-  """
-  def change_poll(%Poll{} = poll) do
-    Poll.changeset(poll, %{})
-  end
-
-  def active?(%{id: poll_id}) do
+  @spec active?(Poll.t()) :: boolean()
+  def active?(%Poll{id: poll_id}) do
     now = DateTime.utc_now()
 
     Poll
