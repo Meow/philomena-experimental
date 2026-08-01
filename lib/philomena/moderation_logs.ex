@@ -15,8 +15,14 @@ defmodule Philomena.ModerationLogs do
   @doc """
   Returns the paginated moderation logs for `actor` (the current viewer).
 
-  The log is staff-only. Returns `{:error, :unauthorized}` when the viewer may
-  not read it, otherwise `{:ok, moderation_logs}` as a `m:Scrivener.Page`.
+  ## Examples
+
+      iex> load_moderation_logs(admin, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_moderation_logs(user, pagination)
+      {:error, :unauthorized}
+
   """
   @spec load_moderation_logs(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
@@ -26,16 +32,7 @@ defmodule Philomena.ModerationLogs do
     end
   end
 
-  @doc """
-  Returns a paginated list of moderation logs as a `m:Scrivener.Page`.
-
-  ## Examples
-
-      iex> list_moderation_logs(page_size: 15)
-      [%ModerationLog{}, ...]
-
-  """
-  def list_moderation_logs(pagination) do
+  defp list_moderation_logs(pagination) do
     ModerationLog
     |> where([ml], ml.created_at >= ago(2, "week"))
     |> preload(:user)
@@ -47,8 +44,11 @@ defmodule Philomena.ModerationLogs do
   Creates a moderation log.
 
   This is called from within the context function that performs the logged
-  action, after that action succeeds - after the transaction commits, not
-  inside it. `subject_path` is built with `Philomena.ModerationLogs.Paths`.
+  action, after that action succeeds. `subject_path` is built with
+  `Philomena.ModerationLogs.Paths`.
+
+  FIXME: create the moderation log inside the transaction that does
+  moderation-related activity, obviously.
 
   ## Examples
 
