@@ -68,6 +68,7 @@ defmodule Philomena.TagChanges do
   # `Philomena.TagChangeRevertWorker`; it performs no authorization and writes
   # no moderation log, so callers needing authorization go through
   # `revert_tag_changes/2` instead.
+  @doc false
   def mass_revert(ids, attributes) do
     tag_changes =
       Repo.all(
@@ -88,6 +89,7 @@ defmodule Philomena.TagChanges do
   end
 
   # Accepts a list of TagChanges.Tag objects with tag_change and tag relations preloaded.
+  @doc false
   def mass_revert_tags(tags, attributes) do
     # Sort tags by tag change creation date, then uniq them by tag ID
     # to keep the first, aka the latest, record. Then prepare the struct
@@ -341,8 +343,7 @@ defmodule Philomena.TagChanges do
   end
 
   @doc """
-  Deletes the tag change named by `id` from the history, on
-  behalf of `actor` (a `Philomena.Attribution.Actor`).
+  Deletes the tag change named by `id` from the history, on behalf of `actor`.
 
   Authorization (`:delete` on the loaded record) happens here; on success the
   record's search document is removed and a moderation log is written. An id
@@ -398,6 +399,7 @@ defmodule Philomena.TagChanges do
   # Matches only changes authored by a user: deleting an anonymous tag change
   # has always crashed when writing this log entry, and that behavior is
   # pinned until it is deliberately fixed.
+  # FIXME: fix the crash?
   defp log_tag_change_deletion(actor, %TagChange{user: %{name: name}, image: image, tags: tags}) do
     ModerationLogs.create_moderation_log(
       actor,
@@ -409,11 +411,15 @@ defmodule Philomena.TagChanges do
 
   @doc """
   Deletes tag changes that have no associated tags.
+
   ## Examples
+
       iex> delete_empty_tag_changes()
       {number_of_deleted_records, nil}
+
   """
   def delete_empty_tag_changes do
+    # TODO: does this even work? It seems to be missing a select
     {count, tag_changes} =
       TagChange
       |> from(as: :tag_change)
@@ -435,7 +441,13 @@ defmodule Philomena.TagChanges do
     |> Repo.one()
   end
 
+  @doc """
+  Load tag changes for the given search query (`tcq`) and resource filters
+  (`image`, `tag`, `user`, and for staff, `ip`, `fingerprint`).
+  """
+  @spec load(Actor.t(), map(), Search.pagination_params()) :: Scrivener.Page.t(TagChange.t())
   def load(%Actor{user: user}, params, pagination) do
+    # TODO: resource filter support seems unnecessary since the query language can handle anything?
     {:ok, query} = Query.compile(get_query(params), user: user)
 
     TagChange
