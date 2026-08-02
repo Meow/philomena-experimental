@@ -67,7 +67,7 @@ defmodule Philomena.Tags do
   #
   # Big thanks to this StackOverflow post for explanations:
   # https://stackoverflow.com/questions/27262900/postgres-update-and-lock-ordering/27263824#27263824
-  defmacro vectorized_mutation_lock(lock_type, tag_ids) do
+  defmacrop vectorized_mutation_lock(lock_type, tag_ids) do
     quote do
       Tag
       |> select([t], t.id)
@@ -75,6 +75,305 @@ defmodule Philomena.Tags do
       |> where([t], t.id in ^unquote(tag_ids))
       |> order_by([t], t.id)
     end
+  end
+
+  # Creates a tag. Visible for testing.
+  @doc false
+  def create_tag(attrs \\ %{}) do
+    %Tag{}
+    |> Tag.creation_changeset(attrs)
+    |> Repo.insert()
+  end
+
+  # Updates a tag.
+  defp update_tag(%Tag{} = tag, attrs) do
+    tag_input = Tag.parse_tag_list(attrs["implied_tag_list"])
+
+    implied_tags =
+      Tag
+      |> where([t], t.name in ^tag_input)
+      |> Repo.all()
+
+    tag
+    |> Tag.changeset(attrs, implied_tags)
+    |> Repo.update()
+    |> reindex_after_update(tag)
+  end
+
+  defp reindex_after_update(result, old_tag) do
+    case result do
+      {:ok, tag} ->
+        if tag.category != old_tag.category do
+          reindex_tag_images(tag)
+        end
+
+        reindex_tag(tag)
+        {:ok, tag}
+
+      error ->
+        error
+    end
+  end
+
+  # Updates a tag's associated image.
+  #
+  # Takes a tag and image upload attributes, analyzes the upload,
+  # persists it, and removes the old tag image if successful.
+  defp update_tag_image(%Tag{} = tag, attrs) do
+    tag
+    |> Uploader.analyze_upload(attrs)
+    |> Repo.update()
+    |> case do
+      {:ok, tag} ->
+        Uploader.persist_upload(tag)
+        Uploader.unpersist_old_upload(tag)
+
+        {:ok, tag}
+
+      error ->
+        error
+    end
+  end
+
+  # Removes a tag's associated image.
+  defp remove_tag_image(%Tag{} = tag) do
+    tag
+    |> Tag.remove_image_changeset()
+    |> Repo.update()
+    |> case do
+      {:ok, tag} ->
+        Uploader.unpersist_old_upload(tag)
+
+        {:ok, tag}
+
+      error ->
+        error
+    end
+  end
+
+  # Deletes a tag.
+  defp delete_tag(%Tag{} = tag) do
+    Exq.enqueue(Exq, "indexing", TagDeleteWorker, [tag.id])
+
+    {:ok, tag}
+  end
+
+  # Performs the actual deletion of a tag.
+  #
+  # Removes the tag from the database, deletes its search index,
+  # reindexes all images that were tagged with it, and cleans up
+  # any empty tag changes.
+  @doc false
+  def perform_delete(tag_id) do
+    tag = get_tag!(tag_id)
+
+    image_ids =
+      Image
+      |> join(:inner, [i], _ in assoc(i, :tags))
+      |> where([_i, t], t.id == ^tag.id)
+      |> select([i, _t], i.id)
+      |> Repo.all()
+
+    {:ok, tag} = Repo.delete(tag)
+
+    Search.delete_document(tag.id, Tag)
+
+    TagChanges.delete_empty_tag_changes()
+
+    Image
+    |> where([i], i.id in ^image_ids)
+    |> preload(^Images.indexing_preloads())
+    |> Search.reindex(Image)
+  end
+
+  # Creates an alias from one tag to another.
+  #
+  # Takes a source tag and target tag name, creating an alias relationship
+  # where the source tag becomes an alias of the target tag. Once the alias
+  # is created, a job is queued to finish processing the alias.
+  @doc false
+  def alias_tag(%Tag{} = tag, attrs) do
+    target_tag = Repo.get_by(Tag, name: String.downcase(attrs["target_tag"]))
+
+    tag
+    |> Repo.preload(:aliased_tag)
+    |> Tag.alias_changeset(target_tag)
+    |> Repo.update()
+    |> case do
+      {:ok, tag} ->
+        Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
+
+        {:ok, tag}
+
+      error ->
+        error
+    end
+  end
+
+  # Performs the actual tag aliasing operation.
+  #
+  # Transfers all associations from the source tag to the target tag,
+  # including image taggings, filters, user watches, and other relationships.
+  # Updates counters and reindexes affected records.
+  @doc false
+  def perform_alias(tag_id, target_tag_id) do
+    tag = get_tag!(tag_id)
+    target_tag = get_tag!(target_tag_id)
+
+    filters_hidden =
+      where(Filter, [f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
+
+    filters_spoilered =
+      where(Filter, [f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
+
+    users_watching =
+      where(User, [u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
+
+    array_replace(filters_hidden, :hidden_tag_ids, tag.id, target_tag.id)
+    array_replace(filters_spoilered, :spoilered_tag_ids, tag.id, target_tag.id)
+    array_replace(users_watching, :watched_tag_ids, tag.id, target_tag.id)
+
+    # Create taggings with the new tag ID on images where the old tag ID is used.
+    retag_query =
+      from i in Image,
+        inner_join: it in Tagging,
+        on: it.image_id == i.id,
+        select: %{image_id: i.id, tag_id: ^target_tag.id},
+        where: it.tag_id == ^tag.id
+
+    Repo.insert_all(Tagging, retag_query, on_conflict: :nothing)
+
+    # Delete taggings on the source tag
+    Tagging
+    |> where(tag_id: ^tag.id)
+    |> Repo.delete_all()
+
+    # Update other associations
+    ArtistLink
+    |> where(tag_id: ^tag.id)
+    |> Repo.update_all(set: [tag_id: target_tag.id])
+
+    DnpEntry
+    |> where(tag_id: ^tag.id)
+    |> Repo.update_all(set: [tag_id: target_tag.id])
+
+    Channel
+    |> where(associated_artist_tag_id: ^tag.id)
+    |> Repo.update_all(set: [associated_artist_tag_id: target_tag.id])
+
+    # Update counter
+    Tag
+    |> where(id: ^tag.id)
+    |> Repo.update_all(
+      set: [images_count: 0, aliased_tag_id: target_tag.id, updated_at: DateTime.utc_now()]
+    )
+
+    # Finally, reindex
+    reindex_tag_images(target_tag)
+    reindex_tags([tag, target_tag])
+
+    :ok
+  end
+
+  # Performs removal of a tag alias.
+  #
+  # Removes the alias relationship between two tags and reindexes
+  # the images of the formerly aliased tag.
+  @doc false
+  def perform_unalias(tag_id) do
+    tag = get_tag!(tag_id)
+    former_alias = Repo.preload(tag, :aliased_tag).aliased_tag
+
+    tag
+    |> Tag.unalias_changeset()
+    |> Repo.update()
+    |> case do
+      {:ok, _} = result ->
+        reindex_tag_images(former_alias)
+        reindex_tags([tag, former_alias])
+
+        result
+
+      result ->
+        result
+    end
+  end
+
+  defp array_replace(queryable, column, old_value, new_value) do
+    queryable
+    |> update(
+      [q],
+      set: [
+        {
+          ^column,
+          fragment("array_replace(?, ?, ?)", field(q, ^column), ^old_value, ^new_value)
+        }
+      ]
+    )
+    |> Repo.update_all([])
+  end
+
+  # Copies tags from one image to another.
+  #
+  # Creates new taggings on the target image for all tags present on the source image,
+  # updates tag counters, and returns the list of copied tags.
+  @doc false
+  def copy_tags(source, target) do
+    # TODO: is this still a bug? can it work with type-casting in the select line?
+
+    # Ecto bug:
+    # ** (DBConnection.EncodeError) Postgrex expected a binary, got 5.
+    #
+    # what I would like to do:
+    #   |> select([t], %{image_id: ^target.id, tag_id: t.tag_id})
+    #
+    # what I have to do instead:
+
+    taggings =
+      Tagging
+      |> where(image_id: ^source.id)
+      |> select([t], %{image_id: ^to_string(target.id), tag_id: t.tag_id})
+      |> Repo.all()
+      |> Enum.map(&%{&1 | image_id: String.to_integer(&1.image_id)})
+
+    {:ok, tag_ids} =
+      Repo.transaction(fn ->
+        {_count, taggings} =
+          Repo.insert_all(Tagging, taggings, on_conflict: :nothing, returning: [:tag_id])
+
+        tag_ids = Enum.map(taggings, & &1.tag_id)
+
+        update_image_counts(Repo, 1, tag_ids)
+
+        tag_ids
+      end)
+
+    Tag
+    |> where([t], t.id in ^tag_ids)
+    |> Repo.all()
+  end
+
+  # Accepts IDs of tags and increments their `images_count` by 1.
+  @doc false
+  @spec update_image_counts(module(), integer(), [integer()]) :: integer()
+  def update_image_counts(repo, diff, tag_ids)
+
+  def update_image_counts(_repo, _diff, []), do: 0
+
+  def update_image_counts(repo, diff, tag_ids) do
+    locked_tags = vectorized_mutation_lock("FOR NO KEY UPDATE", tag_ids)
+
+    {rows_affected, _} =
+      Tag
+      |> where([t], t.id in subquery(locked_tags))
+      |> repo.update_all(inc: [images_count: diff])
+
+    rows_affected
+  end
+
+  # Returns an `%Ecto.Changeset{}` for tracking tag changes.
+  defp change_tag(%Tag{} = tag) do
+    Tag.changeset(tag, %{})
   end
 
   @doc """
@@ -317,7 +616,7 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Loads the tag named by `slug` for editing on behalf of `actor`.
+  Loads the tag named by `slug` for editing, on behalf of `actor`.
 
   Authorizes `:edit`. An unknown slug the actor may act on (an admin) is
   `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
@@ -379,9 +678,7 @@ defmodule Philomena.Tags do
   Assembles the tag usage detail for the tag named by `slug`, on behalf of
   `actor`.
 
-  Authorizes `:edit` on tags first, so an unprivileged actor is
-  `{:error, :unauthorized}` even for an unknown slug; a permitted actor gets
-  `{:error, :not_found}` for an unknown slug. On success the result carries the
+  Authorizes `:edit` on tags first. On success the result carries the
   tag, the filters that spoiler it, the filters that hide it, and the users
   watching it.
 
@@ -397,6 +694,7 @@ defmodule Philomena.Tags do
   @spec tag_detail(Actor.t(), String.t()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized}
   def tag_detail(%Actor{} = actor, slug) do
+    # TODO: should make a result structure for this function
     with :ok <- authorize(actor, :edit, %Tag{}) do
       case tag_by_slug(slug, []) do
         nil ->
@@ -480,24 +778,11 @@ defmodule Philomena.Tags do
     end
   end
 
-  @doc """
-  Gets a single tag.
-
-  Raises `Ecto.NoResultsError` if the Tag does not exist.
-
-  ## Examples
-
-      iex> get_tag!(123)
-      %Tag{}
-
-      iex> get_tag!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_tag!(id), do: Repo.get!(Tag, id)
+  # Gets a single tag.
+  defp get_tag!(id), do: Repo.get!(Tag, id)
 
   @doc """
-  Gets a single tag.
+  Gets a single tag by its name.
 
   Returns nil if the Tag does not exist.
 
@@ -588,29 +873,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Creates a tag.
-
-  ## Examples
-
-      iex> create_tag(%{field: value})
-      {:ok, %Tag{}}
-
-      iex> create_tag(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_tag(attrs \\ %{}) do
-    %Tag{}
-    |> Tag.creation_changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
   Updates the tag named by `slug` on behalf of `actor`.
 
-  Authorizes `:edit` first. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
-  a moderation log is written attributing the update to `actor`.
+  Authorizes `:edit` first. On success a moderation log is written attributing
+  the update to `actor`.
 
   Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
   or `{:error, :unauthorized}`.
@@ -647,80 +913,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Updates a tag.
-
-  ## Examples
-
-      iex> update_tag(tag, %{field: new_value})
-      {:ok, %Tag{}}
-
-      iex> update_tag(tag, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_tag(%Tag{} = tag, attrs) do
-    tag_input = Tag.parse_tag_list(attrs["implied_tag_list"])
-
-    implied_tags =
-      Tag
-      |> where([t], t.name in ^tag_input)
-      |> Repo.all()
-
-    tag
-    |> Tag.changeset(attrs, implied_tags)
-    |> Repo.update()
-    |> reindex_after_update(tag)
-  end
-
-  defp reindex_after_update(result, old_tag) do
-    case result do
-      {:ok, tag} ->
-        if tag.category != old_tag.category do
-          reindex_tag_images(tag)
-        end
-
-        reindex_tag(tag)
-        {:ok, tag}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Updates a tag's associated image.
-
-  Takes a tag and image upload attributes, analyzes the upload,
-  persists it, and removes the old tag image if successful.
-
-  ## Examples
-
-      iex> update_tag_image(tag, %{"image" => upload})
-      {:ok, %Tag{}}
-
-  """
-  def update_tag_image(%Tag{} = tag, attrs) do
-    tag
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.update()
-    |> case do
-      {:ok, tag} ->
-        Uploader.persist_upload(tag)
-        Uploader.unpersist_old_upload(tag)
-
-        {:ok, tag}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
   Updates the spoiler image of the tag named by `slug`, on behalf of `actor`.
 
-  Authorizes `:edit` first. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
-  a moderation log is written attributing the update to `actor`.
+  Authorizes `:edit` first. On success a moderation log is written attributing
+  the update to `actor`.
 
   Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
   or `{:error, :unauthorized}`.
@@ -757,37 +953,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Removes a tag's associated image.
-
-  Removes the image from the tag and deletes the persisted file.
-
-  ## Examples
-
-      iex> remove_tag_image(tag)
-      {:ok, %Tag{}}
-
-  """
-  def remove_tag_image(%Tag{} = tag) do
-    tag
-    |> Tag.remove_image_changeset()
-    |> Repo.update()
-    |> case do
-      {:ok, tag} ->
-        Uploader.unpersist_old_upload(tag)
-
-        {:ok, tag}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
   Removes the spoiler image of the tag named by `slug`, on behalf of `actor`.
 
-  Authorizes `:edit` first. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
-  a moderation log is written attributing the removal to `actor`.
+  Authorizes `:edit` first. On success a moderation log is written attributing
+  the removal to `actor`.
 
   Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
   or `{:error, :unauthorized}`.
@@ -824,29 +993,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Deletes a Tag.
-
-  ## Examples
-
-      iex> delete_tag(tag)
-      {:ok, %Tag{}}
-
-      iex> delete_tag(tag)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_tag(%Tag{} = tag) do
-    Exq.enqueue(Exq, "indexing", TagDeleteWorker, [tag.id])
-
-    {:ok, tag}
-  end
-
-  @doc """
   Queues the tag named by `slug` for deletion on behalf of `actor`.
 
-  Authorizes `:delete` first. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
-  a moderation log is written attributing the deletion to `actor`.
+  Authorizes `:delete` first. On success a moderation log is written
+  attributing the deletion to `actor`.
 
   Returns `{:ok, tag}`, `{:error, :not_found}`, or `{:error, :unauthorized}`.
 
@@ -880,77 +1030,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Performs the actual deletion of a tag.
-
-  Removes the tag from the database, deletes its search index,
-  reindexes all images that were tagged with it, and cleans up
-  any empty tag changes.
-
-  ## Examples
-
-      iex> perform_delete(123)
-      :ok
-
-  """
-  def perform_delete(tag_id) do
-    tag = get_tag!(tag_id)
-
-    image_ids =
-      Image
-      |> join(:inner, [i], _ in assoc(i, :tags))
-      |> where([_i, t], t.id == ^tag.id)
-      |> select([i, _t], i.id)
-      |> Repo.all()
-
-    {:ok, tag} = Repo.delete(tag)
-
-    Search.delete_document(tag.id, Tag)
-
-    TagChanges.delete_empty_tag_changes()
-
-    Image
-    |> where([i], i.id in ^image_ids)
-    |> preload(^Images.indexing_preloads())
-    |> Search.reindex(Image)
-  end
-
-  @doc """
-  Creates an alias from one tag to another.
-
-  Takes a source tag and target tag name, creating an alias relationship
-  where the source tag becomes an alias of the target tag. Once the alias
-  is created, a job is queued to finish processing the alias.
-
-  ## Examples
-
-      iex> alias_tag(source_tag, %{"target_tag" => "destination"})
-      {:ok, %Tag{}}
-
-  """
-  def alias_tag(%Tag{} = tag, attrs) do
-    target_tag = Repo.get_by(Tag, name: String.downcase(attrs["target_tag"]))
-
-    tag
-    |> Repo.preload(:aliased_tag)
-    |> Tag.alias_changeset(target_tag)
-    |> Repo.update()
-    |> case do
-      {:ok, tag} ->
-        Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
-
-        {:ok, tag}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
   Aliases the tag named by `slug` on behalf of `actor`.
 
-  Authorizes `:alias` first. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
-  a moderation log is written attributing the alias to `actor`.
+  Authorizes `:alias` first. On success a moderation log is written
+  attributing the alias to `actor`.
 
   Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
   or `{:error, :unauthorized}`.
@@ -984,78 +1067,6 @@ defmodule Philomena.Tags do
       nil -> {:error, :not_found}
       {:error, %Ecto.Changeset{}} = error -> error
     end
-  end
-
-  @doc """
-  Performs the actual tag aliasing operation.
-
-  Transfers all associations from the source tag to the target tag,
-  including image taggings, filters, user watches, and other relationships.
-  Updates counters and reindexes affected records.
-
-  ## Examples
-
-      iex> perform_alias(123, 456)
-      :ok
-
-  """
-  def perform_alias(tag_id, target_tag_id) do
-    tag = get_tag!(tag_id)
-    target_tag = get_tag!(target_tag_id)
-
-    filters_hidden =
-      where(Filter, [f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
-
-    filters_spoilered =
-      where(Filter, [f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
-
-    users_watching =
-      where(User, [u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
-
-    array_replace(filters_hidden, :hidden_tag_ids, tag.id, target_tag.id)
-    array_replace(filters_spoilered, :spoilered_tag_ids, tag.id, target_tag.id)
-    array_replace(users_watching, :watched_tag_ids, tag.id, target_tag.id)
-
-    # Create taggings with the new tag ID on images where the old tag ID is used.
-    retag_query =
-      from i in Image,
-        inner_join: it in Tagging,
-        on: it.image_id == i.id,
-        select: %{image_id: i.id, tag_id: ^target_tag.id},
-        where: it.tag_id == ^tag.id
-
-    Repo.insert_all(Tagging, retag_query, on_conflict: :nothing)
-
-    # Delete taggings on the source tag
-    Tagging
-    |> where(tag_id: ^tag.id)
-    |> Repo.delete_all()
-
-    # Update other associations
-    ArtistLink
-    |> where(tag_id: ^tag.id)
-    |> Repo.update_all(set: [tag_id: target_tag.id])
-
-    DnpEntry
-    |> where(tag_id: ^tag.id)
-    |> Repo.update_all(set: [tag_id: target_tag.id])
-
-    Channel
-    |> where(associated_artist_tag_id: ^tag.id)
-    |> Repo.update_all(set: [associated_artist_tag_id: target_tag.id])
-
-    # Update counter
-    Tag
-    |> where(id: ^tag.id)
-    |> Repo.update_all(
-      set: [images_count: 0, aliased_tag_id: target_tag.id, updated_at: DateTime.utc_now()]
-    )
-
-    # Finally, reindex
-    reindex_tag_images(target_tag)
-    reindex_tags([tag, target_tag])
-
-    :ok
   end
 
   @doc """
@@ -1198,127 +1209,6 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Performs removal of a tag alias.
-
-  Removes the alias relationship between two tags and reindexes
-  the images of the formerly aliased tag.
-
-  ## Examples
-
-      iex> perform_unalias(123)
-      {:ok, %Tag{}}
-  """
-  def perform_unalias(tag_id) do
-    tag = get_tag!(tag_id)
-    former_alias = Repo.preload(tag, :aliased_tag).aliased_tag
-
-    tag
-    |> Tag.unalias_changeset()
-    |> Repo.update()
-    |> case do
-      {:ok, _} = result ->
-        reindex_tag_images(former_alias)
-        reindex_tags([tag, former_alias])
-
-        result
-
-      result ->
-        result
-    end
-  end
-
-  defp array_replace(queryable, column, old_value, new_value) do
-    queryable
-    |> update(
-      [q],
-      set: [
-        {
-          ^column,
-          fragment("array_replace(?, ?, ?)", field(q, ^column), ^old_value, ^new_value)
-        }
-      ]
-    )
-    |> Repo.update_all([])
-  end
-
-  @doc """
-  Copies tags from one image to another.
-
-  Creates new taggings on the target image for all tags present on the source image,
-  updates tag counters, and returns the list of copied tags.
-
-  ## Examples
-
-      iex> copy_tags(source_image, target_image)
-      [%Tag{}, ...]
-
-  """
-  def copy_tags(source, target) do
-    # Ecto bug:
-    # ** (DBConnection.EncodeError) Postgrex expected a binary, got 5.
-    #
-    # what I would like to do:
-    #   |> select([t], %{image_id: ^target.id, tag_id: t.tag_id})
-    #
-    # what I have to do instead:
-
-    taggings =
-      Tagging
-      |> where(image_id: ^source.id)
-      |> select([t], %{image_id: ^to_string(target.id), tag_id: t.tag_id})
-      |> Repo.all()
-      |> Enum.map(&%{&1 | image_id: String.to_integer(&1.image_id)})
-
-    {:ok, tag_ids} =
-      Repo.transaction(fn ->
-        {_count, taggings} =
-          Repo.insert_all(Tagging, taggings, on_conflict: :nothing, returning: [:tag_id])
-
-        tag_ids = Enum.map(taggings, & &1.tag_id)
-
-        update_image_counts(Repo, 1, tag_ids)
-
-        tag_ids
-      end)
-
-    Tag
-    |> where([t], t.id in ^tag_ids)
-    |> Repo.all()
-  end
-
-  @doc """
-  Accepts IDs of tags and increments their `images_count` by 1.
-  """
-  @spec update_image_counts(term(), integer(), [integer()]) :: integer()
-  def update_image_counts(repo, diff, tag_ids)
-
-  def update_image_counts(_repo, _diff, []), do: 0
-
-  def update_image_counts(repo, diff, tag_ids) do
-    locked_tags = vectorized_mutation_lock("FOR NO KEY UPDATE", tag_ids)
-
-    {rows_affected, _} =
-      Tag
-      |> where([t], t.id in subquery(locked_tags))
-      |> repo.update_all(inc: [images_count: diff])
-
-    rows_affected
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking tag changes.
-
-  ## Examples
-
-      iex> change_tag(tag)
-      %Ecto.Changeset{source: %Tag{}}
-
-  """
-  def change_tag(%Tag{} = tag) do
-    Tag.changeset(tag, %{})
-  end
-
-  @doc """
   Queues a single tag for search index updates.
   Returns the tag struct unchanged, for use in a pipeline.
 
@@ -1385,102 +1275,6 @@ defmodule Philomena.Tags do
     |> Search.reindex(Tag)
   end
 
-  alias Philomena.Tags.Implication
-
-  @doc """
-  Returns the list of tags_implied_tags.
-
-  ## Examples
-
-      iex> list_tags_implied_tags()
-      [%Implication{}, ...]
-
-  """
-  def list_tags_implied_tags do
-    Repo.all(Implication)
-  end
-
-  @doc """
-  Gets a single implication.
-
-  Raises `Ecto.NoResultsError` if the Implication does not exist.
-
-  ## Examples
-
-      iex> get_implication!(123)
-      %Implication{}
-
-      iex> get_implication!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_implication!(id), do: Repo.get!(Implication, id)
-
-  @doc """
-  Creates a implication.
-
-  ## Examples
-
-      iex> create_implication(%{field: value})
-      {:ok, %Implication{}}
-
-      iex> create_implication(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_implication(attrs \\ %{}) do
-    %Implication{}
-    |> Implication.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Updates a implication.
-
-  ## Examples
-
-      iex> update_implication(implication, %{field: new_value})
-      {:ok, %Implication{}}
-
-      iex> update_implication(implication, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_implication(%Implication{} = implication, attrs) do
-    implication
-    |> Implication.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes a Implication.
-
-  ## Examples
-
-      iex> delete_implication(implication)
-      {:ok, %Implication{}}
-
-      iex> delete_implication(implication)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_implication(%Implication{} = implication) do
-    Repo.delete(implication)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking implication changes.
-
-  ## Examples
-
-      iex> change_implication(implication)
-      %Ecto.Changeset{source: %Implication{}}
-
-  """
-  def change_implication(%Implication{} = implication) do
-    Implication.changeset(implication, %{})
-  end
-
   @doc """
   Deletes all tags that meet all of the following conditions:
   - Not present on any images
@@ -1505,6 +1299,7 @@ defmodule Philomena.Tags do
 
   """
   def cleanup! do
+    # TODO: Couldn't this be a single delete statement that returns the ids?
     tag_ids =
       from(t in Tag,
         as: :tag,

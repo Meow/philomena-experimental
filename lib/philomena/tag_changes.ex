@@ -363,7 +363,7 @@ defmodule Philomena.TagChanges do
       {:error, :not_found}
 
   """
-  @spec delete_tag_change(Actor.t(), any()) ::
+  @spec delete_tag_change(Actor.t(), IntegerId.integer_id()) ::
           {:ok, TagChange.t()}
           | {:error, :unauthorized | :not_found}
           | {:error, Ecto.Changeset.t()}
