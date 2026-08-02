@@ -76,9 +76,8 @@ defmodule Philomena.RateLimiter do
     :ok
   end
 
-  @doc """
-  Resets all rate limits. Visible for testing.
-  """
+  # Resets all rate limits. Visible for testing.
+  @doc false
   @spec reset_limits_globally!() :: :ok
   def reset_limits_globally! do
     case Redix.command!(redix_connection(), ["KEYS", "#{@key_prefix}*"]) do

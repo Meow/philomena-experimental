@@ -6,6 +6,9 @@ defmodule PhilomenaWeb.MarkdownRenderer do
   import Phoenix.HTML.Link
   import Ecto.Query
 
+  # TODO: collection_renderer pattern is a weird inversion of control
+  # that is no longer needed. It should flow one way from context to web
+
   def render_one(item, conn) do
     hd(render_collection([item], conn))
   end

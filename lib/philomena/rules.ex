@@ -75,22 +75,6 @@ defmodule Philomena.Rules do
   def find_rule(id), do: Repo.get(Rule, id)
 
   @doc """
-  Gets a single rule by its position.
-
-  Raises `Ecto.NoResultsError` if the Rule does not exist.
-
-  ## Examples
-
-      iex> get_by_position!(0)
-      %Rule{name: "Rule #0", position: 0, ...}
-
-      iex> get_by_position!(99999)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_by_position!(position), do: Repo.get_by!(Rule, position: position)
-
-  @doc """
   Gets a single rule by its name.
 
   Raises `Ecto.NoResultsError` if the Rule does not exist.
@@ -148,20 +132,12 @@ defmodule Philomena.Rules do
     |> Repo.insert()
   end
 
-  @doc """
-  Creates a rule and stores the initial version attributed to a user.
-
-  If the user is nil, then it is assumed to be a system action.
-
-  ## Examples
-
-      iex> create_rule_with_version(%{name: "Rule #0", ...}, user)
-      {:ok, [%Rule{}, %RuleVersion{}]}
-
-      iex> create_rule_with_version(%{bad_field: bad_value, ...}, user)
-      {:error, %Ecto.Changeset{}}
-
-  """
+  # Creates a rule and stores the initial version attributed to a user.
+  #
+  # If the user is nil, then it is assumed to be a system action.
+  #
+  # Visible for testing.
+  @doc false
   def create_rule_with_version(attrs, user) do
     Repo.transact(fn ->
       with {:ok, rule} <- insert_rule(attrs),
@@ -177,20 +153,12 @@ defmodule Philomena.Rules do
     |> Repo.update()
   end
 
-  @doc """
-  Updates a rule and stores the new version attributed to a user.
-
-  If the user is nil, then it is assumed to be a system edit.
-
-  ## Examples
-
-      iex> update_rule_with_version(rule, user, %{field: new_value})
-      {:ok, [%Rule{}, %RuleVersion{}]}
-
-      iex> update_rule_with_version(rule, user, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
+  # Updates a rule and stores the new version attributed to a user.
+  #
+  # If the user is nil, then it is assumed to be a system edit.
+  #
+  # Visible for testing.
+  @doc false
   def update_rule_with_version(%Rule{} = rule, user, attrs) do
     Repo.transact(fn ->
       with {:ok, updated_rule} <- save_rule(rule, attrs),
@@ -200,22 +168,13 @@ defmodule Philomena.Rules do
     end)
   end
 
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking rule changes.
-
-  ## Examples
-
-      iex> change_rule(rule)
-      %Ecto.Changeset{data: %Rule{}}
-
-  """
-  def change_rule(%Rule{} = rule, attrs \\ %{}) do
+  # Returns an `%Ecto.Changeset{}` for tracking rule changes.
+  defp change_rule(%Rule{} = rule, attrs \\ %{}) do
     Rule.changeset(rule, attrs)
   end
 
   @doc """
-  Returns the rules `user` (the current viewer, possibly `nil`) may see, ordered
-  by position.
+  Returns the rules `actor` may see, ordered by position.
 
   A viewer who may edit rules sees every rule; everyone else sees only the
   visible (non-hidden, non-internal) rules.
@@ -230,8 +189,7 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Loads the rule at `position` for `user` (the current viewer, possibly `nil`) to
-  be shown.
+  Loads the rule at `position` for `actor` to be shown.
 
   Returns `{:error, :not_found}` for a position no row could have,
   `{:error, :unauthorized}` when the viewer may not see the rule, and
@@ -239,7 +197,7 @@ defmodule Philomena.Rules do
   not edit it (a distinct case from an ordinary authorization failure).
   Otherwise `{:ok, rule}`.
   """
-  @spec load_rule_for_show(Actor.t(), any()) ::
+  @spec load_rule_for_show(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Rule.t()} | {:error, :not_found | :unauthorized | :rule_hidden}
   def load_rule_for_show(%Actor{user: user}, position) do
     with {:ok, rule} <- load_authorized_rule(user, position, :show) do
@@ -252,7 +210,7 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Prepares a new rule on behalf of `user`.
+  Prepares a new rule on behalf of `actor`.
 
   Returns `{:error, :unauthorized}` when the viewer may not create rules,
   otherwise `{:ok, changeset}`.
@@ -266,7 +224,7 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Creates a rule (with its initial version) on behalf of `user` from `attrs`.
+  Creates a rule (with its initial version) on behalf of `actor` from `attrs`.
 
   Returns `{:error, :unauthorized}` when the viewer may not create rules,
   `{:error, %Ecto.Changeset{}}` on a validation failure, and
@@ -283,13 +241,13 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Loads the rule at `position` for `user` to be edited.
+  Loads the rule at `position` for `actor` to edit.
 
   Returns `{:error, :not_found}` for a position no row could have,
   `{:error, :unauthorized}` when the viewer may not edit the rule, and otherwise
   `{:ok, {rule, changeset}}`.
   """
-  @spec load_rule_for_edit(Actor.t(), any()) ::
+  @spec load_rule_for_edit(Actor.t(), IntegerId.integer_id()) ::
           {:ok, {Rule.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
   def load_rule_for_edit(%Actor{} = actor, position) do
     with {:ok, rule} <- load_authorized_rule(actor, position, :edit) do
@@ -298,7 +256,7 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Updates the rule at `position` (with a new version) on behalf of `user` from
+  Updates the rule at `position` (with a new version), on behalf of `actor`, from
   `attrs`.
 
   Returns `{:error, :not_found}` for a position no row could have,
@@ -306,7 +264,7 @@ defmodule Philomena.Rules do
   `{:error, {rule, changeset}}` on a validation failure (carrying the unchanged
   rule), and `{:ok, [rule, rule_version]}` on success.
   """
-  @spec update_rule(Actor.t(), any(), map()) ::
+  @spec update_rule(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, [Rule.t() | RuleVersion.t()]}
           | {:error, {Rule.t(), Ecto.Changeset.t()}}
           | {:error, :not_found | :unauthorized}

@@ -46,10 +46,8 @@ defmodule Philomena.Profiles do
   Assembles the public profile page of the user named by `slug`, for the viewer
   described by `scope`.
 
-  The user is loaded by slug and authorized for `:show`; an unknown slug
-  authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
-  cover `nil`). `current_filter` is the viewer's active `Filter`, whose hidden
+  The user is loaded by slug and authorized for `:show`.
+  `current_filter` is the viewer's active `Filter`, whose hidden
   tags scope the recent comments strip. The recent uploads, faves, artwork,
   comments, and posts strips are batched into a single multi-search; posts and
   comments the viewer may not see are dropped afterward. Descriptions and
@@ -251,9 +249,22 @@ defmodule Philomena.Profiles do
 
   The metadata is the user's current filter and the most recent IP and
   fingerprint rows.
+
+  ## Examples
+
+      iex> admin_metadata(admin, user)
+      %{
+        filter: %Filter{},
+        last_ip: %UserIp{},
+        last_fp: %UserFingerprint{}
+      }
+
   """
   @spec admin_metadata(Actor.t(), User.t()) :: map() | nil
   def admin_metadata(%Actor{} = actor, user) do
+    # TODO: this should have a struct definition for its return
+    # TODO: "fp" should be spelled out as "fingerprint"
+
     if Canada.Can.can?(actor.user, :index, User) do
       user = Repo.preload(user, [:current_filter])
 
@@ -305,16 +316,24 @@ defmodule Philomena.Profiles do
   `actor`: every IP address the user has been seen on, and the other users seen
   on those same addresses.
 
-  The user is loaded by slug and authorized for `:show_details`; an unknown slug
-  authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
-  cover `nil`).
+  The user is loaded by slug and authorized for `:show_details`.
 
-  Returns `{:ok, %{user: user, user_ips: [...], other_users: %{ip => [...]}}}`.
+  ## Examples
+
+      iex> load_ip_history(moderator, slug)
+      {:ok, %{
+          user: %User{},
+          user_ips: [%UserIp{}, ...],
+          other_users: %{
+            ip => [%UserIp{}, ...]
+          }
+        }}
+
   """
   @spec load_ip_history(Actor.t(), String.t()) ::
           {:ok, map()} | {:error, :unauthorized | :not_found}
   def load_ip_history(%Actor{} = actor, slug) do
+    # TODO: this should have a struct definition for its return
     with {:ok, user} <- load_detailed_profile(actor, slug) do
       user_ips =
         UserIp
@@ -345,16 +364,25 @@ defmodule Philomena.Profiles do
   behalf of `actor`: every fingerprint the user has been seen with, and the
   other users seen with those same fingerprints.
 
-  The user is loaded by slug and authorized for `:show_details`; an unknown slug
-  authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
-  cover `nil`).
+  The user is loaded by slug and authorized for `:show_details`.
 
-  Returns `{:ok, %{user: user, user_fps: [...], other_users: %{fp => [...]}}}`.
+  ## Examples
+
+      iex> load_fp_history(moderator, slug)
+      {:ok, %{
+          user: %User{},
+          user_fps: [%UserFingerprint{}, ...],
+          other_users: %{
+            fingerprint => [%UserFingerprint{}, ...]
+          }
+        }}
+
   """
   @spec load_fp_history(Actor.t(), String.t()) ::
           {:ok, map()} | {:error, :unauthorized | :not_found}
   def load_fp_history(%Actor{} = actor, slug) do
+    # TODO: this should have a struct definition for its return
+    # TODO: "fp" should be spelled out as "fingerprint"
     with {:ok, user} <- load_detailed_profile(actor, slug) do
       user_fps =
         UserFingerprint
@@ -381,9 +409,6 @@ defmodule Philomena.Profiles do
   end
 
   # Loads a user by profile slug and authorizes the viewer for `:show_details`.
-  # An unknown slug authorizes a `nil` record, so a viewer whose grants do not
-  # cover `nil` gets `{:error, :unauthorized}` and one permitted to act on `nil`
-  # gets `{:error, :not_found}`.
   defp load_detailed_profile(actor, slug) do
     user = Repo.get_by(User, slug: slug)
 
