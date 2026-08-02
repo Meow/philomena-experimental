@@ -11,12 +11,29 @@ defmodule Philomena.SiteNotices do
   alias Philomena.Loader
   alias Philomena.SiteNotices.SiteNotice
 
+  # Updates a site notice.
+  defp update_site_notice(%SiteNotice{} = site_notice, attrs) do
+    site_notice
+    |> SiteNotice.changeset(attrs)
+    |> Repo.update()
+  end
+
+  # Deletes a site notice.
+  defp delete_site_notice(%SiteNotice{} = site_notice) do
+    Repo.delete(site_notice)
+  end
+
+  # Returns an `%Ecto.Changeset{}` for tracking site notice changes.
+  defp change_site_notice(%SiteNotice{} = site_notice) do
+    SiteNotice.changeset(site_notice, %{})
+  end
+
   @doc """
-  Returns the list of site_notices.
+  Returns the list active of site notices.
 
   ## Examples
 
-      iex> list_site_notices()
+      iex> active_site_notices()
       [%SiteNotice{}, ...]
 
   """
@@ -31,27 +48,11 @@ defmodule Philomena.SiteNotices do
   end
 
   @doc """
-  Gets a single site_notice.
-
-  Raises `Ecto.NoResultsError` if the Site notice does not exist.
-
-  ## Examples
-
-      iex> get_site_notice!(123)
-      %SiteNotice{}
-
-      iex> get_site_notice!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_site_notice!(id), do: Repo.get!(SiteNotice, id)
-
-  @doc """
   Returns the paginated site notices for the admin listing, on behalf of
   `actor`, newest start date first.
 
   Authorizes `:index` against the site-notice model. Returns
-  `{:ok, site_notices}` as a `m:Scrivener.Page` or `{:error, :unauthorized}`.
+  `{:ok, site_notices}` or `{:error, :unauthorized}`.
   """
   @spec load_site_notices(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
@@ -110,9 +111,7 @@ defmodule Philomena.SiteNotices do
   Loads the site notice named by the `id` for editing, on behalf of
   `actor`, pairing it with a change-tracking changeset.
 
-  Authorizes `:edit` against the loaded notice: a non-castable id is
-  `{:error, :not_found}`, and an unknown id authorizes `nil` and comes back
-  `{:error, :unauthorized}` for a non-admin (admins get `{:error, :not_found}`).
+  Authorizes `:edit` against the loaded notice.
 
   Returns `{:ok, {site_notice, changeset}}`, `{:error, :unauthorized}`, or
   `{:error, :not_found}`.
@@ -141,24 +140,6 @@ defmodule Philomena.SiteNotices do
   end
 
   @doc """
-  Updates a site_notice.
-
-  ## Examples
-
-      iex> update_site_notice(site_notice, %{field: new_value})
-      {:ok, %SiteNotice{}}
-
-      iex> update_site_notice(site_notice, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_site_notice(%SiteNotice{} = site_notice, attrs) do
-    site_notice
-    |> SiteNotice.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
   Deletes the site notice named by the `id`, on behalf of `actor`.
 
   Loading and authorization follow `load_site_notice_for_edit/2`, authorizing
@@ -173,40 +154,11 @@ defmodule Philomena.SiteNotices do
     end
   end
 
-  @doc """
-  Deletes a SiteNotice.
-
-  ## Examples
-
-      iex> delete_site_notice(site_notice)
-      {:ok, %SiteNotice{}}
-
-      iex> delete_site_notice(site_notice)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_site_notice(%SiteNotice{} = site_notice) do
-    Repo.delete(site_notice)
-  end
-
   # Loads the site notice named by the `id` and authorizes `action`
   # against it: a non-castable id or a `nil` load the actor was permitted to act
   # on (an admin) is `{:error, :not_found}`, while a `nil` or real notice the
   # actor may not act on is `{:error, :unauthorized}`.
   defp load_site_notice(actor, id, action) do
     Loader.fetch_and_authorize(SiteNotice, actor, action, id)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking site_notice changes.
-
-  ## Examples
-
-      iex> change_site_notice(site_notice)
-      %Ecto.Changeset{source: %SiteNotice{}}
-
-  """
-  def change_site_notice(%SiteNotice{} = site_notice) do
-    SiteNotice.changeset(site_notice, %{})
   end
 end
