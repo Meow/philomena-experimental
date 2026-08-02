@@ -33,15 +33,9 @@ defmodule Philomena.SourceChanges do
 
   @doc """
   Lists the source changes recorded on the image named by `image_id`, newest
-  first, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
-  `nil` for an anonymous visitor).
+  first, on behalf of `actor`.
 
-  The image is loaded by id and authorized for `:show`. A non-castable or
-  out-of-range id is `{:error, :not_found}`. A well-formed but unknown id is
-  authorized as a `nil` load: an actor who may not `:show` it gets
-  `{:error, :unauthorized}`, while an actor permitted to act on the `nil` load
-  gets `{:error, :not_found}`. `pagination` is Scrivener pagination data passed
-  through to `Repo.paginate/2`.
+  The image is loaded by id and authorized for `:show`.
 
   Returns `{:ok, {image, source_changes}}` where `source_changes` is a paginated
   set with its user and image associations preloaded.
@@ -55,7 +49,7 @@ defmodule Philomena.SourceChanges do
       {:error, :unauthorized}
 
   """
-  @spec image_source_changes(Actor.t(), String.t() | integer(), keyword() | map()) ::
+  @spec image_source_changes(Actor.t(), IntegerId.integer_id(), Repo.pagination_params()) ::
           {:ok, {Image.t(), Scrivener.Page.t()}}
           | {:error, :unauthorized | :not_found}
   def image_source_changes(%Actor{} = actor, image_id, pagination) do
@@ -80,15 +74,11 @@ defmodule Philomena.SourceChanges do
 
   @doc """
   Lists the source changes made by the user named by the profile `slug`, newest
-  first, on behalf of `actor` (a `Philomena.Attribution.Actor` whose user may be
-  `nil` for an anonymous visitor).
+  first, on behalf of `actor`.
 
-  The user is loaded by slug and authorized for `:show`; an unknown slug
-  authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
-  cover `nil`). Changes to the user's own anonymous uploads are excluded.
-  `params["added"]` narrows to additions (`"1"`) or removals (`"0"`);
-  `pagination` is Scrivener pagination data passed through to `Repo.paginate/2`.
+  The user is loaded by slug and authorized for `:show`. Changes to the user's
+  own anonymous uploads are excluded. `params["added"]` narrows to additions
+  (`"1"`) or removals (`"0"`).
 
   Returns `{:ok, {user, source_changes, image_count}}` where `source_changes` is
   a paginated set with its user and image associations preloaded
@@ -100,7 +90,7 @@ defmodule Philomena.SourceChanges do
       {:ok, {%User{}, %Scrivener.Page{}, 3}}
 
   """
-  @spec user_source_changes(Actor.t(), String.t(), map(), keyword() | map()) ::
+  @spec user_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, {User.t(), Scrivener.Page.t(), non_neg_integer()}}
           | {:error, :unauthorized | :not_found}
   def user_source_changes(%Actor{} = actor, slug, params, pagination) do
@@ -137,20 +127,19 @@ defmodule Philomena.SourceChanges do
 
   @doc """
   Lists the source changes attributed to the IP address `ip`, newest first, on
-  behalf of `actor` (the current viewer).
+  behalf of `actor`.
 
   Listing is staff-only: a viewer who may not see IP addresses gets
   `{:error, :unauthorized}` before the address is parsed, matching the order the
   authorization gate runs in. An unparsable address is `{:error, :not_found}`.
   `params["mask"]` widens the query to a subnet; `params["added"]` narrows to
-  additions (`"1"`) or removals (`"0"`); `pagination` is passed to
-  `Repo.paginate/2`.
+  additions (`"1"`) or removals (`"0"`).
 
   Returns `{:ok, {ip, range, source_changes}}` where `ip` is the parsed address,
   `range` is the masked address actually queried, and `source_changes` is a
   paginated set with its user and image associations preloaded.
   """
-  @spec ip_source_changes(Actor.t(), String.t(), map(), keyword() | map()) ::
+  @spec ip_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, {Postgrex.INET.t(), Postgrex.INET.t(), Scrivener.Page.t()}}
           | {:error, :unauthorized | :not_found}
   def ip_source_changes(%Actor{} = actor, ip, params, pagination) do
@@ -172,18 +161,17 @@ defmodule Philomena.SourceChanges do
 
   @doc """
   Lists the source changes attributed to `fingerprint`, newest first, on behalf
-  of `actor` (the current viewer).
+  of `actor`.
 
   Listing is staff-only: a viewer who may not see IP addresses gets
   `{:error, :unauthorized}`. The fingerprint is matched as a raw string, so any
   value returns a (possibly empty) listing. `params["added"]` narrows to
-  additions (`"1"`) or removals (`"0"`); `pagination` is passed to
-  `Repo.paginate/2`.
+  additions (`"1"`) or removals (`"0"`).
 
   Returns `{:ok, source_changes}`, a paginated set with its user and image
   associations preloaded.
   """
-  @spec fingerprint_source_changes(Actor.t(), String.t(), map(), keyword() | map()) ::
+  @spec fingerprint_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
   def fingerprint_source_changes(%Actor{} = actor, fingerprint, params, pagination) do
     with :ok <- authorize(actor, :show, :ip_address) do
@@ -214,85 +202,4 @@ defmodule Philomena.SourceChanges do
 
   defp added_filter(query, _params),
     do: query
-
-  @doc """
-  Gets a single source_change.
-
-  Raises `Ecto.NoResultsError` if the Source change does not exist.
-
-  ## Examples
-
-      iex> get_source_change!(123)
-      %SourceChange{}
-
-      iex> get_source_change!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_source_change!(id), do: Repo.get!(SourceChange, id)
-
-  @doc """
-  Creates a source_change.
-
-  ## Examples
-
-      iex> create_source_change(%{field: value})
-      {:ok, %SourceChange{}}
-
-      iex> create_source_change(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def create_source_change(attrs \\ %{}) do
-    %SourceChange{}
-    |> SourceChange.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Updates a source_change.
-
-  ## Examples
-
-      iex> update_source_change(source_change, %{field: new_value})
-      {:ok, %SourceChange{}}
-
-      iex> update_source_change(source_change, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_source_change(%SourceChange{} = source_change, attrs) do
-    source_change
-    |> SourceChange.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes a SourceChange.
-
-  ## Examples
-
-      iex> delete_source_change(source_change)
-      {:ok, %SourceChange{}}
-
-      iex> delete_source_change(source_change)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_source_change(%SourceChange{} = source_change) do
-    Repo.delete(source_change)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking source_change changes.
-
-  ## Examples
-
-      iex> change_source_change(source_change)
-      %Ecto.Changeset{source: %SourceChange{}}
-
-  """
-  def change_source_change(%SourceChange{} = source_change) do
-    SourceChange.changeset(source_change, %{})
-  end
 end
