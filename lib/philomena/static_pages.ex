@@ -13,47 +13,17 @@ defmodule Philomena.StaticPages do
   alias Philomena.StaticPages.StaticPage
   alias Philomena.StaticPages.Version
 
-  @doc """
-  Returns the list of static_pages.
-
-  ## Examples
-
-      iex> list_static_pages()
-      [%StaticPage{}, ...]
-
-  """
-  def list_static_pages do
+  # Returns the list of static pages.
+  defp list_static_pages do
     Repo.all(StaticPage)
   end
 
-  @doc """
-  Gets a single static_page.
-
-  Raises `Ecto.NoResultsError` if the Static page does not exist.
-
-  ## Examples
-
-      iex> get_static_page!(123)
-      %StaticPage{}
-
-      iex> get_static_page!(456)
-      ** (Ecto.NoResultsError)
-
-  """
+  # Gets a single static page. Visible for testing.
+  @doc false
   def get_static_page!(id), do: Repo.get!(StaticPage, id)
 
-  @doc """
-  Creates a static_page.
-
-  ## Examples
-
-      iex> create_static_page(%{field: value})
-      {:ok, %StaticPage{}}
-
-      iex> create_static_page(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
+  # Creates a static_page. Visible for testing.
+  @doc false
   def create_static_page(user, attrs \\ %{}) do
     static_page = StaticPage.changeset(%StaticPage{}, attrs)
 
@@ -67,18 +37,8 @@ defmodule Philomena.StaticPages do
     |> Repo.transaction()
   end
 
-  @doc """
-  Updates a static_page.
-
-  ## Examples
-
-      iex> update_static_page(static_page, %{field: new_value})
-      {:ok, %StaticPage{}}
-
-      iex> update_static_page(static_page, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
+  # Updates a static page. Visible for testing.
+  @doc false
   def update_static_page(%StaticPage{} = static_page, user, attrs) do
     version =
       %Version{static_page_id: static_page.id, user_id: user.id}
@@ -94,37 +54,13 @@ defmodule Philomena.StaticPages do
     |> Repo.transaction()
   end
 
-  @doc """
-  Deletes a StaticPage.
-
-  ## Examples
-
-      iex> delete_static_page(static_page)
-      {:ok, %StaticPage{}}
-
-      iex> delete_static_page(static_page)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_static_page(%StaticPage{} = static_page) do
-    Repo.delete(static_page)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking static_page changes.
-
-  ## Examples
-
-      iex> change_static_page(static_page)
-      %Ecto.Changeset{source: %StaticPage{}}
-
-  """
-  def change_static_page(%StaticPage{} = static_page) do
+  # Returns an `%Ecto.Changeset{}` for tracking static page changes.
+  defp change_static_page(%StaticPage{} = static_page) do
     StaticPage.changeset(static_page, %{})
   end
 
   @doc """
-  Returns the static pages listing on behalf of `user`.
+  Returns the static pages listing on behalf of `actor`.
 
   The listing is staff-only. Returns `{:error, :unauthorized}` when the viewer
   may not manage static pages, otherwise `{:ok, static_pages}`.
@@ -137,8 +73,7 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
-  Loads the static page named by `slug` for `user` (the current viewer, possibly
-  `nil`) to be shown.
+  Loads the static page named by `slug`, on behalf of `actor`.
 
   Returns `{:error, :not_found}` for an unknown slug the viewer may otherwise
   read, `{:error, :unauthorized}` when the viewer may not see it, and otherwise
@@ -177,7 +112,7 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
-  Prepares a new static page on behalf of `user`.
+  Prepares a new static page, on behalf of `actor`.
 
   Returns `{:error, :unauthorized}` when the viewer may not manage static pages,
   otherwise `{:ok, changeset}`.
@@ -190,8 +125,7 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
-  Creates a static page (with its initial version) on behalf of `user` from
-  `attrs`.
+  Creates a static page (with its initial version), on behalf of `actor`.
 
   Returns `{:error, :unauthorized}` when the viewer may not manage static pages,
   `{:error, :static_page, changeset, changes}` on a validation failure, and
@@ -208,7 +142,7 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
-  Loads the static page named by `slug` for `user` to be edited.
+  Loads the static page named by `slug` for edit, on behalf of `actor`.
 
   Returns `{:error, :not_found}` for an unknown slug the viewer may otherwise
   manage, `{:error, :unauthorized}` when the viewer may not edit static pages,
@@ -223,8 +157,8 @@ defmodule Philomena.StaticPages do
   end
 
   @doc """
-  Updates the static page named by `slug` (with a new version) on behalf of
-  `user` from `attrs`.
+  Updates the static page named by `slug` (with a new version), on behalf of
+  `actor`.
 
   Returns `{:error, :not_found}` for an unknown slug the viewer may otherwise
   manage, `{:error, :unauthorized}` when the viewer may not edit static pages,
@@ -236,6 +170,7 @@ defmodule Philomena.StaticPages do
           | {:error, :static_page, Ecto.Changeset.t(), map()}
           | {:error, :not_found | :unauthorized}
   def update_page(%Actor{} = actor, slug, attrs) do
+    # TODO: maybe just return the static page instead of the multi result map on success here?
     with {:ok, static_page} <- load_authorized_static_page(actor, slug, :update) do
       update_static_page(static_page, actor.user, attrs)
     end
