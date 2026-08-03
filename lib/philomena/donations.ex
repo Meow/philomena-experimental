@@ -3,7 +3,7 @@ defmodule Philomena.Donations do
   Authorized administration of donation records.
 
   Donation history is financial data. Controller-facing functions authorize
-  the routed class action, and the per-user loader additionally authorizes the
+  the requested action, and the per-user loader additionally authorizes the
   sensitive target before returning it.
   """
 
@@ -37,8 +37,9 @@ defmodule Philomena.Donations do
       iex> load_donations(admin, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_donations(user,  pagination)
+      iex> load_donations(user, pagination)
       {:error, :unauthorized}
+
   """
   @spec load_donations(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}

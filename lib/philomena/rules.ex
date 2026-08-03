@@ -70,7 +70,7 @@ defmodule Philomena.Rules do
   end
 
   @doc """
-  Safely loads a rule by its exact name.
+  Loads a rule by its name.
 
   ## Examples
 
@@ -240,6 +240,7 @@ defmodule Philomena.Rules do
 
       iex> create_rule(user_actor, %{name: "Rule #1", position: 1})
       {:error, :unauthorized}
+
   """
   @spec create_rule(Actor.t(), map()) ::
           {:ok, [Rule.t() | RuleVersion.t()]}
@@ -265,6 +266,7 @@ defmodule Philomena.Rules do
 
       iex> load_rule_for_edit(admin_actor, "missing")
       {:error, :not_found}
+
   """
   @spec load_rule_for_edit(Actor.t(), IntegerId.integer_id()) ::
           {:ok, {Rule.t(), Ecto.Changeset.t()}}
@@ -291,6 +293,7 @@ defmodule Philomena.Rules do
 
       iex> update_rule(admin_actor, "1", %{name: ""})
       {:error, {%Rule{}, %Ecto.Changeset{}}}
+
   """
   @spec update_rule(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, [Rule.t() | RuleVersion.t()]}

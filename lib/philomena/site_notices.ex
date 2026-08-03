@@ -75,6 +75,7 @@ defmodule Philomena.SiteNotices do
 
       iex> load_site_notices(regular_user_actor, %{page_number: 1, page_size: 25})
       {:error, :unauthorized}
+
   """
   @spec load_site_notices(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
@@ -101,6 +102,7 @@ defmodule Philomena.SiteNotices do
 
       iex> new_site_notice(banned_admin_actor)
       {:error, :ban}
+
   """
   @spec new_site_notice(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | Authorization.write_error()
@@ -153,6 +155,7 @@ defmodule Philomena.SiteNotices do
 
       iex> load_site_notice_for_edit(admin_actor, "missing")
       {:error, :not_found}
+
   """
   @spec load_site_notice_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {SiteNotice.t(), Ecto.Changeset.t()}}
@@ -177,6 +180,7 @@ defmodule Philomena.SiteNotices do
 
       iex> update_site_notice(admin_actor, "12", %{title: ""})
       {:error, %Ecto.Changeset{}}
+
   """
   @spec update_site_notice(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, SiteNotice.t()}
@@ -201,6 +205,7 @@ defmodule Philomena.SiteNotices do
 
       iex> delete_site_notice(admin_actor, "missing")
       {:error, :not_found}
+
   """
   @spec delete_site_notice(Actor.t(), Loader.integer_id()) ::
           {:ok, SiteNotice.t()}
