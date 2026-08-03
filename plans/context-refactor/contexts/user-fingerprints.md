@@ -3,6 +3,15 @@
 Source: `lib/philomena/user_fingerprints.ex`; consumer: fingerprint-profile
 controller and Profiles/SourceChanges sensitive-data assembly.
 
+## Status
+
+Implemented in wave 1. Fingerprint profiles parse, lowercase, and validate the
+supported browser fingerprint formats before applying the shared
+`:show, :identity_metadata` gate. Invalid inputs are not found, while valid
+unmatched inputs return an empty typed profile. The web cookie helper delegates
+format knowledge to this domain context, and all sensitive-data consumers use
+the same named permission.
+
 ## Findings
 
 - `load_fingerprint_profile/2` is the only public API and correctly gates a

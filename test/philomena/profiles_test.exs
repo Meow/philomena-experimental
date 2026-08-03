@@ -258,11 +258,9 @@ defmodule Philomena.ProfilesTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is unauthorized for a moderator, not-found for an admin" do
-      # A moderator's :show_details grant is over %User{} only, so it does not
-      # cover the nil load an unknown slug produces; an admin's blanket grant does.
+    test "an unknown slug is not found for every staff role" do
       assert Profiles.load_ip_history(actor(moderator_user_fixture()), "no-such-user") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Profiles.load_ip_history(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
@@ -295,9 +293,9 @@ defmodule Philomena.ProfilesTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown slug is not found for every staff role" do
       assert Profiles.load_fp_history(actor(moderator_user_fixture()), "no-such-user") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Profiles.load_fp_history(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}

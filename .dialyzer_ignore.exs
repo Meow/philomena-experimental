@@ -1,7 +1,6 @@
 [
   {"lib/philomena/adverts/restrictions.ex", :call_without_opaque},
   {"lib/philomena/artist_links.ex", :call_without_opaque},
-  {"lib/philomena/bans.ex", :call_without_opaque},
   {"lib/philomena/comments.ex", :call_without_opaque},
   {"lib/philomena/commissions.ex", :call_without_opaque},
   {"lib/philomena/conversations.ex", :call_without_opaque},

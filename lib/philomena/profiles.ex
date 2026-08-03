@@ -262,7 +262,8 @@ defmodule Philomena.Profiles do
     # TODO: this should have a struct definition for its return
     # TODO: "fp" should be spelled out as "fingerprint"
 
-    if Canada.Can.can?(actor.user, :index, User) do
+    if Canada.Can.can?(actor.user, :index, User) and
+         Canada.Can.can?(actor.user, :show, :identity_metadata) do
       user = Repo.preload(user, [:current_filter])
 
       last_ip =
@@ -409,8 +410,9 @@ defmodule Philomena.Profiles do
   defp load_detailed_profile(actor, slug) do
     user = Repo.get_by(User, slug: slug)
 
-    with :ok <- authorize(actor, :show_details, user),
-         %User{} <- user do
+    with %User{} <- user,
+         :ok <- authorize(actor, :show, :identity_metadata),
+         :ok <- authorize(actor, :show_details, user) do
       {:ok, user}
     else
       {:error, :unauthorized} -> {:error, :unauthorized}

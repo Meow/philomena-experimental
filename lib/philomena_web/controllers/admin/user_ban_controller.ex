@@ -21,10 +21,10 @@ defmodule PhilomenaWeb.Admin.UserBanController do
       {:ok, {target_user, changeset}} ->
         render_new(conn, target_user, changeset)
 
-      {:error, :no_target} ->
+      {:error, :not_found} ->
         no_target_user(conn)
 
-      {:error, :unauthorized} = error ->
+      {:error, reason} = error when reason in [:unauthorized, :ban] ->
         error
     end
   end
@@ -37,14 +37,25 @@ defmodule PhilomenaWeb.Admin.UserBanController do
         |> redirect(to: ~p"/admin/user_bans")
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        # `new.html` names the user being banned; the form posts their id back
-        # in a hidden field.
-        case Bans.target_user(user_ban_params["user_id"]) do
-          nil -> no_target_user(conn)
-          target_user -> render_new(conn, target_user, changeset)
+        case Bans.new_user_ban(
+               conn.assigns.actor,
+               user_ban_params["user_id"],
+               user_ban_params
+             ) do
+          {:ok, {target_user, _rebuilt_changeset}} ->
+            render_new(conn, target_user, changeset)
+
+          {:error, :not_found} ->
+            no_target_user(conn)
+
+          {:error, _} = error ->
+            error
         end
 
-      {:error, :unauthorized} = error ->
+      {:error, :not_found} ->
+        no_target_user(conn)
+
+      {:error, reason} = error when reason in [:unauthorized, :ban] ->
         error
     end
   end

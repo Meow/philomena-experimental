@@ -2202,7 +2202,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a regular user is unauthorized on a real image and the flag stays put" do
-      # Authorization on :ip_address runs before the load, so a regular user is
+      # Authorization on :identity_metadata runs before the load, so a regular user is
       # denied without the image ever being touched.
       user = confirmed_user_fixture()
       image = image_fixture(anonymous: false)
@@ -2215,7 +2215,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a regular user with a garbage id is still unauthorized, not not_found" do
-      # The :ip_address authorization precedes the id parse, so a non-castable id
+      # The :identity_metadata authorization precedes the id parse, so a non-castable id
       # never reaches the not-found path for an unprivileged actor.
       user = confirmed_user_fixture()
 
@@ -2830,7 +2830,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a regular user is unauthorized on a real image and params" do
-      # Authorization on :ip_address runs before the load, so a regular user is
+      # Authorization on :identity_metadata runs before the load, so a regular user is
       # denied without the image ever being touched.
       user = confirmed_user_fixture()
       new_owner = confirmed_user_fixture()
@@ -2845,7 +2845,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a regular user with a garbage id and nil params is still unauthorized" do
-      # The :ip_address authorization precedes the id parse and the params check,
+      # The :identity_metadata authorization precedes the id parse and the params check,
       # so neither the not-found nor the invalid_params path is reached.
       user = confirmed_user_fixture()
 

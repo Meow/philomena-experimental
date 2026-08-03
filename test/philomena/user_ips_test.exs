@@ -2,11 +2,9 @@ defmodule Philomena.UserIpsTest do
   @moduledoc """
   Context-level tests for the controller-facing `Philomena.UserIps.load_ip_profile/2`.
 
-  These pin the staff-only gate, the authorize-before-parse ordering (an
-  unprivileged viewer passing garbage input is answered unauthorized, not
-  not-found), the not-found for an unparsable address a staffer submits, and the
-  assembled `IpProfile` shape carrying the users seen on the address and the
-  subnet bans covering it.
+  These pin parse-before-authorization error precedence, IPv4/IPv6
+  canonicalization, the staff-only sensitive-identity gate, and the assembled
+  `IpProfile` shape.
   """
 
   use Philomena.DataCase, async: true
@@ -43,16 +41,29 @@ defmodule Philomena.UserIpsTest do
                {:error, :not_found}
     end
 
+    test "a valid unmatched address returns an empty typed profile" do
+      assert {:ok, %IpProfile{user_ips: [], subnet_bans: []}} =
+               UserIps.load_ip_profile(actor(moderator_user_fixture()), "198.51.100.42")
+    end
+
+    test "an equivalent IPv6 spelling is canonicalized" do
+      assert {:ok, %IpProfile{ip: %Postgrex.INET{address: address}}} =
+               UserIps.load_ip_profile(
+                 actor(moderator_user_fixture()),
+                 "2001:0DB8:0:0:0:0:0:1"
+               )
+
+      assert address == {0x2001, 0xDB8, 0, 0, 0, 0, 0, 1}
+    end
+
     test "a regular user is unauthorized, even for a valid address" do
       assert UserIps.load_ip_profile(actor(confirmed_user_fixture()), "203.0.113.1") ==
                {:error, :unauthorized}
     end
 
-    test "an unprivileged viewer passing garbage is unauthorized, not not-found" do
-      # Authorization runs before the address is parsed, so the missing
-      # permission wins over the malformed input.
+    test "an unprivileged viewer passing garbage is not-found" do
       assert UserIps.load_ip_profile(actor(confirmed_user_fixture()), "garbage") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an anonymous viewer is unauthorized" do

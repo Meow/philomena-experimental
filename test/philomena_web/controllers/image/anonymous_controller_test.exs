@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Image.AnonymousControllerTest do
       refute anonymous?(image)
     end
 
-    # NOTE: the context authorizes `:show, :ip_address`, which a regular user
+    # NOTE: the context authorizes `:show, :identity_metadata`, which a regular user
     # lacks, so they get the authorization redirect.
     test "rejects a regular user", %{conn: conn} do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})

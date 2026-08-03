@@ -19,28 +19,29 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
         |> put_flash(:error, "`#{ip}' is not a valid IP address or CIDR range.")
         |> redirect(to: ~p"/admin/subnet_bans")
 
-      {:error, :unauthorized} = error ->
+      {:error, reason} = error when reason in [:unauthorized, :ban] ->
         error
     end
   end
 
   def new(conn, params) do
     case Bans.new_subnet_ban(conn.assigns.actor, params["specification"]) do
-      {:ok, subnet} ->
-        render_new(conn, subnet)
+      {:ok, changeset} ->
+        render_new(conn, changeset)
 
       {:error, {:invalid_ip, ip}} ->
+        {:ok, changeset} = Bans.new_subnet_ban(conn.assigns.actor, nil)
+
         conn
         |> put_flash(:error, "`#{ip}' is not a valid IP address or CIDR range.")
-        |> render_new(%Bans.Subnet{})
+        |> render_new(changeset)
 
-      {:error, :unauthorized} = error ->
+      {:error, reason} = error when reason in [:unauthorized, :ban] ->
         error
     end
   end
 
-  defp render_new(conn, subnet) do
-    changeset = Bans.change_subnet(subnet)
+  defp render_new(conn, changeset) do
     render(conn, "new.html", title: "New Subnet Ban", changeset: changeset)
   end
 

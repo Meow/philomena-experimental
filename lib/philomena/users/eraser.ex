@@ -85,7 +85,7 @@ defmodule Philomena.Users.Eraser do
 
     # Ban the user
     {:ok, _ban} =
-      Bans.create_user(
+      Bans.create_system_user_ban(
         moderator,
         %{
           "user_id" => user.id,

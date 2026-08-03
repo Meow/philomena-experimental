@@ -2392,7 +2392,7 @@ defmodule Philomena.Images do
   `image_params` is a map with a `"username"` key. A blank username clears the
   uploader, anonymizing it.
 
-  Authorization is `:show` on `:ip_address` - a moderator-and-above capability -
+  Authorization is `:show` on `:identity_metadata` - a moderator-and-above capability -
   and is checked before the image is loaded, so an actor without it gets
   `{:error, :unauthorized}` regardless of the id. The image is then loaded by id
   with no per-image authorization. On success the uploader is reassigned, the image is
@@ -2416,7 +2416,7 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :unauthorized | :not_found | :invalid_params | Ecto.Changeset.t()}
   def update_uploader(%Actor{} = actor, image_id, image_params) do
-    with :ok <- authorize(actor, :show, :ip_address),
+    with :ok <- authorize(actor, :show, :identity_metadata),
          {:ok, id} <- IntegerId.parse(image_id),
          %Image{} = image <- Repo.get(Image, id),
          true <- is_map(image_params),
@@ -2446,7 +2446,7 @@ defmodule Philomena.Images do
   Sets or clears the anonymity status of the image named by `image_id`,
   on behalf of `actor`.
 
-  Authorization is `:show` on `:ip_address` - a moderator-and-above capability -
+  Authorization is `:show` on `:identity_metadata` - a moderator-and-above capability -
   and is checked before the image is loaded, so an actor without it gets
   `{:error, :unauthorized}` regardless of the id. The image is then loaded by id
   with no per-image authorization. On success the anonymity is toggled, the image is
@@ -2466,7 +2466,7 @@ defmodule Philomena.Images do
   @spec update_anonymous(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def update_anonymous(%Actor{} = actor, image_id, anonymous?) do
-    with :ok <- authorize(actor, :show, :ip_address),
+    with :ok <- authorize(actor, :show, :identity_metadata),
          {:ok, id} <- IntegerId.parse(image_id),
          %Image{} = image <- Repo.get(Image, id),
          {:ok, image} <- update_anonymous(image, %{"anonymous" => anonymous?}) do

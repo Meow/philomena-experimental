@@ -3,6 +3,16 @@
 Source: `lib/philomena/bans.ex`; consumers: fingerprint, subnet, and user-ban
 admin controllers plus request-time ban lookup.
 
+## Status
+
+Implemented in wave 1. All three admin flows now share missing-first class and
+instance authorization, enforce the global write prerequisite, and transact the
+ban change with its moderation log. Raw CRUD and form changesets are private;
+account erasure uses the narrow `create_system_user_ban/2` service. Admin-only
+deletion is encoded in Ability, target-user loading is guarded inside the
+context, and request-time lookup has deterministic subnet/fingerprint and
+newest-ban precedence.
+
 ## Findings
 
 - Three near-duplicate admin flows manually authorize a class, load an ID, edit,

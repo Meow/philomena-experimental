@@ -143,7 +143,7 @@ defmodule Philomena.SourceChanges do
           {:ok, {Postgrex.INET.t(), Postgrex.INET.t(), Scrivener.Page.t()}}
           | {:error, :unauthorized | :not_found}
   def ip_source_changes(%Actor{} = actor, ip, params, pagination) do
-    with :ok <- authorize(actor, :show, :ip_address),
+    with :ok <- authorize(actor, :show, :identity_metadata),
          {:ok, ip} <- cast_ip(ip) do
       range = IpMask.parse_mask(ip, params)
 
@@ -174,7 +174,7 @@ defmodule Philomena.SourceChanges do
   @spec fingerprint_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
   def fingerprint_source_changes(%Actor{} = actor, fingerprint, params, pagination) do
-    with :ok <- authorize(actor, :show, :ip_address) do
+    with :ok <- authorize(actor, :show, :identity_metadata) do
       source_changes =
         SourceChange
         |> where(fingerprint: ^fingerprint)

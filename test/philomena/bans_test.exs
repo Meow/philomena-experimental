@@ -18,9 +18,9 @@ defmodule Philomena.BansTest do
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.BansFixtures
-  import Philomena.UserIpsFixtures, only: [inet: 1]
+  import Philomena.UserIpsFixtures, only: [inet: 1, user_ip_fixture: 2]
   import Philomena.UsersFixtures
 
   alias Philomena.ModerationLogs.ModerationLog
@@ -167,22 +167,22 @@ defmodule Philomena.BansTest do
       assert loaded.id == target.id
     end
 
-    test "an unknown but castable user id has no target" do
+    test "an unknown but castable user id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Bans.new_user_ban(actor(moderator), "2147483647") == {:error, :no_target}
+      assert Bans.new_user_ban(actor(moderator), "2147483647") == {:error, :not_found}
     end
 
-    test "a non-castable user id has no target" do
+    test "a non-castable user id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Bans.new_user_ban(actor(moderator), "abc") == {:error, :no_target}
+      assert Bans.new_user_ban(actor(moderator), "abc") == {:error, :not_found}
     end
 
-    test "a nil user id has no target" do
+    test "a nil user id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Bans.new_user_ban(actor(moderator), nil) == {:error, :no_target}
+      assert Bans.new_user_ban(actor(moderator), nil) == {:error, :not_found}
     end
 
     test "a regular user is not authorized" do
@@ -217,6 +217,33 @@ defmodule Philomena.BansTest do
       target = confirmed_user_fixture()
 
       assert {:ok, _ban} = Bans.create_user_ban(actor(admin), valid_user_ban_attrs(target))
+    end
+
+    test "creation automatically bans the target's latest IPv6 /64" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      user_ip_fixture(target, "2001:db8:1:2:3:4:5:6")
+
+      assert {:ok, _ban} = Bans.create_user_ban(actor(moderator), valid_user_ban_attrs(target))
+
+      assert %Bans.Subnet{
+               specification: %Postgrex.INET{
+                 address: {0x2001, 0xDB8, 1, 2, 0, 0, 0, 0},
+                 netmask: 64
+               }
+             } = Repo.one!(Bans.Subnet)
+    end
+
+    test "creation automatically bans the target's latest IPv4 address unchanged" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      user_ip_fixture(target, "203.0.113.51")
+
+      assert {:ok, _ban} = Bans.create_user_ban(actor(moderator), valid_user_ban_attrs(target))
+
+      assert %Bans.Subnet{
+               specification: %Postgrex.INET{address: {203, 0, 113, 51}, netmask: 32}
+             } = Repo.one!(Bans.Subnet)
     end
 
     test "invalid attributes return a changeset and write no log" do
@@ -472,19 +499,20 @@ defmodule Philomena.BansTest do
   end
 
   describe "new_subnet_ban/2" do
-    test "a moderator gets a blank subnet for a nil specification" do
+    test "a moderator gets a blank changeset for a nil specification" do
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Bans.Subnet{specification: nil}} = Bans.new_subnet_ban(actor(moderator), nil)
+      assert {:ok, %Ecto.Changeset{} = changeset} = Bans.new_subnet_ban(actor(moderator), nil)
+      assert Ecto.Changeset.get_field(changeset, :specification) == nil
     end
 
-    test "a moderator gets a prefilled subnet for a valid specification" do
+    test "a moderator gets a changeset prefilled with a valid specification" do
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Bans.Subnet{specification: spec}} =
+      assert {:ok, %Ecto.Changeset{} = changeset} =
                Bans.new_subnet_ban(actor(moderator), "203.0.113.0/24")
 
-      refute is_nil(spec)
+      refute is_nil(Ecto.Changeset.get_field(changeset, :specification))
     end
 
     test "an invalid specification returns the invalid-ip error" do
@@ -894,6 +922,104 @@ defmodule Philomena.BansTest do
     end
   end
 
+  describe "shared ban-management contracts" do
+    test "a ban takes precedence over authorization for every ban creation flow" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      banned_actor = actor(moderator, ban: %{active: true})
+
+      assert Bans.create_user_ban(banned_actor, valid_user_ban_attrs(target)) ==
+               {:error, :ban}
+
+      assert Bans.create_subnet_ban(banned_actor, valid_subnet_ban_attrs()) ==
+               {:error, :ban}
+
+      assert Bans.create_fingerprint_ban(banned_actor, valid_fingerprint_ban_attrs()) ==
+               {:error, :ban}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a missing fingerprint rejects every ban creation flow" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      unattributed_actor = actor(moderator, fingerprint: nil)
+
+      assert Bans.create_user_ban(unattributed_actor, valid_user_ban_attrs(target)) ==
+               {:error, :unauthorized}
+
+      assert Bans.create_subnet_ban(unattributed_actor, valid_subnet_ban_attrs()) ==
+               {:error, :unauthorized}
+
+      assert Bans.create_fingerprint_ban(unattributed_actor, valid_fingerprint_ban_attrs()) ==
+               {:error, :unauthorized}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "malformed member IDs are not found before authorization for all ban kinds" do
+      user_actor = actor(confirmed_user_fixture())
+
+      assert Bans.load_user_ban_for_edit(user_actor, "bad-id") == {:error, :not_found}
+      assert Bans.update_user_ban(user_actor, "bad-id", %{}) == {:error, :not_found}
+      assert Bans.delete_user_ban(user_actor, "bad-id") == {:error, :not_found}
+
+      assert Bans.load_subnet_ban_for_edit(user_actor, "bad-id") == {:error, :not_found}
+      assert Bans.update_subnet_ban(user_actor, "bad-id", %{}) == {:error, :not_found}
+      assert Bans.delete_subnet_ban(user_actor, "bad-id") == {:error, :not_found}
+
+      assert Bans.load_fingerprint_ban_for_edit(user_actor, "bad-id") ==
+               {:error, :not_found}
+
+      assert Bans.update_fingerprint_ban(user_actor, "bad-id", %{}) ==
+               {:error, :not_found}
+
+      assert Bans.delete_fingerprint_ban(user_actor, "bad-id") == {:error, :not_found}
+    end
+  end
+
+  describe "find/3" do
+    test "an anonymous request prefers a subnet ban over a fingerprint ban" do
+      fingerprint = "d015c342859dde3"
+      _fingerprint_ban = fingerprint_ban_fixture(%{"fingerprint" => fingerprint})
+      _subnet_ban = subnet_ban_fixture(%{"specification" => "203.0.113.0/24"})
+
+      assert %{type: "Subnet"} = Bans.find(nil, inet("203.0.113.50"), fingerprint)
+    end
+
+    test "a signed-in request ignores matching subnet and fingerprint bans" do
+      user = confirmed_user_fixture()
+      fingerprint = "d015c342859dde3"
+      _fingerprint_ban = fingerprint_ban_fixture(%{"fingerprint" => fingerprint})
+      _subnet_ban = subnet_ban_fixture(%{"specification" => "203.0.113.0/24"})
+
+      assert Bans.find(user, inet("203.0.113.50"), fingerprint) == nil
+    end
+
+    test "a signed-in request returns its user ban" do
+      user = confirmed_user_fixture()
+      _user_ban = user_ban_fixture(user)
+
+      assert %{type: "User"} = Bans.find(user, inet("203.0.113.50"), "d015c342859dde3")
+    end
+
+    test "the newest matching ban wins within one ban kind" do
+      fingerprint = "d015c342859dde3"
+      older = fingerprint_ban_fixture(%{"fingerprint" => fingerprint, "reason" => "older"})
+      newer = fingerprint_ban_fixture(%{"fingerprint" => fingerprint, "reason" => "newer"})
+
+      set_created_at(Bans.Fingerprint, older.id, ~U[2020-01-01 00:00:00Z])
+      set_created_at(Bans.Fingerprint, newer.id, ~U[2024-01-01 00:00:00Z])
+
+      assert %{generated_ban_id: generated_ban_id} = Bans.find(nil, nil, fingerprint)
+      assert generated_ban_id == newer.generated_ban_id
+    end
+
+    test "an identity with no attributes has no ban" do
+      assert Bans.find(nil, nil, nil) == nil
+    end
+  end
+
   # Controller-shaped attrs (string keys) a user ban insert requires: a target,
   # a reason, and a valid_until (a RelativeDate a plain DateTime casts fine).
   defp valid_user_ban_attrs(target) do
@@ -914,7 +1040,7 @@ defmodule Philomena.BansTest do
 
   defp valid_fingerprint_ban_attrs do
     %{
-      "fingerprint" => "c1836fd10ff8f27a",
+      "fingerprint" => "d015c342859dde3",
       "reason" => "Test fingerprint reason",
       "valid_until" => DateTime.add(DateTime.utc_now(:second), 365, :day)
     }

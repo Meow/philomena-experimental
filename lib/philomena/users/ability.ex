@@ -74,8 +74,8 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{role: "moderator"}, :show, %Conversation{}), do: true
   def can?(%User{role: "moderator"}, :approve, %Message{}), do: true
 
-  # View IP addresses and fingerprints
-  def can?(%User{role: "moderator"}, :show, :ip_address), do: true
+  # View sensitive identity metadata such as IP addresses and fingerprints
+  def can?(%User{role: "moderator"}, :show, :identity_metadata), do: true
 
   # Manage duplicate reports
   def can?(%User{role: "moderator"}, :index, DuplicateReport), do: true
@@ -109,10 +109,32 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{role: "moderator"}, _action, DnpEntry), do: true
   def can?(%User{role: "moderator"}, _action, %DnpEntry{}), do: true
 
-  # Create bans
-  def can?(%User{role: "moderator"}, _action, Bans.User), do: true
-  def can?(%User{role: "moderator"}, _action, Bans.Subnet), do: true
-  def can?(%User{role: "moderator"}, _action, Bans.Fingerprint), do: true
+  # Manage bans. Deletion deliberately remains admin-only via the admin rule
+  # above; context member flows authorize both the class and the loaded record.
+  @ban_management_actions [:index, :new, :create, :edit, :update]
+  def can?(%User{role: "moderator"}, action, Bans.User)
+      when action in @ban_management_actions,
+      do: true
+
+  def can?(%User{role: "moderator"}, action, %Bans.User{})
+      when action in @ban_management_actions,
+      do: true
+
+  def can?(%User{role: "moderator"}, action, Bans.Subnet)
+      when action in @ban_management_actions,
+      do: true
+
+  def can?(%User{role: "moderator"}, action, %Bans.Subnet{})
+      when action in @ban_management_actions,
+      do: true
+
+  def can?(%User{role: "moderator"}, action, Bans.Fingerprint)
+      when action in @ban_management_actions,
+      do: true
+
+  def can?(%User{role: "moderator"}, action, %Bans.Fingerprint{})
+      when action in @ban_management_actions,
+      do: true
 
   # Hide topics
   def can?(%User{role: "moderator"}, :show, %Topic{}), do: true

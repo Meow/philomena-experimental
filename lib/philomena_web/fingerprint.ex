@@ -1,6 +1,8 @@
 defmodule PhilomenaWeb.Fingerprint do
   import Plug.Conn
 
+  alias Philomena.UserFingerprints
+
   @type t :: String.t()
   @name "_ses"
 
@@ -69,15 +71,5 @@ defmodule PhilomenaWeb.Fingerprint do
 
   """
   @spec valid_format?(any()) :: boolean()
-  def valid_format?(fingerprint)
-
-  def valid_format?(<<"c", rest::binary>>) when byte_size(rest) <= 12 do
-    match?({_result, ""}, Integer.parse(rest))
-  end
-
-  def valid_format?(<<"d", rest::binary>>) when byte_size(rest) == 14 do
-    match?({:ok, _result}, Base.decode16(rest, case: :lower))
-  end
-
-  def valid_format?(_fingerprint), do: false
+  defdelegate valid_format?(fingerprint), to: UserFingerprints
 end

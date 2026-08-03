@@ -137,6 +137,10 @@ present; and subscription persistence functions are explicitly internal, with
 the channel index using an actor-scoped wrapper. SiteNotices is the canonical
 ID-based exemplar. Rules and Donations are the first wave 1 examples for a
 position query and a slug query, respectively.
+Wave 1 now also includes Bans, UserFingerprints, and UserIps: ban administration
+uses transactional actor-scoped flows and private persistence helpers, while
+sensitive IP/fingerprint readers share the named `:identity_metadata`
+permission and canonical invalid-input behavior.
 
 ### Wave 0: characterize and establish the contract
 
