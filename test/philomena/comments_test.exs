@@ -659,9 +659,9 @@ defmodule Philomena.CommentsTest do
       assert {:ok, {_image, _comment, [%CommentVersion{} = version]}} =
                Comments.comment_history(actor(), "#{image.id}", "#{comment.id}")
 
-      # create_version records the body as it stood before the edit, so the
+      # previous_body records the body as it stood before the edit, so the
       # single version carries the original text and names its editor.
-      assert version.body == "Original comment body"
+      assert version.previous_body == "Original comment body"
       assert version.user.id == author.id
     end
 

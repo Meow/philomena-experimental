@@ -515,9 +515,9 @@ defmodule Philomena.PostsTest do
       assert {:ok, {_topic, _post, [%PostVersion{} = version]}} =
                Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
-      # create_version records the body as it stood before the edit, so the
+      # previous_body records the body as it stood before the edit, so the
       # single version carries the original text and names its editor.
-      assert version.body == "Original post body"
+      assert version.previous_body == "Original post body"
       assert version.user.id == author.id
     end
 
@@ -944,17 +944,12 @@ defmodule Philomena.PostsTest do
 
       assert updated.body == "Original reply body plus an edit"
       assert Repo.reload!(post).body == "Original reply body plus an edit"
-
-      # A version row was written for the post. Its `body` is virtual, decoded
-      # from the persisted `object` blob only through the history loader, so the
-      # value is read back via post_history: create_version records the body as it
-      # stood before the edit, so the single version carries the original text.
       assert Repo.exists?(from v in PostVersion, where: v.post_id == ^post.id)
 
       assert {:ok, {_topic, _post, [%PostVersion{} = version]}} =
                Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
-      assert version.body == "Original reply body"
+      assert version.previous_body == "Original reply body"
     end
 
     test "another regular user cannot edit, leaving the body unchanged",
