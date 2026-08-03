@@ -60,7 +60,7 @@ defmodule Philomena.Polls do
   # present for editing and on the update-error path.
   defp load_forum_topic_poll(actor, forum_slug, topic_slug) do
     with {:ok, forum, topic} <-
-           Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
          {:ok, poll} <- load_poll(topic),
          :ok <- authorize(actor, :hide, topic) do
       {:ok, forum, topic, Repo.preload(poll, :options)}

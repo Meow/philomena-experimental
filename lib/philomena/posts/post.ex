@@ -51,15 +51,15 @@ defmodule Philomena.Posts.Post do
   end
 
   @doc false
-  def topic_creation_changeset(post, attrs, attribution, anonymous?) do
+  def topic_creation_changeset(post, attrs, %Actor{} = actor, anonymous?) do
     post
     |> change(anonymous: anonymous?)
     |> cast(attrs, [:body])
     |> validate_required([:body])
     |> validate_length(:body, min: 1, max: 300_000, count: :bytes)
-    |> change(attribution)
+    |> change(Actor.to_changes(actor))
     |> change(topic_position: 0)
-    |> Approval.maybe_put_approval(attribution[:user], :external_links)
+    |> Approval.maybe_put_approval(actor.user, :external_links)
   end
 
   def hide_changeset(post, attrs, user) do

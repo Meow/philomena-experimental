@@ -489,7 +489,7 @@ defmodule Philomena.Posts do
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :post_create),
          {:ok, forum, topic} <-
-           Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
          :ok <- authorize(actor.user, :create_post, topic) do
       case create_post(topic, actor, post_params || %{}) do
         {:ok, %{post: post}} ->
@@ -573,7 +573,7 @@ defmodule Philomena.Posts do
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_edit(actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_not_banned(actor),
-         {:ok, post} <- load_editable_post(actor.user, forum_slug, topic_slug, post_id) do
+         {:ok, post} <- load_editable_post(actor, forum_slug, topic_slug, post_id) do
       {:ok, {post, change_post(post)}}
     end
   end
@@ -617,7 +617,7 @@ defmodule Philomena.Posts do
           | {:error, :ban | :unauthorized | :not_found}
   def update_post(%Actor{} = actor, forum_slug, topic_slug, post_id, post_params) do
     with :ok <- verify_write_access(actor),
-         {:ok, post} <- load_editable_post(actor.user, forum_slug, topic_slug, post_id) do
+         {:ok, post} <- load_editable_post(actor, forum_slug, topic_slug, post_id) do
       case update_post(post, actor.user, post_params || %{}) do
         {:ok, %{post: updated_post}} ->
           report_non_approved(updated_post)
@@ -636,12 +636,12 @@ defmodule Philomena.Posts do
   # hidden from users needs `:show`), and finally the post is authorized for
   # `:edit`. The `:create_post` check precedes the post load, so a locked topic
   # answers unauthorized before an unknown id could answer not-found.
-  defp load_editable_post(user, forum_slug, topic_slug, post_id) do
+  defp load_editable_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with {:ok, _forum, topic} <-
-           Topics.load_forum_topic(user, forum_slug, topic_slug, show_hidden: false),
-         :ok <- authorize(user, :create_post, topic),
-         {:ok, post} <- load_topic_post(user, topic, post_id),
-         :ok <- authorize(user, :edit, post) do
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         :ok <- authorize(actor, :create_post, topic),
+         {:ok, post} <- load_topic_post(actor, topic, post_id),
+         :ok <- authorize(actor, :edit, post) do
       {:ok, post}
     end
   end
@@ -959,8 +959,8 @@ defmodule Philomena.Posts do
           | {:error, :unauthorized | :not_found}
   def post_history(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with {:ok, _forum, topic} <-
-           Topics.load_forum_topic(actor.user, forum_slug, topic_slug, show_hidden: false),
-         {:ok, post} <- load_topic_post(actor.user, topic, post_id) do
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         {:ok, post} <- load_topic_post(actor, topic, post_id) do
       {:ok, {topic, post, Versions.load_last_versions("Post", post)}}
     end
   end
@@ -969,7 +969,7 @@ defmodule Philomena.Posts do
   # author preloaded), a missing row is `{:error, :not_found}`,
   # and a post hidden from users is authorized for `:show` - visible to staff,
   # otherwise `{:error, :unauthorized}`.
-  defp load_topic_post(actor, topic, post_id) do
+  defp load_topic_post(%Actor{} = actor, topic, post_id) do
     Post
     |> where(topic_id: ^topic.id, id: ^to_string(post_id))
     |> preload(topic: :forum, user: [awards: :badge])
@@ -1022,10 +1022,10 @@ defmodule Philomena.Posts do
         ) ::
           {:ok, {Topic.t(), Post.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
-  def load_post_for_report(%Actor{user: user} = actor, forum_slug, topic_slug, post_id) do
+  def load_post_for_report(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_not_banned(actor),
          {:ok, {topic, post}} <-
-           load_reportable_post(user, forum_slug, topic_slug, post_id) do
+           load_reportable_post(actor, forum_slug, topic_slug, post_id) do
       changeset = Reports.change_report(%Report{reportable_type: "Post", reportable_id: post.id})
       {:ok, {topic, post, changeset}}
     end
@@ -1066,9 +1066,9 @@ defmodule Philomena.Posts do
         ) ::
           {:ok, {Topic.t(), Post.t()}}
           | {:error, :ban | :unauthorized | :not_found}
-  def load_post_for_report_creation(%Actor{user: user} = actor, forum_slug, topic_slug, post_id) do
+  def load_post_for_report_creation(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor) do
-      load_reportable_post(user, forum_slug, topic_slug, post_id)
+      load_reportable_post(actor, forum_slug, topic_slug, post_id)
     end
   end
 
@@ -1078,10 +1078,10 @@ defmodule Philomena.Posts do
   # Permissions are decided on the user alone, so the report loaders pass the
   # actor's user here. The post is loaded with its topic and forum preloaded, so
   # the topic returned here carries its forum.
-  defp load_reportable_post(user, forum_slug, topic_slug, post_id) do
+  defp load_reportable_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with {:ok, _forum, topic} <-
-           Topics.load_forum_topic(user, forum_slug, topic_slug, show_hidden: false),
-         {:ok, post} <- load_topic_post(user, topic, post_id) do
+           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         {:ok, post} <- load_topic_post(actor, topic, post_id) do
       {:ok, {post.topic, post}}
     end
   end

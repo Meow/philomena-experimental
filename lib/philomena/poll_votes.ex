@@ -128,7 +128,7 @@ defmodule Philomena.PollVotes do
   @spec list_votes(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
           {:ok, [PollOption.t()]} | {:error, :unauthorized | :not_found}
   def list_votes(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, _forum, topic, poll} <- load_forum_topic_poll(actor.user, forum_slug, topic_slug),
+    with {:ok, _forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
          :ok <- authorize(actor, :hide, topic) do
       {:ok, voted_options(poll)}
     end
@@ -184,7 +184,7 @@ defmodule Philomena.PollVotes do
           | {:error, :ban | :unauthorized | :not_found}
   def create_votes(%Actor{} = actor, forum_slug, topic_slug, poll_params) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum, topic, poll} <- load_forum_topic_poll(actor.user, forum_slug, topic_slug) do
+         {:ok, forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug) do
       record_votes(actor.user, forum, topic, poll, poll_params)
     end
   end
@@ -234,7 +234,7 @@ defmodule Philomena.PollVotes do
           | {:error, Forum.t(), Topic.t()}
           | {:error, :unauthorized | :not_found}
   def delete_vote(%Actor{} = actor, forum_slug, topic_slug, vote_id) do
-    with {:ok, forum, topic, _poll} <- load_forum_topic_poll(actor.user, forum_slug, topic_slug),
+    with {:ok, forum, topic, _poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
          :ok <- authorize(actor, :hide, topic) do
       case load_poll_vote(vote_id) do
         nil ->
