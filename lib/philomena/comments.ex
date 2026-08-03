@@ -73,18 +73,12 @@ defmodule Philomena.Comments do
   @doc false
   def update_comment(%Comment{} = comment, editor, attrs) do
     now = DateTime.utc_now(:second)
-    current_body = comment.body
-    current_reason = comment.edit_reason
-
     comment_changes = Comment.changeset(comment, attrs, now)
 
     Multi.new()
     |> Multi.update(:comment, comment_changes)
-    |> Multi.run(:version, fn _repo, _changes ->
-      Versions.create_version("Comment", comment.id, editor.id, %{
-        "body" => current_body,
-        "edit_reason" => current_reason
-      })
+    |> Multi.run(:version, fn repo, %{comment: updated} ->
+      Versions.record_edit(repo, comment, updated, editor)
     end)
     |> Repo.transaction()
   end
@@ -105,7 +99,7 @@ defmodule Philomena.Comments do
   @doc false
   def hide_loaded_comment(%Comment{} = comment, attrs, user) do
     # Also used by Users.Eraser (TODO what API should be exposed for that?)
-    report_query = Reports.close_report_query({"Comment", comment.id}, user)
+    report_query = Reports.close_report_query(user, comment_id: comment.id)
     comment = Comment.hide_changeset(comment, attrs, user)
 
     Multi.new()
@@ -179,9 +173,9 @@ defmodule Philomena.Comments do
 
   defp report_non_approved(comment) do
     Reports.create_system_report(
-      {"Comment", comment.id},
       "Approval",
-      "Comment contains external links"
+      "Comment contains external links",
+      comment_id: comment.id
     )
   end
 
@@ -433,7 +427,7 @@ defmodule Philomena.Comments do
   @spec paginate_image_comments(Actor.t(), Image.t(), Repo.pagination_params()) ::
           Scrivener.Page.t()
   def paginate_image_comments(%Actor{user: user}, image, pagination) do
-    direction = load_direction(user)
+    direction = load_direction(user.settings)
 
     visible_image_comments(user, image)
     |> order_by([{^direction, :created_at}])
@@ -504,7 +498,7 @@ defmodule Philomena.Comments do
     |> filter_non_approved(user, show_hidden?)
   end
 
-  defp load_direction(%{comments_newest_first: false}), do: :asc
+  defp load_direction(%{settings: %{comments_newest_first: false}}), do: :asc
   defp load_direction(_user), do: :desc
 
   defp filter_destroyed(query, true), do: query
@@ -521,7 +515,7 @@ defmodule Philomena.Comments do
   # The offset counts only the comments ahead of the target in
   # the viewer's reading direction; counting the target itself would push
   # a comment sitting exactly on a page boundary onto the next page.
-  defp filter_direction(query, time, %{comments_newest_first: false}),
+  defp filter_direction(query, time, %{settings: %{comments_newest_first: false}}),
     do: where(query, [c], c.created_at < ^time)
 
   defp filter_direction(query, time, _user),
@@ -754,7 +748,7 @@ defmodule Philomena.Comments do
     with :ok <- verify_not_banned(actor),
          {:ok, comment} <- load_reportable_comment(actor, image_id, comment_id) do
       changeset =
-        Reports.change_report(%Report{reportable_type: "Comment", reportable_id: comment.id})
+        Reports.change_report(%Report{comment_id: comment.id})
 
       {:ok, {comment, changeset}}
     end
@@ -1070,8 +1064,8 @@ defmodule Philomena.Comments do
     end
   end
 
-  defp approve_loaded_comment(actor, %Comment{} = comment) do
-    report_query = Reports.close_report_query({"Comment", comment.id}, actor.user)
+  defp approve_loaded_comment(%Actor{user: user} = actor, %Comment{} = comment) do
+    report_query = Reports.close_report_query(user, comment_id: comment.id)
     changeset = Comment.approve_changeset(comment)
 
     Multi.new()

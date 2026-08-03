@@ -29,6 +29,6 @@ defmodule PhilomenaWeb.ActivityController do
     )
   end
 
-  defp show_sidebar?(%{show_sidebar_and_watched_images: false}), do: false
+  defp show_sidebar?(%{settings: %{show_sidebar_and_watched_images: false}}), do: false
   defp show_sidebar?(_user), do: true
 end

@@ -1,5 +1,4 @@
 defmodule Philomena.SearchIndexer do
-  alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
 
   alias Philomena.Comments
@@ -22,7 +21,6 @@ defmodule Philomena.SearchIndexer do
   alias Philomena.Users.User
 
   alias Philomena.Maintenance
-  alias Philomena.Polymorphic
   alias Philomena.Repo
   import Ecto.Query
 
@@ -137,15 +135,15 @@ defmodule Philomena.SearchIndexer do
   @spec reindex_schema(schema :: module(), opts :: Keyword.t()) :: :ok
   def reindex_schema(schema, opts \\ []) do
     maintenance = Keyword.get(opts, :maintenance, true)
+    query = limit(schema, 1)
+    min = if maintenance, do: Repo.one(order_by(query, asc: :id))
 
-    if maintenance do
-      query = limit(schema, 1)
-      min = Repo.one(order_by(query, asc: :id)).id
-      max = Repo.one(order_by(query, desc: :id)).id
+    if maintenance and not is_nil(min) do
+      max = Repo.one(order_by(query, desc: :id))
 
       schema
       |> reindex_schema_impl(opts)
-      |> Maintenance.log_progress(inspect(schema), min, max)
+      |> Maintenance.log_progress(inspect(schema), min.id, max.id)
     else
       schema
       |> reindex_schema_impl(opts)
@@ -155,33 +153,15 @@ defmodule Philomena.SearchIndexer do
 
   @spec reindex_schema_impl(schema :: module(), opts :: Keyword.t()) ::
           Enumerable.t({:ok, integer()})
-  defp reindex_schema_impl(schema, opts)
-
-  defp reindex_schema_impl(Report, opts) do
-    # Reports currently require handling for their polymorphic nature
-    Report
-    |> preload([:user, :admin])
-    |> Batch.record_batches(batch_size: @batch_sizes[Report])
-    |> Task.async_stream(
-      fn records ->
-        records
-        |> Polymorphic.load_polymorphic(reportable: [reportable_id: :reportable_type])
-        |> Enum.map(&Search.index_document(&1, Report))
-      end,
-      timeout: :infinity,
-      max_concurrency: max_concurrency(opts)
-    )
-  end
-
   defp reindex_schema_impl(schema, opts) when schema in @schemas do
-    # Normal schemas can simply be reindexed with indexing_preloads
     context = Map.fetch!(@contexts, schema)
 
     schema
     |> preload(^context.indexing_preloads())
     |> Search.reindex_stream(schema,
       batch_size: @batch_sizes[schema],
-      max_concurrency: max_concurrency(opts)
+      max_concurrency: max_concurrency(opts),
+      targets: opts[:targets]
     )
   end
 

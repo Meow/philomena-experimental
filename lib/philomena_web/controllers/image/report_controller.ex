@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Image.ReportController do
       |> put_view(ReportView)
       |> render("new.html",
         title: "Reporting Image",
-        reportable: image,
+        subject: image,
         changeset: changeset,
         action: action
       )
@@ -28,32 +28,7 @@ defmodule PhilomenaWeb.Image.ReportController do
     with {:ok, image} <- Reports.load_image_for_report_creation(conn.assigns.actor, image_id) do
       action = ~p"/images/#{image}/reports"
 
-      case Reports.create_report(conn.assigns.actor, "Image", image.id, params["report"]) do
-        {:ok, _report} ->
-          conn
-          |> put_flash(
-            :info,
-            "Your report has been received and will be checked by staff shortly."
-          )
-          |> redirect(to: report_redirect_path(conn.assigns.current_user))
-
-        {:error, :too_many_reports} ->
-          conn
-          |> put_flash(
-            :error,
-            "You may not have more than #{Reports.max_open_reports()} open reports at a time. " <>
-              "Did you read the reporting tips?"
-          )
-          |> redirect(to: "/")
-
-        {:error, %Ecto.Changeset{} = changeset} ->
-          conn
-          |> put_view(ReportView)
-          |> render("new.html", reportable: image, changeset: changeset, action: action)
-      end
+      ReportController.create(conn, action, image, [image_id: image.id], params)
     end
   end
-
-  defp report_redirect_path(nil), do: "/"
-  defp report_redirect_path(_user), do: ~p"/reports"
 end

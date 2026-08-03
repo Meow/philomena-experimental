@@ -29,8 +29,14 @@ defmodule Philomena.Reports do
   alias Philomena.IndexWorker
   alias Philomena.ModNotes
   alias Philomena.ModNotes.ModNote
-  alias Philomena.Polymorphic
   alias Philomena.Rules
+
+  alias Philomena.Images.Image
+  alias Philomena.Comments.Comment
+  alias Philomena.Posts.Post
+  alias Philomena.Commissions.Commission
+  alias Philomena.Conversations.Conversation
+  alias Philomena.Galleries.Gallery
 
   @max_open_reports 5
 
@@ -172,9 +178,7 @@ defmodule Philomena.Reports do
       )
       |> Search.search_records(preload(Report, [:admin, :rule, user: :linked_tags]))
 
-    entries = Polymorphic.load_polymorphic(reports, reportable: [reportable_id: :reportable_type])
-
-    %{reports | entries: entries}
+    %{reports | entries: preload_targets(reports)}
   end
 
   defp own_open_reports(actor) do
@@ -183,7 +187,7 @@ defmodule Philomena.Reports do
     |> preload([:admin, :rule, user: :linked_tags])
     |> order_by(desc: :created_at)
     |> Repo.all()
-    |> Polymorphic.load_polymorphic(reportable: [reportable_id: :reportable_type])
+    |> preload_targets()
   end
 
   defp open_system_reports do
@@ -192,7 +196,7 @@ defmodule Philomena.Reports do
     |> preload([:admin, :rule, user: :linked_tags])
     |> order_by(desc: :created_at)
     |> Repo.all()
-    |> Polymorphic.load_polymorphic(reportable: [reportable_id: :reportable_type])
+    |> preload_targets()
   end
 
   defp report_sorts do
@@ -227,9 +231,6 @@ defmodule Philomena.Reports do
          report = load_report_with_preloads(id),
          :ok <- authorize(actor, :show, report),
          %Report{} <- report do
-      [report] =
-        Polymorphic.load_polymorphic([report], reportable: [reportable_id: :reportable_type])
-
       {:ok, report}
     else
       {:error, :unauthorized} -> {:error, :unauthorized}
@@ -239,7 +240,7 @@ defmodule Philomena.Reports do
 
   defp load_report_with_preloads(id) do
     Report
-    |> preload([:admin, :rule, user: [:linked_tags, awards: :badge]])
+    |> preload(^Report.target_preloads())
     |> Repo.get(id)
   end
 
@@ -250,7 +251,7 @@ defmodule Philomena.Reports do
   @spec mod_notes(Actor.t(), Report.t(), (list() -> list())) :: list() | nil
   def mod_notes(%Actor{} = viewer, report, collection_renderer) do
     if Canada.Can.can?(viewer.user, :index, ModNote) do
-      ModNotes.list_all_mod_notes_by_type_and_id("Report", report.id, collection_renderer)
+      ModNotes.list_all_mod_notes_for_target(collection_renderer, report_id: report.id)
     end
   end
 
@@ -281,7 +282,7 @@ defmodule Philomena.Reports do
     with :ok <- verify_not_banned(actor),
          {:ok, image} <-
            Images.load_visible_image(actor, image_id, [:sources, tags: :aliases]) do
-      changeset = change_report(%Report{reportable_type: "Image", reportable_id: image.id})
+      changeset = change_report(%Report{image_id: image.id})
       {:ok, {image, changeset}}
     end
   end
@@ -337,7 +338,7 @@ defmodule Philomena.Reports do
   def load_gallery_for_report(%Actor{} = actor, gallery_id) do
     with :ok <- verify_not_banned(actor),
          {:ok, gallery} <- load_reportable_gallery(actor.user, gallery_id) do
-      changeset = change_report(%Report{reportable_type: "Gallery", reportable_id: gallery.id})
+      changeset = change_report(%Report{gallery_id: gallery.id})
       {:ok, {gallery, changeset}}
     end
   end
@@ -392,7 +393,7 @@ defmodule Philomena.Reports do
   def load_user_for_report(%Actor{} = actor, slug) do
     with :ok <- verify_not_banned(actor),
          {:ok, user} <- load_reportable_user(actor.user, slug) do
-      changeset = change_report(%Report{reportable_type: "User", reportable_id: user.id})
+      changeset = change_report(%Report{reported_user_id: user.id})
       {:ok, {user, changeset}}
     end
   end
@@ -457,7 +458,7 @@ defmodule Philomena.Reports do
     with :ok <- verify_not_banned(actor),
          {:ok, {user, commission}} <- Commissions.load_commission_for_show(slug) do
       changeset =
-        change_report(%Report{reportable_type: "Commission", reportable_id: commission.id})
+        change_report(%Report{commission_id: commission.id})
 
       {:ok, {user, commission, changeset}}
     end
@@ -512,7 +513,7 @@ defmodule Philomena.Reports do
     with :ok <- verify_not_banned(actor),
          {:ok, conversation} <- load_reportable_conversation(actor.user, slug) do
       changeset =
-        change_report(%Report{reportable_type: "Conversation", reportable_id: conversation.id})
+        change_report(%Report{conversation_id: conversation.id})
 
       {:ok, {conversation, changeset}}
     end
@@ -558,10 +559,9 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Submits a report against the reportable named by `reportable_type` and
-  `reportable_id` from `params`, on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
+  Creates a report against the target named by `target`, a one-entry keyword
+  list of the target foreign key column and its id (e.g. `image_id: image.id`),
+  on behalf of `actor`.
 
   A regular user or an anonymous IP holding `max_open_reports/0` open reports is
   refused with `{:error, :too_many_reports}`; staff are exempt. Otherwise the
@@ -574,20 +574,20 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> create_report(actor, "Comment", 1, %{"reason" => "Spam"})
+      iex> create_report(actor, %{"reason" => "Spam"}, comment_id: 1)
       {:ok, %Report{}}
 
-      iex> create_report(actor, "Comment", 1, %{"reason" => ""})
+      iex> create_report(actor, %{"reason" => ""}, comment_id: 1)
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec create_report(Actor.t(), String.t(), integer(), map() | nil) ::
+  @spec create_report(Actor.t(), map() | nil, keyword()) ::
           {:ok, Report.t()} | {:error, :too_many_reports} | {:error, Ecto.Changeset.t()}
-  def create_report(%Actor{} = actor, reportable_type, reportable_id, params) do
+  def create_report(%Actor{} = actor, params, target) do
     if too_many_reports?(actor) do
       {:error, :too_many_reports}
     else
-      create_report({reportable_type, reportable_id}, actor_attributes(actor), params || %{})
+      create_report(actor_attributes(actor), params || %{}, target, nil)
     end
   end
 
@@ -618,34 +618,36 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Creates a report.
+  Creates a report against the target named by `target`, a one-entry keyword
+  list of the target foreign key column and its id (e.g. `image_id: image.id`).
 
   ## Examples
 
-      iex> create_report(%{field: value})
+      iex> create_report(attribution, %{"reason" => "..."}, image_id: image.id)
       {:ok, %Report{}}
 
-      iex> create_report(%{field: bad_value})
+      iex> create_report(attribution, %{"reason" => ""}, image_id: image.id)
       {:error, %Ecto.Changeset{}}
 
   """
-  def create_report({reportable_type, reportable_id} = _type_and_id, attribution, attrs \\ %{}) do
+  def create_report(attribution, attrs, target, _unused) do
     rule = Rules.find_rule(attrs["rule_id"])
 
-    %Report{reportable_type: reportable_type, reportable_id: reportable_id}
+    struct(Report, target)
     |> Report.user_creation_changeset(attrs, attribution, rule)
     |> Repo.insert()
     |> reindex_after_update()
   end
 
   @doc """
-  Returns an `m:Ecto.Query` which updates all open reports for the given `reportable_type`
-  and `reportable_id` to close them.
+  Returns an `m:Ecto.Query` which updates all open reports against the target
+  named by `target`, a one-entry keyword list of the target foreign key column
+  and its id (e.g. `image_id: image.id`), to close them.
 
   Because this is only a query due to the limitations of `m:Ecto.Multi`, this must be
   coupled with an associated call to `reindex_reports/1` to operate correctly, e.g.:
 
-      report_query = Reports.close_report_query({"Image", image.id}, user)
+      report_query = Reports.close_report_query(user, image_id: image.id)
 
       Multi.new()
       |> Multi.update_all(:reports, report_query, [])
@@ -664,17 +666,15 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> close_report_query({"Image", 1}, %User{})
+      iex> close_report_query(%User{}, image_id: 1)
       #Ecto.Query<...>
 
   """
-  def close_report_query({reportable_type, reportable_id} = _type_and_id, closing_user) do
+  def close_report_query(closing_user, [{column, id}]) do
     now = DateTime.utc_now(:second)
 
     from r in Report,
-      where:
-        r.reportable_type == ^reportable_type and r.reportable_id == ^reportable_id and
-          r.open == true,
+      where: field(r, ^column) == ^id and r.open == true,
       select: r.id,
       update: [
         set: [
@@ -687,30 +687,32 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Closes all open reports for the given reportable type and ID, marking them as closed by the specified user.
+  Closes all open reports against the target named by `target` (see
+  `close_report_query/2`), marking them as closed by the specified user.
   Also reindexes the affected reports.
 
   Returns `{:ok, {count, reports}}`.
   """
-  def close_reports(type_and_id, closing_user) do
+  def close_reports(closing_user, target) do
     {_count, reports} =
-      result = Repo.update_all(close_report_query(type_and_id, closing_user), [])
+      result = Repo.update_all(close_report_query(closing_user, target), [])
 
     reindex_reports(reports)
     {:ok, result}
   end
 
   @doc """
-  Automatically create a report with the given rule and reason on the given
-  `reportable_id` and `reportable_type`.
+  Automatically create a report with the given rule and reason against the
+  target named by `target`, a one-entry keyword list of the target foreign key
+  column and its id (e.g. `comment_id: comment.id`).
 
   ## Examples
 
-      iex> create_system_report({"Comment", 1}, "Rule #0", "Custom report reason")
+      iex> create_system_report("Rule #0", "Custom report reason", comment_id: 1)
       {:ok, %Report{}}
 
   """
-  def create_system_report({reportable_type, reportable_id} = _type_and_id, rule_name, reason) do
+  def create_system_report(rule_name, reason, target) do
     rule = Rules.get_by_name!(rule_name)
 
     attrs = %{
@@ -724,7 +726,7 @@ defmodule Philomena.Reports do
       fingerprint: "ffff"
     }
 
-    %Report{reportable_type: reportable_type, reportable_id: reportable_id}
+    struct(Report, target)
     |> Report.creation_changeset(attrs, attribution, rule)
     |> Repo.insert()
     |> reindex_after_update()
@@ -775,6 +777,7 @@ defmodule Philomena.Reports do
 
   """
   def change_report(%Report{} = report) do
+    # FIXME: this should be private, and the functions that call it (comments/posts) moved to this context
     Report.changeset(report, %{})
   end
 
@@ -914,8 +917,47 @@ defmodule Philomena.Reports do
     |> where([r], field(r, ^column) in ^condition)
     |> preload([:user, :admin])
     |> Repo.all()
-    |> Polymorphic.load_polymorphic(reportable: [reportable_id: :reportable_type])
+    |> preload_targets()
     |> Enum.map(&Search.index_document(&1, Report))
+  end
+
+  @doc """
+  Preloads the target associations onto the given report(s).
+  """
+  def preload_targets(%Report{} = report) do
+    Repo.preload(report, Report.target_preloads())
+  end
+
+  def preload_targets(reports) do
+    reports
+    |> Enum.to_list()
+    |> Repo.preload(Report.target_preloads())
+  end
+
+  def indexing_preloads do
+    [
+      :user,
+      :admin,
+      :reported_user,
+      image: from(i in Image, preload: :user),
+      comment: from(c in Comment, preload: :user),
+      post: from(p in Post, preload: :user),
+      commission: from(x in Commission, preload: :user),
+      conversation: from(c in Conversation, preload: [:from, :to]),
+      gallery: from(g in Gallery, preload: :user)
+    ]
+  end
+
+  def convert_reports!() do
+    rules =
+      Rules.list_reportable_rules()
+      |> Enum.map(&{&1.name, &1})
+      |> Map.new()
+
+    Report
+    |> preload([:rule])
+    |> Batch.records(batch_size: 128)
+    |> Enum.each(&convert_report(&1, rules))
   end
 
   def convert_reports!() do

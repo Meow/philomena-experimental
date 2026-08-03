@@ -23,6 +23,7 @@ defmodule Philomena.CommissionsTest do
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.Item
   alias Philomena.Repo
+  alias Philomena.Reports
 
   # A truthy ban value in the shape production passes; only its presence matters
   # to the write-access and not-banned checks the loaders run first.
@@ -197,13 +198,36 @@ defmodule Philomena.CommissionsTest do
     end
   end
 
-  describe "delete_commission/3" do
+  describe "delete_commission/2" do
     test "the owner deletes their commission" do
       user = verified_user_with_link()
       commission = commission_fixture(user)
 
       assert {:ok, %Commission{}} = Commissions.delete_commission(actor(user), user.slug)
       assert Repo.get(Commission, commission.id) == nil
+    end
+  end
+
+  describe "delete_commission/3" do
+    test "closes the commission's open reports and nulls the target FK while keeping the row" do
+      commission = commission_fixture(confirmed_user_fixture())
+      report = report_fixture(commission_id: commission.id)
+      admin = admin_user_fixture()
+
+      assert report.open
+      assert report.commission_id == commission.id
+
+      assert {:ok, _commission} = Commissions.delete_commission(commission, admin, nil)
+
+      closed = Reports.get_report!(report.id)
+      refute closed.open
+      assert closed.state == "closed"
+      assert closed.admin_id == admin.id
+      # The FK is nilified by the database, orphaning the report as audit trail.
+      assert closed.commission_id == nil
+      assert Enum.all?(Report.target_columns(), &is_nil(Map.get(closed, &1)))
+
+      refute Repo.get(Commission, commission.id)
     end
   end
 

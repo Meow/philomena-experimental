@@ -53,7 +53,7 @@ defmodule Philomena.Users.Eraser do
     |> where(user_id: ^user.id)
     |> Repo.all()
     |> Enum.each(fn gallery ->
-      {:ok, _gallery} = Galleries.delete_gallery(gallery)
+      {:ok, _gallery} = Galleries.delete_gallery(gallery, moderator, nil)
     end)
 
     # Delete all posted topics
@@ -95,7 +95,7 @@ defmodule Philomena.Users.Eraser do
       )
 
     # Close all reports against the user
-    {:ok, _} = Reports.close_reports({"User", user.id}, moderator)
+    {:ok, _} = Reports.close_reports(moderator, reported_user_id: user.id)
 
     # We succeeded
     :ok

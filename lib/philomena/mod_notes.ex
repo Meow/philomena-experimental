@@ -10,24 +10,28 @@ defmodule Philomena.ModNotes do
   alias Philomena.Repo
   alias Philomena.Loader
   alias Philomena.ModNotes.ModNote
-  alias Philomena.Polymorphic
+
+  # Whitelist of the target foreign key columns a note may be filed against.
+  @target_columns [:user_id, :report_id, :dnp_entry_id]
 
   @doc """
-  Returns a list of 2-tuples of mod notes and rendered output for the notable type and id.
+  Returns a list of 2-tuples of mod notes and rendered output for the target
+  named by `target`, a one-entry keyword list of the target foreign key column
+  and its id (e.g. `user_id: 1`).
 
   See `list_mod_notes/3` for more information about collection rendering.
 
   ## Examples
 
-      iex> list_all_mod_notes_by_type_and_id("User", "1", & &1.body)
+      iex> list_all_mod_notes_for_target(& &1.body, user_id: 1)
       [
         {%ModNote{body: "hello *world*"}, "hello *world*"}
       ]
 
   """
-  def list_all_mod_notes_by_type_and_id(notable_type, notable_id, collection_renderer) do
+  def list_all_mod_notes_for_target(collection_renderer, [{column, id}]) do
     ModNote
-    |> where(notable_type: ^notable_type, notable_id: ^notable_id)
+    |> where([m], field(m, ^column) == ^id)
     |> preload(:moderator)
     |> order_by(desc: :id)
     |> Repo.all()
@@ -57,18 +61,14 @@ defmodule Philomena.ModNotes do
 
   @doc """
   Returns a `m:Scrivener.Page` of 2-tuples of mod notes and rendered output
-  for the notable type and id and current pagination.
+  for the target named by `target`, a one-entry keyword list of the target
+  foreign key column and its id (e.g. `user_id: 1`), and current pagination.
 
   See `list_mod_notes/3` for more information.
   """
-  def list_mod_notes_by_notable_type_and_id(
-        notable_type,
-        notable_id,
-        collection_renderer,
-        pagination
-      ) do
+  def list_mod_notes_for_target(collection_renderer, pagination, [{column, id}]) do
     ModNote
-    |> where(notable_type: ^notable_type, notable_id: ^notable_id)
+    |> where([m], field(m, ^column) == ^id)
     |> list_mod_notes(collection_renderer, pagination)
   end
 
@@ -100,9 +100,15 @@ defmodule Philomena.ModNotes do
 
   defp preload_and_render(mod_notes, collection_renderer) do
     bodies = collection_renderer.(mod_notes)
-    preloaded = Polymorphic.load_polymorphic(mod_notes, notable: [notable_id: :notable_type])
+    preloaded = preload_targets(mod_notes)
 
     Enum.zip(preloaded, bodies)
+  end
+
+  defp preload_targets(mod_notes) do
+    mod_notes
+    |> Enum.to_list()
+    |> Repo.preload(ModNote.target_preloads())
   end
 
   @doc """
@@ -122,16 +128,26 @@ defmodule Philomena.ModNotes do
   def load_mod_note_index(%Actor{} = actor, params, collection_renderer, pagination) do
     with :ok <- authorize(actor, :index, ModNote) do
       mod_notes =
-        case params do
-          %{"notable_type" => type, "notable_id" => id} ->
-            list_mod_notes_by_notable_type_and_id(type, id, collection_renderer, pagination)
-
-          _ ->
-            list_mod_notes(collection_renderer, pagination)
+        case target(params) do
+          [_] = target -> list_mod_notes_for_target(collection_renderer, pagination, target)
+          [] -> list_mod_notes(collection_renderer, pagination)
         end
 
       {:ok, mod_notes}
     end
+  end
+
+  # The one target foreign key column named in `params`, as a one-entry keyword
+  # list (e.g. `[user_id: 1]`), or an empty list when none is present.
+  defp target(params) do
+    Enum.find_value(@target_columns, [], fn column ->
+      with value when value not in [nil, ""] <- params[to_string(column)],
+           {id, ""} <- Integer.parse(to_string(value)) do
+        [{column, id}]
+      else
+        _ -> false
+      end
+    end)
   end
 
   @doc """
@@ -145,13 +161,7 @@ defmodule Philomena.ModNotes do
           {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
   def new_mod_note(%Actor{} = actor, params) do
     with :ok <- authorize(actor, :new, ModNote) do
-      changeset =
-        change_mod_note(%ModNote{
-          notable_type: params["notable_type"],
-          notable_id: params["notable_id"]
-        })
-
-      {:ok, changeset}
+      {:ok, change_mod_note(struct(ModNote, target(params)))}
     end
   end
 
@@ -192,7 +202,7 @@ defmodule Philomena.ModNotes do
   def create_mod_note(%Actor{} = actor, attrs \\ %{}) do
     with :ok <- authorize(actor, :create, ModNote) do
       %ModNote{moderator_id: actor.user.id}
-      |> ModNote.changeset(attrs)
+      |> ModNote.creation_changeset(attrs, target(attrs))
       |> Repo.insert()
     end
   end

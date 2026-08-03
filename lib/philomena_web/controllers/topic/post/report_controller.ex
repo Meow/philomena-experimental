@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.Topic.Post.ReportController do
            Posts.load_post_for_report_creation(conn.assigns.actor, forum_id, topic_id, post_id) do
       action = ~p"/forums/#{topic.forum}/topics/#{topic}/posts/#{post}/reports"
 
-      ReportController.create(conn, action, "Post", post, params)
+      ReportController.create(conn, action, post, [post_id: post.id], params)
     end
   end
 end

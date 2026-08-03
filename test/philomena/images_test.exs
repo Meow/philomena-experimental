@@ -8,6 +8,8 @@ defmodule Philomena.ImagesTest do
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.ImageHides
   alias Philomena.ImageHides.ImageHide
+  alias Philomena.Galleries
+  alias Philomena.Galleries.Interaction
   alias Philomena.Images
   alias Philomena.ImageVotes
   alias Philomena.ImageVotes.ImageVote
@@ -26,6 +28,7 @@ defmodule Philomena.ImagesTest do
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 
+  import Philomena.GalleriesFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
@@ -201,6 +204,73 @@ defmodule Philomena.ImagesTest do
                Images.create_image(actor(user), attrs)
 
       assert "has already been uploaded: it's image #{existing.id}" in errors_on(changeset).image
+    end
+  end
+
+  describe "hide_image/3 gallery cleanup" do
+    # Hiding (deleting) an image removes it from every gallery containing it.
+    # The gallery search document serializes image_count and image_ids, so the
+    # transaction must surface the affected gallery ids for reindexing - the
+    # galleries step returns them, and process_after_hide queues the reindex.
+    test "removes the image from galleries and returns the affected gallery ids" do
+      moderator = user_fixture()
+      image = image_fixture()
+      gallery = gallery_fixture(user_fixture())
+      {:ok, _} = Galleries.add_image_to_gallery(gallery, image)
+
+      assert {:ok, %{galleries: {1, [gallery_id]}}} =
+               Images.hide_image(image, moderator, %{"deletion_reason" => "Rule violation"})
+
+      assert gallery_id == gallery.id
+      assert Repo.reload!(gallery).image_count == 0
+      refute Repo.get_by(Interaction, gallery_id: gallery.id)
+    end
+
+    test "returns no gallery ids when the image is in no gallery" do
+      moderator = user_fixture()
+      image = image_fixture()
+
+      assert {:ok, %{galleries: {0, []}}} =
+               Images.hide_image(image, moderator, %{"deletion_reason" => "Rule violation"})
+    end
+  end
+
+  describe "merge_image/4 gallery migration" do
+    test "replaces the source image with the target image, retaining position" do
+      moderator = user_fixture()
+      source = image_fixture()
+      target = image_fixture()
+      filler = image_fixture()
+      gallery = gallery_fixture(user_fixture())
+      {:ok, _} = Galleries.add_image_to_gallery(gallery, filler)
+      {:ok, _} = Galleries.add_image_to_gallery(gallery, source)
+
+      assert {:ok, _result} = Images.merge_image(nil, source, target, moderator)
+
+      # The source image's interaction was repointed in place.
+      assert %{position: 1} =
+               Repo.get_by(Interaction, gallery_id: gallery.id, image_id: target.id)
+
+      refute Repo.get_by(Interaction, gallery_id: gallery.id, image_id: source.id)
+      assert Repo.reload!(gallery).image_count == 2
+    end
+
+    test "only removes the source image from a gallery already containing the target" do
+      moderator = user_fixture()
+      source = image_fixture()
+      target = image_fixture()
+      gallery = gallery_fixture(user_fixture())
+      {:ok, _} = Galleries.add_image_to_gallery(gallery, source)
+      {:ok, _} = Galleries.add_image_to_gallery(gallery, target)
+
+      assert {:ok, _result} = Images.merge_image(nil, source, target, moderator)
+
+      # The target keeps its own interaction; the source's is simply deleted.
+      assert [%{image_id: target_id, position: 1}] =
+               Repo.all(where(Interaction, gallery_id: ^gallery.id))
+
+      assert target_id == target.id
+      assert Repo.reload!(gallery).image_count == 1
     end
   end
 

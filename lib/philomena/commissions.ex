@@ -17,6 +17,7 @@ defmodule Philomena.Commissions do
   alias Philomena.Commissions.Item
   alias Philomena.Commissions.QueryBuilder
   alias Philomena.Commissions.SearchQuery
+  alias Philomena.Reports
 
   @profile_preloads [
     :verified_links,
@@ -43,8 +44,24 @@ defmodule Philomena.Commissions do
   end
 
   # Deletes a commission.
-  defp delete_commission(%Commission{} = commission) do
-    Repo.delete(commission)
+  defp delete_commission(%Commission{} = commission, closing_user, _unused) do
+    Multi.new()
+    |> Multi.update_all(
+      :reports,
+      Reports.close_report_query(closing_user, commission_id: commission.id),
+      []
+    )
+    |> Multi.delete(:commission, commission)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{commission: commission, reports: {_count, reports}}} ->
+        Reports.reindex_reports(reports)
+
+        {:ok, commission}
+
+      error ->
+        error
+    end
   end
 
   # Returns an `%Ecto.Changeset{}` for tracking commission changes.
@@ -247,10 +264,10 @@ defmodule Philomena.Commissions do
   @spec delete_commission(Actor.t(), String.t()) ::
           {:ok, Commission.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
-  def delete_commission(%Actor{} = actor, slug) do
+  def delete_commission(%Actor{user: user} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, {_user, commission}} <- authorize_existing_commission(actor, slug) do
-      delete_commission(commission)
+      delete_commission(commission, user, nil)
     end
   end
 

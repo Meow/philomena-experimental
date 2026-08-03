@@ -100,18 +100,12 @@ defmodule Philomena.Posts do
   @doc false
   def update_post(%Post{} = post, editor, attrs) do
     now = DateTime.utc_now(:second)
-    current_body = post.body
-    current_reason = post.edit_reason
-
     post_changes = Post.changeset(post, attrs, now)
 
     Multi.new()
     |> Multi.update(:post, post_changes)
-    |> Multi.run(:version, fn _repo, _changes ->
-      Versions.create_version("Post", post.id, editor.id, %{
-        "body" => current_body,
-        "edit_reason" => current_reason
-      })
+    |> Multi.run(:version, fn repo, %{post: updated} ->
+      Versions.record_edit(repo, post, updated, editor)
     end)
     |> Repo.transaction()
     |> case do
@@ -132,7 +126,7 @@ defmodule Philomena.Posts do
 
     Multi.new()
     |> Multi.update(:post, Post.hide_changeset(post, attrs, user))
-    |> Multi.update_all(:reports, Reports.close_report_query({"Post", post.id}, user), [])
+    |> Multi.update_all(:reports, Reports.close_report_query(user, post_id: post.id), [])
     |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
     |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
     |> Repo.transaction()
@@ -536,9 +530,9 @@ defmodule Philomena.Posts do
 
   def report_non_approved(post) do
     Reports.create_system_report(
-      {"Post", post.id},
       "Approval",
-      "Post contains external links"
+      "Post contains external links",
+      post_id: post.id
     )
   end
 
@@ -884,8 +878,8 @@ defmodule Philomena.Posts do
     end
   end
 
-  defp approve_loaded_post(actor, %Post{} = post) do
-    report_query = Reports.close_report_query({"Post", post.id}, actor.user)
+  defp approve_loaded_post(%Actor{user: user} = actor, %Post{} = post) do
+    report_query = Reports.close_report_query(user, post_id: post.id)
     changeset = Post.approve_changeset(post)
 
     Multi.new()
@@ -1026,7 +1020,7 @@ defmodule Philomena.Posts do
     with :ok <- verify_not_banned(actor),
          {:ok, {topic, post}} <-
            load_reportable_post(actor, forum_slug, topic_slug, post_id) do
-      changeset = Reports.change_report(%Report{reportable_type: "Post", reportable_id: post.id})
+      changeset = Reports.change_report(%Report{post_id: post.id})
       {:ok, {topic, post, changeset}}
     end
   end

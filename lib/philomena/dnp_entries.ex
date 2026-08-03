@@ -195,7 +195,7 @@ defmodule Philomena.DnpEntries do
   @spec mod_notes(Actor.t(), DnpEntry.t(), (list() -> list())) :: list() | nil
   def mod_notes(%Actor{} = viewer, %DnpEntry{} = dnp_entry, collection_renderer) do
     if Canada.Can.can?(viewer.user, :index, ModNote) do
-      ModNotes.list_all_mod_notes_by_type_and_id("DnpEntry", dnp_entry.id, collection_renderer)
+      ModNotes.list_all_mod_notes_for_target(collection_renderer, dnp_entry_id: dnp_entry.id)
     end
   end
 

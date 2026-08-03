@@ -386,7 +386,7 @@ defmodule Philomena.Conversations do
         update: [set: [from_read: false, to_read: false]]
 
     reports_query =
-      Reports.close_report_query({"Conversation", message.conversation_id}, actor.user)
+      Reports.close_report_query(actor.user, conversation_id: message.conversation_id)
 
     Multi.new()
     |> Multi.update(:message, message_changeset)
@@ -431,7 +431,7 @@ defmodule Philomena.Conversations do
 
   defp paginate_messages(conversation, user, pagination) do
     direction =
-      if user.messages_newest_first do
+      if user.settings.messages_newest_first do
         :desc
       else
         :asc

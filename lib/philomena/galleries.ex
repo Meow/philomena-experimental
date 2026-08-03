@@ -28,6 +28,7 @@ defmodule Philomena.Galleries do
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
   alias Philomena.Users.User
+  alias Philomena.Reports
 
   use Philomena.Subscriptions,
     on_delete: :clear_gallery_notification,
@@ -59,9 +60,9 @@ defmodule Philomena.Galleries do
   end
 
   # Deletes a gallery.
-  @spec delete_gallery(Gallery.t()) :: {:ok, Gallery.t()} | Ecto.Multi.failure()
+  @spec delete_gallery(Gallery.t(), User.t(), any()) :: {:ok, Gallery.t()} | Ecto.Multi.failure()
   @doc false
-  def delete_gallery(%Gallery{} = gallery) do
+  def delete_gallery(%Gallery{} = gallery, closing_user, _unused) do
     # TODO: Visible for Eraser.erase_permanently!/2
     images =
       Interaction
@@ -70,6 +71,11 @@ defmodule Philomena.Galleries do
       |> Repo.all()
 
     Multi.new()
+    |> Multi.update_all(
+      :reports,
+      Reports.close_report_query(closing_user, gallery_id: gallery.id),
+      []
+    )
     |> Multi.delete(:gallery, gallery)
     |> Repo.transaction()
     |> case do

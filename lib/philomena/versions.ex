@@ -1,101 +1,91 @@
 defmodule Philomena.Versions do
   @moduledoc """
   The Versions context.
+
+  Edit histories for posts and comments. Version rows are after-edit
+  snapshots: each row holds the body and edit reason as of one edit, made by
+  `user_id` at `created_at`. The state an item had before its first edit
+  lives in an initial row stamped with the item's author and creation time,
+  created lazily when the item is first edited — never-edited items have no
+  version rows at all.
   """
 
   import Ecto.Query, warn: false
   alias Philomena.Repo
 
-  alias Philomena.Versions.Version
-  alias Philomena.Users.User
+  alias Philomena.Comments.Comment
+  alias Philomena.Comments.CommentVersion
+  alias Philomena.Posts.Post
+  alias Philomena.Posts.PostVersion
 
   @doc """
-  Loads the most recent versions recorded for `parent`, identified by
-  `item_type` and `parent.id`, newest first and capped at 25, with each
-  version's diff against `parent` and its author associations resolved via
-  `load_data_and_associations/2`.
+  Returns the most recent versions of a post, prepared for display.
 
-  This is the query behind the post/comment/image edit-history pages; the
-  25-version cap and descending order are pinned to match those listings.
-
-  ## Examples
-
-      iex> load_last_versions("Post", post)
-      [%Version{}, ...]
-
+  Each returned version carries `previous_body` from the next-older row and
+  `parent` for attribution; the oldest row of an item's history only serves
+  as a diff base and is not returned as an entry. Versions are returned
+  newest-first, with `user` (and awards) preloaded, at most 25.
   """
-  @spec load_last_versions(String.t(), struct()) :: [Version.t()]
-  def load_last_versions(item_type, parent) do
-    Version
-    |> where(item_type: ^item_type, item_id: ^parent.id)
-    |> order_by(desc: :created_at)
-    |> limit(25)
+  def load_post_versions(post), do: load_versions(PostVersion, :post_id, post)
+
+  @doc """
+  Returns the most recent versions of a comment, prepared for display.
+
+  See `load_post_versions/1`.
+  """
+  def load_comment_versions(comment), do: load_versions(CommentVersion, :comment_id, comment)
+
+  defp load_versions(schema, fk, parent) do
+    schema
+    |> where([v], field(v, ^fk) == ^parent.id)
+    |> order_by(desc: :created_at, desc: :id)
+    |> limit(26)
+    |> preload(user: [awards: :badge])
     |> Repo.all()
-    |> load_data_and_associations(parent)
-  end
-
-  def load_data_and_associations(versions, parent) do
-    user_ids =
-      versions
-      |> Enum.map(& &1.whodunnit)
-      |> Enum.reject(&is_nil/1)
-
-    users =
-      User
-      |> where([u], u.id in ^user_ids)
-      |> preload(awards: :badge)
-      |> Repo.all()
-      |> Map.new(&{to_string(&1.id), &1})
-
-    {versions, _last_body} =
-      versions
-      |> Enum.map_reduce(
-        {parent.body, parent.edit_reason},
-        fn version, {previous_body, previous_reason} ->
-          json = JSON.decode!(version.object || "{}")
-          body = json["body"] || ""
-          edit_reason = json["edit_reason"]
-
-          v = %{
-            version
-            | parent: parent,
-              user: users[version.whodunnit],
-              body: body,
-              previous_body: previous_body,
-              edit_reason: previous_reason
-          }
-
-          {v, {body, edit_reason}}
-        end
-      )
-
-    versions
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.map(fn [version, previous] ->
+      %{version | parent: parent, previous_body: previous.body}
+    end)
   end
 
   @doc """
-  Creates a version.
+  Records an edit of a post or comment, given the item as it was before the
+  edit and as it is after.
 
-  ## Examples
+  Inserts the after-edit version row, preceded by the initial row capturing
+  the pre-first-edit state if this is the item's first recorded edit. Must
+  run inside the transaction that updated the item: the item's row lock
+  serializes concurrent edits, making the first-edit check race-free.
 
-      iex> create_version(%{field: value})
-      {:ok, %Version{}}
-
-      iex> create_version(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
+  Returns `{:ok, version}`, shaped for `Ecto.Multi.run/3`.
   """
-  def create_version(item_type, item_id, whodunnit, attrs \\ %{}) do
-    %Version{
-      item_type: item_type,
-      item_id: item_id,
-      event: "update",
-      whodunnit: whodunnit(whodunnit)
-    }
-    |> Version.changeset(attrs, item_id)
-    |> Repo.insert()
+  def record_edit(repo, %Post{} = original, %Post{} = updated, editor) do
+    record_edit(repo, PostVersion, :post_id, original, updated, editor)
   end
 
-  # revolver ocelot
-  defp whodunnit(user_id) when is_integer(user_id), do: to_string(user_id)
-  defp whodunnit(nil), do: nil
+  def record_edit(repo, %Comment{} = original, %Comment{} = updated, editor) do
+    record_edit(repo, CommentVersion, :comment_id, original, updated, editor)
+  end
+
+  defp record_edit(repo, schema, fk, original, updated, editor) do
+    unless repo.exists?(where(schema, [v], field(v, ^fk) == ^original.id)) do
+      repo.insert!(
+        struct(schema, [
+          {fk, original.id},
+          {:user_id, original.user_id},
+          {:body, original.body || ""},
+          {:created_at, original.created_at}
+        ])
+      )
+    end
+
+    repo.insert(
+      struct(schema, [
+        {fk, updated.id},
+        {:user_id, editor.id},
+        {:body, updated.body || ""},
+        {:edit_reason, updated.edit_reason}
+      ])
+    )
+  end
 end

@@ -33,7 +33,7 @@ defmodule Philomena.Filters.Filter do
   def changeset(filter, attrs) do
     user =
       change(filter).data
-      |> Repo.preload(:user)
+      |> Repo.preload(user: :settings)
       |> Map.get(:user)
 
     filter

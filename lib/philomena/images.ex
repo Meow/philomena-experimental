@@ -253,6 +253,7 @@ defmodule Philomena.Images do
     image
     |> Image.hide_changeset(attrs, user)
     |> hide_image_multi(image, user, Multi.new())
+    |> remove_gallery_interactions_multi(image)
     |> Multi.update_all(:duplicate_reports, duplicate_reports, [])
     |> Repo.transaction()
     |> process_after_hide()
@@ -308,11 +309,12 @@ defmodule Philomena.Images do
 
   This will:
   1. Hide the source image
-  2. Update first_seen_at timestamp
-  3. Copy tags to the target image
-  4. Migrate sources, comments, subscriptions and interactions
-  5. Send merge notifications
-  6. Reindex both images and all of the comments
+  2. Replace the source image with the target image in galleries
+  3. Update first_seen_at timestamp
+  4. Copy tags to the target image
+  5. Migrate sources, comments, subscriptions and interactions
+  6. Send merge notifications
+  7. Reindex both images, the affected galleries, and all of the comments
 
   ## Parameters
   - multi: Optional `m:Ecto.Multi` for transaction handling
@@ -342,6 +344,7 @@ defmodule Philomena.Images do
     image
     |> Image.merge_changeset(duplicate_of_image)
     |> hide_image_multi(image, user, multi)
+    |> migrate_gallery_interactions_multi(image, duplicate_of_image)
     |> Multi.run(:first_seen_at, fn _, %{} ->
       update_first_seen_at(
         duplicate_of_image,
@@ -371,6 +374,7 @@ defmodule Philomena.Images do
       {:ok, result} ->
         reindex_image(duplicate_of_image)
         Comments.reindex_comments_on_image(duplicate_of_image)
+        reindex_merged_galleries(result)
 
         PhilomenaWeb.Endpoint.broadcast!(
           "firehose",
@@ -390,7 +394,7 @@ defmodule Philomena.Images do
   end
 
   defp hide_image_multi(changeset, image, user, multi) do
-    report_query = Reports.close_report_query({"Image", image.id}, user)
+    report_query = Reports.close_report_query(user, image_id: image.id)
 
     galleries =
       Gallery
@@ -418,9 +422,60 @@ defmodule Philomena.Images do
     end)
   end
 
+  defp remove_gallery_interactions_multi(multi, image) do
+    galleries =
+      Gallery
+      |> join(:inner, [g], gi in assoc(g, :interactions), on: gi.image_id == ^image.id)
+      |> update(inc: [image_count: -1])
+      |> select([g], g.id)
+
+    gallery_interactions = where(Interaction, image_id: ^image.id)
+
+    multi
+    |> Multi.update_all(:galleries, galleries, [])
+    |> Multi.delete_all(:gallery_interactions, gallery_interactions, [])
+  end
+
+  defp migrate_gallery_interactions_multi(multi, image, duplicate_of_image) do
+    target_gallery_ids =
+      Interaction
+      |> where(image_id: ^duplicate_of_image.id)
+      |> select([gi], gi.gallery_id)
+
+    # Galleries may contain at most one interaction per image, so the source
+    # image's interaction can only be repointed at the target image in
+    # galleries which do not already contain the target.
+    migratable =
+      Interaction
+      |> where(image_id: ^image.id)
+      |> where([gi], gi.gallery_id not in subquery(target_gallery_ids))
+      |> update(set: [image_id: ^duplicate_of_image.id])
+      |> select([gi], gi.gallery_id)
+
+    leftover = Interaction |> where(image_id: ^image.id) |> select([gi], gi.gallery_id)
+
+    multi
+    |> Multi.update_all(:migrated_gallery_interactions, migratable, [])
+    |> Multi.delete_all(:gallery_interactions, leftover, [])
+    |> Multi.run(:galleries, fn repo, %{gallery_interactions: {_count, gallery_ids}} ->
+      {count, nil} =
+        Gallery
+        |> where([g], g.id in ^gallery_ids)
+        |> repo.update_all(inc: [image_count: -1])
+
+      {:ok, {count, gallery_ids}}
+    end)
+  end
+
   defp process_after_hide(result) do
     case result do
-      {:ok, %{image: image, tags: tags, reports: {_count, reports}} = result} ->
+      {:ok,
+       %{
+         image: image,
+         tags: tags,
+         reports: {_, reports},
+         galleries: {_, gallery_ids}
+       } = result} ->
         spawn(fn ->
           Thumbnailer.hide_thumbnails(image, image.hidden_image_key)
           purge_files(image, image.hidden_image_key)
@@ -429,6 +484,7 @@ defmodule Philomena.Images do
         Comments.reindex_comments_on_image(image)
         Reports.reindex_reports(reports)
         Tags.reindex_tags(tags)
+        Galleries.reindex_galleries(gallery_ids)
         reindex_image(image)
         reindex_copied_tags(result)
 
@@ -441,6 +497,13 @@ defmodule Philomena.Images do
 
   defp reindex_copied_tags(%{copy_tags: tags}), do: Tags.reindex_tags(tags)
   defp reindex_copied_tags(_result), do: nil
+
+  defp reindex_merged_galleries(%{
+         migrated_gallery_interactions: {_, migrated_gallery_ids},
+         galleries: {_, removed_gallery_ids}
+       }) do
+    Galleries.reindex_galleries(Enum.uniq(migrated_gallery_ids ++ removed_gallery_ids))
+  end
 
   defp update_first_seen_at(image, time_1, time_2) do
     min_time =
@@ -1532,9 +1595,9 @@ defmodule Philomena.Images do
 
   defp maybe_suggest_user_verification(%User{id: id, images_count: 5, verified: false}) do
     Reports.create_system_report(
-      {"User", id},
       "Verification",
-      "User has uploaded enough approved images to be considered for verification."
+      "User has uploaded enough approved images to be considered for verification.",
+      reported_user_id: id
     )
   end
 
