@@ -4251,11 +4251,13 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a banned actor is rejected even with a fingerprint" do
-      # load_new_image only checks the ban, so a fingerprint does not rescue a
-      # banned actor.
       actor = actor(confirmed_user_fixture(), ban: @ban, fingerprint: "d015c342859dde3")
 
       assert Images.load_new_image(actor) == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint may not reach the form" do
+      assert Images.load_new_image(actor(nil, fingerprint: nil)) == {:error, :unauthorized}
     end
   end
 

@@ -46,17 +46,12 @@ defmodule PhilomenaWeb.Admin.ArtistLink.ContactControllerTest do
   describe "POST /admin/artist_links/:artist_link_id/contact (create) failure paths" do
     setup [:register_and_log_in_moderator]
 
-    # NOTE: an unknown (well-formed) link id loads nil; a moderator's grant does
-    # not cover nil, so :create returns unauthorized.
     test "redirects for an unknown link id", %{conn: conn} do
       conn = post(conn, ~p"/admin/artist_links/#{0}/contact")
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
 
-    # NOTE: a non-integer link id fails the id parse before authorization, so
-    # the flash is the not-found message rather than the "You can't access that
-    # page." an unknown (well-formed) integer id gets.
     test "redirects with the not-found flash for a non-integer link id", %{conn: conn} do
       conn = post(conn, ~p"/admin/artist_links/not-an-integer/contact")
       assert redirected_to(conn) == "/"

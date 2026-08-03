@@ -1,19 +1,23 @@
 defmodule Philomena.Donations do
   @moduledoc """
-  The Donations context.
+  Authorized administration of donation records.
+
+  Donation history is financial data. Controller-facing functions authorize
+  the routed class action, and the per-user loader additionally authorizes the
+  sensitive target before returning it.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  alias Philomena.Repo
   alias Philomena.Attribution.Actor
+  alias Philomena.Authorization
   alias Philomena.Donations.Donation
+  alias Philomena.Loader
+  alias Philomena.Repo
   alias Philomena.Users.User
 
-  # Inserts a donation from `attrs`. Visible for testing.
-  @doc false
-  def insert_donation(attrs \\ %{}) do
+  defp insert_donation(attrs) do
     %Donation{}
     |> Donation.changeset(attrs)
     |> Repo.insert()
@@ -35,7 +39,6 @@ defmodule Philomena.Donations do
 
       iex> load_donations(user,  pagination)
       {:error, :unauthorized}
-
   """
   @spec load_donations(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
@@ -52,8 +55,13 @@ defmodule Philomena.Donations do
   end
 
   @doc """
-  Loads the user named by `slug` together with their donations, on behalf of
-  `actor`, pairing them with a changeset for adding a donation.
+  Loads the user named by `slug` with their donations and a new-donation
+  changeset.
+
+  This form loader verifies write access, authorizes the routed `:show` action
+  against donations, then safely loads and authorizes the target user's
+  financial history. A missing slug is not found; a real but forbidden target
+  is unauthorized.
 
   ## Examples
 
@@ -68,24 +76,27 @@ defmodule Philomena.Donations do
 
   """
   @spec load_user_donations(Actor.t(), String.t()) ::
-          {:ok, {User.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+          {:ok, {User.t(), Ecto.Changeset.t()}}
+          | {:error, Authorization.write_error_reason() | :not_found}
   def load_user_donations(%Actor{} = actor, slug) do
-    with :ok <- authorize(actor, :index, Donation) do
-      user =
-        User
-        |> where(slug: ^slug)
-        |> preload(donations: :user)
-        |> Repo.one()
+    user_query =
+      User
+      |> where(slug: ^slug)
+      |> preload(donations: :user)
 
-      case user do
-        nil -> {:error, :not_found}
-        %User{} -> {:ok, {user, change_donation(%Donation{})}}
-      end
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :show, Donation),
+         {:ok, user} <- Loader.one(user_query),
+         :ok <- authorize(actor, :show_donations, user) do
+      {:ok, {user, change_donation(%Donation{})}}
     end
   end
 
   @doc """
   Creates a donation on behalf of `actor` from `attrs`.
+
+  Verifies write access and authorizes `:create` before inserting. Database and
+  validation failures are returned as changesets.
 
   ## Examples
 
@@ -100,9 +111,12 @@ defmodule Philomena.Donations do
 
   """
   @spec create_donation(Actor.t(), map()) ::
-          {:ok, Donation.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+          {:ok, Donation.t()}
+          | Authorization.write_error()
+          | {:error, Ecto.Changeset.t()}
   def create_donation(%Actor{} = actor, attrs) do
-    with :ok <- authorize(actor, :index, Donation) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, Donation) do
       insert_donation(attrs)
     end
   end

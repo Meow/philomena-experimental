@@ -6,7 +6,7 @@ defmodule Philomena.ArtistLinks do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
@@ -196,7 +196,7 @@ defmodule Philomena.ArtistLinks do
           {:ok, {User.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_artist_link_for_new(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
       {:ok, {user, change_artist_link(%ArtistLink{})}}
     end

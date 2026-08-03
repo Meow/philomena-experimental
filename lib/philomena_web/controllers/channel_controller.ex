@@ -8,8 +8,8 @@ defmodule PhilomenaWeb.ChannelController do
   def index(conn, params) do
     show_nsfw? = conn.cookies["chan_nsfw"] == "true"
 
-    channels = Channels.list_channels(show_nsfw?, params, conn.assigns.scrivener)
-    subscriptions = Channels.subscriptions(channels, conn.assigns.current_user)
+    {channels, subscriptions} =
+      Channels.load_channels(conn.assigns.actor, show_nsfw?, params, conn.assigns.scrivener)
 
     render(conn, "index.html",
       title: "Livestreams",

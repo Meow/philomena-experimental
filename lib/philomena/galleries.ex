@@ -6,7 +6,7 @@ defmodule Philomena.Galleries do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
@@ -205,9 +205,10 @@ defmodule Philomena.Galleries do
       {:error, :ban}
 
   """
-  @spec new_gallery(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :ban}
+  @spec new_gallery(Actor.t()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def new_gallery(%Actor{} = actor) do
-    with :ok <- verify_not_banned(actor) do
+    with :ok <- verify_write_access(actor) do
       {:ok, change_gallery(%Gallery{})}
     end
   end
@@ -313,7 +314,7 @@ defmodule Philomena.Galleries do
           {:ok, {Gallery.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_gallery_for_edit(%Actor{} = actor, gallery_id) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :edit) do
       {:ok, {gallery, change_gallery(gallery)}}
     end

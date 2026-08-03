@@ -2,14 +2,13 @@ defmodule Philomena.ModNotesTest do
   @moduledoc """
   Context-level tests for the controller-facing `Philomena.ModNotes` functions:
   the admin index (`load_mod_note_index/4`), the new/create form and insert
-  (`new_mod_note/2`, `create_mod_note/2`), and the edit/update/delete actions on
-  a possibly-nil load.
+  (`new_mod_note/2`, `create_mod_note/2`), and the edit/update/delete actions.
 
   These pin the staff authorization matrix (assistants and moderators may index,
   create, and touch their own notes; a moderator may not touch another
   moderator's note; an admin may touch any), the moderator attribution on
-  create, the notable-filter branch of the index, and the unauthorized/not-found
-  split on an unknown id.
+  create, the notable-filter branch of the index, and uniform not-found results
+  for absent IDs.
   """
 
   use Philomena.DataCase, async: true
@@ -174,9 +173,9 @@ defmodule Philomena.ModNotesTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown well-formed id is not-found for every actor" do
       assert ModNotes.load_mod_note_for_edit(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert ModNotes.load_mod_note_for_edit(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -236,11 +235,11 @@ defmodule Philomena.ModNotesTest do
              }) == {:error, :unauthorized}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown well-formed id is not-found for every actor" do
       assert ModNotes.update_mod_note(actor(moderator_user_fixture()), "2147483647", %{
                "body" => "x"
              }) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert ModNotes.update_mod_note(actor(admin_user_fixture()), "2147483647", %{"body" => "x"}) ==
                {:error, :not_found}
@@ -288,9 +287,9 @@ defmodule Philomena.ModNotesTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown well-formed id is not-found for every actor" do
       assert ModNotes.delete_mod_note(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert ModNotes.delete_mod_note(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}

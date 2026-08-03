@@ -116,6 +116,15 @@ defmodule Philomena.ArtistLinksTest do
                {:error, :ban}
     end
 
+    test "an actor without a fingerprint is rejected before authorization" do
+      user = confirmed_user_fixture()
+
+      assert ArtistLinks.load_artist_link_for_new(
+               actor(user, fingerprint: nil),
+               user.slug
+             ) == {:error, :unauthorized}
+    end
+
     test "an unrelated user may not open another user's new form" do
       user = confirmed_user_fixture()
 
@@ -425,9 +434,9 @@ defmodule Philomena.ArtistLinksTest do
                {:error, :not_found}
     end
 
-    test "an unknown integer id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown integer id is not-found for every actor" do
       assert ArtistLinks.verify_artist_link(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert ArtistLinks.verify_artist_link(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -467,9 +476,9 @@ defmodule Philomena.ArtistLinksTest do
                {:error, :not_found}
     end
 
-    test "an unknown integer id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown integer id is not-found for every actor" do
       assert ArtistLinks.contact_artist_link(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert ArtistLinks.contact_artist_link(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -509,9 +518,9 @@ defmodule Philomena.ArtistLinksTest do
                {:error, :not_found}
     end
 
-    test "an unknown integer id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown integer id is not-found for every actor" do
       assert ArtistLinks.reject_artist_link(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert ArtistLinks.reject_artist_link(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}

@@ -55,14 +55,14 @@ defmodule PhilomenaWeb.Gallery.ImageControllerTest do
       assert Repo.reload!(gallery).image_count == 1
     end
 
-    test "redirects with the authorization flash for an unknown image id", %{conn: conn} do
+    test "redirects with the not-found flash for an unknown image id", %{conn: conn} do
       %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
       gallery = gallery_fixture(user)
 
       conn = post(conn, ~p"/galleries/#{gallery}/images", %{"image_id" => "999999999"})
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
 
     test "redirects other users with the authorization flash", %{conn: conn} do

@@ -6,7 +6,7 @@ defmodule Philomena.Topics do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_not_banned: 1, verify_write_access: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
@@ -617,7 +617,7 @@ defmodule Philomena.Topics do
           {:ok, {Forum.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized}
   def load_new_topic(%Actor{} = actor, forum_slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, forum} <- load_authorized_forum(actor, forum_slug) do
       changeset =
         change_topic(%Topic{

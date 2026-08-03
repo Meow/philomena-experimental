@@ -6,7 +6,7 @@ defmodule Philomena.Users do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
@@ -1425,7 +1425,7 @@ defmodule Philomena.Users do
   @spec load_profile_for_description_edit(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_profile_for_description_edit(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor) do
+    with :ok <- verify_write_access(actor) do
       load_authorized_profile(actor.user, :edit_description, slug)
     end
   end
@@ -1586,7 +1586,7 @@ defmodule Philomena.Users do
   @spec load_profile_for_scratchpad_edit(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_profile_for_scratchpad_edit(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          :ok <- authorize(actor.user, :index, ModNote),
          %User{} = user <- Repo.get_by(User, slug: slug) do
       {:ok, user}
@@ -1683,9 +1683,10 @@ defmodule Philomena.Users do
   A banned actor is rejected with `{:error, :ban}`; otherwise returns
   `{:ok, %Ecto.Changeset{}}`.
   """
-  @spec load_user_for_avatar_edit(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :ban}
+  @spec load_user_for_avatar_edit(Actor.t()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def load_user_for_avatar_edit(%Actor{user: user} = actor) do
-    with :ok <- verify_not_banned(actor) do
+    with :ok <- verify_write_access(actor) do
       {:ok, change_user(user)}
     end
   end
@@ -1782,7 +1783,7 @@ defmodule Philomena.Users do
   @spec load_user_for_rename(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def load_user_for_rename(%Actor{user: user} = actor) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          :ok <- authorize(user, :change_username, user) do
       {:ok, change_user(user)}
     end

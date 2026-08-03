@@ -112,7 +112,7 @@ defmodule PhilomenaWeb.DnpEntryControllerTest do
       conn = get(conn, ~p"/dnp/999999")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
   end
 

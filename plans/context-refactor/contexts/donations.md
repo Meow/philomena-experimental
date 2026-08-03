@@ -3,6 +3,13 @@
 Source: `lib/philomena/donations.ex`; consumers: admin donation and per-user
 donation controllers.
 
+## Status
+
+Implemented as a wave 1 query-loader exemplar. Routed actions are distinct,
+the per-user form verifies write access and safely loads the slug through
+`Loader.one/1`, financial-history access is authorized against the real target,
+and raw insertion is private.
+
 ## Findings
 
 - List, user list, and create all authorize `:index`; creation has no distinct

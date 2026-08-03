@@ -3,6 +3,13 @@
 Source: `lib/philomena/site_notices.ex`; consumers: public layout notice display
 and admin notice CRUD.
 
+## Status
+
+Implemented as the wave 0 exemplar. Admin form and mutation paths share the
+write prerequisite, member loading uses the normalized Loader contract, the
+public active-window query is explicitly unauthenticated, and public APIs now
+follow the private-first documentation/spec convention.
+
 ## Findings
 
 - This is the closest existing example of the desired API: member CRUD delegates

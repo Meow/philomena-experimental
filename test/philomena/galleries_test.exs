@@ -75,11 +75,13 @@ defmodule Philomena.GalleriesTest do
     end
 
     test "a banned actor is rejected even while carrying a fingerprint" do
-      # The form loader runs verify_not_banned, which decides the ban before the
-      # fingerprint requirement, so a banned actor with a fingerprint is :ban.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Galleries.new_gallery(actor) == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint may not reach the form" do
+      assert Galleries.new_gallery(actor(nil, fingerprint: nil)) == {:error, :unauthorized}
     end
   end
 
@@ -280,11 +282,14 @@ defmodule Philomena.GalleriesTest do
     end
 
     test "a banned actor is rejected even while carrying a fingerprint" do
-      # This is a GET-guarded action, so it runs verify_not_banned: a banned
-      # actor with a fingerprint is still :ban.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Galleries.load_gallery_for_edit(actor, "abc") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Galleries.load_gallery_for_edit(actor(nil, fingerprint: nil), "abc") ==
+               {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do

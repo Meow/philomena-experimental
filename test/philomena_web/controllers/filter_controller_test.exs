@@ -100,16 +100,13 @@ defmodule PhilomenaWeb.FilterControllerTest do
       assert html_response(get(conn, ~p"/filters/#{filter}"), 200) =~ filter.name
     end
 
-    test "redirects with the authorization flash for an unknown filter", %{conn: conn} do
+    test "redirects with the not-found flash for an unknown filter", %{conn: conn} do
       conn = get(conn, ~p"/filters/999999999")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
 
-    # NOTE: a non-integer id short-circuits to NotFoundPlug via the central
-    # IntegerId guard, so the flash is the not-found message rather than the
-    # "You can't access that page." an unknown integer id gets.
     test "redirects with the not-found flash for a non-integer id", %{conn: conn} do
       conn = get(conn, ~p"/filters/not-a-number")
 

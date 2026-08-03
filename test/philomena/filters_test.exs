@@ -4,7 +4,7 @@ defmodule Philomena.FiltersTest do
 
   These pin the index/search viewer-visibility scoping, the `FilterPage` struct
   shape, the per-role authorization matrices on the form loaders and write
-  paths (owner vs unrelated user vs admin, the non-castable/unknown id split,
+  paths (owner vs unrelated user vs admin, uniform malformed/absent ID handling,
   banned and missing-fingerprint actors on the tag toggles), and the preserved
   oddities: a missing switch id raising `ArgumentError`, and make-public being
   an idempotent success.
@@ -169,9 +169,9 @@ defmodule Philomena.FiltersTest do
       assert Filters.load_filter_page(actor(), "not-a-number") == {:error, :not_found}
     end
 
-    test "a well-formed id naming no row is unauthorized for a user, not-found for an admin" do
+    test "a well-formed id naming no row is not-found for every actor" do
       assert Filters.load_filter_page(actor(confirmed_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Filters.load_filter_page(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
@@ -232,9 +232,9 @@ defmodule Philomena.FiltersTest do
                {:error, :not_found}
     end
 
-    test "a well-formed id naming no row is unauthorized for a user, not-found for an admin" do
+    test "a well-formed id naming no row is not-found for every actor" do
       assert Filters.load_filter_for_edit(actor(confirmed_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Filters.load_filter_for_edit(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
@@ -289,9 +289,9 @@ defmodule Philomena.FiltersTest do
                {:error, :not_found}
     end
 
-    test "a well-formed id naming no row is unauthorized for a user, not-found for an admin" do
+    test "a well-formed id naming no row is not-found for every actor" do
       assert Filters.update_filter(actor(confirmed_user_fixture()), "999999999", %{"name" => "x"}) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Filters.update_filter(actor(admin_user_fixture()), "999999999", %{"name" => "x"}) ==
                {:error, :not_found}
@@ -321,9 +321,9 @@ defmodule Philomena.FiltersTest do
       assert Filters.delete_filter(actor(confirmed_user_fixture()), "abc") == {:error, :not_found}
     end
 
-    test "a well-formed id naming no row is unauthorized for a user, not-found for an admin" do
+    test "a well-formed id naming no row is not-found for every actor" do
       assert Filters.delete_filter(actor(confirmed_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Filters.delete_filter(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
@@ -362,9 +362,9 @@ defmodule Philomena.FiltersTest do
                {:error, :not_found}
     end
 
-    test "a well-formed id naming no row is unauthorized for a user, not-found for an admin" do
+    test "a well-formed id naming no row is not-found for every actor" do
       assert Filters.make_filter_public(actor(confirmed_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Filters.make_filter_public(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}

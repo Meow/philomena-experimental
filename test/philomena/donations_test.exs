@@ -12,7 +12,7 @@ defmodule Philomena.DonationsTest do
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.DonationsFixtures
   import Philomena.UsersFixtures
 
@@ -20,6 +20,7 @@ defmodule Philomena.DonationsTest do
   alias Philomena.Donations.Donation
 
   @pagination [page: 1, page_size: 25]
+  @ban %{reason: "Rule #0", valid_until: ~U[3000-01-01 00:00:00Z]}
 
   describe "load_donations/2" do
     test "an anonymous viewer is unauthorized" do
@@ -121,6 +122,23 @@ defmodule Philomena.DonationsTest do
                })
 
       assert %{user_id: ["does not exist"]} = errors_on(changeset)
+    end
+  end
+
+  describe "write access prerequisite" do
+    test "the per-user form and create reject bans and missing fingerprints" do
+      admin = admin_user_fixture()
+      target = confirmed_user_fixture()
+
+      operations = [
+        &Donations.load_user_donations(&1, target.slug),
+        &Donations.create_donation(&1, %{})
+      ]
+
+      for operation <- operations do
+        assert operation.(actor(admin, ban: @ban)) == {:error, :ban}
+        assert operation.(actor(admin, fingerprint: nil)) == {:error, :unauthorized}
+      end
     end
   end
 end

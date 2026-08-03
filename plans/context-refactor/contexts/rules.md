@@ -3,6 +3,15 @@
 Source: `lib/philomena/rules.ex`; consumers: rule list/show/new/edit/update
 controller and report rule selection.
 
+## Status
+
+The controller boundary is implemented as a wave 1 position-loader exemplar.
+Hidden/internal visibility now lives in Ability, position loading uses
+`Loader.one_and_authorize/3`, absent positions are uniformly not-found, write
+forms and mutations share the write prerequisite, and raw version mutations are
+private. Report-facing rule lookup/list services remain public until the Reports
+wave can move report form assembly behind an actor-scoped boundary.
+
 ## Findings
 
 - Visibility uses direct `Canada.Can.can?` calls, while other operations use

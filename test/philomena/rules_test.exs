@@ -3,19 +3,33 @@ defmodule Philomena.RulesTest do
   Context-level tests for the controller-facing `Philomena.Rules` functions.
 
   These pin the edit-gated index visibility (staff see hidden and internal rules,
-  everyone else only the visible ones), the show loader's distinct
-  `{:error, :rule_hidden}` shape for a hidden rule a viewer may not edit, the
-  position parsing, and the admin-only create/edit/update authorization matrix.
+  everyone else only the visible ones), ability-based hidden-rule visibility,
+  position parsing, missing-before-forbidden precedence, and the admin-only
+  create/edit/update authorization matrix.
   """
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.RulesFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Rules
   alias Philomena.Rules.Rule
+
+  @ban %{reason: "Rule #0", valid_until: ~U[3000-01-01 00:00:00Z]}
+
+  describe "safe rule service lookups" do
+    test "malformed IDs and absent names do not raise" do
+      assert Rules.find_rule("not-an-id") == nil
+      assert Rules.fetch_rule_by_name("No such rule") == {:error, :not_found}
+    end
+
+    test "loads an existing rule by name" do
+      rule = rule_fixture()
+      assert Rules.fetch_rule_by_name(rule.name) == {:ok, rule}
+    end
+  end
 
   describe "list_rules_for/1" do
     test "an admin sees hidden and internal rules alongside visible ones" do
@@ -58,17 +72,18 @@ defmodule Philomena.RulesTest do
       assert loaded.id == rule.id
     end
 
-    test "a hidden rule is rule_hidden for a viewer who may not edit it" do
+    test "a hidden rule is unauthorized for a viewer who may not edit it" do
       rule = rule_fixture(%{hidden: true})
 
       assert Rules.load_rule_for_show(actor(confirmed_user_fixture()), to_string(rule.position)) ==
-               {:error, :rule_hidden}
+               {:error, :unauthorized}
     end
 
-    test "an internal rule is rule_hidden for a viewer who may not edit it" do
+    test "an internal rule is unauthorized for a viewer who may not edit it" do
       rule = rule_fixture(%{internal: true})
 
-      assert Rules.load_rule_for_show(actor(), to_string(rule.position)) == {:error, :rule_hidden}
+      assert Rules.load_rule_for_show(actor(), to_string(rule.position)) ==
+               {:error, :unauthorized}
     end
 
     test "an admin may show a hidden rule" do
@@ -84,9 +99,9 @@ defmodule Philomena.RulesTest do
       assert Rules.load_rule_for_show(actor(), "not-a-number") == {:error, :not_found}
     end
 
-    test "an unknown well-formed position is unauthorized for a user, not-found for an admin" do
+    test "an unknown well-formed position is not found for every actor" do
       assert Rules.load_rule_for_show(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Rules.load_rule_for_show(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -151,9 +166,9 @@ defmodule Philomena.RulesTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown well-formed position is unauthorized for a user, not-found for an admin" do
+    test "an unknown well-formed position is not found for every actor" do
       assert Rules.load_rule_for_edit(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Rules.load_rule_for_edit(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -196,6 +211,25 @@ defmodule Philomena.RulesTest do
     test "a non-integer position is not-found" do
       assert Rules.update_rule(actor(admin_user_fixture()), "not-a-number", %{title: "x"}) ==
                {:error, :not_found}
+    end
+  end
+
+  describe "write access prerequisite" do
+    test "form and mutation paths reject bans and missing fingerprints" do
+      admin = admin_user_fixture()
+      rule = rule_fixture()
+
+      operations = [
+        &Rules.load_new_rule/1,
+        &Rules.create_rule(&1, %{name: "Blocked", position: -1}),
+        &Rules.load_rule_for_edit(&1, rule.position),
+        &Rules.update_rule(&1, rule.position, %{title: "Blocked"})
+      ]
+
+      for operation <- operations do
+        assert operation.(actor(admin, ban: @ban)) == {:error, :ban}
+        assert operation.(actor(admin, fingerprint: nil)) == {:error, :unauthorized}
+      end
     end
   end
 end

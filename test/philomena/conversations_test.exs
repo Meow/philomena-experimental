@@ -172,11 +172,14 @@ defmodule Philomena.ConversationsTest do
     end
 
     test "a banned actor is rejected even while carrying a fingerprint" do
-      # This is a GET-guarded action, so it runs verify_not_banned: the ban is
-      # decided before the fingerprint requirement.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Conversations.load_new_conversation(actor, "anyone") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint may not reach the form" do
+      assert Conversations.load_new_conversation(actor(nil, fingerprint: nil), "anyone") ==
+               {:error, :unauthorized}
     end
   end
 

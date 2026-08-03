@@ -5,10 +5,9 @@ defmodule Philomena.AdvertsTest do
 
   Advert administration is admin/`Advert`-role-map-moderator only; these pin the
   module-level `:index` gate (a plain moderator is rejected before any advert
-  loads), the per-instance unknown-id asymmetry (an admin may act on the `nil`
-  load and gets not-found, while an `Advert`-role moderator cannot and gets
-  unauthorized), the byte-exact moderation logs each write emits, and that the
-  image-upload pipeline runs on the real fixture uploads.
+  loads), uniform not-found results for absent IDs, the byte-exact moderation
+  logs each write emits, and that the image-upload pipeline runs on the real
+  fixture uploads.
   """
 
   use Philomena.DataCase, async: true
@@ -153,12 +152,12 @@ defmodule Philomena.AdvertsTest do
                {:error, :not_found}
     end
 
-    test "an unknown id is not-found for an admin but unauthorized for an Advert-role moderator" do
+    test "an unknown id is not-found for every actor" do
       assert Adverts.load_advert_for_edit(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
       assert Adverts.load_advert_for_edit(actor(role_moderator_fixture("Advert")), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
   end
 
@@ -191,13 +190,13 @@ defmodule Philomena.AdvertsTest do
       no_moderation_logs!()
     end
 
-    test "an unknown id is not-found for an admin but unauthorized for an Advert-role moderator" do
+    test "an unknown id is not-found for every actor" do
       assert Adverts.update_advert(actor(admin_user_fixture()), "2147483647", %{"title" => "x"}) ==
                {:error, :not_found}
 
       assert Adverts.update_advert(actor(role_moderator_fixture("Advert")), "2147483647", %{
                "title" => "x"
-             }) == {:error, :unauthorized}
+             }) == {:error, :not_found}
     end
 
     test "a blank title is a changeset error and writes no log" do
@@ -251,14 +250,14 @@ defmodule Philomena.AdvertsTest do
       no_moderation_logs!()
     end
 
-    test "an unknown id is not-found for an admin but unauthorized for an Advert-role moderator" do
+    test "an unknown id is not-found for every actor" do
       assert Adverts.update_advert_image(actor(admin_user_fixture()), "2147483647", %{
                "image" => png_upload()
              }) == {:error, :not_found}
 
       assert Adverts.update_advert_image(actor(role_moderator_fixture("Advert")), "2147483647", %{
                "image" => png_upload()
-             }) == {:error, :unauthorized}
+             }) == {:error, :not_found}
     end
   end
 
@@ -292,12 +291,12 @@ defmodule Philomena.AdvertsTest do
       assert Adverts.delete_advert(actor(admin_user_fixture()), "abc") == {:error, :not_found}
     end
 
-    test "an unknown id is not-found for an admin but unauthorized for an Advert-role moderator" do
+    test "an unknown id is not-found for every actor" do
       assert Adverts.delete_advert(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
       assert Adverts.delete_advert(actor(role_moderator_fixture("Advert")), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
   end
 end

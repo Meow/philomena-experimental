@@ -29,16 +29,14 @@ defmodule PhilomenaWeb.Channel.SubscriptionControllerTest do
 
   subscription_toggle_tests()
 
-  test "POST for an unknown channel redirects to / with the authorization flash",
+  test "POST for an unknown channel redirects to / with the not-found flash",
        %{conn: conn} do
-    # the nil load is authorized against the actor; a regular user's grant does
-    # not cover nil, so the context returns unauthorized
     %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
     conn = post(conn, ~p"/channels/999999999/subscription")
 
     assert redirected_to(conn) == "/"
-    assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+    assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
   end
 
   test "a non-integer channel id redirects to / with the not-found flash", %{conn: conn} do

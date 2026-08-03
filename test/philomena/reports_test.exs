@@ -9,8 +9,8 @@ defmodule Philomena.ReportsTest do
   These pin the attribution carried onto the inserted report, the open-report
   limit (regular users and anonymous IPs capped at `max_open_reports/0`, staff
   exempt), the rejected-changeset shape, the `:index`/`:show`/`:edit`
-  authorization matrices (including the plain/moderator-unauthorized vs
-  admin-not-found split on an unknown id), the `ReportPage` struct shape and its
+  authorization matrices (including uniform not-found results for absent IDs),
+  the `ReportPage` struct shape and its
   `rq`-search vs default branches, and the mod-note staff gate.
 
   `load_report_index/3` reads through OpenSearch, so this module follows the
@@ -343,9 +343,9 @@ defmodule Philomena.ReportsTest do
       assert Reports.claim_report(actor(), to_string(report.id)) == {:error, :unauthorized}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown well-formed id is not-found for every actor" do
       assert Reports.claim_report(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Reports.claim_report(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -383,9 +383,9 @@ defmodule Philomena.ReportsTest do
       assert Reports.unclaim_report(actor(), to_string(report.id)) == {:error, :unauthorized}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown well-formed id is not-found for every actor" do
       assert Reports.unclaim_report(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Reports.unclaim_report(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -421,9 +421,9 @@ defmodule Philomena.ReportsTest do
       assert Reports.close_report(actor(), to_string(report.id)) == {:error, :unauthorized}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator, not-found for an admin" do
+    test "an unknown well-formed id is not-found for every actor" do
       assert Reports.close_report(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Reports.close_report(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -464,20 +464,22 @@ defmodule Philomena.ReportsTest do
   end
 
   describe "load_image_for_report/2" do
-    # Backs the report form (a GET-guarded action), so it runs the not-banned
-    # check first (no fingerprint requirement) and then loads and authorizes the
-    # image for :show.
+    # Backs a report write form, so it runs the global write prerequisite before
+    # loading and authorizing the image.
 
     setup do
       %{image: image_fixture()}
     end
 
     test "a banned actor is rejected before any loading, even with a garbage id" do
-      # verify_not_banned runs before the loader, so a banned actor is
-      # {:error, :ban} even against an id that could never load.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Reports.load_image_for_report(actor, "abc") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Reports.load_image_for_report(actor(nil, fingerprint: nil), "abc") ==
+               {:error, :unauthorized}
     end
 
     test "an anonymous actor loads the report form for a visible image", %{image: image} do
@@ -578,8 +580,8 @@ defmodule Philomena.ReportsTest do
   end
 
   describe "load_gallery_for_report/2" do
-    # Backs the report form (a GET-guarded action): the not-banned check runs
-    # first, then the gallery is loaded and authorized for :show.
+    # Backs a report write form, so it runs the global write prerequisite before
+    # loading and authorizing the gallery.
 
     setup do
       %{gallery: gallery_fixture(confirmed_user_fixture())}
@@ -589,6 +591,11 @@ defmodule Philomena.ReportsTest do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Reports.load_gallery_for_report(actor, "abc") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Reports.load_gallery_for_report(actor(nil, fingerprint: nil), "abc") ==
+               {:error, :unauthorized}
     end
 
     test "an anonymous actor loads the report form for a gallery", %{gallery: gallery} do
@@ -602,11 +609,8 @@ defmodule Philomena.ReportsTest do
       assert changeset.data.gallery_id == gallery.id
     end
 
-    # A well-formed id naming no row authorizes nil; no ordinary rule permits it,
-    # so an anonymous actor is unauthorized, while an admin (whose grant covers
-    # nil) instead sees the missing row as not-found.
-    test "a well-formed id naming no row is unauthorized for anonymous, not-found for admin" do
-      assert Reports.load_gallery_for_report(actor(nil), "999999999") == {:error, :unauthorized}
+    test "a well-formed id naming no row is not-found for every actor" do
+      assert Reports.load_gallery_for_report(actor(nil), "999999999") == {:error, :not_found}
 
       assert Reports.load_gallery_for_report(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
@@ -650,9 +654,9 @@ defmodule Philomena.ReportsTest do
       assert loaded.id == gallery.id
     end
 
-    test "a well-formed id naming no row is unauthorized for anonymous, not-found for admin" do
+    test "a well-formed id naming no row is not-found for every actor" do
       assert Reports.load_gallery_for_report_creation(actor(nil), "999999999") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Reports.load_gallery_for_report_creation(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
@@ -665,8 +669,8 @@ defmodule Philomena.ReportsTest do
   end
 
   describe "load_user_for_report/2" do
-    # Backs the profile report form (a GET-guarded action): the not-banned check
-    # runs first, then the user is looked up by slug and authorized for :show.
+    # Backs a report write form, so it runs the global write prerequisite before
+    # loading and authorizing the user.
 
     setup do
       %{reported: confirmed_user_fixture()}
@@ -676,6 +680,11 @@ defmodule Philomena.ReportsTest do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Reports.load_user_for_report(actor, "no-such-user") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Reports.load_user_for_report(actor(nil, fingerprint: nil), "no-such-user") ==
+               {:error, :unauthorized}
     end
 
     test "an anonymous actor loads the report form for a user", %{reported: reported} do
@@ -741,10 +750,8 @@ defmodule Philomena.ReportsTest do
   end
 
   describe "load_commission_for_report/2" do
-    # Backs the commission report form (a GET-guarded action): the not-banned
-    # check runs first, then the user and their commission are looked up by slug.
-    # Viewing the commission report form needs no permission, so the lookup runs
-    # no authorization.
+    # Backs a report write form, so it runs the global write prerequisite before
+    # loading the user and commission.
 
     setup do
       user = confirmed_user_fixture()
@@ -757,6 +764,11 @@ defmodule Philomena.ReportsTest do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Reports.load_commission_for_report(actor, "no-such-user") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Reports.load_commission_for_report(actor(nil, fingerprint: nil), "no-such-user") ==
+               {:error, :unauthorized}
     end
 
     test "an anonymous actor loads the report form for a commission", %{
@@ -846,9 +858,8 @@ defmodule Philomena.ReportsTest do
   end
 
   describe "load_conversation_for_report/2" do
-    # Backs the conversation report form (a GET-guarded action): the not-banned
-    # check runs first, then the conversation is loaded by slug and authorized
-    # for :show (participants, moderators, and admins).
+    # Backs a report write form, so it runs the global write prerequisite before
+    # loading and authorizing the conversation.
 
     setup do
       from = confirmed_user_fixture()
@@ -860,6 +871,11 @@ defmodule Philomena.ReportsTest do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Reports.load_conversation_for_report(actor, "no-such-slug") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Reports.load_conversation_for_report(actor(nil, fingerprint: nil), "no-such-slug") ==
+               {:error, :unauthorized}
     end
 
     test "a participant loads the report form for their conversation", %{

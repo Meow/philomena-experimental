@@ -5,7 +5,7 @@ defmodule Philomena.Commissions do
 
   import Ecto.Query, warn: false
 
-  import Philomena.Authorization, only: [verify_write_access: 1, verify_not_banned: 1]
+  import Philomena.Authorization, only: [verify_write_access: 1]
 
   alias Philomena.IntegerId
   alias Ecto.Multi
@@ -125,7 +125,7 @@ defmodule Philomena.Commissions do
           {:ok, User.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def load_commission_for_new(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor) do
+    with :ok <- verify_write_access(actor) do
       authorize_new_commission(actor, slug)
     end
   end
@@ -195,7 +195,7 @@ defmodule Philomena.Commissions do
           {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def load_commission_for_edit(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, {user, commission}} <- authorize_existing_commission(actor, slug) do
       {:ok, {user, commission, change_commission(commission)}}
     end
@@ -479,7 +479,7 @@ defmodule Philomena.Commissions do
           {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_item_for_new(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, {user, commission}} <- authorize_item(actor, slug) do
       {:ok, {user, commission, change_item(%Item{})}}
     end
@@ -550,7 +550,7 @@ defmodule Philomena.Commissions do
           {:ok, {User.t(), Commission.t(), Item.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_item_for_edit(%Actor{} = actor, slug, id) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, {user, commission}} <- authorize_item(actor, slug) do
       # TODO: fix raise when invalid item is passed here
       item = fetch_item!(commission, id)

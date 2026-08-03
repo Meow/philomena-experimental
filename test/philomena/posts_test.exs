@@ -24,7 +24,6 @@ defmodule Philomena.PostsTest do
   alias Philomena.Posts.Post
   alias Philomena.Posts.PostVersion
   alias Philomena.Forums.Forum
-  alias Philomena.Reports.Report
   alias Philomena.Repo
   alias Philomena.Topics.Topic
   alias Philomena.Users.User
@@ -545,43 +544,29 @@ defmodule Philomena.PostsTest do
   end
 
   describe "load_post_for_report/4" do
-    # This backs the report form (a GET-guarded action), so it runs
-    # verify_not_banned first and then the same forum/topic/post load-and-authorize
-    # chain as post_history/4. Unlike the creation path, it enforces no fingerprint
-    # requirement.
+    # This backs a report write form, so it enforces the same write prerequisite
+    # as submission before the forum/topic/post load-and-authorize chain.
 
     test "a banned actor is rejected before any loading, even with an unknown forum" do
-      # verify_not_banned runs before the loader, so a banned actor is {:error, :ban}
-      # even against a forum slug that does not exist (a missing forum would
-      # otherwise surface as :unauthorized). Getting :ban pins that the ban check
-      # precedes the load.
+      # The write prerequisite runs before loading, so the ban wins even against
+      # a forum slug that does not exist.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Posts.load_post_for_report(actor, "nonexistent", "whatever", "1") ==
                {:error, :ban}
     end
 
-    test "an anonymous actor with no fingerprint loads the report form for a visible post",
+    test "an anonymous actor with no fingerprint cannot load the report form",
          %{forum: forum, topic: topic} do
-      # The GET path checks only the ban, never the fingerprint, so a non-banned
-      # anonymous actor carrying no fingerprint still succeeds here (the creation
-      # path below rejects the same actor as unauthorized).
       [post] = topic.posts
       anonymous = actor(nil, fingerprint: nil)
 
-      assert {:ok, {loaded_topic, %Post{} = loaded_post, %Ecto.Changeset{} = changeset}} =
-               Posts.load_post_for_report(anonymous, forum.short_name, topic.slug, "#{post.id}")
-
-      assert loaded_topic.id == topic.id
-      assert loaded_post.id == post.id
-
-      # The topic carries its forum preloaded for building the form action.
-      assert %Forum{} = loaded_topic.forum
-      assert loaded_topic.forum.id == forum.id
-
-      # The changeset is over a Report addressed at this post.
-      assert %Report{} = changeset.data
-      assert changeset.data.post_id == post.id
+      assert Posts.load_post_for_report(
+               anonymous,
+               forum.short_name,
+               topic.slug,
+               "#{post.id}"
+             ) == {:error, :unauthorized}
     end
 
     test "an unknown forum is unauthorized", %{topic: topic} do
@@ -856,16 +841,23 @@ defmodule Philomena.PostsTest do
   end
 
   describe "load_post_for_edit/4" do
-    # This backs the edit form (a GET-guarded action), so it runs
-    # verify_not_banned first (no fingerprint requirement) and then the same
-    # load-and-authorize chain update_post/5 uses, ending in the post's :edit
-    # authorization.
+    # This backs the edit write, so it runs the global write prerequisite and
+    # then the same load-and-authorize chain update_post/5 uses.
 
     test "a banned actor is rejected before any loading, even with an unknown forum" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Posts.load_post_for_edit(actor, "nonexistent", "whatever", "1") ==
                {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Posts.load_post_for_edit(
+               actor(nil, fingerprint: nil),
+               "nonexistent",
+               "whatever",
+               "1"
+             ) == {:error, :unauthorized}
     end
 
     test "the post's author loads the form", %{forum: forum, topic: topic} do

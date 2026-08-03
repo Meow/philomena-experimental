@@ -119,22 +119,6 @@ defmodule Philomena.AuthorizationTest do
     type: "User"
   }
 
-  describe "verify_not_banned/1" do
-    import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
-
-    test "passes an anonymous actor with no ban" do
-      assert Authorization.verify_not_banned(actor()) == :ok
-    end
-
-    test "passes a signed-in actor with no ban", %{user: user} do
-      assert Authorization.verify_not_banned(actor(user)) == :ok
-    end
-
-    test "rejects an actor carrying an active ban" do
-      assert Authorization.verify_not_banned(actor(nil, ban: @ban)) == {:error, :ban}
-    end
-  end
-
   describe "verify_write_access/1" do
     import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
 

@@ -7,11 +7,10 @@ defmodule Philomena.SiteNoticesTest do
 
   These pin the per-role authorization matrix (admin and a moderator holding the
   SiteNotice admin grant pass; a plain moderator, a regular user, and an
-  anonymous visitor are rejected) and the authorize-the-loaded-record split on
-  the edit/update/delete functions: a non-castable id is `{:error, :not_found}`
-  for everyone; a well-formed unknown id authorizes a `nil` record, coming back
-  `{:error, :not_found}` for an admin but `{:error, :unauthorized}` for a
-  non-admin. No moderation logs are written here.
+  anonymous visitor are rejected), the write prerequisite, and the shared
+  loader contract: malformed and absent IDs are not found for every actor,
+  while a real forbidden notice is unauthorized. No moderation logs are written
+  here.
 
   The actor is a `Philomena.Attribution.Actor`, matching what the controller
   hands in as `conn.assigns.actor`.
@@ -19,7 +18,7 @@ defmodule Philomena.SiteNoticesTest do
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.SiteNoticesFixtures
   import Philomena.UsersFixtures
 
@@ -27,6 +26,7 @@ defmodule Philomena.SiteNoticesTest do
   alias Philomena.SiteNotices.SiteNotice
 
   @pagination %{page_number: 1, page_size: 25}
+  @ban %{reason: "Rule #0", valid_until: ~U[3000-01-01 00:00:00Z]}
 
   # A moderator granted the SiteNotice admin role_map, the shape a request-loaded
   # actor carries; site-notice management admits this moderator but not a plain
@@ -44,6 +44,28 @@ defmodule Philomena.SiteNoticesTest do
       "start_date" => DateTime.utc_now(:second),
       "finish_date" => DateTime.add(DateTime.utc_now(:second), 365, :day)
     }
+  end
+
+  describe "active_site_notices/0" do
+    test "returns only live notices inside their active UTC window" do
+      now = DateTime.utc_now(:second)
+      active = site_notice_fixture(%{"start_date" => DateTime.add(now, -1, :day)})
+      _not_live = site_notice_fixture(%{"live" => false})
+
+      _not_started =
+        site_notice_fixture(%{
+          "start_date" => DateTime.add(now, 1, :day),
+          "finish_date" => DateTime.add(now, 2, :day)
+        })
+
+      _finished =
+        site_notice_fixture(%{
+          "start_date" => DateTime.add(now, -2, :day),
+          "finish_date" => DateTime.add(now, -1, :day)
+        })
+
+      assert Enum.map(SiteNotices.active_site_notices(), & &1.id) == [active.id]
+    end
   end
 
   describe "load_site_notices/2" do
@@ -169,14 +191,14 @@ defmodule Philomena.SiteNoticesTest do
                {:error, :not_found}
     end
 
-    test "a well-formed unknown id is unauthorized for a plain moderator" do
+    test "a well-formed unknown id is not found for a plain moderator" do
       assert SiteNotices.load_site_notice_for_edit(actor(moderator_user_fixture()), 2_147_483_647) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
-    test "a well-formed unknown id is unauthorized for a regular user" do
+    test "a well-formed unknown id is not found for a regular user" do
       assert SiteNotices.load_site_notice_for_edit(actor(confirmed_user_fixture()), 2_147_483_647) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "a non-castable id is not found for an admin" do
@@ -243,10 +265,10 @@ defmodule Philomena.SiteNoticesTest do
                {:error, :not_found}
     end
 
-    test "a well-formed unknown id is unauthorized for a plain moderator" do
+    test "a well-formed unknown id is not found for a plain moderator" do
       assert SiteNotices.update_site_notice(actor(moderator_user_fixture()), 2_147_483_647, %{
                "title" => "x"
-             }) == {:error, :unauthorized}
+             }) == {:error, :not_found}
     end
 
     test "a real notice is unauthorized for a plain moderator" do
@@ -291,9 +313,9 @@ defmodule Philomena.SiteNoticesTest do
                {:error, :not_found}
     end
 
-    test "a well-formed unknown id is unauthorized for a plain moderator" do
+    test "a well-formed unknown id is not found for a plain moderator" do
       assert SiteNotices.delete_site_notice(actor(moderator_user_fixture()), 2_147_483_647) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "a non-castable id is not found for an admin" do
@@ -320,6 +342,26 @@ defmodule Philomena.SiteNoticesTest do
     test "an anonymous visitor is not authorized" do
       notice = site_notice_fixture()
       assert SiteNotices.delete_site_notice(actor(), notice.id) == {:error, :unauthorized}
+    end
+  end
+
+  describe "write access prerequisite" do
+    test "form and mutation paths consistently reject bans and missing fingerprints" do
+      admin = admin_user_fixture()
+      notice = site_notice_fixture()
+
+      operations = [
+        &SiteNotices.new_site_notice/1,
+        &SiteNotices.create_site_notice(&1, valid_attrs()),
+        &SiteNotices.load_site_notice_for_edit(&1, notice.id),
+        &SiteNotices.update_site_notice(&1, notice.id, %{"title" => "Changed"}),
+        &SiteNotices.delete_site_notice(&1, notice.id)
+      ]
+
+      for operation <- operations do
+        assert operation.(actor(admin, ban: @ban)) == {:error, :ban}
+        assert operation.(actor(admin, fingerprint: nil)) == {:error, :unauthorized}
+      end
     end
   end
 end

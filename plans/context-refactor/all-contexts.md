@@ -127,6 +127,17 @@ reason or invariant is non-obvious; comments that restate code should go.
 
 ## Migration sequence
 
+### Implementation status
+
+Wave 0 is implemented. `Philomena.Loader` now loads before authorization and
+provides query-based `one/1` and `one_and_authorize/3` primitives; shared error
+types live in `Philomena.Authorization`; `verify_not_banned/1` and all callers
+are gone; the loader/authorization role matrix and known-oddities register are
+present; and subscription persistence functions are explicitly internal, with
+the channel index using an actor-scoped wrapper. SiteNotices is the canonical
+ID-based exemplar. Rules and Donations are the first wave 1 examples for a
+position query and a slug query, respectively.
+
 ### Wave 0: characterize and establish the contract
 
 - Follow `test/CONVENTIONS.md`: land any missing controller characterization in

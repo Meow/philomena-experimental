@@ -6,7 +6,7 @@ defmodule Philomena.Reports do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.Repo
   alias Philomena.Loader
@@ -283,7 +283,7 @@ defmodule Philomena.Reports do
           {:ok, {Image.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_image_for_report(%Actor{} = actor, image_id) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, image} <-
            Images.load_visible_image(actor, image_id, [:sources, tags: :aliases]) do
       changeset = change_report(%Report{image_id: image.id})
@@ -340,7 +340,7 @@ defmodule Philomena.Reports do
           {:ok, {Gallery.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_gallery_for_report(%Actor{} = actor, gallery_id) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_reportable_gallery(actor.user, gallery_id) do
       changeset = change_report(%Report{gallery_id: gallery.id})
       {:ok, {gallery, changeset}}
@@ -395,7 +395,7 @@ defmodule Philomena.Reports do
           {:ok, {User.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_user_for_report(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, user} <- load_reportable_user(actor.user, slug) do
       changeset = change_report(%Report{reported_user_id: user.id})
       {:ok, {user, changeset}}
@@ -457,9 +457,9 @@ defmodule Philomena.Reports do
   """
   @spec load_commission_for_report(Actor.t(), String.t()) ::
           {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :not_found}
+          | {:error, :ban | :unauthorized | :not_found}
   def load_commission_for_report(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, {user, commission}} <- Commissions.load_commission_for_show(slug) do
       changeset =
         change_report(%Report{commission_id: commission.id})
@@ -514,7 +514,7 @@ defmodule Philomena.Reports do
           {:ok, {Conversation.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_conversation_for_report(%Actor{} = actor, slug) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, conversation} <- load_reportable_conversation(actor.user, slug) do
       changeset =
         change_report(%Report{conversation_id: conversation.id})
@@ -710,6 +710,9 @@ defmodule Philomena.Reports do
   target named by `target`, a one-entry keyword list of the target foreign key
   column and its id (e.g. `comment_id: comment.id`).
 
+  Returns `{:error, :not_found}` when the named rule is absent instead of
+  raising from this operational path.
+
   ## Examples
 
       iex> create_system_report("Rule #0", "Custom report reason", comment_id: 1)
@@ -717,23 +720,23 @@ defmodule Philomena.Reports do
 
   """
   def create_system_report(rule_name, reason, target) do
-    rule = Rules.get_by_name!(rule_name)
+    with {:ok, rule} <- Rules.fetch_rule_by_name(rule_name) do
+      attrs = %{
+        reason: reason,
+        user_agent: "system"
+      }
 
-    attrs = %{
-      reason: reason,
-      user_agent: "system"
-    }
+      attribution = %{
+        system: true,
+        ip: %Postgrex.INET{address: {127, 0, 0, 1}, netmask: 32},
+        fingerprint: "ffff"
+      }
 
-    attribution = %{
-      system: true,
-      ip: %Postgrex.INET{address: {127, 0, 0, 1}, netmask: 32},
-      fingerprint: "ffff"
-    }
-
-    struct(Report, target)
-    |> Report.creation_changeset(attrs, attribution, rule)
-    |> Repo.insert()
-    |> reindex_after_update()
+      struct(Report, target)
+      |> Report.creation_changeset(attrs, attribution, rule)
+      |> Repo.insert()
+      |> reindex_after_update()
+    end
   end
 
   @doc """

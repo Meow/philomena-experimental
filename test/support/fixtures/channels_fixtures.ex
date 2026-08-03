@@ -28,7 +28,7 @@ defmodule Philomena.ChannelsFixtures do
 
   @doc """
   Creates a channel the fetcher has stamped, so it appears on the livestreams
-  index (`Channels.list_channels/3` lists only channels with `last_fetched_at`
+  index (`Channels.load_channels/4` lists only channels with `last_fetched_at`
   set).
 
   `create_attrs` are string-keyed the way the admin channel controller submits

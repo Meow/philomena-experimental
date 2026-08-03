@@ -17,7 +17,7 @@ defmodule Philomena.DnpEntries do
   alias Philomena.Users.User
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_not_banned: 1, verify_write_access: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   # Inserts a DNP entry for `user`, filed against whichever of `tags` matches the
   # `"tag_id"` in `attrs`. Visible for testing.
@@ -226,7 +226,7 @@ defmodule Philomena.DnpEntries do
           | {:error, :unauthorized}
   def load_new_dnp_entry(%Actor{} = actor, params) do
     # TODO: weird success shape?
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, tags} <- selectable_tags(actor.user, params) do
       {:ok, %{changeset: change_dnp_entry(%DnpEntry{}), selectable_tags: tags}}
     end

@@ -882,9 +882,8 @@ defmodule Philomena.CommentsTest do
   end
 
   describe "load_comment_for_edit/3" do
-    # Backs the edit form (a GET-guarded action), so it runs the not-banned
-    # check first (no fingerprint requirement) and then loads and authorizes the
-    # comment for :edit.
+    # Backs the edit write, so it runs the global write prerequisite before
+    # loading and authorizing the comment for :edit.
 
     setup do
       %{image: image_fixture()}
@@ -895,6 +894,11 @@ defmodule Philomena.CommentsTest do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Comments.load_comment_for_edit(actor, image, "#{comment.id}") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading", %{image: image} do
+      assert Comments.load_comment_for_edit(actor(nil, fingerprint: nil), image, "1") ==
+               {:error, :unauthorized}
     end
 
     test "the author loads the form", %{image: image} do
@@ -1019,21 +1023,22 @@ defmodule Philomena.CommentsTest do
   end
 
   describe "load_comment_for_report/3" do
-    # Backs the report form (a GET-guarded action), so it runs the not-banned
-    # check first (no fingerprint requirement) and then authorizes the image for
-    # :show and loads the comment within it (a hidden comment visible only to
-    # actors who may :show it).
+    # Backs a report write form, so it runs the global write prerequisite before
+    # authorizing the image and loading the comment within it.
 
     setup do
       %{image: image_fixture()}
     end
 
     test "a banned actor is rejected before any loading, even with garbage ids" do
-      # verify_not_banned runs before the loader, so a banned actor is
-      # {:error, :ban} even against ids that could never load.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Comments.load_comment_for_report(actor, "999999999", "abc") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Comments.load_comment_for_report(actor(nil, fingerprint: nil), "1", "1") ==
+               {:error, :unauthorized}
     end
 
     test "an anonymous actor loads the report form for a visible comment", %{image: image} do

@@ -6,7 +6,7 @@ defmodule Philomena.Posts do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_not_banned: 1, verify_write_access: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
@@ -566,7 +566,7 @@ defmodule Philomena.Posts do
           {:ok, {Post.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_edit(actor, forum_slug, topic_slug, post_id) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, post} <- load_editable_post(actor, forum_slug, topic_slug, post_id) do
       {:ok, {post, change_post(post)}}
     end
@@ -1017,7 +1017,7 @@ defmodule Philomena.Posts do
           {:ok, {Topic.t(), Post.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_report(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, {topic, post}} <-
            load_reportable_post(actor, forum_slug, topic_slug, post_id) do
       changeset = Reports.change_report(%Report{post_id: post.id})

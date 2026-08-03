@@ -34,7 +34,7 @@ defmodule Philomena.TopicsTest do
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to verify_write_access
-  # and verify_not_banned.
+  # and the global write prerequisite.
   @ban %{
     reason: "Rule #0",
     valid_until: ~U[3000-01-01 00:00:00Z],
@@ -1173,11 +1173,14 @@ defmodule Philomena.TopicsTest do
 
   describe "load_new_topic/2" do
     test "a banned actor is rejected before any loading" do
-      # verify_not_banned runs first, so a banned actor is {:error, :ban} even
-      # against a forum slug that does not exist.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
       assert Topics.load_new_topic(actor, "nonexistent") == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      assert Topics.load_new_topic(actor(nil, fingerprint: nil), "nonexistent") ==
+               {:error, :unauthorized}
     end
 
     test "a regular actor gets the forum and a changeset seeded with a poll and one post" do

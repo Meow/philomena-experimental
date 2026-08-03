@@ -545,7 +545,11 @@ defimpl Canada.Can, for: Philomena.Users.User do
       when action in [:edit, :update, :delete],
       do: true
 
-  # Index and show rules
+  # Index and show public rules
+  def can?(%User{} = user, :show, %Rule{hidden: hidden, internal: internal} = rule)
+      when hidden or internal,
+      do: can?(user, :edit, rule)
+
   def can?(%User{}, action, %Rule{}) when action in [:index, :show], do: true
 
   # Show static pages
@@ -622,7 +626,9 @@ defimpl Canada.Can, for: Atom do
   # Create and edit galleries
   def can?(_user, :show, %Gallery{}), do: true
 
-  # Index and show rules
+  # Index and show public rules
+  def can?(_user, :show, %Rule{hidden: true}), do: false
+  def can?(_user, :show, %Rule{internal: true}), do: false
   def can?(_user, action, %Rule{}) when action in [:index, :show], do: true
 
   # Show static pages

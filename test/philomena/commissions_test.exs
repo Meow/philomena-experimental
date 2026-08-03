@@ -111,6 +111,15 @@ defmodule Philomena.CommissionsTest do
                {:error, :ban}
     end
 
+    test "an actor without a fingerprint is rejected before gating" do
+      user = verified_user_with_link()
+
+      assert Commissions.load_commission_for_new(
+               actor(user, fingerprint: nil),
+               user.slug
+             ) == {:error, :unauthorized}
+    end
+
     test "an owner whose profile already has a commission is unauthorized" do
       user = verified_user_with_link()
       commission_fixture(user)
@@ -180,6 +189,16 @@ defmodule Philomena.CommissionsTest do
 
       assert Commissions.load_commission_for_edit(actor(confirmed_user_fixture()), user.slug) ==
                {:error, :unauthorized}
+    end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      user = verified_user_with_link()
+      commission_fixture(user)
+
+      assert Commissions.load_commission_for_edit(
+               actor(user, fingerprint: nil),
+               user.slug
+             ) == {:error, :unauthorized}
     end
   end
 
@@ -252,6 +271,14 @@ defmodule Philomena.CommissionsTest do
       assert Commissions.load_item_for_new(actor(moderator_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
+
+    test "an actor without a fingerprint is rejected before loading" do
+      user = verified_user_with_link()
+      commission_fixture(user)
+
+      assert Commissions.load_item_for_new(actor(user, fingerprint: nil), user.slug) ==
+               {:error, :unauthorized}
+    end
   end
 
   describe "create_item/3" do
@@ -289,6 +316,17 @@ defmodule Philomena.CommissionsTest do
       assert_raise Ecto.NoResultsError, fn ->
         Commissions.load_item_for_edit(actor(user), user.slug, "2147483647")
       end
+    end
+
+    test "an actor without a fingerprint is rejected before the item lookup" do
+      user = verified_user_with_link()
+      commission_fixture(user)
+
+      assert Commissions.load_item_for_edit(
+               actor(user, fingerprint: nil),
+               user.slug,
+               "2147483647"
+             ) == {:error, :unauthorized}
     end
   end
 

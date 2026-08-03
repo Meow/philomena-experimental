@@ -6,7 +6,7 @@ defmodule Philomena.Comments do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
   alias Philomena.Repo
@@ -686,8 +686,7 @@ defmodule Philomena.Comments do
           {:ok, {Comment.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_comment_for_edit(%Actor{} = actor, %Image{} = image, comment_id) do
-    # TODO: inconsistency in the fingerprint requirement?
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, comment} <- load_editable_comment(actor.user, image, comment_id) do
       {:ok, {comment, change_comment(comment)}}
     end
@@ -744,8 +743,7 @@ defmodule Philomena.Comments do
           {:ok, {Comment.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found}
   def load_comment_for_report(%Actor{} = actor, image_id, comment_id) do
-    # TODO: inconsistency in the fingerprint requirement?
-    with :ok <- verify_not_banned(actor),
+    with :ok <- verify_write_access(actor),
          {:ok, comment} <- load_reportable_comment(actor, image_id, comment_id) do
       changeset =
         Reports.change_report(%Report{comment_id: comment.id})

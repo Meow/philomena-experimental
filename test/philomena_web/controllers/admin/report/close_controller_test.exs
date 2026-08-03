@@ -47,18 +47,12 @@ defmodule PhilomenaWeb.Admin.Report.CloseControllerTest do
   describe "POST /admin/reports/:report_id/close (create) failure paths" do
     setup [:register_and_log_in_moderator]
 
-    # NOTE: an unknown (well-formed) report id loads nil; a moderator's grant
-    # does not cover nil, so :create returns unauthorized - the authorization
-    # flash + redirect to /, not a 404.
     test "redirects for an unknown report id", %{conn: conn} do
       conn = post(conn, ~p"/admin/reports/#{0}/close")
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
 
-    # NOTE: a non-integer report id fails the id parse before authorization, so
-    # the flash is the not-found message rather than the "You can't access that
-    # page." an unknown (well-formed) integer id gets.
     test "redirects with the not-found flash for a non-integer report id", %{conn: conn} do
       conn = post(conn, ~p"/admin/reports/not-an-integer/close")
       assert redirected_to(conn) == "/"

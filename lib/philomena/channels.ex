@@ -67,23 +67,7 @@ defmodule Philomena.Channels do
     Channel.changeset(channel, %{})
   end
 
-  @doc """
-  Returns a page of channels for the livestreams listing.
-
-  Only channels the fetcher has stamped (`last_fetched_at` set) are listed,
-  ordered live-first and then by title, with the associated artist tag
-  preloaded. `show_nsfw?` includes NSFW channels when true. A non-empty
-  `"cq"` in `params` matches the channel title, short name, or artist tag
-  name.
-
-  ## Examples
-
-      iex> list_channels(false, %{"cq" => "pony"}, pagination)
-      %Scrivener.Page{}
-
-  """
-  @spec list_channels(boolean(), map(), Repo.pagination_params()) :: Scrivener.Page.t()
-  def list_channels(show_nsfw?, params, pagination) do
+  defp list_channels(show_nsfw?, params, pagination) do
     Channel
     |> maybe_show_nsfw(show_nsfw?)
     |> where([c], not is_nil(c.last_fetched_at))
@@ -92,6 +76,27 @@ defmodule Philomena.Channels do
     |> preload([_c, t], associated_artist_tag: t)
     |> maybe_search(params)
     |> Repo.paginate(pagination)
+  end
+
+  @doc """
+  Loads the livestream listing and the acting user's subscription state.
+
+  Only channels the fetcher has stamped (`last_fetched_at` set) are listed,
+  ordered live-first and then by title. `show_nsfw?` includes NSFW channels;
+  a non-empty `"cq"` matches title, short name, or artist tag name. Subscription
+  state is scoped to the actor's user and is empty for an anonymous actor.
+
+  ## Examples
+
+      iex> load_channels(actor, false, %{"cq" => "pony"}, pagination)
+      {%Scrivener.Page{}, %{12 => true}}
+
+  """
+  @spec load_channels(Actor.t(), boolean(), map(), Repo.pagination_params()) ::
+          {Scrivener.Page.t(), %{optional(integer()) => true}}
+  def load_channels(%Actor{} = actor, show_nsfw?, params, pagination) do
+    channels = list_channels(show_nsfw?, params, pagination)
+    {channels, subscriptions(channels, actor.user)}
   end
 
   @doc """

@@ -121,19 +121,19 @@ defmodule Philomena.DnpEntriesTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown well-formed id is unauthorized for a plain user and a moderator, not-found for an admin" do
+    test "an unknown well-formed id is not-found for every signed-in role" do
       assert DnpEntries.load_dnp_entry(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert DnpEntries.load_dnp_entry(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert DnpEntries.load_dnp_entry(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for an anonymous viewer" do
-      assert DnpEntries.load_dnp_entry(actor(), "2147483647") == {:error, :unauthorized}
+    test "an unknown well-formed id is not-found for an anonymous viewer" do
+      assert DnpEntries.load_dnp_entry(actor(), "2147483647") == {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
@@ -192,6 +192,11 @@ defmodule Philomena.DnpEntriesTest do
       {user, _tag} = linked_user()
 
       assert DnpEntries.load_new_dnp_entry(actor(user, ban: @ban), %{}) == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before the tag check" do
+      assert DnpEntries.load_new_dnp_entry(actor(nil, fingerprint: nil), %{}) ==
+               {:error, :unauthorized}
     end
 
     test "an actor with no selectable tag is unauthorized" do

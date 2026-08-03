@@ -53,11 +53,6 @@ defmodule PhilomenaWeb.RuleController do
 
         render(conn, :show, rule: rule, versions: versions)
 
-      {:error, :rule_hidden} ->
-        conn
-        |> put_flash(:error, "You do not have permission to view that rule.")
-        |> redirect(to: ~p"/rules")
-
       {:error, _} = error ->
         error
     end

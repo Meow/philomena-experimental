@@ -8,7 +8,8 @@ defmodule Philomena.Subscriptions do
     This is the name of the object field in the subscription table.
     For `m:Philomena.Images`, this would be `:image_id`.
 
-  The following functions and documentation are produced in the calling module:
+  The following internal persistence functions are produced in the calling
+  module:
   - `subscribed?/2`
   - `subscriptions/2`
   - `create_subscription/2`
@@ -41,15 +42,7 @@ defmodule Philomena.Subscriptions do
     subscription_module = Module.concat(__CALLER__.module, Subscription)
 
     quote do
-      @doc """
-      Returns whether the user is currently subscribed to this object.
-
-      ## Examples
-
-          iex> subscribed?(object, user)
-          false
-
-      """
+      @doc false
       def subscribed?(object, user) do
         Philomena.Subscriptions.subscribed?(
           unquote(subscription_module),
@@ -59,16 +52,7 @@ defmodule Philomena.Subscriptions do
         )
       end
 
-      @doc """
-      Returns a map containing whether the user is currently subscribed to any of
-      the provided objects.
-
-      ## Examples
-
-          iex> subscriptions([%{id: 1}, %{id: 2}], user)
-          %{2 => true}
-
-      """
+      @doc false
       def subscriptions(objects, user) do
         Philomena.Subscriptions.subscriptions(
           unquote(subscription_module),
@@ -78,18 +62,7 @@ defmodule Philomena.Subscriptions do
         )
       end
 
-      @doc """
-      Creates a subscription.
-
-      ## Examples
-
-          iex> create_subscription(object, user)
-          {:ok, %Subscription{}}
-
-          iex> create_subscription(object, user)
-          {:error, %Ecto.Changeset{}}
-
-      """
+      @doc false
       def create_subscription(object, user) do
         Philomena.Subscriptions.create_subscription(
           unquote(subscription_module),
@@ -99,15 +72,7 @@ defmodule Philomena.Subscriptions do
         )
       end
 
-      @doc """
-      Deletes a subscription and removes notifications for it.
-
-      ## Examples
-
-          iex> delete_subscription(object, user)
-          {:ok, %Subscription{}}
-
-      """
+      @doc false
       def delete_subscription(object, user) do
         unquote(on_delete)
 
@@ -119,21 +84,7 @@ defmodule Philomena.Subscriptions do
         )
       end
 
-      @doc """
-      Creates a subscription inside the `m:Ecto.Multi` flow if `user` is not nil
-      and `field` in `user` is `true`.
-
-      Valid values for field are `:watch_on_reply`, `:watch_on_upload`, `:watch_on_new_topic`.
-
-      ## Examples
-
-          iex> maybe_subscribe_on(multi, :image, user, :watch_on_reply)
-          %Ecto.Multi{}
-
-          iex> maybe_subscribe_on(multi, :topic, nil, :watch_on_reply)
-          %Ecto.Multi{}
-
-      """
+      @doc false
       def maybe_subscribe_on(multi, change_name, user, field) do
         Philomena.Subscriptions.maybe_subscribe_on(multi, __MODULE__, change_name, user, field)
       end

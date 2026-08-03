@@ -25,18 +25,19 @@ defmodule Philomena.Loader do
   @typedoc "Generic type of fetch_and_authorize return value."
   @type fetch_and_authorize_result(t) :: {:ok, t} | {:error, :unauthorized | :not_found}
 
-  @typedoc "Generic type of fetch return value."
+  @typedoc "Generic type of a load that does not perform authorization."
   @type fetch_result(t) :: {:ok, t} | {:error, :not_found}
+
+  @typedoc "Errors shared by all authorized member loaders."
+  @type load_error :: :unauthorized | :not_found
 
   @doc """
   Loads the `queryable` record named by `id`, applying `preloads`, and authorizes
   `actor` for `action` on it.
 
-  The record is authorized before its existence is checked, so a well-formed id
-  that names no row is authorized as `nil`: no ordinary rule permits `nil`, so it
-  is `{:error, :unauthorized}`, while an actor whose grant covers `nil` instead
-  gets `{:error, :not_found}`. An id that no `integer` column could hold is
-  `{:error, :not_found}`.
+  Parsing and loading happen before authorization. A malformed ID or absent row
+  is therefore always `{:error, :not_found}`, independent of the actor. Only a
+  real record can produce `{:error, :unauthorized}`.
 
   Returns `{:ok, record}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
 
@@ -57,23 +58,9 @@ defmodule Philomena.Loader do
           preloads :: list()
         ) :: fetch_and_authorize_result(struct())
   def fetch_and_authorize(queryable, actor, action, id, preloads \\ []) do
-    case IntegerId.parse(id) do
-      {:ok, id} ->
-        record =
-          queryable
-          |> preload(^preloads)
-          |> Repo.get(id)
-
-        with :ok <- authorize(actor, action, record),
-             %{__struct__: _} <- record do
-          {:ok, record}
-        else
-          {:error, :unauthorized} -> {:error, :unauthorized}
-          nil -> {:error, :not_found}
-        end
-
-      :error ->
-        {:error, :not_found}
+    with {:ok, record} <- fetch(queryable, id, preloads),
+         :ok <- authorize(actor, action, record) do
+      {:ok, record}
     end
   end
 
@@ -114,6 +101,59 @@ defmodule Philomena.Loader do
 
       :error ->
         {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads one record from `query` without authorization.
+
+  This is the query-based counterpart to `fetch/3` for slugs, positions,
+  composite keys, and parent-scoped resources. An empty result is
+  `{:error, :not_found}`. If the query returns more than one row,
+  `Ecto.MultipleResultsError` is raised because that violates the caller's
+  one-record invariant.
+
+  ## Examples
+
+      iex> one(from rule in Rule, where: rule.position == 1)
+      {:ok, %Rule{}}
+
+      iex> one(from rule in Rule, where: rule.position == 999_999)
+      {:error, :not_found}
+
+  """
+  @spec one(query :: Ecto.Queryable.t()) :: fetch_result(struct())
+  def one(query) do
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      record -> {:ok, record}
+    end
+  end
+
+  @doc """
+  Loads one record from `query`, then authorizes `actor` for `action` on it.
+
+  An empty query result is always `{:error, :not_found}`. A loaded record the
+  actor cannot access is `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> one_and_authorize(from(rule in Rule, where: rule.position == 1), actor, :show)
+      {:ok, %Rule{}}
+
+      iex> one_and_authorize(from(rule in Rule, where: rule.position == 999_999), actor, :show)
+      {:error, :not_found}
+
+  """
+  @spec one_and_authorize(
+          query :: Ecto.Queryable.t(),
+          actor :: actor(),
+          action :: atom()
+        ) :: fetch_and_authorize_result(struct())
+  def one_and_authorize(query, actor, action) do
+    with {:ok, record} <- one(query),
+         :ok <- authorize(actor, action, record) do
+      {:ok, record}
     end
   end
 end

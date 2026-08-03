@@ -781,6 +781,15 @@ defmodule Philomena.UsersTest do
                {:error, :ban}
     end
 
+    test "an actor without a fingerprint is rejected before authorization" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_profile_for_description_edit(
+               actor(user, fingerprint: nil),
+               user.slug
+             ) == {:error, :unauthorized}
+    end
+
     test "an unknown slug is unauthorized for a moderator, not-found for an admin" do
       assert Users.load_profile_for_description_edit(
                actor(moderator_user_fixture()),
@@ -862,6 +871,15 @@ defmodule Philomena.UsersTest do
                actor(moderator_user_fixture(), ban: @ban),
                user.slug
              ) == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected before the mod-note check" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_profile_for_scratchpad_edit(
+               actor(moderator_user_fixture(), fingerprint: nil),
+               user.slug
+             ) == {:error, :unauthorized}
     end
 
     test "a permitted actor naming an unknown slug is not-found" do
@@ -1037,6 +1055,13 @@ defmodule Philomena.UsersTest do
       assert Users.load_user_for_rename(actor(user, ban: @ban)) == {:error, :ban}
     end
 
+    test "an actor without a fingerprint is rejected before authorization" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_user_for_rename(actor(user, fingerprint: nil)) ==
+               {:error, :unauthorized}
+    end
+
     test "a user who renamed within the window is unauthorized" do
       user = recently_renamed_user()
 
@@ -1124,6 +1149,13 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert Users.load_user_for_avatar_edit(actor(user, ban: @ban)) == {:error, :ban}
+    end
+
+    test "an actor without a fingerprint is rejected" do
+      user = confirmed_user_fixture()
+
+      assert Users.load_user_for_avatar_edit(actor(user, fingerprint: nil)) ==
+               {:error, :unauthorized}
     end
   end
 

@@ -17,6 +17,18 @@ defmodule Philomena.Authorization do
   @typedoc "Type of acceptable actor inputs."
   @type actor :: Actor.t() | User.t() | nil
 
+  @typedoc "The normalized reason returned by a failed ability check."
+  @type error_reason :: :unauthorized
+
+  @typedoc "The normalized failure returned by an ability check."
+  @type error :: {:error, error_reason()}
+
+  @typedoc "Reasons returned by the global write prerequisite."
+  @type write_error_reason :: :ban | error_reason()
+
+  @typedoc "Failures returned by the global write prerequisite."
+  @type write_error :: {:error, write_error_reason()}
+
   @doc """
   Authorizes `actor` to perform `action` on `subject`.
 
@@ -41,29 +53,12 @@ defmodule Philomena.Authorization do
 
   """
   @spec authorize(actor :: actor(), action :: atom(), subject :: any()) ::
-          :ok | {:error, :unauthorized}
+          :ok | error()
   def authorize(%Actor{user: user}, action, subject), do: authorize(user, action, subject)
 
   def authorize(actor, action, subject) do
     if Canada.Can.can?(actor, action, subject), do: :ok, else: {:error, :unauthorized}
   end
-
-  @doc """
-  FIXME: get rid of this. I am not aware of any location where we want this to succeed
-  where verify_write_access would fail.
-
-  Verifies that `actor` is not banned.
-
-  Returns `:ok` when the actor carries no active ban, otherwise `{:error, :ban}`.
-  The ban is the one looked up for the session's user, IP, and fingerprint; an
-  anonymous actor with no ban passes.
-
-  Read paths that precede a write use this function alone, checking only the ban;
-  the write itself uses `verify_write_access/1` instead.
-  """
-  @spec verify_not_banned(actor :: Actor.t()) :: :ok | {:error, :ban}
-  def verify_not_banned(%Actor{ban: nil}), do: :ok
-  def verify_not_banned(%Actor{}), do: {:error, :ban}
 
   @doc """
   Verifies that `actor` may perform a write.
@@ -76,8 +71,7 @@ defmodule Philomena.Authorization do
 
   The fingerprint requirement applies regardless of whether a user is signed in.
   """
-  @spec verify_write_access(actor :: Actor.t()) ::
-          :ok | {:error, :ban} | {:error, :unauthorized}
+  @spec verify_write_access(actor :: Actor.t()) :: :ok | write_error()
   def verify_write_access(%Actor{ban: ban}) when not is_nil(ban), do: {:error, :ban}
   def verify_write_access(%Actor{fingerprint: nil}), do: {:error, :unauthorized}
   def verify_write_access(%Actor{}), do: :ok

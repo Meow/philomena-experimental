@@ -6,7 +6,7 @@ defmodule Philomena.Images do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1, verify_not_banned: 1]
+    only: [authorize: 3, verify_write_access: 1]
 
   require Logger
 
@@ -1191,9 +1191,10 @@ defmodule Philomena.Images do
       {:error, :ban}
 
   """
-  @spec load_new_image(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :ban}
+  @spec load_new_image(Actor.t()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def load_new_image(%Actor{} = actor) do
-    with :ok <- verify_not_banned(actor) do
+    with :ok <- verify_write_access(actor) do
       {:ok, change_image(%Image{sources: [%Source{}]})}
     end
   end

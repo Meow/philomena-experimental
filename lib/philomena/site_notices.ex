@@ -1,14 +1,20 @@
 defmodule Philomena.SiteNotices do
   @moduledoc """
-  The SiteNotices context.
+  Public notice scheduling and authorized administrative management.
+
+  Public readers can fetch notices in their active UTC window without an
+  actor. Administrative functions are actor-first, enforce the global write
+  prerequisite for form and mutation paths, and distinguish missing records
+  from forbidden records.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.Attribution.Actor
-  alias Philomena.Repo
+  alias Philomena.Authorization
   alias Philomena.Loader
+  alias Philomena.Repo
   alias Philomena.SiteNotices.SiteNotice
 
   # Updates a site notice.
@@ -28,8 +34,15 @@ defmodule Philomena.SiteNotices do
     SiteNotice.changeset(site_notice, %{})
   end
 
+  defp load_site_notice(actor, id, action) do
+    Loader.fetch_and_authorize(SiteNotice, actor, action, id)
+  end
+
   @doc """
-  Returns the list active of site notices.
+  Returns currently active public notices, newest first.
+
+  A notice is active only when it is live and the current UTC time is strictly
+  between its start and finish times.
 
   ## Examples
 
@@ -37,6 +50,7 @@ defmodule Philomena.SiteNotices do
       [%SiteNotice{}, ...]
 
   """
+  @spec active_site_notices() :: [SiteNotice.t()]
   def active_site_notices do
     now = DateTime.utc_now()
 
@@ -53,6 +67,14 @@ defmodule Philomena.SiteNotices do
 
   Authorizes `:index` against the site-notice model. Returns
   `{:ok, site_notices}` or `{:error, :unauthorized}`.
+
+  ## Examples
+
+      iex> load_site_notices(actor, %{page_number: 1, page_size: 25})
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_site_notices(regular_user_actor, %{page_number: 1, page_size: 25})
+      {:error, :unauthorized}
   """
   @spec load_site_notices(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
@@ -70,13 +92,21 @@ defmodule Philomena.SiteNotices do
   @doc """
   Builds the changeset for a new site notice, on behalf of `actor`.
 
-  Authorizes `:new` against the site-notice model. Returns `{:ok, changeset}` or
-  `{:error, :unauthorized}`.
+  Verifies write access, then authorizes `:new` against the site-notice model.
+
+  ## Examples
+
+      iex> new_site_notice(admin_actor)
+      {:ok, %Ecto.Changeset{}}
+
+      iex> new_site_notice(banned_admin_actor)
+      {:error, :ban}
   """
   @spec new_site_notice(Actor.t()) ::
-          {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+          {:ok, Ecto.Changeset.t()} | Authorization.write_error()
   def new_site_notice(%Actor{} = actor) do
-    with :ok <- authorize(actor, :new, SiteNotice) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :new, SiteNotice) do
       {:ok, change_site_notice(%SiteNotice{})}
     end
   end
@@ -84,9 +114,8 @@ defmodule Philomena.SiteNotices do
   @doc """
   Creates a site notice on behalf of `actor`, whose user becomes its author.
 
-  Authorizes `:create` against the site-notice model, then inserts the notice.
-  Returns `{:ok, site_notice}`, `{:error, :unauthorized}`, or
-  `{:error, %Ecto.Changeset{}}`.
+  Verifies write access, authorizes `:create` against the site-notice model, and
+  attributes the inserted notice to the actor's user.
 
   ## Examples
 
@@ -98,9 +127,12 @@ defmodule Philomena.SiteNotices do
 
   """
   @spec create_site_notice(Actor.t(), map()) ::
-          {:ok, SiteNotice.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+          {:ok, SiteNotice.t()}
+          | Authorization.write_error()
+          | {:error, Ecto.Changeset.t()}
   def create_site_notice(%Actor{} = actor, attrs \\ %{}) do
-    with :ok <- authorize(actor, :create, SiteNotice) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, SiteNotice) do
       %SiteNotice{user_id: actor.user.id}
       |> SiteNotice.changeset(attrs)
       |> Repo.insert()
@@ -111,15 +143,23 @@ defmodule Philomena.SiteNotices do
   Loads the site notice named by the `id` for editing, on behalf of
   `actor`, pairing it with a change-tracking changeset.
 
-  Authorizes `:edit` against the loaded notice.
+  Verifies write access, then loads the notice and authorizes `:edit` against
+  the real record. Malformed and absent IDs are always not found.
 
-  Returns `{:ok, {site_notice, changeset}}`, `{:error, :unauthorized}`, or
-  `{:error, :not_found}`.
+  ## Examples
+
+      iex> load_site_notice_for_edit(admin_actor, "12")
+      {:ok, {%SiteNotice{}, %Ecto.Changeset{}}}
+
+      iex> load_site_notice_for_edit(admin_actor, "missing")
+      {:error, :not_found}
   """
   @spec load_site_notice_for_edit(Actor.t(), Loader.integer_id()) ::
-          {:ok, {SiteNotice.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+          {:ok, {SiteNotice.t(), Ecto.Changeset.t()}}
+          | {:error, Authorization.write_error_reason() | :not_found}
   def load_site_notice_for_edit(%Actor{} = actor, id) do
-    with {:ok, site_notice} <- load_site_notice(actor, id, :edit) do
+    with :ok <- verify_write_access(actor),
+         {:ok, site_notice} <- load_site_notice(actor, id, :edit) do
       {:ok, {site_notice, change_site_notice(site_notice)}}
     end
   end
@@ -127,14 +167,23 @@ defmodule Philomena.SiteNotices do
   @doc """
   Updates the site notice named by the `id`, on behalf of `actor`.
 
-  Loading and authorization follow `load_site_notice_for_edit/2`, authorizing
-  `:update`. Returns `{:ok, site_notice}`, `{:error, :unauthorized}`,
-  `{:error, :not_found}`, or `{:error, %Ecto.Changeset{}}`.
+  Verifies write access before loading the real record and authorizing
+  `:update`. A validation failure returns its changeset.
+
+  ## Examples
+
+      iex> update_site_notice(admin_actor, "12", %{title: "Maintenance"})
+      {:ok, %SiteNotice{}}
+
+      iex> update_site_notice(admin_actor, "12", %{title: ""})
+      {:error, %Ecto.Changeset{}}
   """
   @spec update_site_notice(Actor.t(), Loader.integer_id(), map()) ::
-          {:ok, SiteNotice.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, SiteNotice.t()}
+          | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
   def update_site_notice(%Actor{} = actor, id, attrs) do
-    with {:ok, site_notice} <- load_site_notice(actor, id, :update) do
+    with :ok <- verify_write_access(actor),
+         {:ok, site_notice} <- load_site_notice(actor, id, :update) do
       update_site_notice(site_notice, attrs)
     end
   end
@@ -142,23 +191,24 @@ defmodule Philomena.SiteNotices do
   @doc """
   Deletes the site notice named by the `id`, on behalf of `actor`.
 
-  Loading and authorization follow `load_site_notice_for_edit/2`, authorizing
-  `:delete`. Returns `{:ok, site_notice}`, `{:error, :unauthorized}`, or
-  `{:error, :not_found}`.
+  Verifies write access before loading the real record and authorizing
+  `:delete`.
+
+  ## Examples
+
+      iex> delete_site_notice(admin_actor, "12")
+      {:ok, %SiteNotice{}}
+
+      iex> delete_site_notice(admin_actor, "missing")
+      {:error, :not_found}
   """
   @spec delete_site_notice(Actor.t(), Loader.integer_id()) ::
-          {:ok, SiteNotice.t()} | {:error, :unauthorized | :not_found}
+          {:ok, SiteNotice.t()}
+          | {:error, Authorization.write_error_reason() | :not_found}
   def delete_site_notice(%Actor{} = actor, id) do
-    with {:ok, site_notice} <- load_site_notice(actor, id, :delete) do
+    with :ok <- verify_write_access(actor),
+         {:ok, site_notice} <- load_site_notice(actor, id, :delete) do
       delete_site_notice(site_notice)
     end
-  end
-
-  # Loads the site notice named by the `id` and authorizes `action`
-  # against it: a non-castable id or a `nil` load the actor was permitted to act
-  # on (an admin) is `{:error, :not_found}`, while a `nil` or real notice the
-  # actor may not act on is `{:error, :unauthorized}`.
-  defp load_site_notice(actor, id, action) do
-    Loader.fetch_and_authorize(SiteNotice, actor, action, id)
   end
 end
