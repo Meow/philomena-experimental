@@ -27,19 +27,14 @@ current/public filter actions, and tag hide/spoiler toggles.
   filter ownership/system-filter restrictions in Ability.
 - Normalize system/user/public/search listing visibility and query failures.
   Keep indexing/service APIs documented but separate from controller APIs.
-- Replace `Philomena.Schema.TagList`'s denormalized comma-string/ID-list
-  propagation for user settings and filters with normalized relations and one
-  canonical tag parsing/alias-resolution path. Coordinate the schema/backfill
-  with Users rather than silently maintaining both representations.
 - Reorder private CRUD/query/tag/indexing functions before public APIs; document
   forced-filter restrictions, default/current semantics, and reindex effects.
+- For now, do NOT replace `Philomena.Schema.TagList`'s denormalized comma-string/ID-list tag storage.
 
 ## TODO resolution
 
 - Remove sentinel-row switching behavior and replace it with an explicit default
   filter contract plus controller/context tests.
-- Remove the shared `Schema.TagList` TODO by landing normalized storage or a
-  separately tracked migration with a temporary, documented compatibility API.
 
 ## Verification
 

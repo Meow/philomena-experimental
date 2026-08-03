@@ -79,17 +79,13 @@ them in the same waves rather than leaving them outside the per-context count:
 
 - Unify `Philomena.Repo.pagination_params` with the search pagination type and
   make every SQL/OpenSearch loader accept the same validated page contract.
-- Remove `Philomena.Schema.TagList` in favor of normalized filter/settings tag
-  relations, or replace the marker with a concrete migration issue if schema work
-  must land separately. Do not keep denormalized IDs and comma strings as two
-  writable sources of truth.
-- Remove `Philomena.Versions.LegacyBackfill` at the intended release boundary;
-  until then, replace the version-number TODO with an explicit removal condition
-  that can be tested from release/schema state.
 - Stop using `Philomena.Images.Search.Scope` as an Actor substitute. Carry Actor
   explicitly for authorization and keep filter/query/pagination as search state.
 - Move search-query optimization into the parser/query AST; remove Images'
   recursive tag-name pattern matcher once the parser exposes referenced tags.
+- For now, do NOT remove `Philomena.Versions.LegacyBackfill`.
+- For now, do NOT remove `Philomena.Schema.TagList` in favor of normalized
+  filter/settings tag relations. Schema work must land separately.
 
 ### Module layout and public surface
 

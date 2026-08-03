@@ -21,9 +21,6 @@ defmodule Philomena.ArtistLinks do
   alias Philomena.ArtistLinks.BadgeAwarder
   alias Philomena.Tags
 
-  # TODO: the need to load a profile by slug in this module is a bit weird
-  # Might want to push that little bit of extra logic back to the controller.
-
   # Creates an artist link. Visible for testing.
   @doc false
   def create_artist_link(user, attrs) do

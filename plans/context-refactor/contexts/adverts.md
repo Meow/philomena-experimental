@@ -24,10 +24,8 @@ and the advert/admin image controllers.
 - Make `get_advert/1`, raw create/update helpers, upload plumbing, and moderation
   log construction private unless a concrete non-context caller requires a
   narrow replacement.
-- Resolve the image-update TODO by extracting one private transaction builder
-  shared with ordinary update while preserving an explicit image-change log.
-  Ensure file persistence and database/log changes have a documented failure
-  boundary.
+- Resolve the image-update TODO by deleting the bespoke logging code and using
+  `:update_image` as the action argument to `advert_log`.
 - Reorder private CRUD/query/log/upload functions before the public API and
   replace the placeholder moduledoc.
 

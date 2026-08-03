@@ -8,8 +8,6 @@ verification/rejection/contact controllers plus automatic verification jobs.
 - The context loads profiles by slug itself (an existing TODO calls this
   ownership questionable) and mixes `actor`, `actor.user`, ID-only artist-link
   loads, and slug-plus-ID controller contracts.
-- The update doc/TODO questions whether `slug` is needed; currently the loaded
-  link already carries its user/profile relationship.
 - Low-level `create_artist_link/1`, `verify_loaded_link/1`, and
   `automatic_verify!/1` share the public surface with actor-scoped APIs.
 - `authorized_profile/3` and `authorized_artist_link/3` reproduce custom missing
@@ -30,13 +28,6 @@ verification/rejection/contact controllers plus automatic verification jobs.
 - Move private profile/link loaders, state transitions, and mail/log helpers
   before the public API. Rewrite docs around verification state transitions,
   notifications, and failure shapes.
-
-## TODO resolution
-
-- “load a profile by slug is weird”: delegate the locator or enforce nested
-  ownership through a shared Users/Profiles API.
-- “slug probably isn't needed”: decide from route semantics and remove it unless
-  it proves parent membership; never keep an ignored security parameter.
 
 ## Verification
 
