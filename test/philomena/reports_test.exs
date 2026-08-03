@@ -29,6 +29,7 @@ defmodule Philomena.ReportsTest do
   import Philomena.ModNotesFixtures
   import Philomena.ReportsFixtures
   import Philomena.UsersFixtures
+  import Philomena.RulesFixtures
 
   alias Philomena.Commissions.Commission
   alias Philomena.Conversations.Conversation
@@ -38,6 +39,7 @@ defmodule Philomena.ReportsTest do
   alias Philomena.Reports
   alias Philomena.Reports.Report
   alias Philomena.Reports.ReportPage
+  alias Philomena.Reports.SearchIndex
   alias Philomena.Repo
   alias Philomena.Users.User
   alias PhilomenaQuery.Search
@@ -90,11 +92,10 @@ defmodule Philomena.ReportsTest do
       user = confirmed_user_fixture()
 
       assert {:ok, %Report{} = report} =
-               Reports.create_report(actor(user), "Image", image.id, report_params())
+               Reports.create_report(actor(user), report_params(), image_id: image.id)
 
       assert report.user_id == user.id
-      assert report.reportable_type == "Image"
-      assert report.reportable_id == image.id
+      assert report.image_id == image.id
       assert report.reason == "Test report reason"
       assert report.open
       no_moderation_logs!()
@@ -102,7 +103,7 @@ defmodule Philomena.ReportsTest do
 
     test "an anonymous fingerprinted actor creates a report with no user", %{image: image} do
       assert {:ok, %Report{} = report} =
-               Reports.create_report(actor(nil), "Image", image.id, report_params())
+               Reports.create_report(actor(nil), report_params(), image_id: image.id)
 
       assert report.user_id == nil
       assert report.ip != nil
@@ -114,9 +115,8 @@ defmodule Philomena.ReportsTest do
       assert {:error, %Ecto.Changeset{} = changeset} =
                Reports.create_report(
                  actor(confirmed_user_fixture()),
-                 "Image",
-                 image.id,
-                 report_params(%{"reason" => ""})
+                 report_params(%{"reason" => ""}),
+                 image_id: image.id
                )
 
       refute changeset.valid?
@@ -128,10 +128,10 @@ defmodule Philomena.ReportsTest do
 
       # Seed the user up to the limit; the next submission is refused.
       for _ <- 1..Reports.max_open_reports() do
-        report_fixture({"Image", image.id}, user)
+        report_fixture(user, image_id: image.id)
       end
 
-      assert Reports.create_report(actor(user), "Image", image.id, report_params()) ==
+      assert Reports.create_report(actor(user), report_params(), image_id: image.id) ==
                {:error, :too_many_reports}
     end
 
@@ -141,21 +141,21 @@ defmodule Philomena.ReportsTest do
       # The same open-report count that refuses a regular user does not refuse
       # staff, whose role is never rate-limited.
       for _ <- 1..Reports.max_open_reports() do
-        report_fixture({"Image", image.id}, moderator)
+        report_fixture(moderator, image_id: image.id)
       end
 
       assert {:ok, %Report{}} =
-               Reports.create_report(actor(moderator), "Image", image.id, report_params())
+               Reports.create_report(actor(moderator), report_params(), image_id: image.id)
     end
 
     test "the limit is keyed by IP for an anonymous actor", %{image: image} do
       # Anonymous submissions carry no user, so the cap is enforced against the
       # actor's IP, which the anonymous attribution fixture shares.
       for _ <- 1..Reports.max_open_reports() do
-        report_fixture({"Image", image.id})
+        report_fixture(image_id: image.id)
       end
 
-      assert Reports.create_report(actor(nil), "Image", image.id, report_params()) ==
+      assert Reports.create_report(actor(nil), report_params(), image_id: image.id) ==
                {:error, :too_many_reports}
     end
   end
@@ -178,7 +178,7 @@ defmodule Philomena.ReportsTest do
     test "an admin gets the assembled page struct with the searched report" do
       admin = admin_user_fixture()
       image = image_fixture()
-      report = report_fixture({"Image", image.id})
+      report = report_fixture(image_id: image.id)
       SearchHelpers.reindex_all!(Report)
 
       assert {:ok, %ReportPage{reports: reports, my_reports: my, system_reports: system}} =
@@ -204,7 +204,7 @@ defmodule Philomena.ReportsTest do
     test "the actor's own open reports populate my_reports and leave the searched list" do
       admin = admin_user_fixture()
       image = image_fixture()
-      report = report_fixture({"Image", image.id})
+      report = report_fixture(image_id: image.id)
       {:ok, _} = Reports.claim_report(actor(admin), to_string(report.id))
       SearchHelpers.reindex_all!(Report)
 
@@ -221,7 +221,7 @@ defmodule Philomena.ReportsTest do
       rule = Philomena.RulesFixtures.rule_fixture()
 
       {:ok, report} =
-        Reports.create_system_report({"Image", image.id}, rule.name, "System reason")
+        Reports.create_system_report(rule.name, "System reason", image_id: image.id)
 
       SearchHelpers.reindex_all!(Report)
 
@@ -237,7 +237,7 @@ defmodule Philomena.ReportsTest do
     test "the rq search branch drives reports and empties the own and system lists" do
       admin = admin_user_fixture()
       image = image_fixture()
-      report = report_fixture({"Image", image.id})
+      report = report_fixture(image_id: image.id)
 
       # A report that would land in my_reports in the default view.
       {:ok, _} = Reports.claim_report(actor(admin), to_string(report.id))
@@ -261,7 +261,7 @@ defmodule Philomena.ReportsTest do
   describe "load_report/2" do
     setup do
       image = image_fixture()
-      %{image: image, report: report_fixture({"Image", image.id})}
+      %{image: image, report: report_fixture(image_id: image.id)}
     end
 
     test "a moderator loads a report with the reportable resolved", %{
@@ -272,8 +272,7 @@ defmodule Philomena.ReportsTest do
                Reports.load_report(actor(moderator_user_fixture()), to_string(report.id))
 
       assert loaded.id == report.id
-      assert loaded.reportable_type == "Image"
-      assert loaded.reportable.id == image.id
+      assert loaded.image.id == image.id
     end
 
     test "an admin loads a report", %{report: report} do
@@ -309,7 +308,7 @@ defmodule Philomena.ReportsTest do
   describe "claim_report/2" do
     setup do
       image = image_fixture()
-      %{report: report_fixture({"Image", image.id})}
+      %{report: report_fixture(image_id: image.id)}
     end
 
     test "a moderator claims a report", %{report: report} do
@@ -361,7 +360,7 @@ defmodule Philomena.ReportsTest do
   describe "unclaim_report/2" do
     setup do
       image = image_fixture()
-      report = report_fixture({"Image", image.id})
+      report = report_fixture(image_id: image.id)
       {:ok, _} = Reports.claim_report(actor(admin_user_fixture()), to_string(report.id))
       %{report: report}
     end
@@ -401,7 +400,7 @@ defmodule Philomena.ReportsTest do
   describe "close_report/2" do
     setup do
       image = image_fixture()
-      %{report: report_fixture({"Image", image.id})}
+      %{report: report_fixture(image_id: image.id)}
     end
 
     test "a moderator closes a report", %{report: report} do
@@ -439,13 +438,10 @@ defmodule Philomena.ReportsTest do
   describe "mod_notes/3" do
     setup do
       image = image_fixture()
-      report = report_fixture({"Image", image.id})
+      report = report_fixture(image_id: image.id)
 
       note =
-        mod_note_fixture(moderator_user_fixture(), %{
-          "notable_type" => "Report",
-          "notable_id" => report.id
-        })
+        mod_note_fixture_for(moderator_user_fixture(), %{"report_id" => report.id})
 
       %{report: report, note: note}
     end
@@ -496,8 +492,7 @@ defmodule Philomena.ReportsTest do
 
       # The changeset is over a Report addressed at this image.
       assert %Report{} = changeset.data
-      assert changeset.data.reportable_type == "Image"
-      assert changeset.data.reportable_id == image.id
+      assert changeset.data.image_id == image.id
     end
 
     test "a regular user loads the report form for a visible image", %{image: image} do
@@ -604,8 +599,7 @@ defmodule Philomena.ReportsTest do
 
       # The changeset is over a Report addressed at this gallery.
       assert %Report{} = changeset.data
-      assert changeset.data.reportable_type == "Gallery"
-      assert changeset.data.reportable_id == gallery.id
+      assert changeset.data.gallery_id == gallery.id
     end
 
     # A well-formed id naming no row authorizes nil; no ordinary rule permits it,
@@ -692,8 +686,7 @@ defmodule Philomena.ReportsTest do
 
       # The changeset is over a Report addressed at this user.
       assert %Report{} = changeset.data
-      assert changeset.data.reportable_type == "User"
-      assert changeset.data.reportable_id == reported.id
+      assert changeset.data.reported_user_id == reported.id
     end
 
     # An unknown slug authorizes nil; no ordinary rule permits it, so an
@@ -781,8 +774,7 @@ defmodule Philomena.ReportsTest do
 
       # The changeset is over a Report addressed at this commission.
       assert %Report{} = changeset.data
-      assert changeset.data.reportable_type == "Commission"
-      assert changeset.data.reportable_id == commission.id
+      assert changeset.data.commission_id == commission.id
     end
 
     # The lookup runs no authorization, so an unknown slug is not-found for every
@@ -881,8 +873,7 @@ defmodule Philomena.ReportsTest do
 
       # The changeset is over a Report addressed at this conversation.
       assert %Report{} = changeset.data
-      assert changeset.data.reportable_type == "Conversation"
-      assert changeset.data.reportable_id == conversation.id
+      assert changeset.data.conversation_id == conversation.id
     end
 
     test "a non-participant regular user is unauthorized", %{conversation: conversation} do
@@ -1010,7 +1001,7 @@ defmodule Philomena.ReportsTest do
       }
 
       assert {:error, changeset} =
-               Reports.create_report(attribution(), attrs, [])
+               Reports.create_report(actor(), attrs, [])
 
       assert %{target: ["must reference exactly one target"]} = errors_on(changeset)
     end

@@ -17,6 +17,7 @@ defmodule Philomena.GalleriesTest do
   import Philomena.GalleriesFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
+  import Philomena.ReportsFixtures
 
   alias Philomena.Galleries
   alias Philomena.Galleries.Gallery
@@ -25,6 +26,8 @@ defmodule Philomena.GalleriesTest do
   alias Philomena.Images.Image
   alias Philomena.Images.Search.Scope
   alias Philomena.Repo
+  alias Philomena.Reports
+  alias Philomena.Reports.Report
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 

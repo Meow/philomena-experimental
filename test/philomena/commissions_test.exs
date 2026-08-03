@@ -18,12 +18,14 @@ defmodule Philomena.CommissionsTest do
   import Philomena.TagsFixtures
   import Philomena.UserIpsFixtures
   import Philomena.UsersFixtures
+  import Philomena.ReportsFixtures
 
   alias Philomena.Commissions
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.Item
   alias Philomena.Repo
   alias Philomena.Reports
+  alias Philomena.Reports.Report
 
   # A truthy ban value in the shape production passes; only its presence matters
   # to the write-access and not-banned checks the loaders run first.

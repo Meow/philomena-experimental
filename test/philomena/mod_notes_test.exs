@@ -15,20 +15,22 @@ defmodule Philomena.ModNotesTest do
   use Philomena.DataCase, async: true
 
   import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.DnpEntriesFixtures
   import Philomena.ModNotesFixtures
+  import Philomena.ReportsFixtures
+  import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
+  import Philomena.TagsFixtures
 
   alias Philomena.ModNotes
   alias Philomena.ModNotes.ModNote
 
   @pagination [page: 1, page_size: 25]
 
-  # Note params in the shape the admin form posts. notable_id is a plain integer
-  # (the relation is polymorphic, with no foreign key), so any id works.
+  # Note params in the shape the admin form posts.
   defp note_attrs(attrs \\ %{}) do
     Enum.into(attrs, %{
-      "notable_type" => "User",
-      "notable_id" => confirmed_user_fixture().id,
+      "user_id" => confirmed_user_fixture().id,
       "body" => "Watching this one"
     })
   end
@@ -63,13 +65,13 @@ defmodule Philomena.ModNotesTest do
 
     test "the notable filter restricts to the matching notable" do
       moderator = moderator_user_fixture()
-      wanted = mod_note_fixture(moderator, %{"notable_type" => "Report", "notable_id" => 12_345})
-      other = mod_note_fixture(moderator, %{"notable_type" => "Report", "notable_id" => 67_890})
+      wanted = mod_note_fixture(moderator)
+      other = mod_note_fixture(moderator)
 
       assert {:ok, page} =
                ModNotes.load_mod_note_index(
                  actor(moderator),
-                 %{"notable_type" => "Report", "notable_id" => "12345"},
+                 %{"user_id" => wanted.user_id},
                  & &1,
                  @pagination
                )
@@ -83,13 +85,9 @@ defmodule Philomena.ModNotesTest do
   describe "new_mod_note/2" do
     test "a moderator gets a changeset seeded from the params" do
       assert {:ok, changeset} =
-               ModNotes.new_mod_note(actor(moderator_user_fixture()), %{
-                 "notable_type" => "Report",
-                 "notable_id" => "7"
-               })
+               ModNotes.new_mod_note(actor(moderator_user_fixture()), %{"report_id" => "7"})
 
-      assert changeset.data.notable_type == "Report"
-      assert changeset.data.notable_id == "7"
+      assert changeset.data.report_id == 7
     end
 
     test "an assistant is authorized" do
@@ -304,13 +302,13 @@ defmodule Philomena.ModNotesTest do
     end
   end
 
-  describe "create_mod_note/3 against a target column" do
+  describe "create_mod_note/2 against a target column" do
     test "a user_id note sets user_id" do
       author = moderator_user_fixture()
       target = confirmed_user_fixture()
 
       {:ok, note} =
-        ModNotes.create_mod_note(author, %{"body" => "watching"}, user_id: target.id)
+        ModNotes.create_mod_note(actor(author), %{"body" => "watching", "user_id" => target.id})
 
       assert note.user_id == target.id
       assert note.report_id == nil
@@ -323,7 +321,10 @@ defmodule Philomena.ModNotesTest do
       report = report_fixture(image_id: image.id)
 
       {:ok, note} =
-        ModNotes.create_mod_note(author, %{"body" => "watching report"}, report_id: report.id)
+        ModNotes.create_mod_note(actor(author), %{
+          "body" => "watching report",
+          "report_id" => report.id
+        })
 
       assert note.report_id == report.id
       assert note.user_id == nil
@@ -336,36 +337,40 @@ defmodule Philomena.ModNotesTest do
       dnp_entry = dnp_entry_fixture(requester, tag)
 
       {:ok, note} =
-        ModNotes.create_mod_note(author, %{"body" => "watching dnp"}, dnp_entry_id: dnp_entry.id)
+        ModNotes.create_mod_note(actor(author), %{
+          "body" => "watching dnp",
+          "dnp_entry_id" => dnp_entry.id
+        })
 
       assert note.dnp_entry_id == dnp_entry.id
       assert note.user_id == nil
     end
   end
 
-  describe "create_mod_note/3 validation" do
+  describe "create_mod_note/2 validation" do
     test "rejects a note with no target" do
       author = moderator_user_fixture()
 
       assert {:error, changeset} =
-               ModNotes.create_mod_note(author, %{"body" => "orphan attempt"}, [])
+               ModNotes.create_mod_note(actor(author), %{"body" => "orphan attempt"})
 
       assert errors_on(changeset)[:target] == ["must reference exactly one target"]
     end
 
-    test "rejects a note referencing two targets" do
+    test "is not created referencing two targets" do
       author = moderator_user_fixture()
       target = confirmed_user_fixture()
       image = image_fixture()
       report = report_fixture(image_id: image.id)
 
-      assert {:error, changeset} =
-               ModNotes.create_mod_note(author, %{"body" => "two targets"},
-                 user_id: target.id,
-                 report_id: report.id
-               )
+      assert {:ok, note} =
+               ModNotes.create_mod_note(actor(author), %{
+                 "body" => "two targets",
+                 "user_id" => target.id,
+                 "report_id" => report.id
+               })
 
-      assert errors_on(changeset)[:target] == ["must reference exactly one target"]
+      assert is_nil(note.report_id) != is_nil(note.user_id)
     end
   end
 
@@ -417,9 +422,10 @@ defmodule Philomena.ModNotesTest do
       report = report_fixture(image_id: image.id)
 
       {:ok, _note} =
-        ModNotes.create_mod_note(author, %{"body" => "note on image report"},
-          report_id: report.id
-        )
+        ModNotes.create_mod_note(actor(author), %{
+          "body" => "note on image report",
+          "report_id" => report.id
+        })
 
       [{note, _body}] =
         ModNotes.list_all_mod_notes_for_target(

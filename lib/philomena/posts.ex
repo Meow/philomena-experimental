@@ -22,12 +22,12 @@ defmodule Philomena.Posts do
   alias Philomena.UserStatistics
   alias Philomena.Users.User
   alias Philomena.Posts.Post
+  alias Philomena.Posts.PostVersion
   alias Philomena.Posts
   alias Philomena.IndexWorker
   alias Philomena.Forums.Forum
   alias Philomena.Notifications
   alias Philomena.Versions
-  alias Philomena.Versions.Version
   alias Philomena.Reports
   alias Philomena.Reports.Report
   alias Philomena.RateLimiter
@@ -949,13 +949,13 @@ defmodule Philomena.Posts do
           topic_slug :: String.t(),
           post_id :: Loader.integer_id()
         ) ::
-          {:ok, {Topic.t(), Post.t(), [Version.t()]}}
+          {:ok, {Topic.t(), Post.t(), [PostVersion.t()]}}
           | {:error, :unauthorized | :not_found}
   def post_history(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with {:ok, _forum, topic} <-
            Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
          {:ok, post} <- load_topic_post(actor, topic, post_id) do
-      {:ok, {topic, post, Versions.load_last_versions("Post", post)}}
+      {:ok, {topic, post, Versions.load_post_versions(post)}}
     end
   end
 

@@ -1,6 +1,7 @@
 defmodule PhilomenaWeb.Image.ReportController do
   use PhilomenaWeb, :controller
 
+  alias PhilomenaWeb.ReportController
   alias PhilomenaWeb.ReportView
   alias Philomena.Reports
 

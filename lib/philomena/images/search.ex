@@ -229,7 +229,7 @@ defmodule Philomena.Images.Search do
 
   defp delay_home_images?(nil), do: true
   defp delay_home_images?(user) when user.role != "user", do: user.staff_delay_home_images
-  defp delay_home_images?(user), do: user.delay_home_images
+  defp delay_home_images?(user), do: user.settings.delay_home_images
 
   defp create_filters(scope) do
     show_hidden? = Canada.Can.can?(scope.user, :hide, %Image{})

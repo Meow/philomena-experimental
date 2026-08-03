@@ -191,8 +191,7 @@ defmodule Philomena.ProfilesTest do
 
       {:ok, note} =
         Philomena.ModNotes.create_mod_note(actor(moderator), %{
-          "notable_type" => "User",
-          "notable_id" => user.id,
+          "user_id" => user.id,
           "body" => "Watching this account"
         })
 

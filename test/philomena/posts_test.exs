@@ -22,12 +22,12 @@ defmodule Philomena.PostsTest do
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Posts
   alias Philomena.Posts.Post
+  alias Philomena.Posts.PostVersion
   alias Philomena.Forums.Forum
   alias Philomena.Reports.Report
   alias Philomena.Repo
   alias Philomena.Topics.Topic
   alias Philomena.Users.User
-  alias Philomena.Versions.Version
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to the write-access and
@@ -512,7 +512,7 @@ defmodule Philomena.PostsTest do
           "edit_reason" => "typo fix"
         })
 
-      assert {:ok, {_topic, _post, [%Version{} = version]}} =
+      assert {:ok, {_topic, _post, [%PostVersion{} = version]}} =
                Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
       # create_version records the body as it stood before the edit, so the
@@ -581,8 +581,7 @@ defmodule Philomena.PostsTest do
 
       # The changeset is over a Report addressed at this post.
       assert %Report{} = changeset.data
-      assert changeset.data.reportable_type == "Post"
-      assert changeset.data.reportable_id == post.id
+      assert changeset.data.post_id == post.id
     end
 
     test "an unknown forum is unauthorized", %{topic: topic} do
@@ -950,11 +949,9 @@ defmodule Philomena.PostsTest do
       # from the persisted `object` blob only through the history loader, so the
       # value is read back via post_history: create_version records the body as it
       # stood before the edit, so the single version carries the original text.
-      assert Repo.exists?(
-               from v in Version, where: v.item_type == "Post" and v.item_id == ^post.id
-             )
+      assert Repo.exists?(from v in PostVersion, where: v.post_id == ^post.id)
 
-      assert {:ok, {_topic, _post, [%Version{} = version]}} =
+      assert {:ok, {_topic, _post, [%PostVersion{} = version]}} =
                Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
       assert version.body == "Original reply body"

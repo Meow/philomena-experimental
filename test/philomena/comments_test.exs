@@ -24,11 +24,11 @@ defmodule Philomena.CommentsTest do
   alias Philomena.Filters.Filter
   alias Philomena.Repo
   alias Philomena.Comments.Comment
+  alias Philomena.Comments.CommentVersion
   alias Philomena.Images.Image
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Reports.Report
   alias Philomena.Users.User
-  alias Philomena.Versions.Version
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 
@@ -218,7 +218,7 @@ defmodule Philomena.CommentsTest do
 
     test "approving closes the comment's open reports", %{image: image} do
       {comment, _author} = unapproved_comment(image)
-      report = report_fixture({"Comment", comment.id}, confirmed_user_fixture())
+      report = report_fixture(confirmed_user_fixture(), comment_id: comment.id)
 
       assert report.open
       assert report.state == "open"
@@ -656,7 +656,7 @@ defmodule Philomena.CommentsTest do
           "edit_reason" => "typo fix"
         })
 
-      assert {:ok, {_image, _comment, [%Version{} = version]}} =
+      assert {:ok, {_image, _comment, [%CommentVersion{} = version]}} =
                Comments.comment_history(actor(), "#{image.id}", "#{comment.id}")
 
       # create_version records the body as it stood before the edit, so the
@@ -1049,8 +1049,7 @@ defmodule Philomena.CommentsTest do
 
       # The changeset is over a Report addressed at this comment.
       assert %Report{} = changeset.data
-      assert changeset.data.reportable_type == "Comment"
-      assert changeset.data.reportable_id == comment.id
+      assert changeset.data.comment_id == comment.id
     end
 
     test "a regular user cannot load a hidden comment's report form", %{image: image} do
@@ -1293,9 +1292,14 @@ defmodule Philomena.CommentsTest do
   end
 
   defp oldest_first_user do
-    confirmed_user_fixture()
-    |> Ecto.Changeset.change(comments_newest_first: false)
-    |> Repo.update!()
+    user = confirmed_user_fixture()
+
+    settings =
+      user.settings
+      |> Ecto.Changeset.change(comments_newest_first: false)
+      |> Repo.update!()
+
+    %{user | settings: settings}
   end
 
   describe "paginate_image_comments/3" do

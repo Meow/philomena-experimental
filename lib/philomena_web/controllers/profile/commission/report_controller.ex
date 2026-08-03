@@ -19,7 +19,7 @@ defmodule PhilomenaWeb.Profile.Commission.ReportController do
       |> put_view(ReportView)
       |> render("new.html",
         title: "Reporting Commission",
-        reportable: commission,
+        subject: commission,
         changeset: changeset,
         action: action
       )

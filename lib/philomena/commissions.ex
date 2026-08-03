@@ -43,8 +43,9 @@ defmodule Philomena.Commissions do
     |> Repo.update()
   end
 
-  # Deletes a commission.
-  defp delete_commission(%Commission{} = commission, closing_user, _unused) do
+  # Deletes a commission. Visible for testing.
+  @doc false
+  def delete_commission(%Commission{} = commission, closing_user, _unused) do
     Multi.new()
     |> Multi.update_all(
       :reports,

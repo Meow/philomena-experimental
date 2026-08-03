@@ -1,9 +1,9 @@
 defmodule PhilomenaWeb.Image.Comment.ReportController do
   use PhilomenaWeb, :controller
 
+  alias PhilomenaWeb.ReportController
   alias PhilomenaWeb.ReportView
   alias Philomena.Comments
-  alias Philomena.Reports
 
   plug PhilomenaWeb.CaptchaPlug
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]

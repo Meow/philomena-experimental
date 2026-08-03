@@ -284,7 +284,7 @@ defmodule Philomena.Galleries do
   def delete_gallery(%Actor{} = actor, gallery_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :delete) do
-      delete_gallery(gallery)
+      delete_gallery(gallery, actor.user, nil)
     end
   end
 
@@ -639,6 +639,23 @@ defmodule Philomena.Galleries do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Galleries", "id", [gallery.id]])
 
     gallery
+  end
+
+  @doc """
+  Queues multiple galleries for reindexing by their ids.
+
+  ## Examples
+
+      iex> reindex_galleries([1, 2, 3])
+      [1, 2, 3]
+
+  """
+  def reindex_galleries([]), do: []
+
+  def reindex_galleries(gallery_ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Galleries", "id", gallery_ids])
+
+    gallery_ids
   end
 
   @doc """

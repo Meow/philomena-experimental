@@ -417,9 +417,9 @@ defmodule Philomena.Conversations do
       {:ok, nil}
     else
       Reports.create_system_report(
-        {"Conversation", message.conversation_id},
         "Approval",
-        "PM contains externally-embedded images"
+        "PM contains externally-embedded images",
+        conversation_id: message.conversation_id
       )
     end
   end

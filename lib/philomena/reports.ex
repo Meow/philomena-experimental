@@ -39,6 +39,7 @@ defmodule Philomena.Reports do
   alias Philomena.Galleries.Gallery
 
   @max_open_reports 5
+  @default_preloads [:admin, :rule, user: :linked_tags]
 
   @doc """
   The maximum number of simultaneously open reports a regular user (or an
@@ -167,36 +168,38 @@ defmodule Philomena.Reports do
   end
 
   defp searched_reports(query, pagination) do
-    reports =
+    queryable =
       Report
-      |> Search.search_definition(
-        %{
-          query: query,
-          sort: report_sorts()
-        },
-        pagination
-      )
-      |> Search.search_records(preload(Report, [:admin, :rule, user: :linked_tags]))
+      |> preload(^@default_preloads)
+      |> preload(^Report.target_preloads())
 
-    %{reports | entries: preload_targets(reports)}
+    Report
+    |> Search.search_definition(
+      %{
+        query: query,
+        sort: report_sorts()
+      },
+      pagination
+    )
+    |> Search.search_records(queryable)
   end
 
   defp own_open_reports(actor) do
     Report
     |> where(open: true, admin_id: ^actor.user.id)
-    |> preload([:admin, :rule, user: :linked_tags])
+    |> preload(^@default_preloads)
+    |> preload(^Report.target_preloads())
     |> order_by(desc: :created_at)
     |> Repo.all()
-    |> preload_targets()
   end
 
   defp open_system_reports do
     Report
     |> where(open: true, system: true)
-    |> preload([:admin, :rule, user: :linked_tags])
+    |> preload(^@default_preloads)
+    |> preload(^Report.target_preloads())
     |> order_by(desc: :created_at)
     |> Repo.all()
-    |> preload_targets()
   end
 
   defp report_sorts do
@@ -240,6 +243,7 @@ defmodule Philomena.Reports do
 
   defp load_report_with_preloads(id) do
     Report
+    |> preload(^@default_preloads)
     |> preload(^Report.target_preloads())
     |> Repo.get(id)
   end
@@ -946,18 +950,6 @@ defmodule Philomena.Reports do
       conversation: from(c in Conversation, preload: [:from, :to]),
       gallery: from(g in Gallery, preload: :user)
     ]
-  end
-
-  def convert_reports!() do
-    rules =
-      Rules.list_reportable_rules()
-      |> Enum.map(&{&1.name, &1})
-      |> Map.new()
-
-    Report
-    |> preload([:rule])
-    |> Batch.records(batch_size: 128)
-    |> Enum.each(&convert_report(&1, rules))
   end
 
   def convert_reports!() do

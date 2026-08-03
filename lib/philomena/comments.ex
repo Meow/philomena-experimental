@@ -23,6 +23,7 @@ defmodule Philomena.Comments do
   alias Philomena.Users.User
   alias Philomena.Filters.Filter
   alias Philomena.Comments.Comment
+  alias Philomena.Comments.CommentVersion
   alias Philomena.Comments.Query
   alias Philomena.Comments
   alias Philomena.IndexWorker
@@ -31,7 +32,6 @@ defmodule Philomena.Comments do
   alias Philomena.Tags.Tag
   alias Philomena.Notifications
   alias Philomena.Versions
-  alias Philomena.Versions.Version
   alias Philomena.Reports
   alias Philomena.Reports.Report
 
@@ -247,12 +247,12 @@ defmodule Philomena.Comments do
           image_id :: IntegerId.integer_id(),
           comment_id :: IntegerId.integer_id()
         ) ::
-          {:ok, {Image.t(), Comment.t(), [Version.t()]}}
+          {:ok, {Image.t(), Comment.t(), [CommentVersion.t()]}}
           | {:error, :unauthorized | :not_found}
   def comment_history(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- Images.load_visible_image(actor, image_id),
          {:ok, comment} <- load_image_comment(actor, image, comment_id) do
-      {:ok, {image, comment, Versions.load_last_versions("Comment", comment)}}
+      {:ok, {image, comment, Versions.load_comment_versions(comment)}}
     end
   end
 
@@ -427,7 +427,7 @@ defmodule Philomena.Comments do
   @spec paginate_image_comments(Actor.t(), Image.t(), Repo.pagination_params()) ::
           Scrivener.Page.t()
   def paginate_image_comments(%Actor{user: user}, image, pagination) do
-    direction = load_direction(user.settings)
+    direction = load_direction(user)
 
     visible_image_comments(user, image)
     |> order_by([{^direction, :created_at}])

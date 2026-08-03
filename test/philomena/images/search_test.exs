@@ -98,11 +98,14 @@ defmodule Philomena.Images.SearchTest do
     end
 
     test "includes recent images for a user who disabled the upload delay" do
-      user =
-        confirmed_user_fixture()
+      user = confirmed_user_fixture()
+
+      settings =
+        user.settings
         |> Ecto.Changeset.change(delay_home_images: false)
         |> Repo.update!()
 
+      user = %{user | settings: settings}
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 

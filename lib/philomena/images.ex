@@ -396,18 +396,9 @@ defmodule Philomena.Images do
   defp hide_image_multi(changeset, image, user, multi) do
     report_query = Reports.close_report_query(user, image_id: image.id)
 
-    galleries =
-      Gallery
-      |> join(:inner, [g], gi in assoc(g, :interactions), on: gi.image_id == ^image.id)
-      |> update(inc: [image_count: -1])
-
-    gallery_interactions = where(Interaction, image_id: ^image.id)
-
     multi
     |> Multi.update(:image, changeset)
     |> Multi.update_all(:reports, report_query, [])
-    |> Multi.update_all(:galleries, galleries, [])
-    |> Multi.delete_all(:gallery_interactions, gallery_interactions, [])
     |> Multi.run(:tags, fn repo, %{image: image} ->
       image = Repo.preload(image, :tags, force: true)
 
@@ -1173,7 +1164,7 @@ defmodule Philomena.Images do
   end
 
   defp maybe_jump_to_last_page(
-         %{comments_newest_first: false, comments_always_jump_to_last: true} = user,
+         %{settings: %{comments_newest_first: false, comments_always_jump_to_last: true}} = user,
          image,
          scrivener
        ) do

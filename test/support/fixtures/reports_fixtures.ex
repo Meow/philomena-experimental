@@ -25,7 +25,7 @@ defmodule Philomena.ReportsFixtures do
       })
       |> Map.put_new_lazy("rule_id", fn -> Philomena.RulesFixtures.rule_fixture().id end)
 
-    {:ok, report} = Reports.create_report(attribution(user), attrs, target)
+    {:ok, report} = Reports.create_report(actor(user), attrs, target)
 
     report
   end

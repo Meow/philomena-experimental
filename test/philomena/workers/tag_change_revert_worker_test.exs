@@ -29,7 +29,7 @@ defmodule Philomena.TagChangeRevertWorkerTest do
     image = Repo.preload(image, [:tags], force: true)
 
     {:ok, _} =
-      Images.update_tags(image, attribution(user), %{
+      Images.update_loaded_tags(image, actor(user), %{
         "old_tag_input" => old_input,
         "tag_input" => new_input
       })

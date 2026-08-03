@@ -147,10 +147,7 @@ defmodule Philomena.DnpEntriesTest do
       entry = dnp_entry_fixture(user, tag)
 
       note =
-        mod_note_fixture(moderator_user_fixture(), %{
-          "notable_type" => "DnpEntry",
-          "notable_id" => entry.id
-        })
+        mod_note_fixture_for(moderator_user_fixture(), %{"dnp_entry_id" => entry.id})
 
       # The renderer zips each note with its rendered body into a {note, body}
       # tuple, so the identity renderer pairs each note with itself.

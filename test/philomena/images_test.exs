@@ -219,7 +219,7 @@ defmodule Philomena.ImagesTest do
       {:ok, _} = Galleries.add_image_to_gallery(gallery, image)
 
       assert {:ok, %{galleries: {1, [gallery_id]}}} =
-               Images.hide_image(image, moderator, %{"deletion_reason" => "Rule violation"})
+               Images.hide_loaded_image(image, moderator, %{"deletion_reason" => "Rule violation"})
 
       assert gallery_id == gallery.id
       assert Repo.reload!(gallery).image_count == 0
@@ -231,7 +231,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, %{galleries: {0, []}}} =
-               Images.hide_image(image, moderator, %{"deletion_reason" => "Rule violation"})
+               Images.hide_loaded_image(image, moderator, %{"deletion_reason" => "Rule violation"})
     end
   end
 
@@ -4207,11 +4207,14 @@ defmodule Philomena.ImagesTest do
     end
 
     test "an oldest-first jump-to-last viewer lands on the final comment page" do
-      user =
-        confirmed_user_fixture()
+      user = confirmed_user_fixture()
+
+      settings =
+        user.settings
         |> Ecto.Changeset.change(comments_newest_first: false, comments_always_jump_to_last: true)
         |> Repo.update!()
 
+      user = %{user | settings: settings}
       image = image_fixture()
       author = confirmed_user_fixture()
       for _ <- 1..3, do: comment_fixture(image, author)
