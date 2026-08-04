@@ -12,16 +12,18 @@ defmodule Philomena.AdvertsTest do
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.AdvertsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Adverts
   alias Philomena.Adverts.Advert
+  alias Philomena.Adverts.Recorder
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Repo
 
   @pagination %{page_number: 1, page_size: 25}
+  @ban %{reason: "Rule #0", valid_until: ~U[3000-01-01 00:00:00Z]}
 
   defp moderation_logs, do: Repo.all(ModerationLog)
 
@@ -147,6 +149,18 @@ defmodule Philomena.AdvertsTest do
                {:error, :unauthorized}
     end
 
+    test "an Advert-role moderator is authorized for the edit action" do
+      advert = advert_fixture()
+
+      assert {:ok, {%Advert{id: id}, %Ecto.Changeset{}}} =
+               Adverts.load_advert_for_edit(
+                 actor(role_moderator_fixture("Advert")),
+                 advert.id
+               )
+
+      assert id == advert.id
+    end
+
     test "a non-castable id is not-found" do
       assert Adverts.load_advert_for_edit(actor(admin_user_fixture()), "abc") ==
                {:error, :not_found}
@@ -188,6 +202,15 @@ defmodule Philomena.AdvertsTest do
 
       assert Repo.get(Advert, advert.id).title == "Unchanged Advert"
       no_moderation_logs!()
+    end
+
+    test "an Advert-role moderator is authorized for the update action" do
+      advert = advert_fixture()
+
+      assert {:ok, %Advert{title: "Role Updated Advert"}} =
+               Adverts.update_advert(actor(role_moderator_fixture("Advert")), advert.id, %{
+                 "title" => "Role Updated Advert"
+               })
     end
 
     test "an unknown id is not-found for every actor" do
@@ -250,6 +273,17 @@ defmodule Philomena.AdvertsTest do
       no_moderation_logs!()
     end
 
+    test "an Advert-role moderator is authorized for the image-update action" do
+      advert = advert_fixture()
+
+      assert {:ok, %Advert{}} =
+               Adverts.update_advert_image(
+                 actor(role_moderator_fixture("Advert")),
+                 advert.id,
+                 %{"image" => png_upload()}
+               )
+    end
+
     test "an unknown id is not-found for every actor" do
       assert Adverts.update_advert_image(actor(admin_user_fixture()), "2147483647", %{
                "image" => png_upload()
@@ -287,6 +321,15 @@ defmodule Philomena.AdvertsTest do
       no_moderation_logs!()
     end
 
+    test "an Advert-role moderator is authorized for the delete action" do
+      advert = advert_fixture()
+
+      assert {:ok, %Advert{id: id}} =
+               Adverts.delete_advert(actor(role_moderator_fixture("Advert")), advert.id)
+
+      assert id == advert.id
+    end
+
     test "a non-castable id is not-found" do
       assert Adverts.delete_advert(actor(admin_user_fixture()), "abc") == {:error, :not_found}
     end
@@ -297,6 +340,71 @@ defmodule Philomena.AdvertsTest do
 
       assert Adverts.delete_advert(actor(role_moderator_fixture("Advert")), "2147483647") ==
                {:error, :not_found}
+    end
+  end
+
+  describe "public recording" do
+    test "record_click/1 accepts only a currently live advert" do
+      now = DateTime.utc_now(:second)
+      live = advert_fixture()
+      disabled = advert_fixture(%{live: false})
+      expired = advert_fixture(%{finish_date: DateTime.add(now, -1, :second)})
+      future = advert_fixture(%{start_date: DateTime.add(now, 1, :hour)})
+
+      assert {:ok, %Advert{id: id}} = Adverts.record_click(live.id)
+      assert id == live.id
+      assert Adverts.record_click(disabled.id) == {:error, :not_found}
+      assert Adverts.record_click(expired.id) == {:error, :not_found}
+      assert Adverts.record_click(future.id) == {:error, :not_found}
+      assert Adverts.record_click("not-an-id") == {:error, :not_found}
+      assert Adverts.record_click(2_000_000_000) == {:error, :not_found}
+    end
+
+    test "Recorder flushes only counters for adverts that are still live" do
+      live =
+        advert_fixture() |> Ecto.Changeset.change(impressions: 10, clicks: 4) |> Repo.update!()
+
+      disabled =
+        advert_fixture(%{live: false})
+        |> Ecto.Changeset.change(impressions: 20, clicks: 8)
+        |> Repo.update!()
+
+      absent_id = 2_000_000_000
+
+      assert :ok =
+               Recorder.run(%{
+                 impressions: %{live.id => 3, disabled.id => 5, absent_id => 7},
+                 clicks: %{live.id => 2, disabled.id => 4, absent_id => 6}
+               })
+
+      assert %{impressions: 13, clicks: 6} = Repo.get!(Advert, live.id)
+      assert %{impressions: 20, clicks: 8} = Repo.get!(Advert, disabled.id)
+      refute Repo.get(Advert, absent_id)
+    end
+  end
+
+  describe "global write prerequisite" do
+    test "forms and mutations reject banned and unattributed administrators" do
+      admin = admin_user_fixture()
+      advert = advert_fixture(%{title: "Unchanged by policy"})
+
+      operations = [
+        fn actor -> Adverts.new_advert(actor) end,
+        fn actor -> Adverts.create_advert(actor, %{}) end,
+        fn actor -> Adverts.load_advert_for_edit(actor, advert.id) end,
+        fn actor -> Adverts.load_advert_for_image_edit(actor, advert.id) end,
+        fn actor -> Adverts.update_advert(actor, advert.id, %{"title" => "Changed"}) end,
+        fn actor -> Adverts.update_advert_image(actor, advert.id, %{}) end,
+        fn actor -> Adverts.delete_advert(actor, advert.id) end
+      ]
+
+      for operation <- operations do
+        assert operation.(actor(admin, ban: @ban)) == {:error, :ban}
+        assert operation.(actor(admin, fingerprint: nil)) == {:error, :unauthorized}
+      end
+
+      assert Repo.get!(Advert, advert.id).title == "Unchanged by policy"
+      no_moderation_logs!()
     end
   end
 end

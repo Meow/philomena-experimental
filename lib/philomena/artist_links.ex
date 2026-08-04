@@ -1,6 +1,11 @@
 defmodule Philomena.ArtistLinks do
   @moduledoc """
-  The ArtistLinks context.
+  Profile-scoped artist-link submission and staff verification workflows.
+
+  Nested member paths constrain both profile slug and link ID before
+  authorization. Form loaders and mutations enforce the global write
+  prerequisite; the release task uses the separately documented automatic
+  verification service.
   """
 
   import Ecto.Query, warn: false
@@ -8,22 +13,18 @@ defmodule Philomena.ArtistLinks do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
-  alias Philomena.Repo
-  alias Philomena.Loader
-
+  alias Philomena.ArtistLinks.{ArtistLink, AutomaticVerifier, BadgeAwarder}
   alias Philomena.Attribution.Actor
+  alias Philomena.Authorization
+  alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
-  alias Philomena.Users.User
-  alias Philomena.ArtistLinks.ArtistLink
-  alias Philomena.ArtistLinks.AutomaticVerifier
-  alias Philomena.ArtistLinks.BadgeAwarder
+  alias Philomena.Repo
   alias Philomena.Tags
+  alias Philomena.Users.User
 
-  # Creates an artist link. Visible for testing.
-  @doc false
-  def create_artist_link(user, attrs) do
+  defp insert_artist_link(user, attrs) do
     tag = Tags.get_tag_or_alias_by_name(attrs["tag_name"])
 
     %ArtistLink{}
@@ -40,21 +41,13 @@ defmodule Philomena.ArtistLinks do
     |> Repo.update()
   end
 
-  # Transitions an artist link to the verified state. Visible for testing.
-  @doc false
-  def verify_loaded_link(%ArtistLink{} = artist_link, verifying_user) do
-    artist_link_changeset = ArtistLink.verify_changeset(artist_link, verifying_user)
-
-    Multi.new()
-    |> Multi.update(:artist_link, artist_link_changeset)
-    |> Multi.run(:add_award, BadgeAwarder.award_callback(artist_link, verifying_user))
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{artist_link: artist_link}} ->
-        {:ok, artist_link}
-
-      {:error, _operation, _value, _changes} ->
-        :error
+  defp verify_loaded_link(%ArtistLink{} = artist_link, verifying_user) do
+    with {:ok, artist_link} <-
+           artist_link
+           |> ArtistLink.verify_changeset(verifying_user)
+           |> Repo.update(),
+         {:ok, _award} <- BadgeAwarder.award_badge(artist_link, verifying_user) do
+      {:ok, artist_link}
     end
   end
 
@@ -77,11 +70,81 @@ defmodule Philomena.ArtistLinks do
     ArtistLink.changeset(artist_link, %{})
   end
 
+  defp profile_query(slug) do
+    User
+    |> where(slug: ^slug)
+    |> where([u], is_nil(u.deleted_at))
+  end
+
+  defp load_authorized_profile(actor, action, slug) do
+    with {:ok, user} <- slug |> profile_query() |> Loader.one(),
+         :ok <- authorize(actor, action, user) do
+      {:ok, user}
+    end
+  end
+
+  defp load_scoped_artist_link(actor, action, slug, id) do
+    case IntegerId.parse(id) do
+      {:ok, id} ->
+        ArtistLink
+        |> join(:inner, [al], user in assoc(al, :user))
+        |> where([al, user], al.id == ^id and user.slug == ^slug and is_nil(user.deleted_at))
+        |> preload([_al, user], user: user)
+        |> preload([:tag, :contacted_by_user])
+        |> Loader.one_and_authorize(actor, action)
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp load_artist_link(actor, action, id) do
+    Loader.fetch_and_authorize(ArtistLink, actor, action, id, [
+      :user,
+      :tag,
+      :contacted_by_user
+    ])
+  end
+
+  defp transact_and_log(operation, log) do
+    Repo.transact(fn ->
+      with {:ok, artist_link} <- operation.(),
+           {:ok, _log} <- log.(artist_link) do
+        {:ok, artist_link}
+      end
+    end)
+  end
+
+  defp transition_log(actor, action, artist_link) do
+    {type, body} =
+      case action do
+        :verify ->
+          {"Admin.ArtistLink.Verification:create",
+           "Verified artist link #{artist_link.uri} created by #{artist_link.user.name}"}
+
+        :reject ->
+          {"Admin.ArtistLink.Reject:create",
+           "Rejected artist link #{artist_link.uri} created by #{artist_link.user.name}"}
+
+        :contact ->
+          {"Admin.ArtistLink.Contact:create",
+           "Contacted artist #{artist_link.user.name} at #{artist_link.uri}"}
+      end
+
+    ModerationLogs.create_moderation_log(
+      actor,
+      type,
+      Paths.artist_link_path(artist_link.user, artist_link),
+      body
+    )
+  end
+
   @doc """
   Updates all artist links pending verification, by transitioning to link verified state
   or resetting next update time.
   """
-  def automatic_verify! do
+  @spec run_automatic_verification!() :: :ok
+  def run_automatic_verification! do
     Enum.each(AutomaticVerifier.generate_updates(), &Repo.update!/1)
   end
 
@@ -104,7 +167,7 @@ defmodule Philomena.ArtistLinks do
   @spec list_artist_links(Actor.t(), String.t()) ::
           {:ok, {User.t(), [ArtistLink.t()]}} | {:error, :unauthorized | :not_found}
   def list_artist_links(%Actor{} = actor, slug) do
-    with {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
+    with {:ok, user} <- load_authorized_profile(actor, :create_links, slug) do
       links =
         ArtistLink
         |> where(user_id: ^user.id)
@@ -137,7 +200,7 @@ defmodule Philomena.ArtistLinks do
   @spec load_artist_links_index(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(ArtistLink.t())} | {:error, :unauthorized}
   def load_artist_links_index(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, %ArtistLink{}) do
+    with :ok <- authorize(actor, :index, ArtistLink) do
       artist_links =
         params
         |> index_query()
@@ -197,7 +260,7 @@ defmodule Philomena.ArtistLinks do
           | {:error, :ban | :unauthorized | :not_found}
   def load_artist_link_for_new(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
+         {:ok, user} <- load_authorized_profile(actor, :create_links, slug) do
       {:ok, {user, change_artist_link(%ArtistLink{})}}
     end
   end
@@ -233,8 +296,8 @@ defmodule Philomena.ArtistLinks do
           | {:error, :ban | :unauthorized | :not_found}
   def create_artist_link(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
-      case create_artist_link(user, attrs) do
+         {:ok, user} <- load_authorized_profile(actor, :create_links, slug) do
+      case insert_artist_link(user, attrs) do
         {:ok, artist_link} -> {:ok, {user, artist_link}}
         {:error, changeset} -> {:error, {user, changeset}}
       end
@@ -263,9 +326,8 @@ defmodule Philomena.ArtistLinks do
   @spec load_artist_link_for_show(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), ArtistLink.t()}} | {:error, :unauthorized | :not_found}
   def load_artist_link_for_show(%Actor{} = actor, slug, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor.user, :show, id),
-         {:ok, user} <- authorized_profile(actor.user, :create_links, slug) do
-      {:ok, {user, artist_link}}
+    with {:ok, artist_link} <- load_scoped_artist_link(actor, :show, slug, id) do
+      {:ok, {artist_link.user, artist_link}}
     end
   end
 
@@ -290,46 +352,17 @@ defmodule Philomena.ArtistLinks do
   """
   @spec load_artist_link_for_edit(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {ArtistLink.t(), Ecto.Changeset.t()}}
-          | {:error, :unauthorized | :not_found}
+          | {:error, Authorization.write_error_reason() | :not_found}
   def load_artist_link_for_edit(%Actor{} = actor, slug, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id),
-         {:ok, _user} <- authorized_profile(actor.user, :edit_links, slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, artist_link} <- load_scoped_artist_link(actor, :edit, slug, id) do
       {:ok, {artist_link, change_artist_link(artist_link)}}
     end
-  end
-
-  # Loads a user by profile slug and authorizes the acting user for `action`.
-  @spec authorized_profile(Loader.actor(), atom(), String.t()) ::
-          {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  defp authorized_profile(actor, action, slug) do
-    user = Repo.get_by(User, slug: slug)
-
-    with :ok <- authorize(actor, action, user),
-         %User{} <- user do
-      {:ok, user}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
-  end
-
-  # Loads an artist link by id (with its user, tag, and contacted-by preloads)
-  # and authorizes the acting user for `action`.
-  @spec authorized_artist_link(Loader.actor(), atom(), Loader.integer_id()) ::
-          Loader.fetch_and_authorize_result(ArtistLink.t())
-  defp authorized_artist_link(actor, action, id) do
-    Loader.fetch_and_authorize(ArtistLink, actor, action, id, [
-      :user,
-      :tag,
-      :contacted_by_user
-    ])
   end
 
   @doc """
   Updates the artist link named by `id` under the profile `slug`, on behalf of
   `actor`, from `attrs`.
-
-  TODO: the slug probably isn't needed here?
 
   ## Examples
 
@@ -349,12 +382,12 @@ defmodule Philomena.ArtistLinks do
   @spec update_artist_link(Actor.t(), String.t(), Loader.integer_id(), map()) ::
           {:ok, {User.t(), ArtistLink.t()}}
           | {:error, {ArtistLink.t(), Ecto.Changeset.t()}}
-          | {:error, :unauthorized | :not_found}
+          | {:error, Authorization.write_error_reason() | :not_found}
   def update_artist_link(%Actor{} = actor, slug, id, attrs) do
-    with {:ok, artist_link} <- authorized_artist_link(actor.user, :update, id),
-         {:ok, user} <- authorized_profile(actor.user, :edit_links, slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, artist_link} <- load_scoped_artist_link(actor, :update, slug, id) do
       case update_artist_link(artist_link, attrs) do
-        {:ok, artist_link} -> {:ok, {user, artist_link}}
+        {:ok, artist_link} -> {:ok, {artist_link.user, artist_link}}
         {:error, changeset} -> {:error, {artist_link, changeset}}
       end
     end
@@ -379,19 +412,15 @@ defmodule Philomena.ArtistLinks do
 
   """
   @spec verify_artist_link(Actor.t(), Loader.integer_id()) ::
-          {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
+          {:ok, ArtistLink.t()}
+          | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
   def verify_artist_link(%Actor{} = actor, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id) do
-      {:ok, artist_link} = verify_loaded_link(artist_link, actor.user)
-
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Admin.ArtistLink.Verification:create",
-        Paths.artist_link_path(artist_link.user, artist_link),
-        "Verified artist link #{artist_link.uri} created by #{artist_link.user.name}"
+    with :ok <- verify_write_access(actor),
+         {:ok, artist_link} <- load_artist_link(actor, :verify, id) do
+      transact_and_log(
+        fn -> verify_loaded_link(artist_link, actor.user) end,
+        &transition_log(actor, :verify, &1)
       )
-
-      {:ok, artist_link}
     end
   end
 
@@ -414,19 +443,15 @@ defmodule Philomena.ArtistLinks do
 
   """
   @spec reject_artist_link(Actor.t(), Loader.integer_id()) ::
-          {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
+          {:ok, ArtistLink.t()}
+          | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
   def reject_artist_link(%Actor{} = actor, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id) do
-      {:ok, artist_link} = reject_loaded_link(artist_link)
-
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Admin.ArtistLink.Reject:create",
-        Paths.artist_link_path(artist_link.user, artist_link),
-        "Rejected artist link #{artist_link.uri} created by #{artist_link.user.name}"
+    with :ok <- verify_write_access(actor),
+         {:ok, artist_link} <- load_artist_link(actor, :reject, id) do
+      transact_and_log(
+        fn -> reject_loaded_link(artist_link) end,
+        &transition_log(actor, :reject, &1)
       )
-
-      {:ok, artist_link}
     end
   end
 
@@ -449,19 +474,15 @@ defmodule Philomena.ArtistLinks do
 
   """
   @spec contact_artist_link(Actor.t(), Loader.integer_id()) ::
-          {:ok, ArtistLink.t()} | {:error, :unauthorized | :not_found}
+          {:ok, ArtistLink.t()}
+          | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
   def contact_artist_link(%Actor{} = actor, id) do
-    with {:ok, artist_link} <- authorized_artist_link(actor.user, :edit, id) do
-      {:ok, artist_link} = contact_loaded_link(artist_link, actor.user)
-
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Admin.ArtistLink.Contact:create",
-        Paths.artist_link_path(artist_link.user, artist_link),
-        "Contacted artist #{artist_link.user.name} at #{artist_link.uri}"
+    with :ok <- verify_write_access(actor),
+         {:ok, artist_link} <- load_artist_link(actor, :contact, id) do
+      transact_and_log(
+        fn -> contact_loaded_link(artist_link, actor.user) end,
+        &transition_log(actor, :contact, &1)
       )
-
-      {:ok, artist_link}
     end
   end
 
@@ -478,8 +499,9 @@ defmodule Philomena.ArtistLinks do
       0
 
   """
+  @spec count_artist_links(User.t() | nil) :: non_neg_integer() | nil
   def count_artist_links(user) do
-    if Canada.Can.can?(user, :index, %ArtistLink{}) do
+    if authorize(user, :index, ArtistLink) == :ok do
       ArtistLink
       |> where([ul], ul.aasm_state in ^["unverified", "link_verified"])
       |> Repo.aggregate(:count)

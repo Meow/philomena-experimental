@@ -1,34 +1,39 @@
 # Permissions for logged-in users.
 defimpl Canada.Can, for: Philomena.Users.User do
-  alias Philomena.Users.User
-  alias Philomena.Roles.Role
-  alias Philomena.Bans
+  alias Philomena.Adverts.Advert
+  alias Philomena.ArtistLinks.ArtistLink
   alias Philomena.Badges.Award
   alias Philomena.Badges.Badge
+  alias Philomena.Bans
   alias Philomena.Channels.Channel
   alias Philomena.Comments.Comment
   alias Philomena.Commissions.Commission
   alias Philomena.Conversations.Conversation
   alias Philomena.Conversations.Message
-  alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.DnpEntries.DnpEntry
-  alias Philomena.Images.Image
+  alias Philomena.DuplicateReports.DuplicateReport
+  alias Philomena.Filters.Filter
   alias Philomena.Forums.Forum
-  alias Philomena.Topics.Topic
+  alias Philomena.Galleries.Gallery
+  alias Philomena.Images.Image
+  alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.ModNotes.ModNote
   alias Philomena.Posts.Post
-  alias Philomena.Filters.Filter
-  alias Philomena.Galleries.Gallery
-  alias Philomena.ArtistLinks.ArtistLink
-  alias Philomena.Tags.Tag
-  alias Philomena.TagChanges.TagChange
   alias Philomena.Reports.Report
-  alias Philomena.StaticPages.StaticPage
+  alias Philomena.Roles.Role
   alias Philomena.Rules.Rule
-  alias Philomena.Adverts.Advert
   alias Philomena.SiteNotices.SiteNotice
-  alias Philomena.ModerationLogs.ModerationLog
+  alias Philomena.StaticPages.StaticPage
+  alias Philomena.TagChanges.TagChange
+  alias Philomena.Tags.Tag
+  alias Philomena.Topics.Topic
   alias Philomena.UserNameChanges.UserNameChange
+  alias Philomena.Users.User
+
+  @award_class_actions [:new, :create]
+  @award_member_actions [:edit, :update, :delete]
+  @badge_class_actions [:index, :new, :create]
+  @badge_member_actions [:edit, :update, :update_image, :show_users]
 
   # Admins can do anything
   def can?(%User{role: "admin"}, _action, _model), do: true
@@ -89,8 +94,12 @@ defimpl Canada.Can, for: Philomena.Users.User do
   # Manage artist links
   def can?(%User{role: "moderator"}, :create_links, %User{}), do: true
   def can?(%User{role: "moderator"}, :edit_links, %User{}), do: true
-  def can?(%User{role: "moderator"}, _action, ArtistLink), do: true
-  def can?(%User{role: "moderator"}, _action, %ArtistLink{}), do: true
+
+  def can?(%User{role: "moderator"}, :index, ArtistLink), do: true
+
+  def can?(%User{role: "moderator"}, action, %ArtistLink{})
+      when action in [:show, :edit, :update, :verify, :reject, :contact],
+      do: true
 
   # Reveal anon users
   def can?(%User{role: "moderator"}, :reveal_anon, _object), do: true
@@ -146,8 +155,12 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{role: "moderator"}, :edit, %Tag{}), do: true
 
   # Award badges
-  def can?(%User{role: "moderator"}, _action, %Award{}), do: true
-  def can?(%User{role: "moderator"}, _action, Award), do: true
+  def can?(%User{role: "moderator"}, action, %Award{})
+      when action in @award_member_actions,
+      do: true
+
+  def can?(%User{role: "moderator"}, action, Award) when action in @award_class_actions,
+    do: true
 
   # Revert tag changes
   def can?(%User{role: "moderator"}, :revert, TagChange), do: true
@@ -183,11 +196,21 @@ defimpl Canada.Can, for: Philomena.Users.User do
       do: true
 
   # Manage badges
-  def can?(%User{role: "moderator", role_map: %{"Badge" => %{"admin" => _}}}, _action, Badge),
-    do: true
+  def can?(
+        %User{role: "moderator", role_map: %{"Badge" => %{"admin" => _}}},
+        action,
+        Badge
+      )
+      when action in @badge_class_actions,
+      do: true
 
-  def can?(%User{role: "moderator", role_map: %{"Badge" => %{"admin" => _}}}, _action, %Badge{}),
-    do: true
+  def can?(
+        %User{role: "moderator", role_map: %{"Badge" => %{"admin" => _}}},
+        action,
+        %Badge{}
+      )
+      when action in @badge_member_actions,
+      do: true
 
   # Manage tags
   def can?(%User{role: "moderator", role_map: %{"Tag" => %{"admin" => _}}}, _action, Tag),
@@ -212,14 +235,23 @@ defimpl Canada.Can, for: Philomena.Users.User do
       do: true
 
   # Manage advertisements
-  def can?(%User{role: "moderator", role_map: %{"Advert" => %{"admin" => _}}}, _action, Advert),
-    do: true
+  @advert_class_actions [:index, :new, :create]
+  @advert_member_actions [:edit, :update, :update_image, :delete]
 
   def can?(
         %User{role: "moderator", role_map: %{"Advert" => %{"admin" => _}}},
-        _action,
+        action,
+        Advert
+      )
+      when action in @advert_class_actions,
+      do: true
+
+  def can?(
+        %User{role: "moderator", role_map: %{"Advert" => %{"admin" => _}}},
+        action,
         %Advert{}
-      ),
+      )
+      when action in @advert_member_actions,
       do: true
 
   # Manage static pages
@@ -589,15 +621,15 @@ defimpl Canada.Can, for: Atom do
   alias Philomena.Channels.Channel
   alias Philomena.Comments.Comment
   alias Philomena.DnpEntries.DnpEntry
-  alias Philomena.Images.Image
-  alias Philomena.Forums.Forum
-  alias Philomena.Topics.Topic
-  alias Philomena.Posts.Post
   alias Philomena.Filters.Filter
+  alias Philomena.Forums.Forum
   alias Philomena.Galleries.Gallery
-  alias Philomena.Tags.Tag
+  alias Philomena.Images.Image
+  alias Philomena.Posts.Post
   alias Philomena.Rules.Rule
   alias Philomena.StaticPages.StaticPage
+  alias Philomena.Tags.Tag
+  alias Philomena.Topics.Topic
   alias Philomena.Users.User
 
   #

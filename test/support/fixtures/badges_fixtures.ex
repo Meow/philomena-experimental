@@ -4,7 +4,7 @@ defmodule Philomena.BadgesFixtures do
   entities via the `Philomena.Badges` context.
   """
 
-  alias Philomena.Badges
+  alias Philomena.Badges.Award
   alias Philomena.Badges.Badge
   alias Philomena.Repo
 
@@ -31,10 +31,9 @@ defmodule Philomena.BadgesFixtures do
   def badge_award_fixture(creator, user, badge \\ nil, attrs \\ %{}) do
     badge = badge || badge_fixture()
 
-    {:ok, award} =
-      Badges.create_badge_award(creator, user, Enum.into(attrs, %{badge_id: badge.id}))
-
-    award
+    %Award{awarded_by_id: creator.id, user_id: user.id}
+    |> Award.changeset(Enum.into(attrs, %{badge_id: badge.id}))
+    |> Repo.insert!()
   end
 
   @svg_fixture Path.absname("test/support/fixtures/files/badge-test.svg")

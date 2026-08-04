@@ -1,41 +1,25 @@
 defmodule Philomena.Adverts do
   @moduledoc """
-  The Adverts context.
+  Public advert selection and click/impression tracking, plus actor-scoped
+  advert administration.
+
+  Public selection and recording are deliberately unauthenticated. Admin form
+  and mutation APIs enforce the global write prerequisite and action-specific
+  abilities; member paths load before authorizing the real advert.
   """
 
   import Ecto.Query, warn: false
 
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  alias Philomena.Repo
-  alias Philomena.Loader
-
+  alias Philomena.Adverts.{Advert, Restrictions, Server, Uploader}
   alias Philomena.Attribution.Actor
+  alias Philomena.Authorization
+  alias Philomena.Images.Image
+  alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
-  alias Philomena.Adverts.Advert
-  alias Philomena.Adverts.Restrictions
-  alias Philomena.Adverts.Server
-  alias Philomena.Adverts.Uploader
-
-  @doc """
-  Gets a single advert.
-
-  ## Examples
-
-      iex> get_advert(123)
-      {:ok, %Advert{}}
-
-      iex> get_advert("123")
-      {:ok, %Advert{}}
-
-      iex> get_advert(456)
-      {:error, :not_found}
-
-  """
-  @spec get_advert(Loader.integer_id()) :: {:ok, Advert.t()} | {:error, :not_found}
-  def get_advert(id) do
-    Loader.fetch(Advert, id)
-  end
+  alias Philomena.Repo
 
   # Creates an advert with an image.
   defp create_advert(attrs) do
@@ -90,6 +74,69 @@ defmodule Philomena.Adverts do
     Advert.changeset(advert, %{})
   end
 
+  defp random_live_for_tags(tags) do
+    tags
+    |> Restrictions.tags()
+    |> live_adverts_query()
+    |> order_by(asc: fragment("random()"))
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp live_adverts_query(restrictions \\ nil) do
+    now = DateTime.utc_now()
+
+    query =
+      Advert
+      |> where(live: true)
+      |> where([a], a.start_date < ^now and a.finish_date > ^now)
+
+    if restrictions do
+      where(query, [a], a.restrictions in ^restrictions)
+    else
+      query
+    end
+  end
+
+  defp load_live_advert(id) do
+    case IntegerId.parse(id) do
+      {:ok, id} -> live_adverts_query() |> where(id: ^id) |> Loader.one()
+      :error -> {:error, :not_found}
+    end
+  end
+
+  defp load_advert(actor, action, id) do
+    Loader.fetch_and_authorize(Advert, actor, action, id)
+  end
+
+  defp load_advert_change(actor, action, id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, advert} <- load_advert(actor, action, id) do
+      {:ok, {advert, change_advert(advert)}}
+    end
+  end
+
+  defp transact_and_log(operation, actor, action) do
+    Repo.transact(fn ->
+      with {:ok, advert} <- operation.(),
+           {:ok, _log} <- advert_log(actor, action, advert) do
+        {:ok, advert}
+      end
+    end)
+  end
+
+  defp advert_log(actor, action, advert) do
+    {type, body} =
+      case action do
+        :create -> {"Admin.Advert:create", "Created advert #{advert.id}"}
+        :update -> {"Admin.Advert:update", "Updated advert #{advert.id}"}
+        :update_image -> {"Admin.Advert.Image:update", "Updated image for advert #{advert.id}"}
+        :delete -> {"Admin.Advert:delete", "Deleted advert #{advert.id}"}
+      end
+
+    ModerationLogs.create_moderation_log(actor, type, "/admin/adverts", body)
+  end
+
   @doc """
   Gets an advert that is currently live.
 
@@ -102,6 +149,7 @@ defmodule Philomena.Adverts do
       %Advert{}
 
   """
+  @spec random_live() :: Advert.t() | nil
   def random_live do
     random_live_for_tags([])
   end
@@ -121,27 +169,13 @@ defmodule Philomena.Adverts do
       %Advert{}
 
   """
+  @spec random_live(Image.t()) :: Advert.t() | nil
   def random_live(image) do
     image
     |> Repo.preload(:tags)
     |> Map.get(:tags)
     |> Enum.map(& &1.name)
     |> random_live_for_tags()
-  end
-
-  defp random_live_for_tags(tags) do
-    now = DateTime.utc_now()
-    restrictions = Restrictions.tags(tags)
-
-    query =
-      from a in Advert,
-        where: a.live == true,
-        where: a.restrictions in ^restrictions,
-        where: a.start_date < ^now and a.finish_date > ^now,
-        order_by: [asc: fragment("random()")],
-        limit: 1
-
-    Repo.one(query)
   end
 
   @doc """
@@ -153,21 +187,28 @@ defmodule Philomena.Adverts do
       :ok
 
   """
+  @spec record_impression(Advert.t()) :: :ok
   def record_impression(%Advert{id: id}) do
     Server.record_impression(id)
   end
 
   @doc """
-  Asynchronously records a new click.
+  Loads the currently live advert named by `id` and asynchronously records a
+  click. Malformed, absent, disabled, not-yet-started, and expired adverts are
+  not found.
 
   ## Example
 
-      iex> record_click(%Advert{})
-      :ok
+      iex> record_click(advert.id)
+      {:ok, %Advert{}}
 
   """
-  def record_click(%Advert{id: id}) do
-    Server.record_click(id)
+  @spec record_click(Loader.integer_id()) :: {:ok, Advert.t()} | {:error, :not_found}
+  def record_click(id) do
+    with {:ok, advert} <- load_live_advert(id),
+         :ok <- Server.record_click(advert.id) do
+      {:ok, advert}
+    end
   end
 
   @doc """
@@ -210,9 +251,10 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec new_advert(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  @spec new_advert(Actor.t()) :: {:ok, Ecto.Changeset.t()} | Authorization.write_error()
   def new_advert(%Actor{} = actor) do
-    with :ok <- authorize(actor, :index, Advert) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :new, Advert) do
       {:ok, change_advert(%Advert{})}
     end
   end
@@ -232,12 +274,11 @@ defmodule Philomena.Adverts do
 
   """
   @spec create_advert(Actor.t(), map()) ::
-          {:ok, Advert.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+          {:ok, Advert.t()} | Authorization.write_error() | {:error, Ecto.Changeset.t()}
   def create_advert(%Actor{} = actor, attrs) do
-    with :ok <- authorize(actor, :index, Advert),
-         {:ok, advert} <- create_advert(attrs) do
-      advert_log(actor, :create, advert)
-      {:ok, advert}
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, Advert) do
+      transact_and_log(fn -> create_advert(attrs) end, actor, :create)
     end
   end
 
@@ -258,12 +299,21 @@ defmodule Philomena.Adverts do
 
   """
   @spec load_advert_for_edit(Actor.t(), Loader.integer_id()) ::
-          {:ok, {Advert.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+          {:ok, {Advert.t(), Ecto.Changeset.t()}}
+          | {:error, Authorization.write_error_reason() | :not_found}
   def load_advert_for_edit(%Actor{} = actor, id) do
-    with :ok <- authorize(actor, :index, Advert),
-         {:ok, advert} <- authorized_advert(actor, :edit, id) do
-      {:ok, {advert, change_advert(advert)}}
-    end
+    load_advert_change(actor, :edit, id)
+  end
+
+  @doc """
+  Loads the advert named by `id` for the image edit form, on behalf of `actor`.
+  The form authorizes the same `:update_image` action as its mutation.
+  """
+  @spec load_advert_for_image_edit(Actor.t(), Loader.integer_id()) ::
+          {:ok, {Advert.t(), Ecto.Changeset.t()}}
+          | {:error, Authorization.write_error_reason() | :not_found}
+  def load_advert_for_image_edit(%Actor{} = actor, id) do
+    load_advert_change(actor, :update_image, id)
   end
 
   @doc """
@@ -288,13 +338,12 @@ defmodule Philomena.Adverts do
 
   """
   @spec update_advert(Actor.t(), Loader.integer_id(), map()) ::
-          {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, Advert.t()}
+          | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
   def update_advert(%Actor{} = actor, id, attrs) do
-    with :ok <- authorize(actor, :index, Advert),
-         {:ok, advert} <- authorized_advert(actor, :update, id),
-         {:ok, advert} <- update_advert(advert, attrs) do
-      advert_log(actor, :update, advert)
-      {:ok, advert}
+    with :ok <- verify_write_access(actor),
+         {:ok, advert} <- load_advert(actor, :update, id) do
+      transact_and_log(fn -> update_advert(advert, attrs) end, actor, :update)
     end
   end
 
@@ -316,13 +365,11 @@ defmodule Philomena.Adverts do
 
   """
   @spec delete_advert(Actor.t(), Loader.integer_id()) ::
-          {:ok, Advert.t()} | {:error, :unauthorized | :not_found}
+          {:ok, Advert.t()} | {:error, Authorization.write_error_reason() | :not_found}
   def delete_advert(%Actor{} = actor, id) do
-    with :ok <- authorize(actor, :index, Advert),
-         {:ok, advert} <- authorized_advert(actor, :delete, id) do
-      {:ok, advert} = delete_advert(advert)
-      advert_log(actor, :delete, advert)
-      {:ok, advert}
+    with :ok <- verify_write_access(actor),
+         {:ok, advert} <- load_advert(actor, :delete, id) do
+      transact_and_log(fn -> delete_advert(advert) end, actor, :delete)
     end
   end
 
@@ -348,40 +395,12 @@ defmodule Philomena.Adverts do
 
   """
   @spec update_advert_image(Actor.t(), Loader.integer_id(), map()) ::
-          {:ok, Advert.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, Advert.t()}
+          | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
   def update_advert_image(%Actor{} = actor, id, attrs) do
-    with :ok <- authorize(actor, :index, Advert),
-         {:ok, advert} <- authorized_advert(actor, :update, id),
-         {:ok, advert} <- update_advert_image(advert, attrs) do
-      # TODO: it would change the log contents but this can realistically just be
-      # folded into advert_log
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Admin.Advert.Image:update",
-        "/admin/adverts",
-        "Updated image for advert #{advert.id}"
-      )
-
-      {:ok, advert}
+    with :ok <- verify_write_access(actor),
+         {:ok, advert} <- load_advert(actor, :update_image, id) do
+      transact_and_log(fn -> update_advert_image(advert, attrs) end, actor, :update_image)
     end
-  end
-
-  # Loads an advert by id and authorizes `action` against it.
-  @spec authorized_advert(Loader.actor(), atom(), Loader.integer_id()) ::
-          Loader.fetch_and_authorize_result(Advert.t())
-  defp authorized_advert(actor, action, id) do
-    Loader.fetch_and_authorize(Advert, actor, action, id)
-  end
-
-  @spec advert_log(Loader.actor(), atom(), Advert.t()) :: any()
-  defp advert_log(actor, action, advert) do
-    body =
-      case action do
-        :create -> "Created advert #{advert.id}"
-        :update -> "Updated advert #{advert.id}"
-        :delete -> "Deleted advert #{advert.id}"
-      end
-
-    ModerationLogs.create_moderation_log(actor, "Admin.Advert:#{action}", "/admin/adverts", body)
   end
 end

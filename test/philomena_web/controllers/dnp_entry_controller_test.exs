@@ -2,24 +2,18 @@ defmodule PhilomenaWeb.DnpEntryControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
   import Ecto.Query
+  import Philomena.ArtistLinksFixtures
   import Philomena.DnpEntriesFixtures
   import Philomena.TagsFixtures
   import Philomena.UsersFixtures
 
-  alias Philomena.ArtistLinks
   alias Philomena.DnpEntries.DnpEntry
   alias Philomena.Repo
 
   # The DNP form only offers tags from the user's verified artist links
   # (the :set_tags plug rejects users without any)
   defp verify_artist_link!(user, tag) do
-    {:ok, link} =
-      ArtistLinks.create_artist_link(user, %{
-        "tag_name" => tag.name,
-        "uri" => "https://example.com/gallery"
-      })
-
-    {:ok, _link} = ArtistLinks.verify_loaded_link(link, user)
+    verified_artist_link_fixture(user, tag, %{"uri" => "https://example.com/gallery"})
     :ok
   end
 

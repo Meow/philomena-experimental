@@ -6,12 +6,13 @@ defmodule PhilomenaWeb.Profile.AwardController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"profile_id" => slug}) do
-    with {:ok, {user, changeset}} <- Badges.load_award_for_new(conn.assigns.actor, slug) do
+    with {:ok, {user, changeset, badges}} <-
+           Badges.load_award_for_new(conn.assigns.actor, slug) do
       render(conn, "new.html",
         title: "New Award",
         user: user,
         changeset: changeset,
-        badges: Badges.awardable_badges()
+        badges: badges
       )
     end
   end
@@ -23,11 +24,11 @@ defmodule PhilomenaWeb.Profile.AwardController do
         |> put_flash(:info, "Award successfully created.")
         |> redirect(to: ~p"/profiles/#{user}")
 
-      {:error, {user, changeset}} ->
+      {:error, {user, changeset, badges}} ->
         render(conn, "new.html",
           user: user,
           changeset: changeset,
-          badges: Badges.awardable_badges()
+          badges: badges
         )
 
       {:error, _} = error ->
@@ -36,14 +37,14 @@ defmodule PhilomenaWeb.Profile.AwardController do
   end
 
   def edit(conn, %{"profile_id" => slug, "id" => id}) do
-    with {:ok, {user, award, changeset}} <-
+    with {:ok, {user, award, changeset, badges}} <-
            Badges.load_award_for_edit(conn.assigns.actor, slug, id) do
       render(conn, "edit.html",
         title: "Editing Award",
         user: user,
         award: award,
         changeset: changeset,
-        badges: Badges.awardable_badges()
+        badges: badges
       )
     end
   end
@@ -55,12 +56,12 @@ defmodule PhilomenaWeb.Profile.AwardController do
         |> put_flash(:info, "Award successfully updated.")
         |> redirect(to: ~p"/profiles/#{user}")
 
-      {:error, {user, award, changeset}} ->
+      {:error, {user, award, changeset, badges}} ->
         render(conn, "edit.html",
           user: user,
           award: award,
           changeset: changeset,
-          badges: Badges.awardable_badges()
+          badges: badges
         )
 
       {:error, _} = error ->

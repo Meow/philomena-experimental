@@ -11,7 +11,7 @@ defmodule Philomena.BadgesTest do
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.BadgesFixtures
   import Philomena.UsersFixtures
 
@@ -22,6 +22,7 @@ defmodule Philomena.BadgesTest do
   alias Philomena.Repo
 
   @pagination %{page_number: 1, page_size: 25}
+  @ban %{reason: "Rule #0", valid_until: ~U[3000-01-01 00:00:00Z]}
 
   # A profile user with an all-unreserved slug, so the moderation-log
   # subject_path is byte-identical to "/profiles/<slug>" with no percent-encoding.
@@ -35,13 +36,17 @@ defmodule Philomena.BadgesTest do
     assert Repo.aggregate(ModerationLog, :count) == 0
   end
 
-  describe "awardable_badges/0" do
-    test "returns the enabled badges ordered by title and excludes disabled ones" do
+  describe "load_award_for_new/2" do
+    test "returns enabled badges ordered by title and excludes disabled ones" do
       beta = badge_fixture(%{title: "Beta Badge"})
       alpha = badge_fixture(%{title: "Alpha Badge"})
       _disabled = badge_fixture(%{title: "Gamma Badge", disable_award: true})
+      user = awardee_fixture()
 
-      titles = Badges.awardable_badges() |> Enum.map(& &1.title)
+      assert {:ok, {_user, _changeset, badges}} =
+               Badges.load_award_for_new(actor(admin_user_fixture()), user.slug)
+
+      titles = Enum.map(badges, & &1.title)
 
       # Ordered ascending by title, and the disabled badge is absent.
       assert Enum.find_index(titles, &(&1 == alpha.title)) <
@@ -49,16 +54,15 @@ defmodule Philomena.BadgesTest do
 
       refute "Gamma Badge" in titles
     end
-  end
 
-  describe "load_award_for_new/2" do
     test "an admin gets the profile user and a changeset" do
       user = awardee_fixture()
 
-      assert {:ok, {loaded_user, %Ecto.Changeset{data: %Award{}}}} =
+      assert {:ok, {loaded_user, %Ecto.Changeset{data: %Award{}}, badges}} =
                Badges.load_award_for_new(actor(admin_user_fixture()), user.slug)
 
       assert loaded_user.id == user.id
+      assert is_list(badges)
     end
 
     test "a regular user may not award badges" do
@@ -97,11 +101,12 @@ defmodule Philomena.BadgesTest do
       user = awardee_fixture()
 
       # No badge_id, so the award changeset is invalid.
-      assert {:error, {loaded_user, %Ecto.Changeset{} = changeset}} =
+      assert {:error, {loaded_user, %Ecto.Changeset{} = changeset, badges}} =
                Badges.award_badge(actor(admin_user_fixture()), user.slug, %{})
 
       assert loaded_user.id == user.id
       refute changeset.valid?
+      assert is_list(badges)
       assert Repo.aggregate(Award, :count) == 0
       no_moderation_logs!()
     end
@@ -118,6 +123,21 @@ defmodule Philomena.BadgesTest do
       assert Repo.aggregate(Award, :count) == 0
       no_moderation_logs!()
     end
+
+    test "duplicate grants are intentionally retained as separate awards" do
+      moderator = moderator_user_fixture()
+      user = awardee_fixture()
+      badge = badge_fixture()
+
+      assert {:ok, {_user, first}} =
+               Badges.award_badge(actor(moderator), user.slug, %{"badge_id" => badge.id})
+
+      assert {:ok, {_user, second}} =
+               Badges.award_badge(actor(moderator), user.slug, %{"badge_id" => badge.id})
+
+      refute first.id == second.id
+      assert Repo.aggregate(Award, :count) == 2
+    end
   end
 
   describe "load_award_for_edit/3" do
@@ -126,11 +146,12 @@ defmodule Philomena.BadgesTest do
       user = awardee_fixture()
       award = badge_award_fixture(admin, user)
 
-      assert {:ok, {loaded_user, loaded_award, %Ecto.Changeset{}}} =
+      assert {:ok, {loaded_user, loaded_award, %Ecto.Changeset{}, badges}} =
                Badges.load_award_for_edit(actor(admin), user.slug, "#{award.id}")
 
       assert loaded_user.id == user.id
       assert loaded_award.id == award.id
+      assert is_list(badges)
     end
 
     test "a non-castable award id is not-found" do
@@ -144,6 +165,16 @@ defmodule Philomena.BadgesTest do
       user = awardee_fixture()
 
       assert Badges.load_award_for_edit(actor(admin_user_fixture()), user.slug, "2147483647") ==
+               {:error, :not_found}
+    end
+
+    test "an award cannot be loaded through another profile slug" do
+      admin = admin_user_fixture()
+      owner = awardee_fixture()
+      other = awardee_fixture()
+      award = badge_award_fixture(admin, owner)
+
+      assert Badges.load_award_for_edit(actor(admin), other.slug, award.id) ==
                {:error, :not_found}
     end
   end
@@ -168,6 +199,20 @@ defmodule Philomena.BadgesTest do
       assert log.type == "Profile.Award:update"
       assert log.body == "Updated award of badge 'Test Award Badge' on #{user.name}"
       assert log.subject_path == "/profiles/#{user.slug}"
+    end
+
+    test "a mismatched profile slug does not update the award" do
+      moderator = moderator_user_fixture()
+      owner = awardee_fixture()
+      other = awardee_fixture()
+      award = badge_award_fixture(moderator, owner, nil, %{label: "Before"})
+
+      assert Badges.update_badge_award(actor(moderator), other.slug, award.id, %{
+               "label" => "After"
+             }) == {:error, :not_found}
+
+      assert Repo.get(Award, award.id).label == "Before"
+      no_moderation_logs!()
     end
   end
 
@@ -201,6 +246,66 @@ defmodule Philomena.BadgesTest do
                {:error, :unauthorized}
 
       assert Repo.get(Award, award.id).id == award.id
+      no_moderation_logs!()
+    end
+
+    test "a mismatched profile slug does not revoke the award" do
+      moderator = moderator_user_fixture()
+      owner = awardee_fixture()
+      other = awardee_fixture()
+      award = badge_award_fixture(moderator, owner)
+
+      assert Badges.revoke_badge_award(actor(moderator), other.slug, award.id) ==
+               {:error, :not_found}
+
+      assert Repo.get(Award, award.id)
+      no_moderation_logs!()
+    end
+  end
+
+  describe "global write prerequisite" do
+    test "badge and award form loaders reject banned and unattributed staff" do
+      admin = admin_user_fixture()
+      user = awardee_fixture()
+      badge = badge_fixture()
+      award = badge_award_fixture(admin, user, badge)
+
+      for operation <- [
+            fn actor -> Badges.new_badge(actor) end,
+            fn actor -> Badges.load_badge_for_edit(actor, badge.id) end,
+            fn actor -> Badges.load_badge_for_image_edit(actor, badge.id) end,
+            fn actor -> Badges.load_award_for_new(actor, user.slug) end,
+            fn actor -> Badges.load_award_for_edit(actor, user.slug, award.id) end
+          ] do
+        assert operation.(actor(admin, ban: @ban)) == {:error, :ban}
+        assert operation.(actor(admin, fingerprint: nil)) == {:error, :unauthorized}
+      end
+    end
+
+    test "badge and award mutations reject banned and unattributed staff" do
+      admin = admin_user_fixture()
+      user = awardee_fixture()
+      badge = badge_fixture(%{title: "Unchanged by policy"})
+      award = badge_award_fixture(admin, user, badge, %{label: "Unchanged"})
+
+      operations = [
+        fn actor -> Badges.create_badge(actor, %{}) end,
+        fn actor -> Badges.update_badge(actor, badge.id, %{"title" => "Changed"}) end,
+        fn actor -> Badges.update_badge_image(actor, badge.id, %{}) end,
+        fn actor -> Badges.award_badge(actor, user.slug, %{"badge_id" => badge.id}) end,
+        fn actor ->
+          Badges.update_badge_award(actor, user.slug, award.id, %{"label" => "Changed"})
+        end,
+        fn actor -> Badges.revoke_badge_award(actor, user.slug, award.id) end
+      ]
+
+      for operation <- operations do
+        assert operation.(actor(admin, ban: @ban)) == {:error, :ban}
+        assert operation.(actor(admin, fingerprint: nil)) == {:error, :unauthorized}
+      end
+
+      assert Repo.get(Badge, badge.id).title == "Unchanged by policy"
+      assert Repo.get(Award, award.id).label == "Unchanged"
       no_moderation_logs!()
     end
   end
@@ -315,6 +420,15 @@ defmodule Philomena.BadgesTest do
                {:error, :unauthorized}
     end
 
+    test "a Badge-role moderator is authorized for the edit action" do
+      badge = badge_fixture()
+
+      assert {:ok, {%Badge{id: id}, %Ecto.Changeset{}}} =
+               Badges.load_badge_for_edit(actor(role_moderator_fixture("Badge")), badge.id)
+
+      assert id == badge.id
+    end
+
     test "a non-castable id is not-found" do
       assert Badges.load_badge_for_edit(actor(admin_user_fixture()), "abc") ==
                {:error, :not_found}
@@ -359,6 +473,15 @@ defmodule Philomena.BadgesTest do
       no_moderation_logs!()
     end
 
+    test "a Badge-role moderator is authorized for the update action" do
+      badge = badge_fixture()
+
+      assert {:ok, %Badge{title: "Role Updated"}} =
+               Badges.update_badge(actor(role_moderator_fixture("Badge")), badge.id, %{
+                 "title" => "Role Updated"
+               })
+    end
+
     test "an unknown id is not-found" do
       assert Badges.update_badge(actor(admin_user_fixture()), "2147483647", %{"title" => "x"}) ==
                {:error, :not_found}
@@ -401,6 +524,26 @@ defmodule Philomena.BadgesTest do
       no_moderation_logs!()
     end
 
+    test "a missing image is a changeset error and preserves the old image" do
+      badge = badge_fixture()
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Badges.update_badge_image(actor(admin_user_fixture()), badge.id, %{})
+
+      refute changeset.valid?
+      assert Repo.get!(Badge, badge.id).image == "test.svg"
+      no_moderation_logs!()
+    end
+
+    test "a Badge-role moderator is authorized for the image-update action" do
+      badge = badge_fixture()
+
+      assert {:ok, %Badge{}} =
+               Badges.update_badge_image(actor(role_moderator_fixture("Badge")), badge.id, %{
+                 "image" => svg_upload()
+               })
+    end
+
     test "an unknown id is not-found" do
       assert Badges.update_badge_image(actor(admin_user_fixture()), "2147483647", %{
                "image" => svg_upload()
@@ -428,6 +571,17 @@ defmodule Philomena.BadgesTest do
 
       assert Badges.load_badge_users(actor(moderator_user_fixture()), "#{badge.id}", @pagination) ==
                {:error, :unauthorized}
+    end
+
+    test "a Badge-role moderator is authorized for the show-users action" do
+      badge = badge_fixture()
+
+      assert {:ok, {%Badge{}, %Scrivener.Page{}}} =
+               Badges.load_badge_users(
+                 actor(role_moderator_fixture("Badge")),
+                 badge.id,
+                 @pagination
+               )
     end
 
     test "a non-castable id is not-found" do

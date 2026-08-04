@@ -1,9 +1,13 @@
 defmodule Philomena.ArtistLinks.BadgeAwarder do
   @moduledoc """
-  Handles awarding a badge to the user of an associated artist link.
+  Handles the internal Artist-badge side effect for verified artist links.
+
+  This support module owns its narrow persistence step so the public Badges
+  context does not expose raw badge or award CRUD to unrelated callers.
   """
 
-  alias Philomena.Badges
+  alias Philomena.Badges.{Award, Badge}
+  alias Philomena.Repo
 
   @badge_title "Artist"
 
@@ -17,21 +21,14 @@ defmodule Philomena.ArtistLinks.BadgeAwarder do
   suitable for use as the return value to an `Ecto.Multi.run/3` callback.
   """
   def award_badge(artist_link, verifying_user) do
-    with badge when not is_nil(badge) <- Badges.get_badge_by_title(@badge_title),
-         award when is_nil(award) <- Badges.get_badge_award_for(badge, artist_link.user) do
-      Badges.create_badge_award(verifying_user, artist_link.user, %{badge_id: badge.id})
+    with %Badge{} = badge <- Repo.get_by(Badge, title: @badge_title),
+         nil <- Repo.get_by(Award, badge_id: badge.id, user_id: artist_link.user.id) do
+      %Award{awarded_by_id: verifying_user.id, user_id: artist_link.user.id}
+      |> Award.changeset(%{badge_id: badge.id})
+      |> Repo.insert()
     else
       _ ->
         {:ok, nil}
-    end
-  end
-
-  @doc """
-  Get a callback for issuing a badge award from within an `m:Ecto.Multi`.
-  """
-  def award_callback(artist_link, verifying_user) do
-    fn _repo, _changes ->
-      award_badge(artist_link, verifying_user)
     end
   end
 end

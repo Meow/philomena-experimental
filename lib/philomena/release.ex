@@ -51,7 +51,7 @@ defmodule Philomena.Release do
 
   def verify_artist_links do
     start_app()
-    Philomena.ArtistLinks.automatic_verify!()
+    Philomena.ArtistLinks.run_automatic_verification!()
   end
 
   def update_stats do

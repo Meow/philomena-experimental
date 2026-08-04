@@ -90,9 +90,9 @@ defmodule Philomena.ArtistLinksTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is unauthorized for an unrelated user, not-found for an admin" do
+    test "an unknown slug is not-found before authorization for every actor" do
       assert ArtistLinks.list_artist_links(actor(confirmed_user_fixture()), "no-such-user") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert ArtistLinks.list_artist_links(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
@@ -198,6 +198,18 @@ defmodule Philomena.ArtistLinksTest do
       assert ArtistLinks.load_artist_link_for_show(actor(user), user.slug, "abc") ==
                {:error, :not_found}
     end
+
+    test "a link cannot be shown through another profile slug" do
+      owner = confirmed_user_fixture()
+      other = confirmed_user_fixture()
+      link = artist_link_fixture(owner, artist_tag_fixture())
+
+      assert ArtistLinks.load_artist_link_for_show(
+               actor(moderator_user_fixture()),
+               other.slug,
+               link.id
+             ) == {:error, :not_found}
+    end
   end
 
   describe "load_artist_link_for_edit/3" do
@@ -234,6 +246,18 @@ defmodule Philomena.ArtistLinksTest do
                "abc"
              ) ==
                {:error, :not_found}
+    end
+
+    test "a link cannot be edited through another profile slug" do
+      owner = confirmed_user_fixture()
+      other = confirmed_user_fixture()
+      link = artist_link_fixture(owner, artist_tag_fixture())
+
+      assert ArtistLinks.load_artist_link_for_edit(
+               actor(moderator_user_fixture()),
+               other.slug,
+               link.id
+             ) == {:error, :not_found}
     end
   end
 
@@ -283,6 +307,21 @@ defmodule Philomena.ArtistLinksTest do
                )
 
       assert updated.tag_id == nil
+    end
+
+    test "a mismatched profile slug does not update the link" do
+      owner = confirmed_user_fixture()
+      other = confirmed_user_fixture()
+      link = artist_link_fixture(owner, artist_tag_fixture())
+
+      assert ArtistLinks.update_artist_link(
+               actor(moderator_user_fixture()),
+               other.slug,
+               link.id,
+               %{"uri" => "https://example.com/not-applied"}
+             ) == {:error, :not_found}
+
+      assert Repo.get!(ArtistLink, link.id).uri == link.uri
     end
   end
 
@@ -524,6 +563,25 @@ defmodule Philomena.ArtistLinksTest do
 
       assert ArtistLinks.reject_artist_link(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
+    end
+  end
+
+  describe "transition write prerequisite" do
+    test "verification, rejection, and contact reject banned and unattributed moderators" do
+      moderator = moderator_user_fixture()
+      link = artist_link_fixture(confirmed_user_fixture(), artist_tag_fixture())
+
+      for operation <- [
+            &ArtistLinks.verify_artist_link(&1, link.id),
+            &ArtistLinks.reject_artist_link(&1, link.id),
+            &ArtistLinks.contact_artist_link(&1, link.id)
+          ] do
+        assert operation.(actor(moderator, ban: @ban)) == {:error, :ban}
+        assert operation.(actor(moderator, fingerprint: nil)) == {:error, :unauthorized}
+      end
+
+      assert Repo.get!(ArtistLink, link.id).aasm_state == "unverified"
+      no_moderation_logs!()
     end
   end
 end
