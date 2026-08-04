@@ -360,7 +360,7 @@ defmodule Philomena.AdvertsTest do
       assert Adverts.record_click(2_000_000_000) == {:error, :not_found}
     end
 
-    test "Recorder flushes only counters for adverts that are still live" do
+    test "Recorder flushes counters for adverts that are not live" do
       live =
         advert_fixture() |> Ecto.Changeset.change(impressions: 10, clicks: 4) |> Repo.update!()
 
@@ -378,7 +378,7 @@ defmodule Philomena.AdvertsTest do
                })
 
       assert %{impressions: 13, clicks: 6} = Repo.get!(Advert, live.id)
-      assert %{impressions: 20, clicks: 8} = Repo.get!(Advert, disabled.id)
+      assert %{impressions: 25, clicks: 12} = Repo.get!(Advert, disabled.id)
       refute Repo.get(Advert, absent_id)
     end
   end
