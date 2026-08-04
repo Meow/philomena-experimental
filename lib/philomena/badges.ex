@@ -1,11 +1,6 @@
 defmodule Philomena.Badges do
   @moduledoc """
-  Actor-scoped administration for badges and the awards attached to profiles.
-
-  Badge and award writes enforce the global write prerequisite, authorize the
-  action being performed, and commit their moderation log in the same database
-  transaction. Profile award member routes are scoped by both profile slug and
-  award ID, so an award can never be reached through another user's profile.
+  Administration for badges and associated awards attached to user profiles.
   """
 
   import Ecto.Query, warn: false
@@ -90,6 +85,35 @@ defmodule Philomena.Badges do
     end)
   end
 
+  # Uploader operations interact with object storage and therefore must not run
+  # inside Repo.transact/1. Until uploads can be staged transactionally, their
+  # database write, storage side effects, and moderation log are intentionally
+  # sequential rather than atomic.
+  defp upload_and_log(operation, log) do
+    with {:ok, result} <- operation.(),
+         {:ok, _log} <- log.(result) do
+      {:ok, result}
+    end
+  end
+
+  @spec badge_log(Loader.actor(), atom(), Badge.t()) :: any()
+  defp badge_log(actor, action, badge) do
+    body =
+      case action do
+        :create -> "Created badge '#{badge.title}'"
+        :update -> "Updated badge '#{badge.title}'"
+        :update_image -> "Updated image of badge '#{badge.title}'"
+      end
+
+    type =
+      case action do
+        :update_image -> "Admin.Badge.Image:update"
+        action -> "Admin.Badge:#{action}"
+      end
+
+    ModerationLogs.create_moderation_log(actor, type, "/admin/badges", body)
+  end
+
   @doc """
   Returns the paginated badges for the admin listing, on behalf of `actor`,
   ordered by title.
@@ -159,7 +183,7 @@ defmodule Philomena.Badges do
   def create_badge(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Badge) do
-      transact_and_log(fn -> create_badge(attrs) end, &badge_log(actor, :create, &1))
+      upload_and_log(fn -> create_badge(attrs) end, &badge_log(actor, :create, &1))
     end
   end
 
@@ -255,7 +279,7 @@ defmodule Philomena.Badges do
   def update_badge_image(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, badge} <- load_badge(actor, :update_image, id) do
-      transact_and_log(
+      upload_and_log(
         fn -> update_badge_image(badge, attrs) end,
         &badge_log(actor, :update_image, &1)
       )
@@ -291,24 +315,6 @@ defmodule Philomena.Badges do
 
       {:ok, {badge, users}}
     end
-  end
-
-  @spec badge_log(Loader.actor(), atom(), Badge.t()) :: any()
-  defp badge_log(actor, action, badge) do
-    body =
-      case action do
-        :create -> "Created badge '#{badge.title}'"
-        :update -> "Updated badge '#{badge.title}'"
-        :update_image -> "Updated image of badge '#{badge.title}'"
-      end
-
-    type =
-      case action do
-        :update_image -> "Admin.Badge.Image:update"
-        action -> "Admin.Badge:#{action}"
-      end
-
-    ModerationLogs.create_moderation_log(actor, type, "/admin/badges", body)
   end
 
   alias Philomena.Badges.Award

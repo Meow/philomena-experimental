@@ -1,11 +1,6 @@
 defmodule Philomena.Adverts do
   @moduledoc """
-  Public advert selection and click/impression tracking, plus actor-scoped
-  advert administration.
-
-  Public selection and recording are deliberately unauthenticated. Admin form
-  and mutation APIs enforce the global write prerequisite and action-specific
-  abilities; member paths load before authorizing the real advert.
+  Advert selection, click/impression tracking, and administration.
   """
 
   import Ecto.Query, warn: false
@@ -123,6 +118,17 @@ defmodule Philomena.Adverts do
         {:ok, advert}
       end
     end)
+  end
+
+  # Uploader operations interact with object storage and therefore must not run
+  # inside Repo.transact/1. Until uploads can be staged transactionally, their
+  # database write, storage side effects, and moderation log are intentionally
+  # sequential rather than atomic.
+  defp upload_and_log(operation, actor, action) do
+    with {:ok, advert} <- operation.(),
+         {:ok, _log} <- advert_log(actor, action, advert) do
+      {:ok, advert}
+    end
   end
 
   defp advert_log(actor, action, advert) do
@@ -278,7 +284,7 @@ defmodule Philomena.Adverts do
   def create_advert(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Advert) do
-      transact_and_log(fn -> create_advert(attrs) end, actor, :create)
+      upload_and_log(fn -> create_advert(attrs) end, actor, :create)
     end
   end
 
@@ -400,7 +406,7 @@ defmodule Philomena.Adverts do
   def update_advert_image(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :update_image, id) do
-      transact_and_log(fn -> update_advert_image(advert, attrs) end, actor, :update_image)
+      upload_and_log(fn -> update_advert_image(advert, attrs) end, actor, :update_image)
     end
   end
 end

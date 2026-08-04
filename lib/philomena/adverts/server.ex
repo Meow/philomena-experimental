@@ -3,9 +3,9 @@ defmodule Philomena.Adverts.Server do
   Advert impression and click aggregator.
 
   Updating the impression count for adverts and clicks on every pageload is unnecessary
-  and slows down requests. This module collects the adverts and clicks and submits a batch
-  of updates to the database after every 10 seconds asynchronously, reducing the amount of
-  work to be done.
+  and creates a large volume of dead database rows. This module collects impressions and
+  clicks and submits a batch of updates to the database after every 10 seconds, reducing
+  the amount of work to be done.
   """
 
   use GenServer
