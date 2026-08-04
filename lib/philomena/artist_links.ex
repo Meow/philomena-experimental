@@ -1,11 +1,6 @@
 defmodule Philomena.ArtistLinks do
   @moduledoc """
-  Profile-scoped artist-link submission and staff verification workflows.
-
-  Nested member paths constrain both profile slug and link ID before
-  authorization. Form loaders and mutations enforce the global write
-  prerequisite; the release task uses the separately documented automatic
-  verification service.
+  Artist link submission and staff verification workflows.
   """
 
   import Ecto.Query, warn: false
@@ -142,6 +137,9 @@ defmodule Philomena.ArtistLinks do
   @doc """
   Updates all artist links pending verification, by transitioning to link verified state
   or resetting next update time.
+
+  This function is designed for automatic link verification as a background task,
+  and is not intended for use from request-facing code.
   """
   @spec run_automatic_verification!() :: :ok
   def run_automatic_verification! do

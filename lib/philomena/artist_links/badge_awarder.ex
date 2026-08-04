@@ -1,9 +1,6 @@
 defmodule Philomena.ArtistLinks.BadgeAwarder do
   @moduledoc """
-  Handles the internal Artist-badge side effect for verified artist links.
-
-  This support module owns its narrow persistence step so the public Badges
-  context does not expose raw badge or award CRUD to unrelated callers.
+  Performs artist badge awarding for verified artist links.
   """
 
   alias Philomena.Badges.{Award, Badge}
