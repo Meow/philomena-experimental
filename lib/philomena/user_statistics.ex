@@ -1,14 +1,17 @@
 defmodule Philomena.UserStatistics do
   @moduledoc """
-  The UserStatistics context.
+  Atomic daily counters derived from successful user activity.
+
+  This module performs no authorization. It accepts a finite statistic key, and
+  updates the user's lifetime counter and UTC daily row together.
   """
 
   import Ecto.Query, warn: false
-  alias Philomena.Repo
 
-  alias Philomena.UserStatistics.UserStatistic
+  alias Philomena.Repo
   alias Philomena.Users
   alias Philomena.Users.User
+  alias Philomena.UserStatistics.UserStatistic
 
   @permitted_actions [
     :images_count,
@@ -20,47 +23,82 @@ defmodule Philomena.UserStatistics do
     :topics_count
   ]
 
-  @doc """
-  Updates a user statistic.
+  @typedoc "A daily and lifetime counter owned by this context."
+  @type statistic ::
+          :images_count
+          | :image_faves_count
+          | :comments_count
+          | :image_votes_count
+          | :metadata_updates_count
+          | :posts_count
+          | :topics_count
 
-  ## Examples
-
-      iex> inc_stat(user, :images_count, -1)
-      {:ok, %UserStatistic{}}
-
-  """
-  def inc_stat(user_or_id, action, amount \\ 1)
-
-  def inc_stat(nil, action, _amount) when action in @permitted_actions,
-    do: {:ok, nil}
-
-  def inc_stat(%User{} = user, action, amount)
-      when action in @permitted_actions,
-      do: inc_stat(user.id, action, amount)
-
-  def inc_stat(user_id, action, amount)
-      when action in @permitted_actions do
-    today = Date.utc_today()
-
+  defp persist_increment(user_id, statistic, amount) do
+    day = Date.utc_today()
     user_query = where(User, id: ^user_id)
 
     Repo.transact(fn ->
-      Repo.update_all(user_query, inc: [{action, amount}])
+      case Repo.update_all(user_query, inc: [{statistic, amount}]) do
+        {1, nil} ->
+          Repo.insert(
+            Map.put(%UserStatistic{day: day, user_id: user_id}, statistic, amount),
+            on_conflict: [inc: [{statistic, amount}]],
+            conflict_target: [:day, :user_id]
+          )
 
-      Repo.insert(
-        Map.put(%UserStatistic{day: today, user_id: user_id}, action, amount),
-        on_conflict: [inc: [{action, amount}]],
-        conflict_target: [:day, :user_id]
-      )
+        {0, nil} ->
+          {:error, :not_found}
+      end
     end)
-    |> case do
-      {:ok, _} ->
-        Users.reindex_user(%User{id: user_id})
+  end
 
-        {:ok, nil}
+  defp reindex_result({:ok, %UserStatistic{}}, user_id) do
+    Users.reindex_user(%User{id: user_id})
+    {:ok, nil}
+  end
 
-      error ->
-        error
-    end
+  defp reindex_result(error, _user_id), do: error
+
+  @doc """
+  Atomically increments one lifetime and UTC-daily statistic for `user_or_id`.
+
+  A `nil` user is an intentional no-op for anonymous activity. A missing user
+  ID is `{:error, :not_found}`. Negative amounts decrement both counters.
+  Unknown statistic keys and non-integer amounts do not match this API.
+
+  The database increments join an ambient transaction when called from an
+  `Ecto.Multi` callback, so an owning action rollback also rolls them back. A
+  successful call enqueues a user reindex; that queue side effect is best-effort
+  and is not part of the database transaction.
+
+  ## Examples
+
+      iex> increment(user, :images_count)
+      {:ok, nil}
+
+      iex> increment(user.id, :images_count, -1)
+      {:ok, nil}
+
+      iex> increment(nil, :comments_count)
+      {:ok, nil}
+
+  """
+  @spec increment(User.t() | integer() | nil, statistic(), integer()) ::
+          {:ok, nil} | {:error, :not_found | Ecto.Changeset.t()}
+  def increment(user_or_id, statistic, amount \\ 1)
+
+  def increment(nil, statistic, amount)
+      when statistic in @permitted_actions and is_integer(amount),
+      do: {:ok, nil}
+
+  def increment(%User{} = user, statistic, amount)
+      when statistic in @permitted_actions and is_integer(amount),
+      do: increment(user.id, statistic, amount)
+
+  def increment(user_id, statistic, amount)
+      when is_integer(user_id) and statistic in @permitted_actions and is_integer(amount) do
+    user_id
+    |> persist_increment(statistic, amount)
+    |> reindex_result(user_id)
   end
 end

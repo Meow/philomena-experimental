@@ -15,7 +15,7 @@ defmodule Philomena.Profiles do
   alias Philomena.UserIps.UserIp
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserStatistics.UserStatistic
-  alias Philomena.UserNameChanges.UserNameChange
+  alias Philomena.UserNameChanges
   alias Philomena.ModNotes
   alias Philomena.ModNotes.ModNote
   alias Philomena.Bans
@@ -30,6 +30,8 @@ defmodule Philomena.Profiles do
   alias Philomena.Filters.Filter
   alias Philomena.Tags.Tag
   alias PhilomenaQuery.Search
+
+  @name_history_pagination %{page: 1, page_size: 250}
 
   @profile_preloads [
     :forced_filter,
@@ -299,13 +301,11 @@ defmodule Philomena.Profiles do
   Returns the name changes of `user` for `actor`, or `nil` when the viewer may
   not see them.
   """
-  @spec name_changes(Actor.t(), User.t()) :: [UserNameChange.t()] | nil
+  @spec name_changes(Actor.t(), User.t()) :: [UserNameChanges.UserNameChange.t()] | nil
   def name_changes(%Actor{} = actor, user) do
-    if Canada.Can.can?(actor.user, :index, UserNameChange) do
-      UserNameChange
-      |> where(user_id: ^user.id)
-      |> order_by(desc: :id)
-      |> Repo.all()
+    case UserNameChanges.load_history(actor, user, @name_history_pagination) do
+      {:ok, page} -> page.entries
+      {:error, :unauthorized} -> nil
     end
   end
 

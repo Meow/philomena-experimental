@@ -141,6 +141,12 @@ Wave 1 now also includes Bans, UserFingerprints, and UserIps: ban administration
 uses transactional actor-scoped flows and private persistence helpers, while
 sensitive IP/fingerprint readers share the named `:identity_metadata`
 permission and canonical invalid-input behavior.
+Autocomplete, Roles, UserStatistics, and UserNameChanges are also complete:
+autocomplete reads use a normalized result and generation atomically replaces
+the PostgreSQL artifact; the unused generated Roles CRUD context is gone because
+Users owns role assignment/reference reads; daily statistics expose one finite,
+atomic increment service; and rename history now owns transaction composition
+plus actor-scoped paginated reads.
 
 ### Wave 0: characterize and establish the contract
 

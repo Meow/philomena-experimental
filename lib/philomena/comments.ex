@@ -142,7 +142,7 @@ defmodule Philomena.Comments do
     |> Repo.transaction()
     |> case do
       {:ok, %{comment: comment}} ->
-        UserStatistics.inc_stat(comment.user_id, :comments_count, -1)
+        UserStatistics.increment(comment.user_id, :comments_count, -1)
         reindex_comment(comment)
 
         {:ok, comment}
@@ -634,7 +634,7 @@ defmodule Philomena.Comments do
   # comment total (a no-op for an anonymous author, whose user is nil), an
   # unapproved one is reported for external links.
   defp record_comment_creation(%Actor{user: user}, %Comment{approved: true}),
-    do: UserStatistics.inc_stat(user, :comments_count)
+    do: UserStatistics.increment(user, :comments_count)
 
   defp record_comment_creation(_actor, comment),
     do: report_non_approved(comment)
@@ -1072,7 +1072,7 @@ defmodule Philomena.Comments do
     |> Repo.transaction()
     |> case do
       {:ok, %{comment: approved_comment, reports: {_count, reports}}} ->
-        UserStatistics.inc_stat(approved_comment.user_id, :comments_count)
+        UserStatistics.increment(approved_comment.user_id, :comments_count)
         Reports.reindex_reports(reports)
         reindex_comment(approved_comment)
         log_comment_approval(actor, approved_comment)

@@ -1492,6 +1492,40 @@ defmodule Philomena.UsersTest do
       assert Users.get_user!(target.id).role == "user"
     end
 
+    test "assigns existing role IDs and rejects malformed or missing role IDs" do
+      target = managed_target()
+      role = Repo.insert!(%Role{name: "admin", resource_type: "Forum"})
+
+      valid_params = %{
+        "name" => target.name,
+        "email" => target.email,
+        "role" => "user",
+        "roles" => [to_string(role.id)]
+      }
+
+      assert {:ok, updated} =
+               Users.update_user_details(actor(admin_user_fixture()), target.slug, valid_params)
+
+      assert Enum.map(updated.roles, & &1.id) == [role.id]
+
+      for invalid_id <- ["not-an-id", "2147483647"] do
+        assert {:error, %Ecto.Changeset{} = changeset} =
+                 Users.update_user_details(
+                   actor(admin_user_fixture()),
+                   target.slug,
+                   %{valid_params | "roles" => [invalid_id]}
+                 )
+
+        assert %{roles: ["contains an invalid role"]} = errors_on(changeset)
+
+        assert Enum.map(
+                 Users.get_user!(target.id) |> Repo.preload(:roles) |> Map.get(:roles),
+                 & &1.id
+               ) ==
+                 [role.id]
+      end
+    end
+
     test "a plain moderator may not update a user" do
       target = managed_target()
 

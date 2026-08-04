@@ -23,6 +23,7 @@ defmodule Philomena.Users do
   alias Philomena.ModNotes.ModNote
   alias Philomena.UserIps.UserIp
   alias Philomena.UserFingerprints.UserFingerprint
+  alias Philomena.UserNameChanges
   alias Philomena.UserNameChanges.UserNameChange
   alias Philomena.Images
   alias Philomena.Comments
@@ -35,6 +36,7 @@ defmodule Philomena.Users do
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.IndexWorker
+  alias Philomena.IntegerId
   alias Philomena.UserEraseWorker
   alias Philomena.UserRenameWorker
   alias Philomena.UserUnvoteWorker
@@ -803,14 +805,7 @@ defmodule Philomena.Users do
 
   """
   def update_user(%User{} = user, attrs) do
-    roles =
-      Role
-      |> where([r], r.id in ^clean_roles(attrs["roles"]))
-      |> Repo.all()
-
-    changeset =
-      user
-      |> User.update_changeset(attrs, roles)
+    changeset = update_user_changeset(user, attrs)
 
     Multi.new()
     |> Multi.update(:user, changeset)
@@ -829,8 +824,46 @@ defmodule Philomena.Users do
     end
   end
 
-  defp clean_roles(nil), do: []
-  defp clean_roles(roles), do: Enum.filter(roles, &("" != &1))
+  defp update_user_changeset(user, attrs) do
+    with {:ok, role_ids} <- parse_role_ids(attrs["roles"]),
+         {:ok, roles} <- load_roles(role_ids) do
+      User.update_changeset(user, attrs, roles)
+    else
+      :error ->
+        user = Repo.preload(user, :roles)
+
+        user
+        |> User.update_changeset(attrs, user.roles)
+        |> Ecto.Changeset.add_error(:roles, "contains an invalid role")
+    end
+  end
+
+  defp parse_role_ids(nil), do: {:ok, []}
+
+  defp parse_role_ids(roles) when is_list(roles) do
+    roles
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.reduce_while({:ok, []}, fn role_id, {:ok, ids} ->
+      case IntegerId.parse(role_id) do
+        {:ok, id} -> {:cont, {:ok, [id | ids]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, ids} -> {:ok, Enum.uniq(ids)}
+      :error -> :error
+    end
+  end
+
+  defp parse_role_ids(_roles), do: :error
+
+  defp load_roles([]), do: {:ok, []}
+
+  defp load_roles(role_ids) do
+    roles = Role |> where([role], role.id in ^role_ids) |> Repo.all()
+
+    if length(roles) == length(role_ids), do: {:ok, roles}, else: :error
+  end
 
   ## Administration
 
@@ -1828,11 +1861,10 @@ defmodule Philomena.Users do
   def rename_user(user, user_params) do
     old_name = user.name
 
-    name_change = UserNameChange.changeset(%UserNameChange{user_id: user.id}, user.name)
     account = User.name_changeset(user, user_params)
 
     Multi.new()
-    |> Multi.insert(:name_change, name_change)
+    |> UserNameChanges.record_rename(:name_change, user)
     |> Multi.update(:account, account)
     |> Repo.transaction()
     |> case do

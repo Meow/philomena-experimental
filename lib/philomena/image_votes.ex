@@ -32,7 +32,7 @@ defmodule Philomena.ImageVotes do
       inc: [upvotes_count: upvotes, downvotes_count: downvotes, score: upvotes - downvotes]
     )
     |> Multi.run(:inc_vote_stat, fn _repo, _changes ->
-      UserStatistics.inc_stat(user, :image_votes_count, 1)
+      UserStatistics.increment(user, :image_votes_count, 1)
     end)
   end
 
@@ -68,7 +68,7 @@ defmodule Philomena.ImageVotes do
           inc: [upvotes_count: -upvotes, downvotes_count: -downvotes, score: downvotes - upvotes]
         )
 
-      UserStatistics.inc_stat(user, :image_votes_count, -(upvotes + downvotes))
+      UserStatistics.increment(user, :image_votes_count, -(upvotes + downvotes))
 
       {:ok, count}
     end)

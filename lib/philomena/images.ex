@@ -1582,7 +1582,7 @@ defmodule Philomena.Images do
   defp increment_user_stats(nil), do: false
 
   defp increment_user_stats(%User{} = user) do
-    UserStatistics.inc_stat(user, :images_count)
+    UserStatistics.increment(user, :images_count)
   end
 
   defp maybe_suggest_user_verification(%User{id: id, images_count: 5, verified: false}) do
@@ -2219,7 +2219,7 @@ defmodule Philomena.Images do
          {:ok, %{image: {image, added, removed}}} <-
            update_loaded_sources(image, actor, attrs) do
       if Enum.any?(added) or Enum.any?(removed) do
-        UserStatistics.inc_stat(actor.user, :metadata_updates_count)
+        UserStatistics.increment(actor.user, :metadata_updates_count)
       end
 
       reindex_image(image)
@@ -2356,7 +2356,7 @@ defmodule Philomena.Images do
       Tags.reindex_tags(added ++ removed)
 
       if Enum.any?(added ++ removed) do
-        UserStatistics.inc_stat(actor.user, :metadata_updates_count)
+        UserStatistics.increment(actor.user, :metadata_updates_count)
       end
 
       RateLimiter.record_action(actor, :tag_update, @tag_update_window)

@@ -185,7 +185,7 @@ defmodule Philomena.Posts do
     |> Repo.transaction()
     |> case do
       {:ok, %{post: post}} ->
-        UserStatistics.inc_stat(post.user_id, :posts_count, -1)
+        UserStatistics.increment(post.user_id, :posts_count, -1)
         reindex_post(post)
 
         {:ok, post}
@@ -504,7 +504,7 @@ defmodule Philomena.Posts do
   # post total (a no-op for an anonymous author, whose user is nil), an
   # unapproved one is reported for external links.
   defp record_post_creation(%Actor{user: user}, %Post{approved: true}),
-    do: UserStatistics.inc_stat(user, :posts_count)
+    do: UserStatistics.increment(user, :posts_count)
 
   defp record_post_creation(_actor, post),
     do: report_non_approved(post)
@@ -888,7 +888,7 @@ defmodule Philomena.Posts do
     |> Repo.transaction()
     |> case do
       {:ok, %{post: approved_post, reports: {_count, reports}}} ->
-        UserStatistics.inc_stat(approved_post.user_id, :posts_count)
+        UserStatistics.increment(approved_post.user_id, :posts_count)
         Reports.reindex_reports(reports)
         reindex_post(approved_post)
         log_post_approval(actor, approved_post)
