@@ -1,8 +1,8 @@
 defmodule Philomena.UserNameChanges do
   @moduledoc """
-  Rename-history persistence and staff-only history reads.
+  Name change history persistence and staff history auditing.
 
-  `Philomena.Users` owns rename authorization and account mutation, and uses
+  `Philomena.Users` manages rename authorization and account mutation, and uses
   this context's transaction step to record the prior name atomically. History
   is retained indefinitely.
   """
@@ -27,12 +27,12 @@ defmodule Philomena.UserNameChanges do
   end
 
   @doc """
-  Adds the prior-name insert for `user` to `multi` under `step`.
+  Records a name change entry for `user` to `multi` under `step`.
 
   This is a transaction composition function for `Philomena.Users`, not a
-  request-facing authorized rename operation. Every successful rename records
-  the exact prior spelling, including case-only changes. If any later step in
-  the owning transaction fails, the history insert rolls back with it.
+  request-facing rename operation. Every successful rename records the exact
+  prior spelling, including case-only changes. If any later step in the
+  owning transaction fails, the history insert rolls back with it.
 
   ## Examples
 

@@ -1,8 +1,8 @@
 defmodule Philomena.UserStatistics do
   @moduledoc """
-  Atomic daily counters derived from successful user activity.
+  Atomic daily counters derived from user activity.
 
-  This module performs no authorization. It accepts a finite statistic key, and
+  This module performs no authorization. It accepts a statistic key, and
   updates the user's lifetime counter and UTC daily row together.
   """
 
