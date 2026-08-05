@@ -6,7 +6,7 @@ defmodule Philomena.Versions do
   snapshots: each row holds the body and edit reason as of one edit, made by
   `user_id` at `created_at`. The state an item had before its first edit
   lives in an initial row stamped with the item's author and creation time,
-  created lazily when the item is first edited — never-edited items have no
+  created lazily when the item is first edited. Never-edited items have no
   version rows at all.
   """
 

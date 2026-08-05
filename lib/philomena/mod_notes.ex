@@ -2,84 +2,34 @@ defmodule Philomena.ModNotes do
   @moduledoc """
   Staff notes attached to users, reports, and DNP entries.
 
-  Target selection is represented by a typed `{type, id}` descriptor and every
-  target is safely loaded and separately authorized. Note writes are attributed
-  to the acting staff member and transactionally coupled to their moderation
-  audit record.
+  Target selection is represented by a typed Target descriptor and every
+  target is loaded and separately authorized. Writes are attributed
+  to the acting staff member and transactionally coupled to their
+  moderation audit record.
   """
 
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
+  alias Philomena.IntegerId
   alias Ecto.Multi
   alias Philomena.Attribution.Actor
-  alias Philomena.DnpEntries.DnpEntry
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModNotes.ModNote
+  alias Philomena.ModNotes.Target
   alias Philomena.Repo
-  alias Philomena.Reports.Report
   alias Philomena.Users.User
 
-  @target_definitions [
-    user: {User, :user_id},
-    report: {Report, :report_id},
-    dnp_entry: {DnpEntry, :dnp_entry_id}
-  ]
   @embedded_page_size 250
 
-  @typedoc "A supported note-target type and safely parseable database ID."
-  @type target :: {:user | :report | :dnp_entry, Loader.integer_id()}
-
-  defp target_params(params) do
-    Enum.flat_map(@target_definitions, fn {type, {_schema, column}} ->
-      value = Map.get(params, to_string(column), Map.get(params, column))
-
-      if value in [nil, ""] do
-        []
-      else
-        [{type, value}]
-      end
-    end)
+  defp fetch_and_authorize_target(actor, %Target{} = target, action) do
+    Loader.fetch_and_authorize(target.schema, actor, action, target.value)
   end
 
-  defp parse_targets(params) do
-    Enum.reduce_while(target_params(params), {:ok, []}, fn {type, value}, {:ok, targets} ->
-      case Philomena.IntegerId.parse(value) do
-        {:ok, id} -> {:cont, {:ok, [{type, id} | targets]}}
-        :error -> {:halt, {:error, :not_found}}
-      end
-    end)
-  end
-
-  defp target_definition(type) do
-    Keyword.fetch!(@target_definitions, type)
-  end
-
-  defp target_changes(targets) do
-    Enum.map(targets, fn {type, id} ->
-      {_schema, column} = target_definition(type)
-      {column, id}
-    end)
-  end
-
-  defp load_target(actor, {type, id}, action) do
-    {schema, _column} = target_definition(type)
-    Loader.fetch_and_authorize(schema, actor, action, id)
-  end
-
-  defp authorize_targets(actor, targets, action) do
-    Enum.reduce_while(targets, :ok, fn target, :ok ->
-      case load_target(actor, target, action) do
-        {:ok, _record} -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-  end
-
-  defp target_query({type, id}) do
-    {_schema, column} = target_definition(type)
-    where(ModNote, [note], field(note, ^column) == ^id)
+  defp target_query(%Target{} = target) do
+    from note in ModNote,
+      where: field(note, ^target.column) == ^target.value
   end
 
   defp ordered_notes(queryable) do
@@ -95,7 +45,11 @@ defmodule Philomena.ModNotes do
   end
 
   defp paginate_notes(queryable, collection_renderer, pagination) do
-    page = queryable |> ordered_notes() |> Repo.paginate(pagination)
+    page =
+      queryable
+      |> ordered_notes()
+      |> Repo.paginate(pagination)
+
     %{page | entries: render_notes(page.entries, collection_renderer)}
   end
 
@@ -103,9 +57,9 @@ defmodule Philomena.ModNotes do
     ModNote.changeset(mod_note, %{})
   end
 
-  defp creation_changeset(%Actor{user: %User{} = moderator}, attrs, targets) do
+  defp creation_changeset(%Actor{user: %User{} = moderator}, attrs, target) do
     %ModNote{moderator_id: moderator.id}
-    |> ModNote.creation_changeset(attrs, target_changes(targets))
+    |> ModNote.creation_changeset(attrs, Target.to_changes(target))
   end
 
   defp update_mod_note_changeset(%ModNote{} = mod_note, attrs) do
@@ -116,15 +70,6 @@ defmodule Philomena.ModNotes do
     Loader.fetch_and_authorize(ModNote, actor, action, id, ModNote.target_preloads())
   end
 
-  defp target_label([{type, id}]) do
-    type
-    |> Atom.to_string()
-    |> String.replace("_", " ")
-    |> then(&"#{&1} #{id}")
-  end
-
-  defp target_label(_targets), do: "invalid target"
-
   defp transact_note(multi, step) do
     case Repo.transact(multi) do
       {:ok, %{^step => note}} -> {:ok, note}
@@ -133,39 +78,12 @@ defmodule Philomena.ModNotes do
     end
   end
 
-  defp index_target_status(_actor, []), do: :ok
-
-  defp index_target_status(actor, [_target] = targets) do
-    authorize_targets(actor, targets, :show_mod_notes)
-  end
-
-  defp index_target_status(_actor, _multiple_targets), do: {:error, :not_found}
-
-  defp new_target_status(_actor, []), do: :ok
-
-  defp new_target_status(actor, [_target] = targets),
-    do: authorize_targets(actor, targets, :annotate)
-
-  defp new_target_status(_actor, _multiple_targets), do: {:error, :not_found}
-
-  defp create_target_status(actor, attrs, []) do
-    {:error, creation_changeset(actor, attrs, [])}
-  end
-
-  defp create_target_status(actor, _attrs, [_target] = targets) do
-    authorize_targets(actor, targets, :annotate)
-  end
-
-  defp create_target_status(actor, attrs, targets) do
-    {:error, creation_changeset(actor, attrs, targets)}
-  end
-
   @doc """
   Returns up to 250 newest notes for `target`, rendered for an embedded page.
 
   The actor must be allowed to index notes and to view notes for the safely
   loaded target. Malformed and missing target IDs are `{:error, :not_found}`.
-  History is retained indefinitely; only this embedded summary is bounded.
+  History is retained indefinitely, but the returned list is bounded to 250.
 
   ## Examples
 
@@ -176,14 +94,15 @@ defmodule Philomena.ModNotes do
       {:error, :unauthorized}
 
   """
-  @spec list_for_target(Actor.t(), target(), (list(ModNote.t()) -> list(term()))) ::
+  @spec list_for_target(Actor.t(), {atom(), IntegerId.integer_id()}, (list(ModNote.t()) ->
+                                                                        list(term()))) ::
           {:ok, [{ModNote.t(), term()}]} | {:error, :not_found | :unauthorized}
   def list_for_target(%Actor{} = actor, {type, id}, collection_renderer)
       when type in [:user, :report, :dnp_entry] do
-    target = {type, id}
-
     with :ok <- authorize(actor, :index, ModNote),
-         {:ok, _record} <- load_target(actor, target, :show_mod_notes) do
+         {:ok, target} <- Target.from_type_and_id(type, id),
+         {:ok, _record} <-
+           fetch_and_authorize_target(actor, target, :show_mod_notes) do
       notes =
         target
         |> target_query()
@@ -198,10 +117,10 @@ defmodule Philomena.ModNotes do
   @doc """
   Loads the paginated staff note index, optionally scoped to one target.
 
-  A target filter is one of `user_id`, `report_id`, or `dnp_entry_id`. It is
-  safely parsed, loaded, and authorized; multiple, malformed, or missing targets
-  return `{:error, :not_found}`. With no filter, all notes are returned newest
-  first.
+  A target filter is one of `user_id`, `report_id`, or `dnp_entry_id`, and is
+  authorized for `:show_mod_notes`. Multiple, malformed, or missing targets
+  act as if no filter was provided. With no filter, all notes are returned
+  newest first.
 
   ## Examples
 
@@ -219,20 +138,21 @@ defmodule Philomena.ModNotes do
           Repo.pagination_params()
         ) :: {:ok, Scrivener.Page.t()} | {:error, :not_found | :unauthorized}
   def load_mod_note_index(%Actor{} = actor, params, collection_renderer, pagination) do
-    with :ok <- authorize(actor, :index, ModNote),
-         {:ok, targets} <- parse_targets(params),
-         :ok <- index_target_status(actor, targets) do
-      queryable = if targets == [], do: ModNote, else: target_query(hd(targets))
-      {:ok, paginate_notes(queryable, collection_renderer, pagination)}
+    with :ok <- authorize(actor, :index, ModNote) do
+      with {:ok, target} <- Target.from_params(params),
+           {:ok, _record} <- fetch_and_authorize_target(actor, target, :show_mod_notes) do
+        {:ok, paginate_notes(target_query(target), collection_renderer, pagination)}
+      else
+        _ ->
+          {:ok, paginate_notes(ModNote, collection_renderer, pagination)}
+      end
     end
   end
 
   @doc """
-  Builds a new-note changeset for an optional target selected in `params`.
+  Builds a new-note changeset for the target selected in `params`.
 
-  When supplied, the target is safely loaded and authorized with `:annotate`.
-  A request without a target intentionally returns a blank changeset whose
-  create-time validation will require one.
+  The target is loaded and authorized with `:annotate`.
 
   ## Examples
 
@@ -248,18 +168,16 @@ defmodule Philomena.ModNotes do
   def new_mod_note(%Actor{} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, ModNote),
-         {:ok, targets} <- parse_targets(params),
-         :ok <- new_target_status(actor, targets) do
-      {:ok, creation_changeset(actor, %{}, targets)}
+         {:ok, target} <- Target.from_params(params),
+         {:ok, _} <- fetch_and_authorize_target(actor, target, :annotate) do
+      {:ok, creation_changeset(actor, %{}, target)}
     end
   end
 
   @doc """
   Creates an attributed note and its moderation log in one transaction.
 
-  Exactly one existing, authorized target is required. No target or multiple
-  targets produce an invalid changeset; malformed and missing IDs are
-  `{:error, :not_found}`.
+  The target is loaded and authorized with `:annotate`.
 
   ## Examples
 
@@ -276,9 +194,9 @@ defmodule Philomena.ModNotes do
   def create_mod_note(%Actor{} = actor, attrs \\ %{}) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, ModNote),
-         {:ok, targets} <- parse_targets(attrs),
-         :ok <- create_target_status(actor, attrs, targets) do
-      changeset = creation_changeset(actor, attrs, targets)
+         {:ok, target} <- Target.from_params(attrs),
+         {:ok, _} <- fetch_and_authorize_target(actor, target, :annotate) do
+      changeset = creation_changeset(actor, attrs, target)
 
       Multi.new()
       |> Multi.insert(:mod_note, changeset)
@@ -287,7 +205,7 @@ defmodule Philomena.ModNotes do
         actor,
         "ModNote:create",
         "/admin/mod_notes",
-        "Created mod note for #{target_label(targets)}"
+        "Created mod note for #{Target.label(target)}"
       )
       |> transact_note(:mod_note)
     end

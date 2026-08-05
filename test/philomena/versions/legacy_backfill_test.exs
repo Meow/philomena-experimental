@@ -118,7 +118,7 @@ defmodule Philomena.Versions.LegacyBackfillTest do
 
       # Four rows: the synthesized initial (author, oldest object body, nil
       # reason), then each legacy row shifted forward to take the next row's
-      # object body — the newest taking the live post's current state. Each
+      # object body - the newest taking the live post's current state. Each
       # shifted row keeps its own legacy whodunnit.
       assert post_rows(post) == [
                {"body v0", nil, author.id},

@@ -81,30 +81,49 @@ defmodule Philomena.ModNotesTest do
       refute other.id in ids
     end
 
-    test "target filters safely reject malformed, missing, and multiple targets" do
+    test "target filters ignore malformed, missing, and multiple targets" do
       moderator = actor(moderator_user_fixture())
       target = confirmed_user_fixture()
 
-      assert ModNotes.load_mod_note_index(
-               moderator,
-               %{"user_id" => "not-an-id"},
-               & &1,
-               @pagination
-             ) == {:error, :not_found}
+      {:ok, index} =
+        ModNotes.load_mod_note_index(
+          moderator,
+          %{"user_id" => "not-an-id"},
+          & &1,
+          @pagination
+        )
 
-      assert ModNotes.load_mod_note_index(
-               moderator,
-               %{"user_id" => "2147483647"},
-               & &1,
-               @pagination
-             ) == {:error, :not_found}
+      assert Enum.empty?(index)
 
-      assert ModNotes.load_mod_note_index(
-               moderator,
-               %{"user_id" => target.id, "report_id" => "2147483647"},
-               & &1,
-               @pagination
-             ) == {:error, :not_found}
+      {:ok, index} =
+        ModNotes.load_mod_note_index(
+          moderator,
+          %{"user_id" => "not-an-id"},
+          & &1,
+          @pagination
+        )
+
+      assert Enum.empty?(index)
+
+      {:ok, index} =
+        ModNotes.load_mod_note_index(
+          moderator,
+          %{"user_id" => "2147483647"},
+          & &1,
+          @pagination
+        )
+
+      assert Enum.empty?(index)
+
+      {:ok, index} =
+        ModNotes.load_mod_note_index(
+          moderator,
+          %{"user_id" => target.id, "report_id" => "2147483647"},
+          & &1,
+          @pagination
+        )
+
+      assert Enum.empty?(index)
     end
   end
 
@@ -185,7 +204,10 @@ defmodule Philomena.ModNotesTest do
     end
 
     test "an assistant is authorized" do
-      assert {:ok, _changeset} = ModNotes.new_mod_note(actor(assistant_user_fixture()), %{})
+      author = assistant_user_fixture()
+
+      assert {:ok, _changeset} =
+               ModNotes.new_mod_note(actor(author), %{"user_id" => author.id})
     end
 
     test "a regular user is unauthorized" do
@@ -488,10 +510,10 @@ defmodule Philomena.ModNotesTest do
     test "rejects a note with no target" do
       author = moderator_user_fixture()
 
-      assert {:error, changeset} =
+      assert {:error, :not_found} =
                ModNotes.create_mod_note(actor(author), %{"body" => "orphan attempt"})
 
-      assert errors_on(changeset)[:target] == ["must reference exactly one target"]
+      refute Repo.get_by(ModNote, body: "orphan attempt")
     end
 
     test "rejects two targets instead of silently choosing one" do
@@ -500,14 +522,13 @@ defmodule Philomena.ModNotesTest do
       image = image_fixture()
       report = report_fixture(image_id: image.id)
 
-      assert {:error, changeset} =
+      assert {:error, :not_found} =
                ModNotes.create_mod_note(actor(author), %{
                  "body" => "two targets",
                  "user_id" => target.id,
                  "report_id" => report.id
                })
 
-      assert errors_on(changeset)[:target] == ["must reference exactly one target"]
       refute Repo.get_by(ModNote, body: "two targets")
     end
   end
