@@ -1,111 +1,291 @@
 defmodule Philomena.Notifications do
   @moduledoc """
-  The Notifications context.
+  Self-scoped unread-notification reads and internal event delivery.
+
+  Readers accept an `Actor` and can only inspect that actor's user. Event
+  broadcasts are idempotent upserts: one unread row exists per recipient and
+  event subject, and a repeated event refreshes it without changing its original
+  creation time. Production event owners call these services from
+  `Ecto.Multi.run/3`, so their database changes and notifications commit or roll
+  back together. Clear operations are idempotent and intentionally accept `nil`
+  users for anonymous read paths.
   """
 
   import Ecto.Query, warn: false
-  alias Philomena.Repo
 
   alias Philomena.Attribution.Actor
   alias Philomena.Channels
+  alias Philomena.Channels.Channel
+  alias Philomena.Comments.Comment
   alias Philomena.Forums
   alias Philomena.Galleries
+  alias Philomena.Galleries.Gallery
   alias Philomena.Images
-  alias Philomena.Topics
-
+  alias Philomena.Images.Image
   alias Philomena.Notifications.ChannelLiveNotification
   alias Philomena.Notifications.ForumPostNotification
   alias Philomena.Notifications.ForumTopicNotification
   alias Philomena.Notifications.GalleryImageNotification
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
+  alias Philomena.Posts.Post
+  alias Philomena.Repo
+  alias Philomena.Topics
+  alias Philomena.Topics.Topic
+  alias Philomena.Users.User
 
-  alias Philomena.Notifications.Category
-  alias Philomena.Notifications.Creator
+  @categories [
+    :channel_live,
+    :forum_post,
+    :forum_topic,
+    :gallery_image,
+    :image_comment,
+    :image_merge
+  ]
+
+  @category_params Map.new(@categories, &{Atom.to_string(&1), &1})
+
+  @typedoc "A route-visible unread-notification category."
+  @type category ::
+          :channel_live
+          | :forum_post
+          | :forum_topic
+          | :gallery_image
+          | :image_comment
+          | :image_merge
+
+  @typedoc "The number of notification rows affected by a broadcast or clear."
+  @type count_result :: {:ok, non_neg_integer()}
+
+  defp category_query(:channel_live),
+    do: from(notification in ChannelLiveNotification, preload: :channel)
+
+  defp category_query(:gallery_image),
+    do: from(notification in GalleryImageNotification, preload: [gallery: :user])
+
+  defp category_query(:image_comment) do
+    from(notification in ImageCommentNotification,
+      preload: [image: [:sources, tags: :aliases], comment: :user]
+    )
+  end
+
+  defp category_query(:image_merge) do
+    from(notification in ImageMergeNotification,
+      preload: [:source, target: [:sources, tags: :aliases]]
+    )
+  end
+
+  defp category_query(:forum_topic),
+    do: from(notification in ForumTopicNotification, preload: [topic: [:forum, :user]])
+
+  defp category_query(:forum_post),
+    do: from(notification in ForumPostNotification, preload: [topic: :forum, post: :user])
+
+  defp user_category_query(category, %User{} = user) do
+    category
+    |> category_query()
+    |> where(user_id: ^user.id)
+  end
+
+  defp union_all_queries([query | rest]) do
+    Enum.reduce(rest, query, fn next, union -> union_all(union, ^next) end)
+  end
+
+  defp unread_count(%User{} = user) do
+    @categories
+    |> Enum.map(fn category ->
+      category
+      |> user_category_query(user)
+      |> exclude(:preload)
+      |> select([_notification], %{one: 1})
+    end)
+    |> union_all_queries()
+    |> Repo.aggregate(:count)
+  end
+
+  defp grouped_unread(%User{} = user, pagination) do
+    Enum.map(@categories, fn category ->
+      page = category |> unread_page(user, pagination)
+      {category, page}
+    end)
+  end
+
+  defp unread_page(category, %User{} = user, pagination) do
+    category
+    |> user_category_query(user)
+    |> order_by(desc: :updated_at)
+    |> Repo.paginate(pagination)
+  end
+
+  defp broadcast_notification(opts) do
+    opts = Keyword.validate!(opts, [:notification_author, :from, :into, :select, :unique_key])
+
+    notification_author = Keyword.get(opts, :notification_author)
+    {subscription_schema, filters} = Keyword.fetch!(opts, :from)
+    notification_schema = Keyword.fetch!(opts, :into)
+    select_keywords = Keyword.fetch!(opts, :select)
+    unique_key = Keyword.fetch!(opts, :unique_key)
+
+    subscription_schema
+    |> subscription_query(notification_author)
+    |> where(^filters)
+    |> convert_to_notification(select_keywords)
+    |> insert_notifications(notification_schema, unique_key)
+  end
+
+  defp subscription_query(subscription, %User{id: user_id}) do
+    from(row in subscription, where: row.user_id != ^user_id)
+  end
+
+  defp subscription_query(subscription, _anonymous_author), do: subscription
+
+  defp convert_to_notification(subscription, extra) do
+    now = dynamic([_row], type(^DateTime.utc_now(:second), :utc_datetime))
+
+    base = %{
+      user_id: dynamic([subscription], subscription.user_id),
+      created_at: now,
+      updated_at: now,
+      read: false
+    }
+
+    extra =
+      Map.new(extra, fn {field, value} ->
+        {field, dynamic([_row], type(^value, :integer))}
+      end)
+
+    from(subscription, select: ^Map.merge(base, extra))
+  end
+
+  defp insert_notifications(query, notification, unique_key) do
+    {count, nil} =
+      Repo.insert_all(
+        notification,
+        query,
+        on_conflict: {:replace_all_except, [:created_at]},
+        conflict_target: [unique_key, :user_id]
+      )
+
+    {:ok, count}
+  end
+
+  defp clear_for_user(_query, nil), do: {:ok, 0}
+
+  defp clear_for_user(query, %User{} = user) do
+    {count, nil} = query |> where(user_id: ^user.id) |> Repo.delete_all()
+    {:ok, count}
+  end
 
   @doc """
-  Return the count of all currently unread notifications for the user in all categories.
+  Parses a notification category route parameter.
+
+  Unknown values are `{:error, :not_found}` rather than silently selecting a
+  different category.
 
   ## Examples
 
-      iex> total_unread_notification_count(user)
+      iex> parse_category("image_comment")
+      {:ok, :image_comment}
+
+      iex> parse_category("unknown")
+      {:error, :not_found}
+
+  """
+  @spec parse_category(any()) :: {:ok, category()} | {:error, :not_found}
+  def parse_category(param) when is_binary(param) do
+    case Map.fetch(@category_params, param) do
+      {:ok, category} -> {:ok, category}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  def parse_category(_param), do: {:error, :not_found}
+
+  @doc """
+  Counts unread notifications belonging to `actor`'s user.
+
+  Anonymous actors intentionally receive zero, allowing the browser-wide count
+  plug to remain a no-op for logged-out requests.
+
+  ## Examples
+
+      iex> total_unread_count(actor)
       15
 
+      iex> total_unread_count(anonymous_actor)
+      0
+
   """
-  def total_unread_notification_count(user) do
-    Category.total_unread_notification_count(user)
-  end
+  @spec total_unread_count(Actor.t()) :: non_neg_integer()
+  def total_unread_count(%Actor{user: nil}), do: 0
+  def total_unread_count(%Actor{user: %User{} = user}), do: unread_count(user)
 
   @doc """
-  Gather up and return the top N notifications for the user, for each category of
-  unread notification currently existing.
+  Loads a paginated page for every unread category belonging to `actor`.
+
+  Anonymous actors are unauthorized. No user locator is accepted, so another
+  user's notifications cannot be selected.
 
   ## Examples
 
-      iex> unread_notifications_for_user(user, page_size: 10)
-      [
-        channel_live: [],
-        forum_post: [%ForumPostNotification{...}, ...],
-        forum_topic: [%ForumTopicNotification{...}, ...],
-        gallery_image: [],
-        image_comment: [%ImageCommentNotification{...}, ...],
-        image_merge: []
-      ]
+      iex> load_unread(actor, page_size: 10)
+      {:ok, [channel_live: %Scrivener.Page{}, ...]}
+
+      iex> load_unread(anonymous_actor, page_size: 10)
+      {:error, :unauthorized}
 
   """
-  def unread_notifications_for_user(%Actor{user: user}, pagination) do
-    Category.unread_notifications_for_user(user, pagination)
+  @spec load_unread(Actor.t(), Repo.pagination_params()) ::
+          {:ok, [{category(), Scrivener.Page.t()}]} | {:error, :unauthorized}
+  def load_unread(%Actor{user: nil}, _pagination), do: {:error, :unauthorized}
+
+  def load_unread(%Actor{user: %User{} = user}, pagination) do
+    {:ok, grouped_unread(user, pagination)}
   end
 
   @doc """
-  Returns paginated unread notifications for the user, given the category.
+  Loads one parsed unread category belonging to `actor`.
+
+  Returns the parsed category with its page so controllers cannot diverge from
+  context parsing. Unknown categories are `{:error, :not_found}`.
 
   ## Examples
 
-      iex> unread_notifications_for_user_and_category(user, :image_comment)
-      [%ImageCommentNotification{...}]
+      iex> load_unread_category(actor, "forum_post", pagination)
+      {:ok, {:forum_post, %Scrivener.Page{}}}
+
+      iex> load_unread_category(actor, "unknown", pagination)
+      {:error, :not_found}
 
   """
-  def unread_notifications_for_user_and_category(%Actor{user: user}, category, pagination) do
-    Category.unread_notifications_for_user_and_category(user, category, pagination)
-  end
+  @spec load_unread_category(Actor.t(), any(), Repo.pagination_params()) ::
+          {:ok, {category(), Scrivener.Page.t()}}
+          | {:error, :not_found | :unauthorized}
+  def load_unread_category(%Actor{user: nil}, _param, _pagination),
+    do: {:error, :unauthorized}
 
-  @doc """
-  Maps a category parameter to its notification category, defaulting any
-  unrecognized value to `:forum_post`.
-
-  ## Examples
-
-      iex> category_for_param("image_comment")
-      :image_comment
-
-      iex> category_for_param("bogus")
-      :forum_post
-
-  """
-  @spec category_for_param(any()) :: Category.t()
-  def category_for_param(param) do
-    case param do
-      "channel_live" -> :channel_live
-      "gallery_image" -> :gallery_image
-      "image_comment" -> :image_comment
-      "image_merge" -> :image_merge
-      "forum_topic" -> :forum_topic
-      _ -> :forum_post
+  def load_unread_category(%Actor{user: %User{} = user}, param, pagination) do
+    with {:ok, category} <- parse_category(param) do
+      {:ok, {category, unread_page(category, user, pagination)}}
     end
   end
 
   @doc """
-  Creates a channel live notification, returning the number of affected users.
+  Broadcasts a live-channel event to the channel's subscribers.
+
+  This duplicate-safe write participates in the caller's ambient Repo
+  transaction. The owning context is responsible for deciding that the event
+  is authorized.
 
   ## Examples
 
-      iex> create_channel_live_notification(channel)
+      iex> broadcast_channel_live(channel)
       {:ok, 2}
 
   """
-  def create_channel_live_notification(channel) do
-    Creator.broadcast_notification(
+  @spec broadcast_channel_live(Channel.t()) :: count_result()
+  def broadcast_channel_live(%Channel{} = channel) do
+    broadcast_notification(
       from: {Channels.Subscription, channel_id: channel.id},
       into: ChannelLiveNotification,
       select: [channel_id: channel.id],
@@ -114,17 +294,21 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Creates a forum post notification, returning the number of affected users.
+  Broadcasts a new-post event to topic subscribers other than the author.
+
+  This duplicate-safe write participates in the caller's ambient Repo
+  transaction. The owning context is responsible for authorizing the post.
 
   ## Examples
 
-      iex> create_forum_post_notification(user, topic, post)
+      iex> broadcast_forum_post(author, topic, post)
       {:ok, 2}
 
   """
-  def create_forum_post_notification(user, topic, post) do
-    Creator.broadcast_notification(
-      notification_author: user,
+  @spec broadcast_forum_post(User.t() | nil, Topic.t(), Post.t()) :: count_result()
+  def broadcast_forum_post(author, %Topic{} = topic, %Post{} = post) do
+    broadcast_notification(
+      notification_author: author,
       from: {Topics.Subscription, topic_id: topic.id},
       into: ForumPostNotification,
       select: [topic_id: topic.id, post_id: post.id],
@@ -133,17 +317,21 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Creates a forum topic notification, returning the number of affected users.
+  Broadcasts a new-topic event to forum subscribers other than the author.
+
+  This duplicate-safe write participates in the caller's ambient Repo
+  transaction. The owning context is responsible for authorizing the topic.
 
   ## Examples
 
-      iex> create_forum_topic_notification(user, topic)
+      iex> broadcast_forum_topic(author, topic)
       {:ok, 2}
 
   """
-  def create_forum_topic_notification(user, topic) do
-    Creator.broadcast_notification(
-      notification_author: user,
+  @spec broadcast_forum_topic(User.t() | nil, Topic.t()) :: count_result()
+  def broadcast_forum_topic(author, %Topic{} = topic) do
+    broadcast_notification(
+      notification_author: author,
       from: {Forums.Subscription, forum_id: topic.forum_id},
       into: ForumTopicNotification,
       select: [topic_id: topic.id],
@@ -152,16 +340,20 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Creates a gallery image notification, returning the number of affected users.
+  Broadcasts a gallery-image event to gallery subscribers.
+
+  This duplicate-safe write participates in the caller's ambient Repo
+  transaction. The owning context is responsible for authorizing the change.
 
   ## Examples
 
-      iex> create_gallery_image_notification(gallery)
+      iex> broadcast_gallery_image(gallery)
       {:ok, 2}
 
   """
-  def create_gallery_image_notification(gallery) do
-    Creator.broadcast_notification(
+  @spec broadcast_gallery_image(Gallery.t()) :: count_result()
+  def broadcast_gallery_image(%Gallery{} = gallery) do
+    broadcast_notification(
       from: {Galleries.Subscription, gallery_id: gallery.id},
       into: GalleryImageNotification,
       select: [gallery_id: gallery.id],
@@ -170,17 +362,21 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Creates an image comment notification, returning the number of affected users.
+  Broadcasts an image-comment event to image subscribers other than the author.
+
+  This duplicate-safe write participates in the caller's ambient Repo
+  transaction. The owning context is responsible for authorizing the comment.
 
   ## Examples
 
-      iex> create_image_comment_notification(user, image, comment)
+      iex> broadcast_image_comment(author, image, comment)
       {:ok, 2}
 
   """
-  def create_image_comment_notification(user, image, comment) do
-    Creator.broadcast_notification(
-      notification_author: user,
+  @spec broadcast_image_comment(User.t() | nil, Image.t(), Comment.t()) :: count_result()
+  def broadcast_image_comment(author, %Image{} = image, %Comment{} = comment) do
+    broadcast_notification(
+      notification_author: author,
       from: {Images.Subscription, image_id: image.id},
       into: ImageCommentNotification,
       select: [image_id: image.id, comment_id: comment.id],
@@ -189,16 +385,20 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Creates an image merge notification, returning the number of affected users.
+  Broadcasts an image-merge event to subscribers of the target image.
+
+  This duplicate-safe write participates in the caller's ambient Repo
+  transaction. The owning context is responsible for authorizing the merge.
 
   ## Examples
 
-      iex> create_image_merge_notification(target, source)
+      iex> broadcast_image_merge(target, source)
       {:ok, 2}
 
   """
-  def create_image_merge_notification(target, source) do
-    Creator.broadcast_notification(
+  @spec broadcast_image_merge(Image.t(), Image.t()) :: count_result()
+  def broadcast_image_merge(%Image{} = target, %Image{} = source) do
+    broadcast_notification(
       from: {Images.Subscription, image_id: target.id},
       into: ImageMergeNotification,
       select: [target_id: target.id, source_id: source.id],
@@ -207,116 +407,119 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Removes the channel live notification for a given channel and user, returning
-  the number of affected users.
+  Clears `user`'s live notification for `channel`.
+
+  Repeated clears and a `nil` user remove zero rows. The delete participates in
+  the caller's ambient Repo transaction.
 
   ## Examples
 
-      iex> clear_channel_live_notification(channel, user)
-      {:ok, 2}
+      iex> clear_channel_live(channel, user)
+      {:ok, 1}
+
+      iex> clear_channel_live(channel, nil)
+      {:ok, 0}
 
   """
-  def clear_channel_live_notification(channel, user) do
+  @spec clear_channel_live(Channel.t(), User.t() | nil) :: count_result()
+  def clear_channel_live(%Channel{} = channel, user) do
     ChannelLiveNotification
     |> where(channel_id: ^channel.id)
-    |> delete_all_for_user(user)
+    |> clear_for_user(user)
   end
 
   @doc """
-  Removes the forum post notification for a given topic and user, returning
-  the number of affected notifications.
+  Clears `user`'s new-post notification for `topic`.
+
+  Repeated clears and a `nil` user remove zero rows. The delete participates in
+  the caller's ambient Repo transaction.
 
   ## Examples
 
-      iex> clear_forum_post_notification(topic, user)
-      {:ok, 2}
+      iex> clear_forum_post(topic, user)
+      {:ok, 1}
 
   """
-  def clear_forum_post_notification(topic, user) do
+  @spec clear_forum_post(Topic.t(), User.t() | nil) :: count_result()
+  def clear_forum_post(%Topic{} = topic, user) do
     ForumPostNotification
     |> where(topic_id: ^topic.id)
-    |> delete_all_for_user(user)
+    |> clear_for_user(user)
   end
 
   @doc """
-  Removes the forum topic notification for a given topic and user, returning
-  the number of affected notifications.
+  Clears `user`'s new-topic notification for `topic`.
+
+  Repeated clears and a `nil` user remove zero rows. The delete participates in
+  the caller's ambient Repo transaction.
 
   ## Examples
 
-      iex> clear_forum_topic_notification(topic, user)
-      {:ok, 2}
+      iex> clear_forum_topic(topic, user)
+      {:ok, 1}
 
   """
-  def clear_forum_topic_notification(topic, user) do
+  @spec clear_forum_topic(Topic.t(), User.t() | nil) :: count_result()
+  def clear_forum_topic(%Topic{} = topic, user) do
     ForumTopicNotification
     |> where(topic_id: ^topic.id)
-    |> delete_all_for_user(user)
+    |> clear_for_user(user)
   end
 
   @doc """
-  Removes the gallery image notification for a given gallery and user, returning
-  the number of affected notifications.
+  Clears `user`'s image notification for `gallery`.
+
+  Repeated clears and a `nil` user remove zero rows. The delete participates in
+  the caller's ambient Repo transaction.
 
   ## Examples
 
-      iex> clear_gallery_image_notification(topic, user)
-      {:ok, 2}
+      iex> clear_gallery_image(gallery, user)
+      {:ok, 1}
 
   """
-  def clear_gallery_image_notification(gallery, user) do
+  @spec clear_gallery_image(Gallery.t(), User.t() | nil) :: count_result()
+  def clear_gallery_image(%Gallery{} = gallery, user) do
     GalleryImageNotification
     |> where(gallery_id: ^gallery.id)
-    |> delete_all_for_user(user)
+    |> clear_for_user(user)
   end
 
   @doc """
-  Removes the image comment notification for a given image and user, returning
-  the number of affected notifications.
+  Clears `user`'s comment notification for `image`.
+
+  Repeated clears and a `nil` user remove zero rows. The delete participates in
+  the caller's ambient Repo transaction.
 
   ## Examples
 
-      iex> clear_gallery_image_notification(topic, user)
-      {:ok, 2}
+      iex> clear_image_comment(image, user)
+      {:ok, 1}
 
   """
-  def clear_image_comment_notification(image, user) do
+  @spec clear_image_comment(Image.t(), User.t() | nil) :: count_result()
+  def clear_image_comment(%Image{} = image, user) do
     ImageCommentNotification
     |> where(image_id: ^image.id)
-    |> delete_all_for_user(user)
+    |> clear_for_user(user)
   end
 
   @doc """
-  Removes the image merge notification for a given image and user, returning
-  the number of affected notifications.
+  Clears `user`'s merge notification for `image`.
+
+  Repeated clears and a `nil` user remove zero rows. The delete participates in
+  the caller's ambient Repo transaction.
 
   ## Examples
 
-      iex> clear_image_merge_notification(topic, user)
-      {:ok, 2}
+      iex> clear_image_merge(image, user)
+      {:ok, 1}
 
   """
-  def clear_image_merge_notification(image, user) do
+  @spec clear_image_merge(Image.t(), User.t() | nil) :: count_result()
+  def clear_image_merge(%Image{} = image, user) do
     ImageMergeNotification
     |> where(target_id: ^image.id)
-    |> delete_all_for_user(user)
-  end
-
-  #
-  # Clear all unread notifications using the given query.
-  #
-  # Returns `{:ok, count}`, where `count` is the number of affected rows.
-  #
-  defp delete_all_for_user(query, user) do
-    if user do
-      {count, nil} =
-        query
-        |> where(user_id: ^user.id)
-        |> Repo.delete_all()
-
-      {:ok, count}
-    else
-      {:ok, 0}
-    end
+    |> clear_for_user(user)
   end
 end

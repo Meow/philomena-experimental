@@ -506,7 +506,7 @@ defmodule Philomena.PostsTest do
       post = post_fixture(topic, author, %{"body" => "Original post body"})
 
       {:ok, _} =
-        Posts.update_post(post, author, %{
+        Posts.update_post(post, actor(author), %{
           "body" => "Original post body plus an edit",
           "edit_reason" => "typo fix"
         })
@@ -526,12 +526,11 @@ defmodule Philomena.PostsTest do
       post = post_fixture(topic, author, %{"body" => "edit 0"})
 
       # Each update records one version, so 26 edits record 26 versions; the
-      # query limits the result to 25. Ordering among versions is not pinned:
-      # created_at has second precision, so edits within the same second tie and
-      # the surviving order is left to the database.
+      # query limits the result to 25. Database ids break same-second timestamp
+      # ties, so the most recently serialized edit is first.
       Enum.reduce(1..26, post, fn n, current ->
         {:ok, %{post: updated}} =
-          Posts.update_post(current, author, %{"body" => "edit #{n}"})
+          Posts.update_post(current, actor(author), %{"body" => "edit #{n}"})
 
         updated
       end)

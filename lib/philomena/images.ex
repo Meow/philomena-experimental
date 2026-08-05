@@ -3215,7 +3215,7 @@ defmodule Philomena.Images do
   end
 
   defp notify_merge(_repo, _changes, source, target) do
-    Notifications.create_image_merge_notification(target, source)
+    Notifications.broadcast_image_merge(target, source)
   end
 
   @doc """
@@ -3580,8 +3580,8 @@ defmodule Philomena.Images do
 
   """
   def clear_image_notification(%Image{} = image, user) do
-    Notifications.clear_image_comment_notification(image, user)
-    Notifications.clear_image_merge_notification(image, user)
+    Notifications.clear_image_comment(image, user)
+    Notifications.clear_image_merge(image, user)
     :ok
   end
 end

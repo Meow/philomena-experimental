@@ -25,7 +25,7 @@ defmodule PhilomenaWeb.Image.ReadControllerTest do
         {:ok, _} = Images.create_subscription(image, user)
         author = confirmed_user_fixture()
         comment = comment_fixture(image, author)
-        {:ok, 1} = Notifications.create_image_comment_notification(author, image, comment)
+        {:ok, 1} = Notifications.broadcast_image_comment(author, image, comment)
       end,
       notification?: fn ->
         Repo.exists?(

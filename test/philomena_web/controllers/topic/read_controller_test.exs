@@ -26,7 +26,7 @@ defmodule PhilomenaWeb.Topic.ReadControllerTest do
         {:ok, _} = Topics.create_subscription(topic, user)
         author = confirmed_user_fixture()
         post = hd(topic.posts)
-        {:ok, 1} = Notifications.create_forum_post_notification(author, topic, post)
+        {:ok, 1} = Notifications.broadcast_forum_post(author, topic, post)
       end,
       notification?: fn ->
         Repo.exists?(

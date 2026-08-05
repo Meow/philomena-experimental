@@ -98,15 +98,21 @@ defmodule Philomena.Posts do
 
   # Updates a post. Visible for testing.
   @doc false
-  def update_post(%Post{} = post, editor, attrs) do
+  def update_post(%Post{} = post, %Actor{} = actor, attrs) do
     now = DateTime.utc_now(:second)
-    post_changes = Post.changeset(post, attrs, now)
+
+    post_query =
+      Post
+      |> where(id: ^post.id)
+      |> preload(:user)
+      |> lock("FOR UPDATE")
 
     Multi.new()
-    |> Multi.update(:post, post_changes)
-    |> Multi.run(:version, fn repo, %{post: updated} ->
-      Versions.record_edit(repo, post, updated, editor)
+    |> Multi.one(:original_post, post_query)
+    |> Multi.update(:post, fn %{original_post: original_post} ->
+      Post.changeset(original_post, attrs, now)
     end)
+    |> Versions.record_edit(:version, :original_post, :post, actor)
     |> Repo.transaction()
     |> case do
       {:ok, %{post: post}} = result ->
@@ -434,7 +440,7 @@ defmodule Philomena.Posts do
   end
 
   defp notify_post(_repo, %{post: post, topic: topic}) do
-    Notifications.create_forum_post_notification(post.user, topic, post)
+    Notifications.broadcast_forum_post(post.user, topic, post)
   end
 
   @doc """
@@ -612,7 +618,7 @@ defmodule Philomena.Posts do
   def update_post(%Actor{} = actor, forum_slug, topic_slug, post_id, post_params) do
     with :ok <- verify_write_access(actor),
          {:ok, post} <- load_editable_post(actor, forum_slug, topic_slug, post_id) do
-      case update_post(post, actor.user, post_params || %{}) do
+      case update_post(post, actor, post_params || %{}) do
         {:ok, %{post: updated_post}} ->
           report_non_approved(updated_post)
           {:ok, updated_post}
@@ -955,7 +961,7 @@ defmodule Philomena.Posts do
     with {:ok, _forum, topic} <-
            Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
          {:ok, post} <- load_topic_post(actor, topic, post_id) do
-      {:ok, {topic, post, Versions.load_post_versions(post)}}
+      {:ok, {topic, post, Versions.for_post(post)}}
     end
   end
 

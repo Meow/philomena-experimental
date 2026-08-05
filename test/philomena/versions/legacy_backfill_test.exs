@@ -13,6 +13,7 @@ defmodule Philomena.Versions.LegacyBackfillTest do
 
   use Philomena.DataCase, async: true
 
+  import Philomena.AttributionFixtures, only: [actor: 1]
   import Philomena.CommentsFixtures
   import Philomena.ForumsFixtures
   import Philomena.ImagesFixtures
@@ -341,7 +342,9 @@ defmodule Philomena.Versions.LegacyBackfillTest do
       [post] = topic.posts
 
       # A real edit populates post_versions through the normal path.
-      {:ok, _} = Posts.update_post(post, editor, %{"body" => "edited", "edit_reason" => "x"})
+      {:ok, _} =
+        Posts.update_post(post, actor(editor), %{"body" => "edited", "edit_reason" => "x"})
+
       assert Repo.aggregate(PostVersion, :count) > 0
 
       assert_raise RuntimeError, ~r/post_versions already contains/, fn ->
@@ -350,7 +353,7 @@ defmodule Philomena.Versions.LegacyBackfillTest do
     end
   end
 
-  describe "load_post_versions/1 after backfill" do
+  describe "for_post/1 after backfill" do
     test "reproduces the legacy edit history as display entries" do
       {post, _author} = seed_post()
       u1 = confirmed_user_fixture()
@@ -389,7 +392,7 @@ defmodule Philomena.Versions.LegacyBackfillTest do
       assert :ok = LegacyBackfill.run!()
 
       entries =
-        Versions.load_post_versions(post)
+        Versions.for_post(post)
         |> Enum.map(&{&1.body, &1.previous_body, &1.edit_reason})
 
       # Newest-first, each entry pairs an after-edit body with the next-older

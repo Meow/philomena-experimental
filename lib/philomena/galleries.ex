@@ -182,7 +182,7 @@ defmodule Philomena.Galleries do
   end
 
   defp notify_gallery(_repo, %{gallery: gallery}) do
-    Notifications.create_gallery_image_notification(gallery)
+    Notifications.broadcast_gallery_image(gallery)
   end
 
   defp last_position(gallery_id) do
@@ -964,7 +964,7 @@ defmodule Philomena.Galleries do
 
   """
   def clear_gallery_notification(%Gallery{} = gallery, user) do
-    Notifications.clear_gallery_image_notification(gallery, user)
+    Notifications.clear_gallery_image(gallery, user)
     :ok
   end
 

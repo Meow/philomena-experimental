@@ -77,7 +77,7 @@ defmodule Philomena.ImagesTest do
     author = confirmed_user_fixture()
     {:ok, _} = Images.create_subscription(image, user)
     comment = comment_fixture(image, author)
-    {:ok, _} = Notifications.create_image_comment_notification(author, image, comment)
+    {:ok, _} = Notifications.broadcast_image_comment(author, image, comment)
     :ok
   end
 
@@ -86,7 +86,7 @@ defmodule Philomena.ImagesTest do
   defp arrange_merge_notification(image, user) do
     source = image_fixture()
     {:ok, _} = Images.create_subscription(image, user)
-    {:ok, _} = Notifications.create_image_merge_notification(image, source)
+    {:ok, _} = Notifications.broadcast_image_merge(image, source)
     :ok
   end
 

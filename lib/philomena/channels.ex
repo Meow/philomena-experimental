@@ -72,7 +72,7 @@ defmodule Philomena.Channels do
   end
 
   defp clear_notification_for(%Channel{} = channel, user) do
-    Notifications.clear_channel_live_notification(channel, user)
+    Notifications.clear_channel_live(channel, user)
     :ok
   end
 

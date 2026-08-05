@@ -43,7 +43,7 @@ defmodule PhilomenaWeb.MarkdownRenderer do
 
   @doc """
   Renders line diffs for a list of version structs (as prepared by
-  `Philomena.Versions.load_post_versions/1` and `load_comment_versions/1`).
+  `Philomena.Versions.for_post/1` and `for_comment/1`).
   Each version's `:difference` field is set to the rendered safe HTML diff
   from the next-older revision's body to this version's body.
   """

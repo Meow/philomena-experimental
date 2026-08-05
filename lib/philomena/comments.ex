@@ -66,20 +66,26 @@ defmodule Philomena.Comments do
   end
 
   defp notify_comment(_repo, %{image: image, comment: comment}) do
-    Notifications.create_image_comment_notification(comment.user, image, comment)
+    Notifications.broadcast_image_comment(comment.user, image, comment)
   end
 
   # Updates a comment. Visible for testing.
   @doc false
-  def update_comment(%Comment{} = comment, editor, attrs) do
+  def update_comment(%Comment{} = comment, %Actor{} = actor, attrs) do
     now = DateTime.utc_now(:second)
-    comment_changes = Comment.changeset(comment, attrs, now)
+
+    comment_query =
+      Comment
+      |> where(id: ^comment.id)
+      |> preload(:user)
+      |> lock("FOR UPDATE")
 
     Multi.new()
-    |> Multi.update(:comment, comment_changes)
-    |> Multi.run(:version, fn repo, %{comment: updated} ->
-      Versions.record_edit(repo, comment, updated, editor)
+    |> Multi.one(:original_comment, comment_query)
+    |> Multi.update(:comment, fn %{original_comment: original_comment} ->
+      Comment.changeset(original_comment, attrs, now)
     end)
+    |> Versions.record_edit(:version, :original_comment, :comment, actor)
     |> Repo.transaction()
   end
 
@@ -252,7 +258,7 @@ defmodule Philomena.Comments do
   def comment_history(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- Images.load_visible_image(actor, image_id),
          {:ok, comment} <- load_image_comment(actor, image, comment_id) do
-      {:ok, {image, comment, Versions.load_comment_versions(comment)}}
+      {:ok, {image, comment, Versions.for_comment(comment)}}
     end
   end
 
@@ -831,7 +837,7 @@ defmodule Philomena.Comments do
   def update_comment(%Actor{} = actor, %Image{} = image, comment_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, comment} <- load_editable_comment(actor.user, image, comment_id) do
-      case update_comment(comment, actor.user, params || %{}) do
+      case update_comment(comment, actor, params || %{}) do
         {:ok, %{comment: updated_comment}} ->
           report_non_approved(updated_comment)
           reindex_comment(updated_comment)

@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.Gallery.ReadControllerTest do
       path: ~p"/galleries/#{gallery}/read",
       arrange!: fn ->
         {:ok, _} = Galleries.create_subscription(gallery, user)
-        {:ok, 1} = Notifications.create_gallery_image_notification(gallery)
+        {:ok, 1} = Notifications.broadcast_gallery_image(gallery)
       end,
       notification?: fn ->
         Repo.exists?(

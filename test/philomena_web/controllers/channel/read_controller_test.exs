@@ -21,7 +21,7 @@ defmodule PhilomenaWeb.Channel.ReadControllerTest do
       path: ~p"/channels/#{channel}/read",
       arrange!: fn ->
         {:ok, _} = Channels.create_subscription(channel, user)
-        {:ok, 1} = Notifications.create_channel_live_notification(channel)
+        {:ok, 1} = Notifications.broadcast_channel_live(channel)
       end,
       notification?: fn ->
         Repo.exists?(

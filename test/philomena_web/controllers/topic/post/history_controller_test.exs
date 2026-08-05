@@ -1,6 +1,7 @@
 defmodule PhilomenaWeb.Topic.Post.HistoryControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
+  import Philomena.AttributionFixtures, only: [actor: 1]
   import Philomena.ForumsFixtures
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
@@ -18,7 +19,7 @@ defmodule PhilomenaWeb.Topic.Post.HistoryControllerTest do
       [post] = topic.posts
 
       {:ok, _} =
-        Posts.update_post(post, author, %{
+        Posts.update_post(post, actor(author), %{
           "body" => "Original post body plus an edit",
           "edit_reason" => "typo fix"
         })

@@ -391,7 +391,7 @@ defmodule Philomena.TopicsTest do
       {:ok, _} = Topics.create_subscription(topic, user)
       author = confirmed_user_fixture()
       post = hd(topic.posts)
-      {:ok, 1} = Notifications.create_forum_post_notification(author, topic, post)
+      {:ok, 1} = Notifications.broadcast_forum_post(author, topic, post)
       assert post_notification?(topic, user)
 
       assert {:ok, _topic} = Topics.mark_topic_read(actor(user), forum.short_name, topic.slug)
@@ -410,8 +410,8 @@ defmodule Philomena.TopicsTest do
     end
 
     test "an anonymous actor marks read harmlessly and returns the topic" do
-      # clear_topic_notification/2 forwards nil to delete_all_for_user, which
-      # short-circuits to {:ok, 0} for a nil user, so an anonymous actor reaching
+      # clear_topic_notification/2 forwards nil to the notification clear
+      # service, which returns {:ok, 0}, so an anonymous actor reaching
       # a visible topic is a successful no-op rather than a crash (contrast
       # subscribe/3, where the anonymous actor's nil user raises BadMapError in
       # create_subscription).
@@ -1161,7 +1161,7 @@ defmodule Philomena.TopicsTest do
       {:ok, _} = Topics.create_subscription(topic, user)
       author = confirmed_user_fixture()
       post = hd(topic.posts)
-      {:ok, 1} = Notifications.create_forum_post_notification(author, topic, post)
+      {:ok, 1} = Notifications.broadcast_forum_post(author, topic, post)
       assert post_notification?(topic, user)
 
       assert {:ok, _page} =

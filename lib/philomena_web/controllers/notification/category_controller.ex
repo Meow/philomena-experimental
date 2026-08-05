@@ -3,20 +3,20 @@ defmodule PhilomenaWeb.Notification.CategoryController do
 
   alias Philomena.Notifications
 
+  action_fallback PhilomenaWeb.FallbackController
+
   def show(conn, params) do
-    category = Notifications.category_for_param(params["id"])
-
-    notifications =
-      Notifications.unread_notifications_for_user_and_category(
-        conn.assigns.actor,
-        category,
-        conn.assigns.scrivener
+    with {:ok, {category, notifications}} <-
+           Notifications.load_unread_category(
+             conn.assigns.actor,
+             params["id"],
+             conn.assigns.scrivener
+           ) do
+      render(conn, "show.html",
+        title: "Notification Area",
+        notifications: notifications,
+        category: category
       )
-
-    render(conn, "show.html",
-      title: "Notification Area",
-      notifications: notifications,
-      category: category
-    )
+    end
   end
 end

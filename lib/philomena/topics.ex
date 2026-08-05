@@ -82,7 +82,7 @@ defmodule Philomena.Topics do
   end
 
   defp notify_topic(_repo, %{topic: topic}) do
-    Notifications.create_forum_topic_notification(topic.user, topic)
+    Notifications.broadcast_forum_topic(topic.user, topic)
   end
 
   # Makes a topic sticky, appearing at the top of its forum. Visible for testing.
@@ -1065,8 +1065,8 @@ defmodule Philomena.Topics do
 
   """
   def clear_topic_notification(%Topic{} = topic, user) do
-    Notifications.clear_forum_post_notification(topic, user)
-    Notifications.clear_forum_topic_notification(topic, user)
+    Notifications.clear_forum_post(topic, user)
+    Notifications.clear_forum_topic(topic, user)
     :ok
   end
 

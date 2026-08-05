@@ -141,6 +141,10 @@ Wave 1 now also includes Bans, UserFingerprints, and UserIps: ban administration
 uses transactional actor-scoped flows and private persistence helpers, while
 sensitive IP/fingerprint readers share the named `:identity_metadata`
 permission and canonical invalid-input behavior.
+Adverts, ArtistLinks, and Badges are complete: their controller-facing flows
+load and authorize through Actor-scoped APIs, database-only mutations use
+explicit transactions, and uploader work remains outside PostgreSQL
+transactions until object-storage uploads can be staged transactionally.
 Autocomplete, Roles, UserStatistics, and UserNameChanges are also complete:
 autocomplete reads use a normalized result and generation atomically replaces
 the PostgreSQL artifact; the unused generated Roles CRUD context is gone because
@@ -154,6 +158,15 @@ with separate target authorization; and moderation logs provide an
 `Ecto.Multi` composition API, used by note CRUD so the audit record and mutation
 succeed or roll back together. The direct log insert remains explicitly
 transitional while later context waves migrate their existing post-hoc calls.
+Notifications and Versions complete wave 1. Notification reads are self-scoped
+through Actor, route-category parsing has a normalized not-found result, and
+the six event kinds share documented duplicate-safe broadcast and idempotent
+clear mechanics that participate in their owners' ambient transactions.
+Post/comment history reads now accept loaded parents only, while edit history
+composes into the owning `Ecto.Multi` with Actor attribution, no-op suppression,
+rollback coupling, and deterministic same-second ordering. Legacy backfill
+support is retained until its release entry point and deployed-schema
+compatibility window are deliberately retired.
 
 ### Wave 0: characterize and establish the contract
 

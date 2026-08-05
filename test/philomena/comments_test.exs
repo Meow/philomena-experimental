@@ -651,7 +651,7 @@ defmodule Philomena.CommentsTest do
       comment = comment_fixture(image, author, %{"body" => "Original comment body"})
 
       {:ok, _} =
-        Comments.update_comment(comment, author, %{
+        Comments.update_comment(comment, actor(author), %{
           "body" => "Original comment body plus an edit",
           "edit_reason" => "typo fix"
         })
@@ -673,7 +673,7 @@ defmodule Philomena.CommentsTest do
       # query limits the result to 25.
       Enum.reduce(1..26, comment, fn n, current ->
         {:ok, %{comment: updated}} =
-          Comments.update_comment(current, author, %{"body" => "edit #{n}"})
+          Comments.update_comment(current, actor(author), %{"body" => "edit #{n}"})
 
         updated
       end)

@@ -1,6 +1,7 @@
 defmodule PhilomenaWeb.Image.Comment.HistoryControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
+  import Philomena.AttributionFixtures, only: [actor: 1]
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
@@ -14,7 +15,7 @@ defmodule PhilomenaWeb.Image.Comment.HistoryControllerTest do
       comment = comment_fixture(image, author, %{"body" => "Original comment body"})
 
       {:ok, _} =
-        Comments.update_comment(comment, author, %{
+        Comments.update_comment(comment, actor(author), %{
           "body" => "Original comment body plus an edit",
           "edit_reason" => "typo fix"
         })

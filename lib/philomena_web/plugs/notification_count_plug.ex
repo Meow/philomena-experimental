@@ -25,14 +25,12 @@ defmodule PhilomenaWeb.NotificationCountPlug do
     user = conn.assigns.current_user
 
     conn
-    |> maybe_assign_notifications(user)
+    |> maybe_assign_notifications(conn.assigns.actor)
     |> maybe_assign_conversations(user)
   end
 
-  defp maybe_assign_notifications(conn, nil), do: conn
-
-  defp maybe_assign_notifications(conn, user) do
-    notifications = Notifications.total_unread_notification_count(user)
+  defp maybe_assign_notifications(conn, actor) do
+    notifications = Notifications.total_unread_count(actor)
 
     Conn.assign(conn, :notification_count, notifications)
   end

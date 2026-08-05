@@ -18,13 +18,13 @@ defmodule PhilomenaWeb.Router do
     plug PhilomenaWeb.PaginationPlug
     plug PhilomenaWeb.EnsureUserEnabledPlug
     plug PhilomenaWeb.CurrentBanPlug
+    plug PhilomenaWeb.UserAttributionPlug
     plug PhilomenaWeb.NotificationCountPlug
     plug PhilomenaWeb.SiteNoticePlug
     plug PhilomenaWeb.ForumListPlug
     plug PhilomenaWeb.FilterSelectPlug
     plug PhilomenaWeb.ChannelPlug
     plug PhilomenaWeb.AdminCountersPlug
-    plug PhilomenaWeb.UserAttributionPlug
   end
 
   pipeline :api do
