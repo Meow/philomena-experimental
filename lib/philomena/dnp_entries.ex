@@ -12,7 +12,6 @@ defmodule Philomena.DnpEntries do
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.ModNotes
-  alias Philomena.ModNotes.ModNote
   alias Philomena.Tags.Tag
   alias Philomena.Users.User
 
@@ -194,8 +193,9 @@ defmodule Philomena.DnpEntries do
   """
   @spec mod_notes(Actor.t(), DnpEntry.t(), (list() -> list())) :: list() | nil
   def mod_notes(%Actor{} = viewer, %DnpEntry{} = dnp_entry, collection_renderer) do
-    if Canada.Can.can?(viewer.user, :index, ModNote) do
-      ModNotes.list_all_mod_notes_for_target(collection_renderer, dnp_entry_id: dnp_entry.id)
+    case ModNotes.list_for_target(viewer, {:dnp_entry, dnp_entry.id}, collection_renderer) do
+      {:ok, notes} -> notes
+      {:error, _reason} -> nil
     end
   end
 

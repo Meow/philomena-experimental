@@ -17,7 +17,6 @@ defmodule Philomena.Profiles do
   alias Philomena.UserStatistics.UserStatistic
   alias Philomena.UserNameChanges
   alias Philomena.ModNotes
-  alias Philomena.ModNotes.ModNote
   alias Philomena.Bans
   alias Philomena.Comments
   alias Philomena.Comments.Comment
@@ -292,8 +291,9 @@ defmodule Philomena.Profiles do
   """
   @spec mod_notes(Actor.t(), User.t(), (list() -> list())) :: list() | nil
   def mod_notes(%Actor{} = actor, user, collection_renderer) do
-    if Canada.Can.can?(actor.user, :index, ModNote) do
-      ModNotes.list_all_mod_notes_for_target(collection_renderer, user_id: user.id)
+    case ModNotes.list_for_target(actor, {:user, user.id}, collection_renderer) do
+      {:ok, notes} -> notes
+      {:error, _reason} -> nil
     end
   end
 

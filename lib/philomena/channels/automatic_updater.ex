@@ -17,6 +17,7 @@ defmodule Philomena.Channels.AutomaticUpdater do
   @doc """
   Updates all the tracked channels for which an update scheme is known.
   """
+  @spec update_tracked_channels!() :: :ok
   def update_tracked_channels! do
     now = DateTime.utc_now(:second)
     Enum.each(providers(), &update_provider(&1, now))
@@ -59,6 +60,6 @@ defmodule Philomena.Channels.AutomaticUpdater do
       |> Map.get(channel.short_name, %{})
       |> Map.merge(%{last_fetched_at: now})
 
-    Channels.update_channel_state(channel, attrs)
+    Channels.update_fetch_state(channel, attrs)
   end
 end

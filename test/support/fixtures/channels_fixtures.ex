@@ -4,6 +4,9 @@ defmodule Philomena.ChannelsFixtures do
   entities via the `Philomena.Channels` context.
   """
 
+  import Philomena.AttributionFixtures, only: [actor: 1]
+  import Philomena.UsersFixtures, only: [moderator_user_fixture: 0]
+
   alias Philomena.Channels
 
   def unique_channel_short_name, do: "test_channel_#{System.unique_integer([:positive])}"
@@ -21,7 +24,7 @@ defmodule Philomena.ChannelsFixtures do
         "short_name" => unique_channel_short_name()
       })
 
-    {:ok, channel} = Channels.create_channel(attrs)
+    {:ok, channel} = Channels.create_channel(actor(moderator_user_fixture()), attrs)
 
     channel
   end
@@ -42,7 +45,7 @@ defmodule Philomena.ChannelsFixtures do
     {:ok, channel} =
       create_attrs
       |> channel_fixture()
-      |> Channels.update_channel_state(state_attrs)
+      |> Channels.update_fetch_state(state_attrs)
 
     channel
   end

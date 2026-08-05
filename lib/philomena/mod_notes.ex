@@ -1,315 +1,379 @@
 defmodule Philomena.ModNotes do
   @moduledoc """
-  The ModNotes context.
+  Staff notes attached to users, reports, and DNP entries.
+
+  Target selection is represented by a typed `{type, id}` descriptor and every
+  target is safely loaded and separately authorized. Note writes are attributed
+  to the acting staff member and transactionally coupled to their moderation
+  audit record.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
+  alias Ecto.Multi
   alias Philomena.Attribution.Actor
-  alias Philomena.Repo
+  alias Philomena.DnpEntries.DnpEntry
   alias Philomena.Loader
+  alias Philomena.ModerationLogs
   alias Philomena.ModNotes.ModNote
+  alias Philomena.Repo
+  alias Philomena.Reports.Report
+  alias Philomena.Users.User
 
-  # Whitelist of the target foreign key columns a note may be filed against.
-  @target_columns [:user_id, :report_id, :dnp_entry_id]
+  @target_definitions [
+    user: {User, :user_id},
+    report: {Report, :report_id},
+    dnp_entry: {DnpEntry, :dnp_entry_id}
+  ]
+  @embedded_page_size 250
 
-  @doc """
-  Returns a list of 2-tuples of mod notes and rendered output for the target
-  named by `target`, a one-entry keyword list of the target foreign key column
-  and its id (e.g. `user_id: 1`).
+  @typedoc "A supported note-target type and safely parseable database ID."
+  @type target :: {:user | :report | :dnp_entry, Loader.integer_id()}
 
-  See `list_mod_notes/3` for more information about collection rendering.
+  defp target_params(params) do
+    Enum.flat_map(@target_definitions, fn {type, {_schema, column}} ->
+      value = Map.get(params, to_string(column), Map.get(params, column))
 
-  ## Examples
-
-      iex> list_all_mod_notes_for_target(& &1.body, user_id: 1)
-      [
-        {%ModNote{body: "hello *world*"}, "hello *world*"}
-      ]
-
-  """
-  def list_all_mod_notes_for_target(collection_renderer, [{column, id}]) do
-    ModNote
-    |> where([m], field(m, ^column) == ^id)
-    |> preload(:moderator)
-    |> order_by(desc: :id)
-    |> Repo.all()
-    |> preload_and_render(collection_renderer)
-  end
-
-  @doc """
-  Returns a `m:Scrivener.Page` of 2-tuples of mod notes and rendered output
-  for the query string and current pagination.
-
-  All mod notes containing the substring `query_string` are matched and returned
-  case-insensitively.
-
-  See `list_mod_notes/3` for more information.
-
-  ## Examples
-
-      iex> list_mod_notes_by_query_string("quack", & &1.body, page_size: 15)
-      %Scrivener.Page{}
-
-  """
-  def list_mod_notes_by_query_string(query_string, collection_renderer, pagination) do
-    ModNote
-    |> where([m], ilike(m.body, ^"%#{query_string}%"))
-    |> list_mod_notes(collection_renderer, pagination)
-  end
-
-  @doc """
-  Returns a `m:Scrivener.Page` of 2-tuples of mod notes and rendered output
-  for the target named by `target`, a one-entry keyword list of the target
-  foreign key column and its id (e.g. `user_id: 1`), and current pagination.
-
-  See `list_mod_notes/3` for more information.
-  """
-  def list_mod_notes_for_target(collection_renderer, pagination, [{column, id}]) do
-    ModNote
-    |> where([m], field(m, ^column) == ^id)
-    |> list_mod_notes(collection_renderer, pagination)
-  end
-
-  @doc """
-  Returns a `m:Scrivener.Page` of 2-tuples of mod notes and rendered output
-  for the current pagination.
-
-  When coerced to a list and rendered as Markdown, the result may look like:
-
-      [
-        {%ModNote{body: "hello *world*"}, "hello <em>world</em>"}
-      ]
-
-  ## Examples
-
-      iex> list_mod_notes(& &1.body, page_size: 15)
-      %Scrivener.Page{}
-
-  """
-  def list_mod_notes(queryable \\ ModNote, collection_renderer, pagination) do
-    mod_notes =
-      queryable
-      |> preload(:moderator)
-      |> order_by(desc: :id)
-      |> Repo.paginate(pagination)
-
-    put_in(mod_notes.entries, preload_and_render(mod_notes, collection_renderer))
-  end
-
-  defp preload_and_render(mod_notes, collection_renderer) do
-    bodies = collection_renderer.(mod_notes)
-    preloaded = preload_targets(mod_notes)
-
-    Enum.zip(preloaded, bodies)
-  end
-
-  defp preload_targets(mod_notes) do
-    mod_notes
-    |> Enum.to_list()
-    |> Repo.preload(ModNote.target_preloads())
-  end
-
-  @doc """
-  Assembles the admin mod-note listing, on behalf of `actor`, rendering each
-  note's body with `collection_renderer` and paginating with `pagination`.
-
-  Authorizes `:index` against the mod-note model first, so a viewer without
-  mod-note access is `{:error, :unauthorized}`. When `params` carries both
-  `"notable_type"` and `"notable_id"` the list is filtered to that notable;
-  otherwise all notes are listed newest first.
-
-  Returns `{:ok, mod_notes}` as a `m:Scrivener.Page` of `{note, rendered}`
-  2-tuples, or `{:error, :unauthorized}`.
-  """
-  @spec load_mod_note_index(Actor.t(), map(), (list() -> list()), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_mod_note_index(%Actor{} = actor, params, collection_renderer, pagination) do
-    with :ok <- authorize(actor, :index, ModNote) do
-      mod_notes =
-        case target(params) do
-          [_] = target -> list_mod_notes_for_target(collection_renderer, pagination, target)
-          [] -> list_mod_notes(collection_renderer, pagination)
-        end
-
-      {:ok, mod_notes}
-    end
-  end
-
-  # The one target foreign key column named in `params`, as a one-entry keyword
-  # list (e.g. `[user_id: 1]`), or an empty list when none is present.
-  defp target(params) do
-    Enum.find_value(@target_columns, [], fn column ->
-      with value when value not in [nil, ""] <- params[to_string(column)],
-           {id, ""} <- Integer.parse(to_string(value)) do
-        [{column, id}]
+      if value in [nil, ""] do
+        []
       else
-        _ -> false
+        [{type, value}]
       end
     end)
   end
 
-  @doc """
-  Builds a changeset for a new mod note, on behalf of `actor`, seeded with the
-  `"notable_type"` and `"notable_id"` from `params`.
+  defp parse_targets(params) do
+    Enum.reduce_while(target_params(params), {:ok, []}, fn {type, value}, {:ok, targets} ->
+      case Philomena.IntegerId.parse(value) do
+        {:ok, id} -> {:cont, {:ok, [{type, id} | targets]}}
+        :error -> {:halt, {:error, :not_found}}
+      end
+    end)
+  end
 
-  Authorizes `:new` against the mod-note model. Returns `{:ok, changeset}` or
-  `{:error, :unauthorized}`.
+  defp target_definition(type) do
+    Keyword.fetch!(@target_definitions, type)
+  end
+
+  defp target_changes(targets) do
+    Enum.map(targets, fn {type, id} ->
+      {_schema, column} = target_definition(type)
+      {column, id}
+    end)
+  end
+
+  defp load_target(actor, {type, id}, action) do
+    {schema, _column} = target_definition(type)
+    Loader.fetch_and_authorize(schema, actor, action, id)
+  end
+
+  defp authorize_targets(actor, targets, action) do
+    Enum.reduce_while(targets, :ok, fn target, :ok ->
+      case load_target(actor, target, action) do
+        {:ok, _record} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp target_query({type, id}) do
+    {_schema, column} = target_definition(type)
+    where(ModNote, [note], field(note, ^column) == ^id)
+  end
+
+  defp ordered_notes(queryable) do
+    queryable
+    |> preload(:moderator)
+    |> order_by(desc: :id)
+  end
+
+  defp render_notes(notes, collection_renderer) do
+    preloaded = Repo.preload(notes, ModNote.target_preloads())
+    rendered = collection_renderer.(preloaded)
+    Enum.zip(preloaded, rendered)
+  end
+
+  defp paginate_notes(queryable, collection_renderer, pagination) do
+    page = queryable |> ordered_notes() |> Repo.paginate(pagination)
+    %{page | entries: render_notes(page.entries, collection_renderer)}
+  end
+
+  defp change_mod_note(%ModNote{} = mod_note) do
+    ModNote.changeset(mod_note, %{})
+  end
+
+  defp creation_changeset(%Actor{user: %User{} = moderator}, attrs, targets) do
+    %ModNote{moderator_id: moderator.id}
+    |> ModNote.creation_changeset(attrs, target_changes(targets))
+  end
+
+  defp update_mod_note_changeset(%ModNote{} = mod_note, attrs) do
+    ModNote.changeset(mod_note, attrs)
+  end
+
+  defp load_mod_note(actor, id, action) do
+    Loader.fetch_and_authorize(ModNote, actor, action, id, ModNote.target_preloads())
+  end
+
+  defp target_label([{type, id}]) do
+    type
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+    |> then(&"#{&1} #{id}")
+  end
+
+  defp target_label(_targets), do: "invalid target"
+
+  defp transact_note(multi, step) do
+    case Repo.transact(multi) do
+      {:ok, %{^step => note}} -> {:ok, note}
+      {:error, ^step, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
+      {:error, :moderation_log, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
+    end
+  end
+
+  defp index_target_status(_actor, []), do: :ok
+
+  defp index_target_status(actor, [_target] = targets) do
+    authorize_targets(actor, targets, :show_mod_notes)
+  end
+
+  defp index_target_status(_actor, _multiple_targets), do: {:error, :not_found}
+
+  defp new_target_status(_actor, []), do: :ok
+
+  defp new_target_status(actor, [_target] = targets),
+    do: authorize_targets(actor, targets, :annotate)
+
+  defp new_target_status(_actor, _multiple_targets), do: {:error, :not_found}
+
+  defp create_target_status(actor, attrs, []) do
+    {:error, creation_changeset(actor, attrs, [])}
+  end
+
+  defp create_target_status(actor, _attrs, [_target] = targets) do
+    authorize_targets(actor, targets, :annotate)
+  end
+
+  defp create_target_status(actor, attrs, targets) do
+    {:error, creation_changeset(actor, attrs, targets)}
+  end
+
+  @doc """
+  Returns up to 250 newest notes for `target`, rendered for an embedded page.
+
+  The actor must be allowed to index notes and to view notes for the safely
+  loaded target. Malformed and missing target IDs are `{:error, :not_found}`.
+  History is retained indefinitely; only this embedded summary is bounded.
+
+  ## Examples
+
+      iex> list_for_target(moderator, {:user, "12"}, renderer)
+      {:ok, [{%ModNote{}, "rendered body"}]}
+
+      iex> list_for_target(user, {:user, "12"}, renderer)
+      {:error, :unauthorized}
+
   """
-  @spec new_mod_note(Actor.t(), map()) ::
-          {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
-  def new_mod_note(%Actor{} = actor, params) do
-    with :ok <- authorize(actor, :new, ModNote) do
-      {:ok, change_mod_note(struct(ModNote, target(params)))}
+  @spec list_for_target(Actor.t(), target(), (list(ModNote.t()) -> list(term()))) ::
+          {:ok, [{ModNote.t(), term()}]} | {:error, :not_found | :unauthorized}
+  def list_for_target(%Actor{} = actor, {type, id}, collection_renderer)
+      when type in [:user, :report, :dnp_entry] do
+    target = {type, id}
+
+    with :ok <- authorize(actor, :index, ModNote),
+         {:ok, _record} <- load_target(actor, target, :show_mod_notes) do
+      notes =
+        target
+        |> target_query()
+        |> ordered_notes()
+        |> limit(@embedded_page_size)
+        |> Repo.all()
+
+      {:ok, render_notes(notes, collection_renderer)}
     end
   end
 
   @doc """
-  Gets a single mod_note.
+  Loads the paginated staff note index, optionally scoped to one target.
 
-  Raises `Ecto.NoResultsError` if the Mod note does not exist.
+  A target filter is one of `user_id`, `report_id`, or `dnp_entry_id`. It is
+  safely parsed, loaded, and authorized; multiple, malformed, or missing targets
+  return `{:error, :not_found}`. With no filter, all notes are returned newest
+  first.
 
   ## Examples
 
-      iex> get_mod_note!(123)
-      %ModNote{}
+      iex> load_mod_note_index(moderator, %{"user_id" => "12"}, renderer, pagination)
+      {:ok, %Scrivener.Page{}}
 
-      iex> get_mod_note!(456)
-      ** (Ecto.NoResultsError)
+      iex> load_mod_note_index(user, %{}, renderer, pagination)
+      {:error, :unauthorized}
 
   """
-  def get_mod_note!(id), do: Repo.get!(ModNote, id)
+  @spec load_mod_note_index(
+          Actor.t(),
+          map(),
+          (list(ModNote.t()) -> list(term())),
+          Repo.pagination_params()
+        ) :: {:ok, Scrivener.Page.t()} | {:error, :not_found | :unauthorized}
+  def load_mod_note_index(%Actor{} = actor, params, collection_renderer, pagination) do
+    with :ok <- authorize(actor, :index, ModNote),
+         {:ok, targets} <- parse_targets(params),
+         :ok <- index_target_status(actor, targets) do
+      queryable = if targets == [], do: ModNote, else: target_query(hd(targets))
+      {:ok, paginate_notes(queryable, collection_renderer, pagination)}
+    end
+  end
 
   @doc """
-  Creates a mod note on behalf of `actor`, who becomes its moderator.
+  Builds a new-note changeset for an optional target selected in `params`.
 
-  Authorizes `:create` against the mod-note model, then inserts the note.
-  Returns `{:ok, mod_note}`, `{:error, :unauthorized}`, or
-  `{:error, %Ecto.Changeset{}}`.
+  When supplied, the target is safely loaded and authorized with `:annotate`.
+  A request without a target intentionally returns a blank changeset whose
+  create-time validation will require one.
 
   ## Examples
 
-      iex> create_mod_note(moderator, %{field: value})
+      iex> new_mod_note(moderator, %{"report_id" => "7"})
+      {:ok, %Ecto.Changeset{}}
+
+      iex> new_mod_note(user, %{})
+      {:error, :unauthorized}
+
+  """
+  @spec new_mod_note(Actor.t(), map()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :not_found | :unauthorized}
+  def new_mod_note(%Actor{} = actor, params) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :new, ModNote),
+         {:ok, targets} <- parse_targets(params),
+         :ok <- new_target_status(actor, targets) do
+      {:ok, creation_changeset(actor, %{}, targets)}
+    end
+  end
+
+  @doc """
+  Creates an attributed note and its moderation log in one transaction.
+
+  Exactly one existing, authorized target is required. No target or multiple
+  targets produce an invalid changeset; malformed and missing IDs are
+  `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> create_mod_note(moderator, %{"user_id" => "12", "body" => "Watching"})
       {:ok, %ModNote{}}
 
-      iex> create_mod_note(moderator, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
+      iex> create_mod_note(user, attrs)
+      {:error, :unauthorized}
 
   """
   @spec create_mod_note(Actor.t(), map()) ::
-          {:ok, ModNote.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+          {:ok, ModNote.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def create_mod_note(%Actor{} = actor, attrs \\ %{}) do
-    with :ok <- authorize(actor, :create, ModNote) do
-      %ModNote{moderator_id: actor.user.id}
-      |> ModNote.creation_changeset(attrs, target(attrs))
-      |> Repo.insert()
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, ModNote),
+         {:ok, targets} <- parse_targets(attrs),
+         :ok <- create_target_status(actor, attrs, targets) do
+      changeset = creation_changeset(actor, attrs, targets)
+
+      Multi.new()
+      |> Multi.insert(:mod_note, changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "ModNote:create",
+        "/admin/mod_notes",
+        "Created mod note for #{target_label(targets)}"
+      )
+      |> transact_note(:mod_note)
     end
   end
 
   @doc """
-  Loads the mod note named by `id` for editing, on behalf of `actor`, pairing
-  it with a change-tracking changeset for it.
+  Loads an authorized note and edit changeset for `actor`.
 
-  Authorizes `:edit` against the loaded note: a non-castable id is
-  `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
-  which no ordinary rule permits, so it is `{:error, :unauthorized}`
-  (`{:error, :not_found}` for admins). A moderator may only touch their own
-  notes.
+  ## Examples
 
-  Returns `{:ok, {mod_note, changeset}}`, `{:error, :unauthorized}`, or
-  `{:error, :not_found}`.
+      iex> load_mod_note_for_edit(moderator, "1")
+      {:ok, {%ModNote{}, %Ecto.Changeset{}}}
+
+      iex> load_mod_note_for_edit(user, "1")
+      {:error, :unauthorized}
+
   """
   @spec load_mod_note_for_edit(Actor.t(), Loader.integer_id()) ::
-          {:ok, {ModNote.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+          {:ok, {ModNote.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :not_found | :unauthorized}
   def load_mod_note_for_edit(%Actor{} = actor, id) do
-    with {:ok, mod_note} <- load_mod_note(actor, id, :edit) do
+    with :ok <- verify_write_access(actor),
+         {:ok, mod_note} <- load_mod_note(actor, id, :edit) do
       {:ok, {mod_note, change_mod_note(mod_note)}}
     end
   end
 
   @doc """
-  Updates the mod note named by `id`, on behalf of `actor`.
+  Updates a note and appends its audit record in the same transaction.
 
-  Loading and authorization follow `load_mod_note_for_edit/2`, authorizing
-  `:update`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`,
-  `{:error, :not_found}`, or `{:error, %Ecto.Changeset{}}`.
+  ## Examples
+
+      iex> update_mod_note(moderator, "1", %{"body" => "Updated"})
+      {:ok, %ModNote{}}
+
+      iex> update_mod_note(user, "1", attrs)
+      {:error, :unauthorized}
+
   """
   @spec update_mod_note(Actor.t(), Loader.integer_id(), map()) ::
-          {:ok, ModNote.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, ModNote.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_mod_note(%Actor{} = actor, id, attrs) do
-    with {:ok, mod_note} <- load_mod_note(actor, id, :update) do
-      update_mod_note(mod_note, attrs)
+    with :ok <- verify_write_access(actor),
+         {:ok, mod_note} <- load_mod_note(actor, id, :update) do
+      Multi.new()
+      |> Multi.update(:mod_note, update_mod_note_changeset(mod_note, attrs))
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "ModNote:update",
+        "/admin/mod_notes/#{mod_note.id}",
+        "Updated mod note #{mod_note.id}"
+      )
+      |> transact_note(:mod_note)
     end
   end
 
   @doc """
-  Updates a mod_note.
+  Deletes a note and appends its audit record in the same transaction.
 
   ## Examples
 
-      iex> update_mod_note(mod_note, %{field: new_value})
+      iex> delete_mod_note(moderator, "1")
       {:ok, %ModNote{}}
 
-      iex> update_mod_note(mod_note, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
+      iex> delete_mod_note(user, "1")
+      {:error, :unauthorized}
 
-  """
-  def update_mod_note(%ModNote{} = mod_note, attrs) do
-    mod_note
-    |> ModNote.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes the mod note named by `id`, on behalf of `actor`.
-
-  Loading and authorization follow `load_mod_note_for_edit/2`, authorizing
-  `:delete`. Returns `{:ok, mod_note}`, `{:error, :unauthorized}`, or
-  `{:error, :not_found}`.
   """
   @spec delete_mod_note(Actor.t(), Loader.integer_id()) ::
-          {:ok, ModNote.t()} | {:error, :unauthorized | :not_found}
+          {:ok, ModNote.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def delete_mod_note(%Actor{} = actor, id) do
-    with {:ok, mod_note} <- load_mod_note(actor, id, :delete) do
-      delete_mod_note(mod_note)
+    with :ok <- verify_write_access(actor),
+         {:ok, mod_note} <- load_mod_note(actor, id, :delete) do
+      Multi.new()
+      |> Multi.delete(:mod_note, mod_note)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "ModNote:delete",
+        "/admin/mod_notes/#{mod_note.id}",
+        "Deleted mod note #{mod_note.id}"
+      )
+      |> transact_note(:mod_note)
     end
-  end
-
-  @doc """
-  Deletes a ModNote.
-
-  ## Examples
-
-      iex> delete_mod_note(mod_note)
-      {:ok, %ModNote{}}
-
-      iex> delete_mod_note(mod_note)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_mod_note(%ModNote{} = mod_note) do
-    Repo.delete(mod_note)
-  end
-
-  # Loads the mod note named by `id` and authorizes `action`
-  # against it: a non-castable id or a `nil` load the actor was permitted to act
-  # on (an admin) is `{:error, :not_found}`, while a `nil` or real note the
-  # actor may not act on is `{:error, :unauthorized}`.
-  defp load_mod_note(actor, id, action) do
-    Loader.fetch_and_authorize(ModNote, actor, action, id)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking mod_note changes.
-
-  ## Examples
-
-      iex> change_mod_note(mod_note)
-      %Ecto.Changeset{source: %ModNote{}}
-
-  """
-  def change_mod_note(%ModNote{} = mod_note) do
-    ModNote.changeset(mod_note, %{})
   end
 end

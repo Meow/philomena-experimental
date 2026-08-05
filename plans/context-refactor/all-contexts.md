@@ -147,6 +147,13 @@ the PostgreSQL artifact; the unused generated Roles CRUD context is gone because
 Users owns role assignment/reference reads; daily statistics expose one finite,
 atomic increment service; and rename history now owns transaction composition
 plus actor-scoped paginated reads.
+Channels, ModNotes, and ModerationLogs are now complete as well: channel visits,
+read state, and subscription toggles use named abilities and guarded,
+idempotent writes; sensitive notes use typed, safely loaded target descriptors
+with separate target authorization; and moderation logs provide an
+`Ecto.Multi` composition API, used by note CRUD so the audit record and mutation
+succeed or roll back together. The direct log insert remains explicitly
+transitional while later context waves migrate their existing post-hoc calls.
 
 ### Wave 0: characterize and establish the contract
 

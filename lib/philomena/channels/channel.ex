@@ -9,7 +9,7 @@ defmodule Philomena.Channels.Channel do
   schema "channels" do
     belongs_to :associated_artist_tag, Tag
 
-    # fixme: rails STI
+    # Provider modules are selected from this legacy Rails STI discriminator.
     field :type, :string
 
     field :short_name, :string

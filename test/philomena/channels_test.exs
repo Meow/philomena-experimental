@@ -21,7 +21,7 @@ defmodule Philomena.ChannelsTest do
   alias Philomena.Channels.Channel
   alias Philomena.Repo
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.ChannelsFixtures
   import Philomena.TagsFixtures
   import Philomena.UsersFixtures
@@ -172,9 +172,23 @@ defmodule Philomena.ChannelsTest do
     test "a non-integer id is not found" do
       assert Channels.visit_channel(actor(), "not-an-integer") == {:error, :not_found}
     end
+
+    test "offline and NSFW channels remain directly visitable" do
+      channel = listed_channel_fixture(%{}, %{is_live: false, nsfw: true})
+
+      assert {:ok, loaded} = Channels.visit_channel(actor(), to_string(channel.id))
+      assert loaded.id == channel.id
+    end
   end
 
   describe "clear_notification/2" do
+    test "an anonymous actor is unauthorized" do
+      channel = channel_fixture()
+
+      assert Channels.clear_notification(actor(), to_string(channel.id)) ==
+               {:error, :unauthorized}
+    end
+
     test "a signed-in user clears the notification and gets the channel back" do
       channel = channel_fixture()
 
@@ -392,6 +406,13 @@ defmodule Philomena.ChannelsTest do
   end
 
   describe "subscribe/2 and unsubscribe/2" do
+    test "an anonymous actor cannot mutate subscription state" do
+      channel = channel_fixture()
+
+      assert Channels.subscribe(actor(), to_string(channel.id)) == {:error, :unauthorized}
+      assert Channels.unsubscribe(actor(), to_string(channel.id)) == {:error, :unauthorized}
+    end
+
     test "a user subscribes to and then unsubscribes from a channel" do
       user = confirmed_user_fixture()
       channel = channel_fixture()
@@ -440,6 +461,19 @@ defmodule Philomena.ChannelsTest do
 
       assert Channels.unsubscribe(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
+    end
+
+    test "the global write prerequisite rejects banned and unattributed users" do
+      user = confirmed_user_fixture()
+      channel = channel_fixture()
+
+      assert Channels.subscribe(actor(user, ban: %{}), to_string(channel.id)) ==
+               {:error, :ban}
+
+      assert Channels.subscribe(actor(user, fingerprint: nil), to_string(channel.id)) ==
+               {:error, :unauthorized}
+
+      refute Channels.subscribed?(channel, user)
     end
   end
 end

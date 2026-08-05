@@ -28,7 +28,6 @@ defmodule Philomena.Reports do
   alias Philomena.Reports
   alias Philomena.IndexWorker
   alias Philomena.ModNotes
-  alias Philomena.ModNotes.ModNote
   alias Philomena.Rules
 
   alias Philomena.Images.Image
@@ -254,8 +253,9 @@ defmodule Philomena.Reports do
   """
   @spec mod_notes(Actor.t(), Report.t(), (list() -> list())) :: list() | nil
   def mod_notes(%Actor{} = viewer, report, collection_renderer) do
-    if Canada.Can.can?(viewer.user, :index, ModNote) do
-      ModNotes.list_all_mod_notes_for_target(collection_renderer, report_id: report.id)
+    case ModNotes.list_for_target(viewer, {:report, report.id}, collection_renderer) do
+      {:ok, notes} -> notes
+      {:error, _reason} -> nil
     end
   end
 

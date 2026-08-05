@@ -13,7 +13,7 @@ defmodule Philomena.ModNotesTest do
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.DnpEntriesFixtures
   import Philomena.ModNotesFixtures
   import Philomena.ReportsFixtures
@@ -21,6 +21,7 @@ defmodule Philomena.ModNotesTest do
   import Philomena.UsersFixtures
   import Philomena.TagsFixtures
 
+  alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.ModNotes
   alias Philomena.ModNotes.ModNote
 
@@ -79,14 +80,108 @@ defmodule Philomena.ModNotesTest do
       assert wanted.id in ids
       refute other.id in ids
     end
+
+    test "target filters safely reject malformed, missing, and multiple targets" do
+      moderator = actor(moderator_user_fixture())
+      target = confirmed_user_fixture()
+
+      assert ModNotes.load_mod_note_index(
+               moderator,
+               %{"user_id" => "not-an-id"},
+               & &1,
+               @pagination
+             ) == {:error, :not_found}
+
+      assert ModNotes.load_mod_note_index(
+               moderator,
+               %{"user_id" => "2147483647"},
+               & &1,
+               @pagination
+             ) == {:error, :not_found}
+
+      assert ModNotes.load_mod_note_index(
+               moderator,
+               %{"user_id" => target.id, "report_id" => "2147483647"},
+               & &1,
+               @pagination
+             ) == {:error, :not_found}
+    end
+  end
+
+  describe "list_for_target/3" do
+    test "loads each supported target kind newest first" do
+      author = moderator_user_fixture()
+      user = confirmed_user_fixture()
+      report = report_fixture(image_id: image_fixture().id)
+      dnp_entry = dnp_entry_fixture(confirmed_user_fixture(), tag_fixture())
+
+      {:ok, user_note} =
+        ModNotes.create_mod_note(actor(author), %{"body" => "user note", "user_id" => user.id})
+
+      {:ok, report_note} =
+        ModNotes.create_mod_note(actor(author), %{
+          "body" => "report note",
+          "report_id" => report.id
+        })
+
+      {:ok, dnp_note} =
+        ModNotes.create_mod_note(actor(author), %{
+          "body" => "dnp note",
+          "dnp_entry_id" => dnp_entry.id
+        })
+
+      renderer = fn notes -> Enum.map(notes, & &1.body) end
+
+      assert {:ok, [{loaded, "user note"}]} =
+               ModNotes.list_for_target(actor(author), {:user, user.id}, renderer)
+
+      assert loaded.id == user_note.id
+
+      assert {:ok, [{loaded, "report note"}]} =
+               ModNotes.list_for_target(actor(author), {:report, report.id}, renderer)
+
+      assert loaded.id == report_note.id
+
+      assert {:ok, [{loaded, "dnp note"}]} =
+               ModNotes.list_for_target(actor(author), {:dnp_entry, dnp_entry.id}, renderer)
+
+      assert loaded.id == dnp_note.id
+    end
+
+    test "rejects unauthorized viewers and missing target IDs" do
+      target = confirmed_user_fixture()
+      renderer = fn notes -> notes end
+
+      assert ModNotes.list_for_target(
+               actor(confirmed_user_fixture()),
+               {:user, target.id},
+               renderer
+             ) == {:error, :unauthorized}
+
+      assert ModNotes.list_for_target(
+               actor(moderator_user_fixture()),
+               {:user, "2147483647"},
+               renderer
+             ) == {:error, :not_found}
+
+      assert ModNotes.list_for_target(
+               actor(moderator_user_fixture()),
+               {:user, "not-an-id"},
+               renderer
+             ) == {:error, :not_found}
+    end
   end
 
   describe "new_mod_note/2" do
     test "a moderator gets a changeset seeded from the params" do
-      assert {:ok, changeset} =
-               ModNotes.new_mod_note(actor(moderator_user_fixture()), %{"report_id" => "7"})
+      report = report_fixture(image_id: image_fixture().id)
 
-      assert changeset.data.report_id == 7
+      assert {:ok, changeset} =
+               ModNotes.new_mod_note(actor(moderator_user_fixture()), %{
+                 "report_id" => to_string(report.id)
+               })
+
+      assert Ecto.Changeset.get_field(changeset, :report_id) == report.id
     end
 
     test "an assistant is authorized" do
@@ -101,6 +196,16 @@ defmodule Philomena.ModNotesTest do
     test "an anonymous actor is unauthorized" do
       assert ModNotes.new_mod_note(actor(), %{}) == {:error, :unauthorized}
     end
+
+    test "a malformed or missing selected target is not found" do
+      moderator = actor(moderator_user_fixture())
+
+      assert ModNotes.new_mod_note(moderator, %{"user_id" => "not-an-id"}) ==
+               {:error, :not_found}
+
+      assert ModNotes.new_mod_note(moderator, %{"user_id" => "2147483647"}) ==
+               {:error, :not_found}
+    end
   end
 
   describe "create_mod_note/2" do
@@ -110,6 +215,11 @@ defmodule Philomena.ModNotesTest do
       assert {:ok, %ModNote{} = note} = ModNotes.create_mod_note(actor(moderator), note_attrs())
       assert note.moderator_id == moderator.id
       assert note.body == "Watching this one"
+
+      assert %ModerationLog{user_id: user_id, type: "ModNote:create"} =
+               Repo.get_by!(ModerationLog, subject_path: "/admin/mod_notes")
+
+      assert user_id == moderator.id
     end
 
     test "an assistant creates a note" do
@@ -136,6 +246,29 @@ defmodule Philomena.ModNotesTest do
                )
 
       assert %{body: ["can't be blank"]} = errors_on(changeset)
+      refute Repo.get_by(ModerationLog, type: "ModNote:create")
+    end
+
+    test "a missing target is not found without attempting the insert" do
+      assert ModNotes.create_mod_note(actor(moderator_user_fixture()), %{
+               "body" => "missing target",
+               "user_id" => "2147483647"
+             }) == {:error, :not_found}
+
+      refute Repo.get_by(ModNote, body: "missing target")
+    end
+
+    test "the global write prerequisite rejects banned and unattributed actors" do
+      moderator = moderator_user_fixture()
+      target = confirmed_user_fixture()
+      attrs = %{"body" => "blocked", "user_id" => target.id}
+
+      assert ModNotes.create_mod_note(actor(moderator, ban: %{}), attrs) == {:error, :ban}
+
+      assert ModNotes.create_mod_note(actor(moderator, fingerprint: nil), attrs) ==
+               {:error, :unauthorized}
+
+      refute Repo.get_by(ModNote, body: "blocked")
     end
   end
 
@@ -198,6 +331,8 @@ defmodule Philomena.ModNotesTest do
                })
 
       assert updated.body == "Edited body"
+
+      assert Repo.get_by!(ModerationLog, type: "ModNote:update").user_id == moderator.id
     end
 
     test "an admin updates any note" do
@@ -217,6 +352,7 @@ defmodule Philomena.ModNotesTest do
                ModNotes.update_mod_note(actor(moderator), to_string(note.id), %{"body" => ""})
 
       assert %{body: ["can't be blank"]} = errors_on(changeset)
+      refute Repo.get_by(ModerationLog, type: "ModNote:update")
     end
 
     test "a moderator may not update another moderator's note" do
@@ -260,6 +396,8 @@ defmodule Philomena.ModNotesTest do
 
       assert {:ok, %ModNote{}} = ModNotes.delete_mod_note(actor(moderator), to_string(note.id))
       refute Repo.get(ModNote, note.id)
+
+      assert Repo.get_by!(ModerationLog, type: "ModNote:delete").user_id == moderator.id
     end
 
     test "an admin deletes any note" do
@@ -356,20 +494,21 @@ defmodule Philomena.ModNotesTest do
       assert errors_on(changeset)[:target] == ["must reference exactly one target"]
     end
 
-    test "is not created referencing two targets" do
+    test "rejects two targets instead of silently choosing one" do
       author = moderator_user_fixture()
       target = confirmed_user_fixture()
       image = image_fixture()
       report = report_fixture(image_id: image.id)
 
-      assert {:ok, note} =
+      assert {:error, changeset} =
                ModNotes.create_mod_note(actor(author), %{
                  "body" => "two targets",
                  "user_id" => target.id,
                  "report_id" => report.id
                })
 
-      assert is_nil(note.report_id) != is_nil(note.user_id)
+      assert errors_on(changeset)[:target] == ["must reference exactly one target"]
+      refute Repo.get_by(ModNote, body: "two targets")
     end
   end
 
@@ -426,11 +565,12 @@ defmodule Philomena.ModNotesTest do
           "report_id" => report.id
         })
 
-      [{note, _body}] =
-        ModNotes.list_all_mod_notes_for_target(
-          fn notes -> Enum.map(notes, & &1.body) end,
-          report_id: report.id
-        )
+      assert {:ok, [{note, _body}]} =
+               ModNotes.list_for_target(
+                 actor(author),
+                 {:report, report.id},
+                 fn notes -> Enum.map(notes, & &1.body) end
+               )
 
       assert %Philomena.Reports.Report{} = note.report
       assert note.report.id == report.id

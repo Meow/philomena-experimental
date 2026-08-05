@@ -283,6 +283,21 @@ defimpl Canada.Can, for: Philomena.Users.User do
       when role in ~W(assistant moderator) and action in [:edit, :update, :delete],
       do: true
 
+  # Read or annotate mod note targets
+  @mod_note_target_actions [:show_mod_notes, :annotate]
+
+  def can?(%User{role: role}, action, %User{})
+      when role in ~W(assistant moderator) and action in @mod_note_target_actions,
+      do: true
+
+  def can?(%User{role: role}, action, %Report{})
+      when role in ~W(assistant moderator) and action in @mod_note_target_actions,
+      do: true
+
+  def can?(%User{role: role}, action, %DnpEntry{})
+      when role in ~W(assistant moderator) and action in @mod_note_target_actions,
+      do: true
+
   #
   # Assistants can...
   #
@@ -609,8 +624,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
   # Show static pages
   def can?(%User{}, :show, %StaticPage{}), do: true
 
-  # Show channels
-  def can?(%User{}, :show, %Channel{}), do: true
+  # View channels and manage personal channel state
+  def can?(%User{}, action, %Channel{})
+      when action in [:show, :visit, :mark_read, :subscribe, :unsubscribe],
+      do: true
 
   # Otherwise...
   def can?(%User{}, _action, _model), do: false
@@ -688,8 +705,8 @@ defimpl Canada.Can, for: Atom do
   # Show static pages
   def can?(_user, :show, %StaticPage{}), do: true
 
-  # Show channels
-  def can?(_user, :show, %Channel{}), do: true
+  # Show and visit channels
+  def can?(_user, action, %Channel{}) when action in [:show, :visit], do: true
 
   # Otherwise...
   def can?(_user, _action, _model), do: false
