@@ -1,33 +1,41 @@
 defmodule Philomena.Profiles do
   @moduledoc """
-  Assembly of the data behind a user's profile page and its admin-only IP and
-  fingerprint histories, scoped to the viewer.
+  Actor-scoped assembly of public profile pages and sensitive staff-only
+  account metadata, IP histories, and fingerprint histories.
+
+  Public pages exclude deactivated profiles. Sensitive loaders first authorize
+  profile details, then delegate their bounded data queries to the owning
+  context under its own permission.
   """
 
   import Ecto.Query, warn: false
 
   import Philomena.Authorization, only: [authorize: 3]
 
-  alias Philomena.Repo
   alias Philomena.Attribution.Actor
-  alias Philomena.Profiles.ProfilePage
-  alias Philomena.Users.User
-  alias Philomena.UserIps.UserIp
-  alias Philomena.UserFingerprints.UserFingerprint
-  alias Philomena.UserStatistics.UserStatistic
-  alias Philomena.UserNameChanges
-  alias Philomena.ModNotes
   alias Philomena.Bans
   alias Philomena.Comments
   alias Philomena.Comments.Comment
-  alias Philomena.Posts.Post
+  alias Philomena.Filters.Filter
   alias Philomena.Galleries.Gallery
   alias Philomena.Images.Image
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
   alias Philomena.Interactions
-  alias Philomena.Filters.Filter
+  alias Philomena.ModNotes
+  alias Philomena.Posts.Post
+  alias Philomena.Profiles.AdminMetadata
+  alias Philomena.Profiles.FingerprintHistory
+  alias Philomena.Profiles.IpHistory
+  alias Philomena.Profiles.ProfilePage
+  alias Philomena.Repo
   alias Philomena.Tags.Tag
+  alias Philomena.UserFingerprints
+  alias Philomena.UserIps
+  alias Philomena.UserNameChanges
+  alias Philomena.Users
+  alias Philomena.Users.User
+  alias Philomena.UserStatistics.UserStatistic
   alias PhilomenaQuery.Search
 
   @name_history_pagination %{page: 1, page_size: 250}
@@ -43,39 +51,8 @@ defmodule Philomena.Profiles do
     ]
   ]
 
-  @doc """
-  Assembles the public profile page of the user named by `slug`, for the viewer
-  described by `scope`.
-
-  The user is loaded by slug and authorized for `:show`.
-  `current_filter` is the viewer's active `Filter`, whose hidden
-  tags scope the recent comments strip. The recent uploads, faves, artwork,
-  comments, and posts strips are batched into a single multi-search; posts and
-  comments the viewer may not see are dropped afterward. Descriptions and
-  commission text are carried raw for the caller to process.
-
-  Returns `{:ok, %ProfilePage{}}`.
-  """
-  @spec load_profile_page(Scope.t(), Filter.t(), String.t()) ::
-          {:ok, ProfilePage.t()} | {:error, :unauthorized | :not_found}
-  def load_profile_page(%Scope{} = scope, %Filter{} = current_filter, slug) do
-    user =
-      User
-      |> where(slug: ^slug)
-      |> preload(^@profile_preloads)
-      |> Repo.one()
-
-    with :ok <- authorize(scope.user, :show, user),
-         %User{} <- user do
-      {:ok, assemble_profile_page(scope, current_filter, user)}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
-  end
-
-  defp assemble_profile_page(scope, current_filter, user) do
-    viewer = scope.user
+  defp assemble_profile_page(actor, scope, current_filter, user) do
+    viewer = actor.user
 
     {:ok, {recent_uploads_def, _tags}} =
       ImageSearch.search_string(scope, "uploader_id:#{user.id}",
@@ -148,8 +125,8 @@ defmodule Philomena.Profiles do
         ]
       )
 
-    recent_posts = Enum.filter(recent_posts, &Canada.Can.can?(viewer, :show, &1.topic))
-    recent_comments = Enum.filter(recent_comments, &Canada.Can.can?(viewer, :show, &1.image))
+    recent_posts = Enum.filter(recent_posts, &(authorize(actor, :show, &1.topic) == :ok))
+    recent_comments = Enum.filter(recent_comments, &(authorize(actor, :show, &1.image) == :ok))
 
     recent_galleries =
       Gallery
@@ -241,182 +218,177 @@ defmodule Philomena.Profiles do
   defp map_fetch(nil, _field_name), do: nil
   defp map_fetch(map, field_name), do: Map.get(map, field_name)
 
-  @doc """
-  Returns the admin metadata about `user` for `actor`, or `nil` when the viewer
-  may not list users.
+  defp load_detailed_profile(actor, slug) do
+    with {:ok, user} <- Users.load_profile(actor, slug),
+         :ok <- authorize(actor, :show_details, user),
+         :ok <- authorize(actor, :show, :identity_metadata) do
+      {:ok, user}
+    end
+  end
 
-  The metadata is the user's current filter and the most recent IP and
-  fingerprint rows.
+  @doc """
+  Assembles the public profile page for the active user named by `slug`.
+
+  The actor is carried separately from the image-search scope and the loaded
+  profile is authorized with `:show`. Missing and deactivated profiles are
+  always not found. `current_filter` scopes the recent-comments strip; posts
+  and comments whose parents the actor cannot show are removed after search.
+  The loaded user includes its forced filter for the caller's owner/staff-only
+  presentation gate.
+
+  Returns `{:ok, %ProfilePage{}}`.
 
   ## Examples
 
-      iex> admin_metadata(admin, user)
-      %{
-        filter: %Filter{},
-        last_ip: %UserIp{},
-        last_fp: %UserFingerprint{}
-      }
+      iex> load_profile_page(actor, scope, filter, "somebody")
+      {:ok, %ProfilePage{}}
+
+      iex> load_profile_page(actor, scope, filter, "missing")
+      {:error, :not_found}
 
   """
-  @spec admin_metadata(Actor.t(), User.t()) :: map() | nil
-  def admin_metadata(%Actor{} = actor, user) do
-    # TODO: this should have a struct definition for its return
-    # TODO: "fp" should be spelled out as "fingerprint"
+  @spec load_profile_page(Actor.t(), Scope.t(), Filter.t(), String.t()) ::
+          {:ok, ProfilePage.t()} | {:error, :unauthorized | :not_found}
+  def load_profile_page(
+        %Actor{} = actor,
+        %Scope{} = scope,
+        %Filter{} = current_filter,
+        slug
+      ) do
+    with {:ok, user} <- Users.load_profile(actor, slug) do
+      user = Repo.preload(user, @profile_preloads)
+      scope = %{scope | user: actor.user}
 
-    if Canada.Can.can?(actor.user, :index, User) and
-         Canada.Can.can?(actor.user, :show, :identity_metadata) do
+      {:ok, assemble_profile_page(actor, scope, current_filter, user)}
+    end
+  end
+
+  @doc """
+  Loads sensitive account metadata about `user` for `actor`.
+
+  The actor must be authorized for `:show_details` on the user and for the
+  shared identity-metadata permission before the current filter or latest IP
+  and fingerprint rows are queried.
+
+  ## Examples
+
+      iex> load_admin_metadata(moderator, user)
+      {:ok, %AdminMetadata{}}
+
+      iex> load_admin_metadata(ordinary_user, user)
+      {:error, :unauthorized}
+
+  """
+  @spec load_admin_metadata(Actor.t(), User.t()) ::
+          {:ok, AdminMetadata.t()} | {:error, :unauthorized}
+  def load_admin_metadata(%Actor{} = actor, %User{} = user) do
+    with :ok <- authorize(actor, :show_details, user),
+         :ok <- authorize(actor, :show, :identity_metadata),
+         {:ok, last_ip} <- UserIps.latest_for_user(actor, user),
+         {:ok, last_fingerprint} <- UserFingerprints.latest_for_user(actor, user) do
       user = Repo.preload(user, [:current_filter])
 
-      last_ip =
-        UserIp
-        |> where(user_id: ^user.id)
-        |> order_by(desc: :updated_at)
-        |> limit(1)
-        |> Repo.one()
-
-      last_fp =
-        UserFingerprint
-        |> where(user_id: ^user.id)
-        |> order_by(desc: :updated_at)
-        |> limit(1)
-        |> Repo.one()
-
-      %{filter: user.current_filter, last_ip: last_ip, last_fp: last_fp}
+      {:ok,
+       %AdminMetadata{
+         filter: user.current_filter,
+         last_ip: last_ip,
+         last_fingerprint: last_fingerprint
+       }}
     end
   end
 
   @doc """
-  Returns the mod notes on `user` for `actor`, processed through `collection_renderer`,
-  or `nil` when the viewer may not read mod notes.
-  """
-  @spec mod_notes(Actor.t(), User.t(), (list() -> list())) :: list() | nil
-  def mod_notes(%Actor{} = actor, user, collection_renderer) do
-    case ModNotes.list_for_target(actor, {:user, user.id}, collection_renderer) do
-      {:ok, notes} -> notes
-      {:error, _reason} -> nil
-    end
-  end
+  Loads up to 250 newest moderation notes on `user` for `actor`, processed
+  through `collection_renderer`.
 
-  @doc """
-  Returns the name changes of `user` for `actor`, or `nil` when the viewer may
-  not see them.
-  """
-  @spec name_changes(Actor.t(), User.t()) :: [UserNameChanges.UserNameChange.t()] | nil
-  def name_changes(%Actor{} = actor, user) do
-    case UserNameChanges.load_history(actor, user, @name_history_pagination) do
-      {:ok, page} -> page.entries
-      {:error, :unauthorized} -> nil
-    end
-  end
-
-  @doc """
-  Loads the IP history of the user named by the profile `slug`, on behalf of
-  `actor`: every IP address the user has been seen on, and the other users seen
-  on those same addresses.
-
-  The user is loaded by slug and authorized for `:show_details`.
+  The `:show_details` gate runs before the ModNotes context applies its own
+  collection and target permissions.
 
   ## Examples
 
-      iex> load_ip_history(moderator, slug)
-      {:ok, %{
-          user: %User{},
-          user_ips: [%UserIp{}, ...],
-          other_users: %{
-            ip => [%UserIp{}, ...]
-          }
-        }}
+      iex> load_mod_notes(moderator, user, renderer)
+      {:ok, [{%ModNote{}, "rendered"}]}
 
   """
-  @spec load_ip_history(Actor.t(), String.t()) ::
-          {:ok, map()} | {:error, :unauthorized | :not_found}
-  def load_ip_history(%Actor{} = actor, slug) do
-    # TODO: this should have a struct definition for its return
-    with {:ok, user} <- load_detailed_profile(actor, slug) do
-      user_ips =
-        UserIp
-        |> where(user_id: ^user.id)
-        |> preload(:user)
-        |> order_by(desc: :updated_at)
-        |> Repo.all()
-
-      distinct_ips =
-        user_ips
-        |> Enum.map(& &1.ip)
-        |> Enum.uniq()
-
-      other_users =
-        UserIp
-        |> where([u], u.ip in ^distinct_ips)
-        |> preload(:user)
-        |> order_by(desc: :updated_at)
-        |> Repo.all()
-        |> Enum.group_by(& &1.ip)
-
-      {:ok, %{user: user, user_ips: user_ips, other_users: other_users}}
+  @spec load_mod_notes(Actor.t(), User.t(), (list() -> list())) ::
+          {:ok, list()} | {:error, :not_found | :unauthorized}
+  def load_mod_notes(%Actor{} = actor, %User{} = user, collection_renderer) do
+    with :ok <- authorize(actor, :show_details, user) do
+      ModNotes.list_for_target(actor, {:user, user.id}, collection_renderer)
     end
   end
 
   @doc """
-  Loads the fingerprint history of the user named by the profile `slug`, on
-  behalf of `actor`: every fingerprint the user has been seen with, and the
-  other users seen with those same fingerprints.
+  Loads up to 250 newest name changes of `user` for `actor`.
 
-  The user is loaded by slug and authorized for `:show_details`.
+  The `:show_details` gate runs before UserNameChanges applies its collection
+  permission.
 
   ## Examples
 
-      iex> load_fp_history(moderator, slug)
-      {:ok, %{
-          user: %User{},
-          user_fps: [%UserFingerprint{}, ...],
-          other_users: %{
-            fingerprint => [%UserFingerprint{}, ...]
-          }
-        }}
+      iex> load_name_changes(moderator, user)
+      {:ok, [%UserNameChange{}]}
 
   """
-  @spec load_fp_history(Actor.t(), String.t()) ::
-          {:ok, map()} | {:error, :unauthorized | :not_found}
-  def load_fp_history(%Actor{} = actor, slug) do
-    # TODO: this should have a struct definition for its return
-    # TODO: "fp" should be spelled out as "fingerprint"
-    with {:ok, user} <- load_detailed_profile(actor, slug) do
-      user_fps =
-        UserFingerprint
-        |> where(user_id: ^user.id)
-        |> preload(:user)
-        |> order_by(desc: :updated_at)
-        |> Repo.all()
-
-      distinct_fps =
-        user_fps
-        |> Enum.map(& &1.fingerprint)
-        |> Enum.uniq()
-
-      other_users =
-        UserFingerprint
-        |> where([u], u.fingerprint in ^distinct_fps)
-        |> preload(:user)
-        |> order_by(desc: :updated_at)
-        |> Repo.all()
-        |> Enum.group_by(& &1.fingerprint)
-
-      {:ok, %{user: user, user_fps: user_fps, other_users: other_users}}
+  @spec load_name_changes(Actor.t(), User.t()) ::
+          {:ok, [UserNameChanges.UserNameChange.t()]} | {:error, :unauthorized}
+  def load_name_changes(%Actor{} = actor, %User{} = user) do
+    with :ok <- authorize(actor, :show_details, user),
+         {:ok, page} <- UserNameChanges.load_history(actor, user, @name_history_pagination) do
+      {:ok, page.entries}
     end
   end
 
-  # Loads a user by profile slug and authorizes the viewer for `:show_details`.
-  defp load_detailed_profile(actor, slug) do
-    user = Repo.get_by(User, slug: slug)
+  @doc """
+  Loads a page of IP history for the active profile named by `slug`, plus other
+  users seen on the IPs in that page.
 
-    with %User{} <- user,
-         :ok <- authorize(actor, :show, :identity_metadata),
-         :ok <- authorize(actor, :show_details, user) do
-      {:ok, user}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
+  The real visible profile is loaded before the `:show_details` and shared
+  identity-metadata gates. UserIps owns the paginated history and caps each
+  IP's cross-references at its 50 most recent rows.
+
+  ## Examples
+
+      iex> load_ip_history(moderator, slug, page: 1, page_size: 25)
+      {:ok, %IpHistory{}}
+
+  """
+  @spec load_ip_history(Actor.t(), String.t(), Repo.pagination_params()) ::
+          {:ok, IpHistory.t()} | {:error, :unauthorized | :not_found}
+  def load_ip_history(%Actor{} = actor, slug, pagination) do
+    with {:ok, user} <- load_detailed_profile(actor, slug),
+         {:ok, {user_ips, other_users}} <-
+           UserIps.load_user_history(actor, user, pagination) do
+      {:ok, %IpHistory{user: user, user_ips: user_ips, other_users: other_users}}
+    end
+  end
+
+  @doc """
+  Loads a page of fingerprint history for the active profile named by `slug`,
+  plus other users seen with the fingerprints in that page.
+
+  The real visible profile is loaded before the `:show_details` and shared
+  identity-metadata gates. UserFingerprints owns the paginated history and caps
+  each fingerprint's cross-references at its 50 most recent rows.
+
+  ## Examples
+
+      iex> load_fingerprint_history(moderator, slug, page: 1, page_size: 25)
+      {:ok, %FingerprintHistory{}}
+
+  """
+  @spec load_fingerprint_history(Actor.t(), String.t(), Repo.pagination_params()) ::
+          {:ok, FingerprintHistory.t()} | {:error, :unauthorized | :not_found}
+  def load_fingerprint_history(%Actor{} = actor, slug, pagination) do
+    with {:ok, user} <- load_detailed_profile(actor, slug),
+         {:ok, {user_fingerprints, other_users}} <-
+           UserFingerprints.load_user_history(actor, user, pagination) do
+      {:ok,
+       %FingerprintHistory{
+         user: user,
+         user_fingerprints: user_fingerprints,
+         other_users: other_users
+       }}
     end
   end
 end

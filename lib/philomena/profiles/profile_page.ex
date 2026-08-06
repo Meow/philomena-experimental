@@ -7,6 +7,8 @@ defmodule Philomena.Profiles.ProfilePage do
   verified-link tags, the user's public-link tags, and the user's bans.
 
   `recent_comments` holds only the comments whose images the viewer may see.
+  The loaded user carries its forced filter for the existing owner/staff-only
+  presentation gate.
   Descriptions, comment bodies, and commission text are carried raw;
   processing them is the caller's concern.
   """

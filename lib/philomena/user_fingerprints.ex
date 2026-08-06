@@ -1,6 +1,7 @@
 defmodule Philomena.UserFingerprints do
   @moduledoc """
-  Fingerprint history profiles and browser fingerprint validation.
+  Actor-scoped fingerprint profiles and user-history reads, plus browser
+  fingerprint validation.
   """
 
   import Ecto.Query, warn: false
@@ -12,6 +13,9 @@ defmodule Philomena.UserFingerprints do
   alias Philomena.Bans
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserFingerprints.FingerprintProfile
+  alias Philomena.Users.User
+
+  @cross_reference_limit 50
 
   defp user_fingerprints_for(fingerprint) do
     UserFingerprint
@@ -28,6 +32,40 @@ defmodule Philomena.UserFingerprints do
   end
 
   defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
+
+  defp history_query(%User{id: user_id}) do
+    UserFingerprint
+    |> where(user_id: ^user_id)
+    |> order_by(desc: :updated_at, desc: :id)
+  end
+
+  defp cross_references([]), do: %{}
+
+  defp cross_references(fingerprints) do
+    ranked_ids =
+      UserFingerprint
+      |> where([user_fingerprint], user_fingerprint.fingerprint in ^fingerprints)
+      |> windows([user_fingerprint],
+        identity: [
+          partition_by: user_fingerprint.fingerprint,
+          order_by: [desc: user_fingerprint.updated_at, desc: user_fingerprint.id]
+        ]
+      )
+      |> select([user_fingerprint], %{
+        id: user_fingerprint.id,
+        rank: over(row_number(), :identity)
+      })
+
+    UserFingerprint
+    |> join(:inner, [user_fingerprint], ranked in subquery(ranked_ids),
+      on: ranked.id == user_fingerprint.id
+    )
+    |> where([_user_fingerprint, ranked], ranked.rank <= ^@cross_reference_limit)
+    |> preload(:user)
+    |> order_by([user_fingerprint], desc: user_fingerprint.updated_at, desc: user_fingerprint.id)
+    |> Repo.all()
+    |> Enum.group_by(& &1.fingerprint)
+  end
 
   @doc """
   Assembles the fingerprint profile page for `actor` from the raw
@@ -51,6 +89,52 @@ defmodule Philomena.UserFingerprints do
          user_fingerprints: user_fingerprints_for(fingerprint),
          fingerprint_bans: Bans.fingerprint_bans_for(fingerprint)
        }}
+    end
+  end
+
+  @doc """
+  Loads a paginated fingerprint history for `user` and cross-references the
+  fingerprints on the current page for `actor`.
+
+  The actor must have the shared identity-metadata permission. Cross-references
+  are capped at the 50 most recently used rows per fingerprint.
+
+  ## Examples
+
+      iex> load_user_history(moderator, user, page: 1, page_size: 25)
+      {:ok, {%Scrivener.Page{}, %{"fingerprint" => [%UserFingerprint{}]}}}
+
+  """
+  @spec load_user_history(Actor.t(), User.t(), Repo.pagination_params()) ::
+          {:ok, {Scrivener.Page.t(UserFingerprint.t()), map()}} | {:error, :unauthorized}
+  def load_user_history(%Actor{} = actor, %User{} = user, pagination) do
+    with :ok <- authorize(actor, :show, :identity_metadata) do
+      user_fingerprints = user |> history_query() |> Repo.paginate(pagination)
+
+      fingerprints =
+        user_fingerprints.entries
+        |> Enum.map(& &1.fingerprint)
+        |> Enum.uniq()
+
+      {:ok, {user_fingerprints, cross_references(fingerprints)}}
+    end
+  end
+
+  @doc """
+  Returns the latest fingerprint-history row for `user`, if any, after applying
+  the shared identity-metadata permission.
+
+  ## Examples
+
+      iex> latest_for_user(moderator, user)
+      {:ok, %UserFingerprint{}}
+
+  """
+  @spec latest_for_user(Actor.t(), User.t()) ::
+          {:ok, UserFingerprint.t() | nil} | {:error, :unauthorized}
+  def latest_for_user(%Actor{} = actor, %User{} = user) do
+    with :ok <- authorize(actor, :show, :identity_metadata) do
+      {:ok, user |> history_query() |> limit(1) |> Repo.one()}
     end
   end
 

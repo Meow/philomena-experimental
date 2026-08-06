@@ -3,15 +3,14 @@ defmodule Philomena.ProfilesTest do
   Context-level tests for `Philomena.Profiles`: the assembled profile page and
   the admin-only history views, each scoped to a viewer.
 
-  `load_profile_page/3` is search-backed (the recent uploads/faves/artwork,
+  `load_profile_page/4` is search-backed (the recent uploads/faves/artwork,
   comments, and posts strips come from a single multi-search), so the module is
   `async: false` and reindexes explicitly. The remaining functions are
   Postgres-only, but share the module.
 
-  These pin the `%ProfilePage{}` shape (including the recent/authorized comments
-  pairing), the `:show_details`/`:index` authorization matrices, and the
-  unknown-slug divergence between viewers who may act on a `nil` load and those
-  who may not.
+  These pin the typed result shapes, the `:show_details` and owning-context
+  authorization gates, stable missing/deactivated results, and pagination of
+  sensitive histories.
   """
 
   use Philomena.DataCase, async: false
@@ -31,6 +30,9 @@ defmodule Philomena.ProfilesTest do
   alias Philomena.Images.Search.Scope
   alias Philomena.Posts.Post
   alias Philomena.Profiles
+  alias Philomena.Profiles.AdminMetadata
+  alias Philomena.Profiles.FingerprintHistory
+  alias Philomena.Profiles.IpHistory
   alias Philomena.Profiles.ProfilePage
   alias Philomena.Repo
   alias Philomena.UserNameChanges.UserNameChange
@@ -38,6 +40,7 @@ defmodule Philomena.ProfilesTest do
   alias PhilomenaQuery.SearchHelpers
 
   @pagination %{page_number: 1, page_size: 25}
+  @scrivener [page: 1, page_size: 25]
 
   # The compiled filter body for a viewer with no active filter: it excludes
   # nothing.
@@ -62,7 +65,7 @@ defmodule Philomena.ProfilesTest do
     Philomena.FiltersFixtures.system_filter_fixture()
   end
 
-  describe "load_profile_page/3" do
+  describe "load_profile_page/4" do
     setup do
       Search.clear_index!(Image)
       Search.clear_index!(Comment)
@@ -81,7 +84,7 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.load_profile_page(scope(nil), current_filter(), user.slug)
+               Profiles.load_profile_page(actor(), scope(nil), current_filter(), user.slug)
 
       assert page.user.id == user.id
 
@@ -134,7 +137,7 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.load_profile_page(scope(nil), current_filter(), user.slug)
+               Profiles.load_profile_page(actor(), scope(nil), current_filter(), user.slug)
 
       # The comment itself is not hidden, so it matches the search, but an
       # anonymous viewer cannot see the hidden image, so it is dropped from the
@@ -142,45 +145,64 @@ defmodule Philomena.ProfilesTest do
       refute comment.id in Enum.map(page.recent_comments, & &1.id)
     end
 
-    test "an unknown slug is unauthorized for an anonymous viewer" do
-      assert Profiles.load_profile_page(scope(nil), current_filter(), "no-such-user") ==
-               {:error, :unauthorized}
+    test "an unknown slug is not found for every viewer" do
+      for viewer <- [actor(), actor(confirmed_user_fixture()), actor(admin_user_fixture())] do
+        assert Profiles.load_profile_page(
+                 viewer,
+                 scope(viewer.user),
+                 current_filter(),
+                 "no-such-user"
+               ) == {:error, :not_found}
+      end
     end
 
-    test "an unknown slug is not-found for an admin whose grant covers a nil load" do
+    test "a deactivated profile is not found for every viewer" do
+      user = confirmed_user_fixture()
+
+      user
+      |> Ecto.Changeset.change(deleted_at: DateTime.utc_now(:second))
+      |> Repo.update!()
+
       assert Profiles.load_profile_page(
+               actor(admin_user_fixture()),
                scope(admin_user_fixture()),
                current_filter(),
-               "no-such-user"
-             ) ==
-               {:error, :not_found}
+               user.slug
+             ) == {:error, :not_found}
     end
   end
 
-  describe "admin_metadata/2" do
+  describe "load_admin_metadata/2" do
     test "a moderator sees the user's current filter and latest IP and fingerprint" do
       user = confirmed_user_fixture()
       user_ip_fixture(user, "203.0.113.55")
       user_fingerprint_fixture(user, "metadatafp")
 
-      assert %{filter: _filter, last_ip: last_ip, last_fp: last_fp} =
-               Profiles.admin_metadata(actor(moderator_user_fixture()), user)
+      assert {:ok,
+              %AdminMetadata{
+                filter: _filter,
+                last_ip: last_ip,
+                last_fingerprint: last_fingerprint
+              }} = Profiles.load_admin_metadata(actor(moderator_user_fixture()), user)
 
       assert to_string(last_ip.ip) == "203.0.113.55"
-      assert last_fp.fingerprint == "metadatafp"
+      assert last_fingerprint.fingerprint == "metadatafp"
     end
 
     test "a regular user sees no metadata" do
-      assert Profiles.admin_metadata(actor(confirmed_user_fixture()), confirmed_user_fixture()) ==
-               nil
+      assert Profiles.load_admin_metadata(
+               actor(confirmed_user_fixture()),
+               confirmed_user_fixture()
+             ) == {:error, :unauthorized}
     end
 
     test "an anonymous viewer sees no metadata" do
-      assert Profiles.admin_metadata(actor(), confirmed_user_fixture()) == nil
+      assert Profiles.load_admin_metadata(actor(), confirmed_user_fixture()) ==
+               {:error, :unauthorized}
     end
   end
 
-  describe "mod_notes/3" do
+  describe "load_mod_notes/3" do
     # The renderer is handed the raw note list and returns one body per note; the
     # result pairs each preloaded note with its rendered body.
     defp renderer, do: fn notes -> Enum.map(notes, & &1.body) end
@@ -195,51 +217,66 @@ defmodule Philomena.ProfilesTest do
           "body" => "Watching this account"
         })
 
-      assert [{loaded_note, body}] = Profiles.mod_notes(actor(moderator), user, renderer())
+      assert {:ok, [{loaded_note, body}]} =
+               Profiles.load_mod_notes(actor(moderator), user, renderer())
+
       assert loaded_note.id == note.id
       assert body == "Watching this account"
     end
 
     test "a regular user sees no notes" do
-      assert Profiles.mod_notes(
+      assert Profiles.load_mod_notes(
                actor(confirmed_user_fixture()),
                confirmed_user_fixture(),
                renderer()
-             ) ==
-               nil
+             ) == {:error, :unauthorized}
+    end
+
+    test "the profile-details gate applies before the mod-note permission" do
+      assert Profiles.load_mod_notes(
+               actor(assistant_user_fixture()),
+               confirmed_user_fixture(),
+               renderer()
+             ) == {:error, :unauthorized}
     end
   end
 
-  describe "name_changes/2" do
+  describe "load_name_changes/2" do
     test "a moderator sees the user's name changes, newest id first" do
       user = confirmed_user_fixture()
       older = Repo.insert!(%UserNameChange{user_id: user.id, name: "oldname"})
       newer = Repo.insert!(%UserNameChange{user_id: user.id, name: "newername"})
 
-      assert changes = Profiles.name_changes(actor(moderator_user_fixture()), user)
+      assert {:ok, changes} = Profiles.load_name_changes(actor(moderator_user_fixture()), user)
       assert Enum.map(changes, & &1.id) == [newer.id, older.id]
     end
 
     test "a regular user sees no name changes" do
-      assert Profiles.name_changes(actor(confirmed_user_fixture()), confirmed_user_fixture()) ==
-               nil
+      assert Profiles.load_name_changes(
+               actor(confirmed_user_fixture()),
+               confirmed_user_fixture()
+             ) == {:error, :unauthorized}
     end
   end
 
-  describe "load_ip_history/2" do
+  describe "load_ip_history/3" do
     test "a moderator loads the user's IPs and the other users on them" do
       subject = confirmed_user_fixture()
       alias_user = confirmed_user_fixture()
       user_ip_fixture(subject, "203.0.113.40")
       user_ip_fixture(alias_user, "203.0.113.40")
 
-      assert {:ok, %{user: loaded, user_ips: user_ips, other_users: other_users}} =
-               Profiles.load_ip_history(actor(moderator_user_fixture()), subject.slug)
+      assert {:ok, %IpHistory{user: loaded, user_ips: user_ips, other_users: other_users}} =
+               Profiles.load_ip_history(
+                 actor(moderator_user_fixture()),
+                 subject.slug,
+                 @scrivener
+               )
 
       assert loaded.id == subject.id
-      assert length(user_ips) == 1
+      assert length(user_ips.entries) == 1
 
-      shared_ip = hd(user_ips).ip
+      shared_ip = hd(user_ips.entries).ip
       other_user_ids = other_users[shared_ip] |> Enum.map(& &1.user_id)
       assert alias_user.id in other_user_ids
       assert subject.id in other_user_ids
@@ -248,37 +285,63 @@ defmodule Philomena.ProfilesTest do
     test "a regular user may not load IP history" do
       assert Profiles.load_ip_history(
                actor(confirmed_user_fixture()),
-               confirmed_user_fixture().slug
+               confirmed_user_fixture().slug,
+               @scrivener
              ) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous viewer may not load IP history" do
-      assert Profiles.load_ip_history(actor(), confirmed_user_fixture().slug) ==
+      assert Profiles.load_ip_history(actor(), confirmed_user_fixture().slug, @scrivener) ==
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is not found for every staff role" do
-      assert Profiles.load_ip_history(actor(moderator_user_fixture()), "no-such-user") ==
-               {:error, :not_found}
+    test "an unknown slug is not found before authorization for every viewer" do
+      for viewer <- [actor(), actor(confirmed_user_fixture()), actor(moderator_user_fixture())] do
+        assert Profiles.load_ip_history(viewer, "no-such-user", @scrivener) ==
+                 {:error, :not_found}
+      end
+    end
 
-      assert Profiles.load_ip_history(actor(admin_user_fixture()), "no-such-user") ==
-               {:error, :not_found}
+    test "paginates the subject history" do
+      subject = confirmed_user_fixture()
+      user_ip_fixture(subject, "203.0.113.41")
+      user_ip_fixture(subject, "203.0.113.42")
+
+      assert {:ok, %IpHistory{user_ips: page}} =
+               Profiles.load_ip_history(
+                 actor(moderator_user_fixture()),
+                 subject.slug,
+                 page: 1,
+                 page_size: 1
+               )
+
+      assert length(page.entries) == 1
+      assert page.total_entries == 2
     end
   end
 
-  describe "load_fp_history/2" do
+  describe "load_fingerprint_history/3" do
     test "a moderator loads the user's fingerprints and the other users on them" do
       subject = confirmed_user_fixture()
       alias_user = confirmed_user_fixture()
       user_fingerprint_fixture(subject, "sharedfp")
       user_fingerprint_fixture(alias_user, "sharedfp")
 
-      assert {:ok, %{user: loaded, user_fps: user_fps, other_users: other_users}} =
-               Profiles.load_fp_history(actor(moderator_user_fixture()), subject.slug)
+      assert {:ok,
+              %FingerprintHistory{
+                user: loaded,
+                user_fingerprints: user_fingerprints,
+                other_users: other_users
+              }} =
+               Profiles.load_fingerprint_history(
+                 actor(moderator_user_fixture()),
+                 subject.slug,
+                 @scrivener
+               )
 
       assert loaded.id == subject.id
-      assert length(user_fps) == 1
+      assert length(user_fingerprints.entries) == 1
 
       other_user_ids = other_users["sharedfp"] |> Enum.map(& &1.user_id)
       assert alias_user.id in other_user_ids
@@ -286,19 +349,19 @@ defmodule Philomena.ProfilesTest do
     end
 
     test "a regular user may not load fingerprint history" do
-      assert Profiles.load_fp_history(
+      assert Profiles.load_fingerprint_history(
                actor(confirmed_user_fixture()),
-               confirmed_user_fixture().slug
+               confirmed_user_fixture().slug,
+               @scrivener
              ) ==
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is not found for every staff role" do
-      assert Profiles.load_fp_history(actor(moderator_user_fixture()), "no-such-user") ==
-               {:error, :not_found}
-
-      assert Profiles.load_fp_history(actor(admin_user_fixture()), "no-such-user") ==
-               {:error, :not_found}
+    test "an unknown slug is not found before authorization for every viewer" do
+      for viewer <- [actor(), actor(confirmed_user_fixture()), actor(moderator_user_fixture())] do
+        assert Profiles.load_fingerprint_history(viewer, "no-such-user", @scrivener) ==
+                 {:error, :not_found}
+      end
     end
   end
 end

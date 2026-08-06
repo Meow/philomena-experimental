@@ -9,7 +9,9 @@ Implemented in wave 1. IP profiles parse and canonicalize before applying the
 shared `:show, :identity_metadata` gate, yielding stable not-found versus
 unauthorized results and typed empty profiles. The raw lookup became the narrow
 `latest_ip_for_user/1` service used only by automatic ban creation, and IPv6 /64
-masking moved into that ban-specific helper.
+masking moved into that ban-specific helper. The Profiles wave added
+actor-scoped latest-row and paginated user-history services, with
+cross-references bounded to 50 rows per IP.
 
 ## Findings
 

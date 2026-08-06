@@ -37,7 +37,7 @@ defmodule PhilomenaWeb.Profile.FpHistoryControllerTest do
 
       response = html_response(get(conn, ~p"/profiles/#{subject}/fp_history"), 200)
 
-      assert response =~ "FP History for"
+      assert response =~ "Fingerprint History for"
       assert response =~ subject.name
       assert response =~ alias_user.name
     end
@@ -48,7 +48,7 @@ defmodule PhilomenaWeb.Profile.FpHistoryControllerTest do
 
       response = html_response(get(conn, ~p"/profiles/#{subject}/fp_history"), 200)
 
-      assert response =~ "FP History for"
+      assert response =~ "Fingerprint History for"
       assert response =~ subject.name
     end
 

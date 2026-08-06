@@ -74,7 +74,24 @@ defmodule PhilomenaWeb.ProfileControllerTest do
       conn = get(conn, ~p"/profiles/nonexistent-user")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
+    end
+
+    test "redirects to / for a deactivated profile", %{conn: conn} do
+      user = confirmed_user_fixture()
+
+      user
+      |> Ecto.Changeset.change(deleted_at: DateTime.utc_now(:second))
+      |> Repo.update!()
+
+      conn = get(conn, ~p"/profiles/#{user}")
+
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
   end
 end

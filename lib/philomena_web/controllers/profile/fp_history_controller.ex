@@ -6,11 +6,16 @@ defmodule PhilomenaWeb.Profile.FpHistoryController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"profile_id" => slug}) do
-    with {:ok, history} <- Profiles.load_fp_history(conn.assigns.actor, slug) do
+    with {:ok, history} <-
+           Profiles.load_fingerprint_history(
+             conn.assigns.actor,
+             slug,
+             conn.assigns.scrivener
+           ) do
       render(conn, "index.html",
-        title: "FP History for `#{history.user.name}'",
+        title: "Fingerprint History for `#{history.user.name}'",
         user: history.user,
-        user_fps: history.user_fps,
+        user_fingerprints: history.user_fingerprints,
         other_users: history.other_users
       )
     end

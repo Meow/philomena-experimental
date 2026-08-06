@@ -10,7 +10,9 @@ supported browser fingerprint formats before applying the shared
 `:show, :identity_metadata` gate. Invalid inputs are not found, while valid
 unmatched inputs return an empty typed profile. The web cookie helper delegates
 format knowledge to this domain context, and all sensitive-data consumers use
-the same named permission.
+the same named permission. The Profiles wave added actor-scoped latest-row and
+paginated user-history services, with cross-references bounded to 50 rows per
+fingerprint.
 
 ## Findings
 

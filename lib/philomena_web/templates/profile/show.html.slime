@@ -139,7 +139,7 @@
 
       = render PhilomenaWeb.ProfileView, "_about_me.html", user: @user, about_me: @about_me, conn: @conn
 
-    = if can_read_mod_notes?(@conn) and not hide_staff_tools?(@conn) do
+    = if can_read_mod_notes?(@conn, @user) and not hide_staff_tools?(@conn) do
       .block
         .block__header.flex.flex--no-wrap
           a.flex__grow href=~p"/admin/mod_notes?#{[user_id: @user.id]}" Mod Notes
@@ -161,7 +161,7 @@
         a.block__header--single-item href=~p"/profiles/#{@user}/scratchpad/edit" Moderation Scratchpad
         .block__content.profile-about
           = @scratchpad
-    = if can_see_user_name_changes?(@conn) and not hide_staff_tools?(@conn) and Enum.any?(@name_changes) do
+    = if can_see_user_name_changes?(@conn, @user) and not hide_staff_tools?(@conn) and Enum.any?(@name_changes) do
       .block
         .block__header
           span.block__header__title Name History

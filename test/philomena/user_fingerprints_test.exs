@@ -1,11 +1,12 @@
 defmodule Philomena.UserFingerprintsTest do
   @moduledoc """
-  Context-level tests for the controller-facing
-  `Philomena.UserFingerprints.load_fingerprint_profile/2`.
+  Context-level tests for fingerprint profiles and the actor-scoped user-history
+  services consumed by Profiles.
 
   These pin canonicalization, validation-before-authorization, the staff-only
   sensitive-identity gate, and the distinction between an invalid fingerprint
-  and a valid fingerprint with no matching history.
+  and a valid fingerprint with no matching history, plus pagination and
+  latest-row lookup.
   """
 
   use Philomena.DataCase, async: true
@@ -93,6 +94,36 @@ defmodule Philomena.UserFingerprintsTest do
     test "an anonymous viewer is unauthorized for a valid fingerprint" do
       assert UserFingerprints.load_fingerprint_profile(actor(), "d11111111111111") ==
                {:error, :unauthorized}
+    end
+  end
+
+  describe "profile history services" do
+    test "loads a bounded page and latest row for an authorized actor" do
+      subject = confirmed_user_fixture()
+      other = confirmed_user_fixture()
+      latest = user_fingerprint_fixture(subject, "shared-history")
+      user_fingerprint_fixture(other, "shared-history")
+      moderator = actor(moderator_user_fixture())
+
+      assert {:ok, {page, other_users}} =
+               UserFingerprints.load_user_history(moderator, subject,
+                 page: 1,
+                 page_size: 1
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [latest.id]
+      assert other.id in Enum.map(other_users[latest.fingerprint], & &1.user_id)
+      assert UserFingerprints.latest_for_user(moderator, subject) == {:ok, latest}
+    end
+
+    test "rejects an actor without the identity-metadata permission" do
+      user = confirmed_user_fixture()
+      actor = actor(confirmed_user_fixture())
+
+      assert UserFingerprints.load_user_history(actor, user, page: 1, page_size: 25) ==
+               {:error, :unauthorized}
+
+      assert UserFingerprints.latest_for_user(actor, user) == {:error, :unauthorized}
     end
   end
 end

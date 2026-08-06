@@ -1,5 +1,19 @@
 # Profiles context plan
 
+## Status
+
+Wave 2 complete. Public profile assembly now takes Actor separately from image
+search state and uses Users' active-profile slug locator, so missing and
+deactivated profiles are consistently not-found. Recent parent visibility uses
+the shared authorization entry point rather than direct Canada calls.
+
+`ProfilePage`, `AdminMetadata`, `IpHistory`, and `FingerprintHistory` provide
+typed results. Every sensitive section applies `:show_details` before delegating
+to ModNotes, UserNameChanges, UserIps, or UserFingerprints; IP and fingerprint
+histories are paginated and their cross-references are capped per identity. The
+legacy web route remains `/fp_history`, while context APIs, result fields,
+controller assigns, and displayed terminology spell out `fingerprint`.
+
 Source: `lib/philomena/profiles.ex`; consumers: profile page, IP history, and
 fingerprint history controllers.
 

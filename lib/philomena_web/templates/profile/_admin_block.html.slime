@@ -20,8 +20,8 @@
     ' from
     => link_to_ip(@conn, @last_ip.ip)
 
-    = if @last_fp do
-      => link_to_fingerprint(@conn, @last_fp.fingerprint)
+    = if @last_fingerprint do
+      => link_to_fingerprint(@conn, @last_fingerprint.fingerprint)
   - else
     em
       ' (never)

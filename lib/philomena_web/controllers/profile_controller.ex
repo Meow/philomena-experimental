@@ -10,6 +10,7 @@ defmodule PhilomenaWeb.ProfileController do
   def show(conn, %{"id" => slug}) do
     with {:ok, page} <-
            Profiles.load_profile_page(
+             conn.assigns.actor,
              ImageScope.search_scope(conn),
              conn.assigns.current_filter,
              slug
@@ -63,26 +64,30 @@ defmodule PhilomenaWeb.ProfileController do
   end
 
   defp put_admin_metadata(assigns, viewer, user) do
-    case Profiles.admin_metadata(viewer, user) do
-      nil ->
+    case Profiles.load_admin_metadata(viewer, user) do
+      {:error, _reason} ->
         assigns
 
-      %{filter: filter, last_ip: last_ip, last_fp: last_fp} ->
-        [filter: filter, last_ip: last_ip, last_fp: last_fp] ++ assigns
+      {:ok, metadata} ->
+        [
+          filter: metadata.filter,
+          last_ip: metadata.last_ip,
+          last_fingerprint: metadata.last_fingerprint
+        ] ++ assigns
     end
   end
 
   defp put_mod_notes(assigns, viewer, user, renderer) do
-    case Profiles.mod_notes(viewer, user, renderer) do
-      nil -> assigns
-      mod_notes -> [{:mod_notes, mod_notes} | assigns]
+    case Profiles.load_mod_notes(viewer, user, renderer) do
+      {:ok, mod_notes} -> [{:mod_notes, mod_notes} | assigns]
+      {:error, _reason} -> assigns
     end
   end
 
   defp put_name_changes(assigns, viewer, user) do
-    case Profiles.name_changes(viewer, user) do
-      nil -> assigns
-      name_changes -> [{:name_changes, name_changes} | assigns]
+    case Profiles.load_name_changes(viewer, user) do
+      {:ok, name_changes} -> [{:name_changes, name_changes} | assigns]
+      {:error, _reason} -> assigns
     end
   end
 

@@ -208,6 +208,29 @@ defmodule Philomena.Users do
   end
 
   @doc """
+  Loads the visible, active profile named by `slug` for `actor`.
+
+  Missing and deactivated profiles are always not found. A real active profile
+  that the actor may not show is unauthorized.
+
+  ## Examples
+
+      iex> load_profile(actor, "somebody")
+      {:ok, %User{}}
+
+      iex> load_profile(actor, "missing")
+      {:error, :not_found}
+
+  """
+  @spec load_profile(Actor.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def load_profile(%Actor{} = actor, slug) do
+    User
+    |> where([user], user.slug == ^slug and is_nil(user.deleted_at))
+    |> Loader.one_and_authorize(actor, :show)
+  end
+
+  @doc """
   Loads a visible profile by slug as a report target on behalf of `actor`.
 
   Deactivated and missing profiles are always not-found. A real profile the
@@ -221,10 +244,9 @@ defmodule Philomena.Users do
   @spec load_report_target(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, slug) do
-    User
-    |> where([user], user.slug == ^slug and is_nil(user.deleted_at))
-    |> preload(public_links: :tag, awards: :badge)
-    |> Loader.one_and_authorize(actor, :show)
+    with {:ok, user} <- load_profile(actor, slug) do
+      {:ok, Repo.preload(user, public_links: :tag, awards: :badge)}
+    end
   end
 
   @doc """

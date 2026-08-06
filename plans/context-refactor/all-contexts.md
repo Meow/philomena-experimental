@@ -174,6 +174,11 @@ and staff listings are actor-scoped, report moderation uses distinct abilities,
 and row-locked claim/unclaim/close transitions atomically persist their audit
 logs. Bulk target cleanup and indexing remain explicit cross-context and worker
 service APIs.
+Profiles is also complete. Profile pages carry Actor independently from image
+search state and resolve active users through one shared Users slug locator.
+Sensitive embedded metadata consistently requires `:show_details` before its
+owning context's authorization and query, while typed IP and fingerprint
+histories paginate the subject rows and cap per-identity cross-references.
 
 ### Wave 0: characterize and establish the contract
 

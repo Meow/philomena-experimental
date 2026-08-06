@@ -1,10 +1,11 @@
 defmodule Philomena.UserIpsTest do
   @moduledoc """
-  Context-level tests for the controller-facing `Philomena.UserIps.load_ip_profile/2`.
+  Context-level tests for IP profiles and the actor-scoped user-history services
+  consumed by Profiles.
 
   These pin parse-before-authorization error precedence, IPv4/IPv6
-  canonicalization, the staff-only sensitive-identity gate, and the assembled
-  `IpProfile` shape.
+  canonicalization, the staff-only sensitive-identity gate, typed profile shape,
+  pagination, and latest-row lookup.
   """
 
   use Philomena.DataCase, async: true
@@ -68,6 +69,33 @@ defmodule Philomena.UserIpsTest do
 
     test "an anonymous viewer is unauthorized" do
       assert UserIps.load_ip_profile(actor(), "203.0.113.1") == {:error, :unauthorized}
+    end
+  end
+
+  describe "profile history services" do
+    test "loads a bounded page and latest row for an authorized actor" do
+      subject = confirmed_user_fixture()
+      other = confirmed_user_fixture()
+      latest = user_ip_fixture(subject, "203.0.113.60")
+      user_ip_fixture(other, "203.0.113.60")
+      moderator = actor(moderator_user_fixture())
+
+      assert {:ok, {page, other_users}} =
+               UserIps.load_user_history(moderator, subject, page: 1, page_size: 1)
+
+      assert Enum.map(page.entries, & &1.id) == [latest.id]
+      assert other.id in Enum.map(other_users[latest.ip], & &1.user_id)
+      assert UserIps.latest_for_user(moderator, subject) == {:ok, latest}
+    end
+
+    test "rejects an actor without the identity-metadata permission" do
+      user = confirmed_user_fixture()
+      actor = actor(confirmed_user_fixture())
+
+      assert UserIps.load_user_history(actor, user, page: 1, page_size: 25) ==
+               {:error, :unauthorized}
+
+      assert UserIps.latest_for_user(actor, user) == {:error, :unauthorized}
     end
   end
 end

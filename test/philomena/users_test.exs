@@ -171,6 +171,27 @@ defmodule Philomena.UsersTest do
     end
   end
 
+  describe "load_profile/2" do
+    test "loads an active profile for an actor" do
+      user = confirmed_user_fixture()
+
+      assert {:ok, loaded} = Users.load_profile(actor(), user.slug)
+      assert loaded.id == user.id
+    end
+
+    test "returns not found for missing and deactivated profiles for every actor" do
+      user =
+        confirmed_user_fixture()
+        |> Ecto.Changeset.change(deleted_at: DateTime.utc_now(:second))
+        |> Repo.update!()
+
+      for viewer <- [actor(), actor(confirmed_user_fixture()), actor(admin_user_fixture())] do
+        assert Users.load_profile(viewer, "missing-profile") == {:error, :not_found}
+        assert Users.load_profile(viewer, user.slug) == {:error, :not_found}
+      end
+    end
+  end
+
   describe "register_user/1" do
     test "requires email and password to be set" do
       {:error, changeset} = Users.register_user(%{})
