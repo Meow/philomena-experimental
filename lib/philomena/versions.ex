@@ -1,11 +1,10 @@
 defmodule Philomena.Versions do
   @moduledoc """
-  Edit-history persistence for posts and comments.
+  Edit history for posts and comments.
 
-  History reads accept loaded parents only; request-facing parent loading and
-  authorization remain in `Philomena.Posts` and `Philomena.Comments`. History
-  writes compose into the same `Ecto.Multi` as the parent update, so neither
-  change can commit alone.
+  History reads accept loaded parents only. Authorization remains in
+  `Philomena.Posts` and `Philomena.Comments`. History writes compose into the
+  same `Ecto.Multi` as the parent update, so neither change can commit alone.
 
   Version rows are after-edit snapshots. On the first meaningful edit, an
   initial row captures the parent's original state and attribution before the
@@ -45,16 +44,6 @@ defmodule Philomena.Versions do
   defp normalized_text(nil), do: ""
   defp normalized_text(text), do: text
 
-  defp persist_edit(repo, schema, foreign_key, original, updated, %User{} = editor) do
-    if meaningful_edit?(original, updated) do
-      with :ok <- maybe_insert_initial(repo, schema, foreign_key, original) do
-        insert_snapshot(repo, schema, foreign_key, updated, editor.id)
-      end
-    else
-      {:ok, nil}
-    end
-  end
-
   defp maybe_insert_initial(repo, schema, foreign_key, original) do
     if repo.exists?(where(schema, [version], field(version, ^foreign_key) == ^original.id)) do
       :ok
@@ -85,11 +74,19 @@ defmodule Philomena.Versions do
     |> repo.insert()
   end
 
-  @doc """
-  Loads display-ready history for an already authorized post.
+  defp persist_edit(repo, schema, foreign_key, original, updated, %User{} = editor) do
+    if meaningful_edit?(original, updated) do
+      with :ok <- maybe_insert_initial(repo, schema, foreign_key, original) do
+        insert_snapshot(repo, schema, foreign_key, updated, editor.id)
+      end
+    else
+      {:ok, nil}
+    end
+  end
 
-  The loaded parent prevents this internal service from becoming an alternate
-  request-ID lookup path. `Philomena.Posts.post_history/4` owns authorization.
+  @doc """
+  Loads version history for an already authorized post.
+
   Results are newest first, limited to 25, and carry their parent and previous
   body for rendering a diff. A never-edited post returns `[]`.
 
@@ -103,11 +100,10 @@ defmodule Philomena.Versions do
   def for_post(%Post{} = post), do: load_versions(PostVersion, :post_id, post)
 
   @doc """
-  Loads display-ready history for an already authorized comment.
+  Loads version history for an already authorized comment.
 
-  `Philomena.Comments.comment_history/3` owns request-facing parent loading and
-  authorization. Results follow the same ordering and diff rules as
-  `for_post/1`.
+  Results are newest first, limited to 25, and carry their parent and previous
+  body for rendering a diff. A never-edited comment returns `[]`.
 
   ## Examples
 
@@ -120,7 +116,7 @@ defmodule Philomena.Versions do
     do: load_versions(CommentVersion, :comment_id, comment)
 
   @doc """
-  Adds post- or comment-version persistence to an owning update Multi.
+  Adds post or comment version history to an owning update Multi.
 
   `original_step` and `updated_step` must name prior steps returning the loaded
   parent before and after its update. Both must have the same supported parent
@@ -137,7 +133,13 @@ defmodule Philomena.Versions do
       %Ecto.Multi{}
 
   """
-  @spec record_edit(Multi.t(), Multi.name(), Multi.name(), Multi.name(), Actor.t()) :: Multi.t()
+  @spec record_edit(
+          multi :: Multi.t(),
+          name :: Multi.name(),
+          original_step :: Multi.name(),
+          updated_step :: Multi.name(),
+          actor :: Actor.t()
+        ) :: Multi.t()
   def record_edit(
         %Multi{} = multi,
         name,
@@ -146,11 +148,14 @@ defmodule Philomena.Versions do
         %Actor{user: %User{} = editor}
       ) do
     Multi.run(multi, name, fn repo, changes ->
-      case {Map.fetch!(changes, original_step), Map.fetch!(changes, updated_step)} do
-        {%Post{} = original, %Post{} = updated} ->
+      original = Map.fetch!(changes, original_step)
+      updated = Map.fetch!(changes, updated_step)
+
+      case {original, updated} do
+        {%Post{}, %Post{}} ->
           persist_edit(repo, PostVersion, :post_id, original, updated, editor)
 
-        {%Comment{} = original, %Comment{} = updated} ->
+        {%Comment{}, %Comment{}} ->
           persist_edit(repo, CommentVersion, :comment_id, original, updated, editor)
 
         _other ->
