@@ -481,10 +481,9 @@ defmodule Philomena.Reports do
   @doc """
   Claims an open, unclaimed report for the acting staff member.
 
-  The report is loaded under a row lock and authorized with `:claim`. A racing
+  The report is loaded under a row lock and authorized with `:claim`. A raced
   or repeated claim returns a changeset error rather than reassigning the
-  report. The update and moderation log commit atomically; indexing is queued
-  only after they succeed.
+  report.
 
   ## Examples
 
@@ -512,8 +511,7 @@ defmodule Philomena.Reports do
   Releases the claim on an open report.
 
   The report is locked and authorized with `:unclaim`. Releasing an already
-  unclaimed report is an idempotent success with no write, log, or index job.
-  A real update and its moderation log commit atomically.
+  unclaimed report is an idempotent success.
 
   ## Examples
 
@@ -538,8 +536,7 @@ defmodule Philomena.Reports do
   Closes a report on behalf of the acting staff member.
 
   The report is locked and authorized with `:close`. Closing an already
-  closed report is an idempotent success with no write, log, or index job. A
-  real close and its moderation log commit atomically.
+  closed report is an idempotent success.
 
   ## Examples
 
@@ -706,7 +703,7 @@ defmodule Philomena.Reports do
   ## Examples
 
       iex> perform_reindex(:id, [1, 2])
-      [:ok, :ok]
+      :ok
 
   """
   @spec perform_reindex(atom(), list()) :: :ok
