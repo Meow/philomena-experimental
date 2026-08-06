@@ -166,30 +166,21 @@ defmodule Philomena.Reports do
     %ReportForm{target: target, changeset: changeset || change_report(target)}
   end
 
-  defp ensure_report_limit(%Actor{} = actor) do
-    if exempt_from_report_limit?(actor) or not too_many_reports?(actor) do
-      :ok
-    else
-      {:error, :too_many_reports}
+  defp ensure_report_limit(%Actor{user: user, ip: ip} = actor) do
+    cond do
+      authorize(actor, :bypass_submission_limit, Report) == :ok ->
+        :ok
+
+      not is_nil(user) and
+          open_report_count(where(Report, user_id: ^user.id)) >= @max_open_reports ->
+        {:error, :too_many_reports}
+
+      open_report_count(where(Report, ip: ^ip)) >= @max_open_reports ->
+        {:error, :too_many_reports}
+
+      true ->
+        :ok
     end
-  end
-
-  defp exempt_from_report_limit?(actor) do
-    authorize(actor, :bypass_submission_limit, Report) == :ok
-  end
-
-  defp too_many_reports?(%Actor{user: user, ip: ip}) do
-    too_many_user_open_reports?(user) or too_many_ip_open_reports?(ip)
-  end
-
-  defp too_many_user_open_reports?(nil), do: false
-
-  defp too_many_user_open_reports?(%User{id: user_id}) do
-    open_report_count(where(Report, user_id: ^user_id)) >= @max_open_reports
-  end
-
-  defp too_many_ip_open_reports?(ip) do
-    open_report_count(where(Report, ip: ^ip)) >= @max_open_reports
   end
 
   defp open_report_count(query) do
