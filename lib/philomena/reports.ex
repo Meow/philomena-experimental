@@ -1,11 +1,6 @@
 defmodule Philomena.Reports do
   @moduledoc """
   Report forms, submission limits, staff review, and report search indexing.
-
-  Request-facing functions take an attribution actor first. Report forms use a
-  tagged target locator so the form and its submission share one safely loaded,
-  authorized target. Staff transitions lock the report row and commit their
-  moderation log in the same database transaction.
   """
 
   import Ecto.Query, warn: false
@@ -269,12 +264,6 @@ defmodule Philomena.Reports do
     report
   end
 
-  defp preload_targets(reports) do
-    reports
-    |> List.wrap()
-    |> Repo.preload(Report.target_preloads())
-  end
-
   defp convert_report(%Report{rule_id: 1, reason: report_reason} = report, rules) do
     case Regex.run(@reason_regex, report_reason) do
       [_, prefix, suffix, reason] ->
@@ -354,9 +343,10 @@ defmodule Philomena.Reports do
         |> where(user_id: ^user.id)
         |> order_by(desc: :created_at)
         |> preload(:rule)
+        |> preload(^Report.target_preloads())
         |> Repo.paginate(pagination)
 
-      {:ok, %{reports | entries: preload_targets(reports.entries)}}
+      {:ok, reports}
     end
   end
 
@@ -719,14 +709,12 @@ defmodule Philomena.Reports do
       [:ok, :ok]
 
   """
-  @spec perform_reindex(atom(), list()) :: list()
+  @spec perform_reindex(atom(), list()) :: :ok
   def perform_reindex(column, condition) do
     Report
     |> where([report], field(report, ^column) in ^condition)
-    |> preload([:user, :admin])
-    |> Repo.all()
-    |> preload_targets()
-    |> Enum.map(&Search.index_document(&1, Report))
+    |> preload(^indexing_preloads())
+    |> Search.reindex(Report)
   end
 
   @doc """
