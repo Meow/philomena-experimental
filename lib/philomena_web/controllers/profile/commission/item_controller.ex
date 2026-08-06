@@ -2,17 +2,17 @@ defmodule PhilomenaWeb.Profile.Commission.ItemController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Commissions
+  alias Philomena.Commissions.ItemForm
 
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"profile_id" => slug}) do
-    with {:ok, {user, commission, changeset}} <-
-           Commissions.load_item_for_new(conn.assigns.actor, slug) do
+    with {:ok, %ItemForm{} = form} <- Commissions.new_item(conn.assigns.actor, slug) do
       render(conn, "new.html",
         title: "New Commission Item",
-        user: user,
-        commission: commission,
-        changeset: changeset
+        user: form.user,
+        commission: form.commission,
+        changeset: form.changeset
       )
     end
   end
@@ -24,8 +24,12 @@ defmodule PhilomenaWeb.Profile.Commission.ItemController do
         |> put_flash(:info, "Item successfully created.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
 
-      {:error, {user, commission, changeset}} ->
-        render(conn, "new.html", user: user, commission: commission, changeset: changeset)
+      {:error, %ItemForm{} = form} ->
+        render(conn, "new.html",
+          user: form.user,
+          commission: form.commission,
+          changeset: form.changeset
+        )
 
       {:error, _} = error ->
         error
@@ -33,14 +37,14 @@ defmodule PhilomenaWeb.Profile.Commission.ItemController do
   end
 
   def edit(conn, %{"profile_id" => slug, "id" => id}) do
-    with {:ok, {user, commission, item, changeset}} <-
+    with {:ok, %ItemForm{} = form} <-
            Commissions.load_item_for_edit(conn.assigns.actor, slug, id) do
       render(conn, "edit.html",
         title: "Editing Commission Item",
-        user: user,
-        commission: commission,
-        item: item,
-        changeset: changeset
+        user: form.user,
+        commission: form.commission,
+        item: form.item,
+        changeset: form.changeset
       )
     end
   end
@@ -52,12 +56,12 @@ defmodule PhilomenaWeb.Profile.Commission.ItemController do
         |> put_flash(:info, "Item successfully updated.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
 
-      {:error, {user, commission, item, changeset}} ->
+      {:error, %ItemForm{} = form} ->
         render(conn, "edit.html",
-          user: user,
-          commission: commission,
-          item: item,
-          changeset: changeset
+          user: form.user,
+          commission: form.commission,
+          item: form.item,
+          changeset: form.changeset
         )
 
       {:error, _} = error ->

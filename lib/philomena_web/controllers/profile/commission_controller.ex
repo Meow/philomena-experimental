@@ -1,25 +1,23 @@
 defmodule PhilomenaWeb.Profile.CommissionController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Commissions.Commission
   alias Philomena.Commissions
+  alias Philomena.Commissions.CommissionForm
+  alias Philomena.Commissions.CommissionPage
   alias PhilomenaWeb.MarkdownRenderer
 
   action_fallback PhilomenaWeb.FallbackController
 
   def show(conn, %{"profile_id" => slug}) do
-    with {:ok, {user, commission}} <- Commissions.load_commission_for_show(slug) do
-      items =
-        commission.items
-        |> Enum.sort(&(Decimal.compare(&1.base_price, &2.base_price) != :gt))
-
+    with {:ok, %CommissionPage{user: user, commission: commission}} <-
+           Commissions.load_commission_for_show(conn.assigns.actor, slug) do
       item_descriptions =
-        items
+        commission.items
         |> Enum.map(&%{body: &1.description})
         |> MarkdownRenderer.render_collection(conn)
 
       item_add_ons =
-        items
+        commission.items
         |> Enum.map(&%{body: &1.add_ons})
         |> MarkdownRenderer.render_collection(conn)
 
@@ -41,7 +39,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
         will_not_create: will_not_create
       }
 
-      items = Enum.zip([item_descriptions, item_add_ons, items])
+      items = Enum.zip([item_descriptions, item_add_ons, commission.items])
 
       render(conn, "show.html",
         title: "Showing Commission",
@@ -55,12 +53,12 @@ defmodule PhilomenaWeb.Profile.CommissionController do
   end
 
   def new(conn, %{"profile_id" => slug}) do
-    case Commissions.load_commission_for_new(conn.assigns.actor, slug) do
-      {:ok, user} ->
+    case Commissions.new_commission(conn.assigns.actor, slug) do
+      {:ok, %CommissionForm{} = form} ->
         render(conn, "new.html",
           title: "New Commission",
-          user: user,
-          changeset: Commissions.change_commission(%Commission{})
+          user: form.user,
+          changeset: form.changeset
         )
 
       {:error, :no_verified_links} ->
@@ -73,13 +71,13 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def create(conn, %{"profile_id" => slug, "commission" => commission_params}) do
     case Commissions.create_commission(conn.assigns.actor, slug, commission_params) do
-      {:ok, {user, _commission}} ->
+      {:ok, %CommissionPage{user: user}} ->
         conn
         |> put_flash(:info, "Commission successfully created.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
 
-      {:error, {user, changeset}} ->
-        render(conn, "new.html", user: user, changeset: changeset)
+      {:error, %CommissionForm{} = form} ->
+        render(conn, "new.html", user: form.user, changeset: form.changeset)
 
       {:error, :no_verified_links} ->
         require_verified_link(conn)
@@ -91,8 +89,12 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def edit(conn, %{"profile_id" => slug}) do
     case Commissions.load_commission_for_edit(conn.assigns.actor, slug) do
-      {:ok, {user, _commission, changeset}} ->
-        render(conn, "edit.html", title: "Editing Commission", user: user, changeset: changeset)
+      {:ok, %CommissionForm{} = form} ->
+        render(conn, "edit.html",
+          title: "Editing Commission",
+          user: form.user,
+          changeset: form.changeset
+        )
 
       {:error, :no_verified_links} ->
         require_verified_link(conn)
@@ -104,13 +106,13 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def update(conn, %{"profile_id" => slug, "commission" => commission_params}) do
     case Commissions.update_commission(conn.assigns.actor, slug, commission_params) do
-      {:ok, {user, _commission}} ->
+      {:ok, %CommissionPage{user: user}} ->
         conn
         |> put_flash(:info, "Commission successfully updated.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
 
-      {:error, {user, changeset}} ->
-        render(conn, "edit.html", user: user, changeset: changeset)
+      {:error, %CommissionForm{} = form} ->
+        render(conn, "edit.html", user: form.user, changeset: form.changeset)
 
       {:error, :no_verified_links} ->
         require_verified_link(conn)

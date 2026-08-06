@@ -8,6 +8,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
   alias Philomena.Channels.Channel
   alias Philomena.Comments.Comment
   alias Philomena.Commissions.Commission
+  alias Philomena.Commissions.Item
   alias Philomena.Conversations.Conversation
   alias Philomena.Conversations.Message
   alias Philomena.DnpEntries.DnpEntry
@@ -34,6 +35,15 @@ defimpl Canada.Can, for: Philomena.Users.User do
   @award_member_actions [:edit, :update, :delete]
   @badge_class_actions [:index, :new, :create]
   @badge_member_actions [:edit, :update, :update_image, :show_users]
+  @commission_management_actions [:new, :create, :edit, :update, :delete]
+  @commission_item_actions [:new, :create, :edit, :update, :delete]
+
+  # Commission items deliberately remain owner-only, including for staff.
+  def can?(%User{id: id}, action, %Item{commission: %Commission{user_id: id}})
+      when action in @commission_item_actions,
+      do: true
+
+  def can?(%User{}, action, %Item{}) when action in @commission_item_actions, do: false
 
   # Admins can do anything
   def can?(%User{role: "admin"}, _action, _model), do: true
@@ -173,7 +183,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{role: "moderator"}, :delete, %TagChange{}), do: true
 
   # Manage commissions
-  def can?(%User{role: "moderator"}, _action, %Commission{}), do: true
+  def can?(%User{role: "moderator"}, action, %Commission{})
+      when action in @commission_management_actions,
+      do: true
 
   # Manage galleries
   def can?(%User{role: "moderator"}, _action, %Gallery{}), do: true
@@ -548,9 +560,12 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{id: id}, :create_links, %User{id: id}), do: true
   def can?(%User{id: id}, :show, %ArtistLink{user_id: id}), do: true
 
-  # Edit their commissions
+  # View the directory/listings and manage their own commission.
+  def can?(%User{}, :index, Commission), do: true
+  def can?(%User{}, :show, %Commission{}), do: true
+
   def can?(%User{id: id}, action, %Commission{user_id: id})
-      when action in [:edit, :update, :delete],
+      when action in @commission_management_actions,
       do: true
 
   # View non-deleted images
@@ -646,6 +661,7 @@ end
 defimpl Canada.Can, for: Atom do
   alias Philomena.Channels.Channel
   alias Philomena.Comments.Comment
+  alias Philomena.Commissions.Commission
   alias Philomena.DnpEntries.DnpEntry
   alias Philomena.Filters.Filter
   alias Philomena.Forums.Forum
@@ -699,6 +715,10 @@ defimpl Canada.Can, for: Atom do
 
   # View profile pages
   def can?(_user, :show, %User{}), do: true
+
+  # View the commission directory and listings.
+  def can?(_user, :index, Commission), do: true
+  def can?(_user, :show, %Commission{}), do: true
 
   def can?(_user, :show, %DnpEntry{aasm_state: "listed"}), do: true
   def can?(_user, :show_reason, %DnpEntry{aasm_state: "listed", hide_reason: false}), do: true

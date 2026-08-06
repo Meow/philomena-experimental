@@ -1,5 +1,21 @@
 # Commissions context plan
 
+## Status
+
+Wave 2 complete. Commission pages, forms, item forms, and directory results now
+use typed structs and actor-scoped APIs. Profiles resolve through Users' shared
+active-profile locator; commission ownership/staff policy and strict owner-only
+item policy live in abilities. Every form and mutation applies the same global
+write prerequisite.
+
+Nested items load through a route-commission query before authorization, so
+malformed, absent, and wrong-commission IDs are consistently not-found. One
+commission per profile is enforced by a database unique index, listing items
+have deterministic price/ID ordering, and raw CRUD/query/changeset/preload
+mechanics are private. The public directory is SQL-backed and excludes
+deactivated owners; commission deletion closes reports transactionally and
+reindexes affected report documents only after commit.
+
 Source: `lib/philomena/commissions.ex`; consumers: commission directory/profile
 and nested item controllers plus report loading.
 

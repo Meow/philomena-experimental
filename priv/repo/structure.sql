@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict X2vAoA95ZKibV0626LfdJ04GUgYCdVOj8SQ9wd3hME2a2XB2CfLtn76o2Rb50Ma
+\restrict YH6G2Gjy0zMsBMWQFlw2hjHizqFcqaDPVjFRj67VBjLZZEF3IkEkIkodUw9krKK
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -3625,7 +3625,7 @@ CREATE INDEX index_commissions_on_sheet_image_id ON public.commissions USING btr
 -- Name: index_commissions_on_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_commissions_on_user_id ON public.commissions USING btree (user_id);
+CREATE UNIQUE INDEX index_commissions_on_user_id ON public.commissions USING btree (user_id);
 
 
 --
@@ -5924,7 +5924,7 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict X2vAoA95ZKibV0626LfdJ04GUgYCdVOj8SQ9wd3hME2a2XB2CfLtn76o2Rb50Ma
+\unrestrict YH6G2Gjy0zMsBMWQFlw2hjHizqFcqaDPVjFRj67VBjLZZEF3IkEkIkodUw9krKK
 
 INSERT INTO public."schema_migrations" (version) VALUES (20200503002523);
 INSERT INTO public."schema_migrations" (version) VALUES (20200607000511);
@@ -5967,3 +5967,4 @@ INSERT INTO public."schema_migrations" (version) VALUES (20260719123608);
 INSERT INTO public."schema_migrations" (version) VALUES (20260719123609);
 INSERT INTO public."schema_migrations" (version) VALUES (20260719123610);
 INSERT INTO public."schema_migrations" (version) VALUES (20260719123611);
+INSERT INTO public."schema_migrations" (version) VALUES (20260806000000);

@@ -179,6 +179,11 @@ search state and resolve active users through one shared Users slug locator.
 Sensitive embedded metadata consistently requires `:show_details` before its
 owning context's authorization and query, while typed IP and fingerprint
 histories paginate the subject rows.
+Commissions is complete. Typed page/form/directory results wrap an active
+profile locator, named commission and item abilities replace role/ownership
+checks, and nested items are parent-scoped before authorization. The database
+enforces one listing per profile; directory reads exclude deactivated owners,
+and transactional report cleanup retains after-commit report indexing.
 
 ### Wave 0: characterize and establish the contract
 

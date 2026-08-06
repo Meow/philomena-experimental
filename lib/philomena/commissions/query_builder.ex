@@ -5,6 +5,7 @@ defmodule Philomena.Commissions.QueryBuilder do
   alias Philomena.Commissions.Item
   alias Philomena.Commissions.SearchQuery
   alias Philomena.UserIps.UserIp
+  alias Philomena.Users.User
   import Ecto.Query
 
   @doc """
@@ -47,6 +48,10 @@ defmodule Philomena.Commissions.QueryBuilder do
         as: :commission,
         where: c.open == true,
         where: c.commission_items_count > 0,
+        inner_join: u in User,
+        as: :user,
+        on: u.id == c.user_id,
+        where: is_nil(u.deleted_at),
         inner_join: ci in Item,
         as: :commission_item,
         on: ci.commission_id == c.id
@@ -66,7 +71,7 @@ defmodule Philomena.Commissions.QueryBuilder do
       preload: [user: [awards: :badge], items: [example_image: [:sources, tags: :aliases]]]
   end
 
-  defp maybe_filter_price(query, sq = %SearchQuery{}) do
+  defp maybe_filter_price(query, %SearchQuery{} = sq) do
     if not is_nil(sq.price_min) and not is_nil(sq.price_max) do
       from [commission_item: ci] in query,
         where: ci.base_price >= ^sq.price_min and ci.base_price <= ^sq.price_max
@@ -75,7 +80,7 @@ defmodule Philomena.Commissions.QueryBuilder do
     end
   end
 
-  def maybe_filter_item_type(query, sq = %SearchQuery{}) do
+  defp maybe_filter_item_type(query, %SearchQuery{} = sq) do
     if sq.item_type do
       from [commission_item: ci] in query,
         where: ci.item_type == ^sq.item_type
@@ -84,7 +89,7 @@ defmodule Philomena.Commissions.QueryBuilder do
     end
   end
 
-  defp maybe_filter_categories(query, sq = %SearchQuery{}) do
+  defp maybe_filter_categories(query, %SearchQuery{} = sq) do
     if sq.category do
       from [commission: c] in query,
         where: fragment("? @> ?", c.categories, ^sq.category)
@@ -93,7 +98,7 @@ defmodule Philomena.Commissions.QueryBuilder do
     end
   end
 
-  defp maybe_filter_keywords(query, sq = %SearchQuery{}) do
+  defp maybe_filter_keywords(query, %SearchQuery{} = sq) do
     if sq.keywords do
       keywords = like_sanitize(sq.keywords)
 
