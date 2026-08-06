@@ -1,7 +1,6 @@
 defmodule Philomena.UserFingerprints do
   @moduledoc """
-  Actor-scoped fingerprint profiles and user-history reads, plus browser
-  fingerprint validation.
+  Fingerprint profiles, user history, and browser fingerprint validation.
   """
 
   import Ecto.Query, warn: false
@@ -14,8 +13,6 @@ defmodule Philomena.UserFingerprints do
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserFingerprints.FingerprintProfile
   alias Philomena.Users.User
-
-  @cross_reference_limit 50
 
   defp user_fingerprints_for(fingerprint) do
     UserFingerprint
@@ -39,30 +36,11 @@ defmodule Philomena.UserFingerprints do
     |> order_by(desc: :updated_at, desc: :id)
   end
 
-  defp cross_references([]), do: %{}
-
   defp cross_references(fingerprints) do
-    ranked_ids =
-      UserFingerprint
-      |> where([user_fingerprint], user_fingerprint.fingerprint in ^fingerprints)
-      |> windows([user_fingerprint],
-        identity: [
-          partition_by: user_fingerprint.fingerprint,
-          order_by: [desc: user_fingerprint.updated_at, desc: user_fingerprint.id]
-        ]
-      )
-      |> select([user_fingerprint], %{
-        id: user_fingerprint.id,
-        rank: over(row_number(), :identity)
-      })
-
     UserFingerprint
-    |> join(:inner, [user_fingerprint], ranked in subquery(ranked_ids),
-      on: ranked.id == user_fingerprint.id
-    )
-    |> where([_user_fingerprint, ranked], ranked.rank <= ^@cross_reference_limit)
+    |> where([u], u.fingerprint in ^fingerprints)
     |> preload(:user)
-    |> order_by([user_fingerprint], desc: user_fingerprint.updated_at, desc: user_fingerprint.id)
+    |> order_by(desc: :updated_at)
     |> Repo.all()
     |> Enum.group_by(& &1.fingerprint)
   end
@@ -96,8 +74,7 @@ defmodule Philomena.UserFingerprints do
   Loads a paginated fingerprint history for `user` and cross-references the
   fingerprints on the current page for `actor`.
 
-  The actor must have the shared identity-metadata permission. Cross-references
-  are capped at the 50 most recently used rows per fingerprint.
+  `actor` must be authorized to show `:identity_metadata`.
 
   ## Examples
 
@@ -109,7 +86,10 @@ defmodule Philomena.UserFingerprints do
           {:ok, {Scrivener.Page.t(UserFingerprint.t()), map()}} | {:error, :unauthorized}
   def load_user_history(%Actor{} = actor, %User{} = user, pagination) do
     with :ok <- authorize(actor, :show, :identity_metadata) do
-      user_fingerprints = user |> history_query() |> Repo.paginate(pagination)
+      user_fingerprints =
+        user
+        |> history_query()
+        |> Repo.paginate(pagination)
 
       fingerprints =
         user_fingerprints.entries
@@ -121,8 +101,8 @@ defmodule Philomena.UserFingerprints do
   end
 
   @doc """
-  Returns the latest fingerprint-history row for `user`, if any, after applying
-  the shared identity-metadata permission.
+  Returns the latest fingerprint history row for `user`, if any, after authorizing
+  the `:identity_metadata` permission.
 
   ## Examples
 
@@ -134,7 +114,11 @@ defmodule Philomena.UserFingerprints do
           {:ok, UserFingerprint.t() | nil} | {:error, :unauthorized}
   def latest_for_user(%Actor{} = actor, %User{} = user) do
     with :ok <- authorize(actor, :show, :identity_metadata) do
-      {:ok, user |> history_query() |> limit(1) |> Repo.one()}
+      {:ok,
+       user
+       |> history_query()
+       |> limit(1)
+       |> Repo.one()}
     end
   end
 

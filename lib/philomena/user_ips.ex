@@ -1,7 +1,6 @@
 defmodule Philomena.UserIps do
   @moduledoc """
-  Actor-scoped IP profiles and user-history reads, plus the narrow latest-IP
-  lookup used by automatic ban enforcement.
+  IP profiles, user history, and latest IP lookup for automatic ban enforcement.
   """
 
   import Ecto.Query, warn: false
@@ -14,8 +13,6 @@ defmodule Philomena.UserIps do
   alias Philomena.UserIps.UserIp
   alias Philomena.UserIps.IpProfile
   alias Philomena.Users.User
-
-  @cross_reference_limit 50
 
   defp user_ips_for(ip) do
     UserIp
@@ -38,28 +35,11 @@ defmodule Philomena.UserIps do
     |> order_by(desc: :updated_at, desc: :id)
   end
 
-  defp cross_references([]), do: %{}
-
   defp cross_references(ips) do
-    ranked_ids =
-      UserIp
-      |> where([user_ip], user_ip.ip in ^ips)
-      |> windows([user_ip],
-        identity: [
-          partition_by: user_ip.ip,
-          order_by: [desc: user_ip.updated_at, desc: user_ip.id]
-        ]
-      )
-      |> select([user_ip], %{
-        id: user_ip.id,
-        rank: over(row_number(), :identity)
-      })
-
     UserIp
-    |> join(:inner, [user_ip], ranked in subquery(ranked_ids), on: ranked.id == user_ip.id)
-    |> where([_user_ip, ranked], ranked.rank <= ^@cross_reference_limit)
+    |> where([u], u.ip in ^ips)
     |> preload(:user)
-    |> order_by([user_ip], desc: user_ip.updated_at, desc: user_ip.id)
+    |> order_by(desc: :updated_at)
     |> Repo.all()
     |> Enum.group_by(& &1.ip)
   end
@@ -92,8 +72,7 @@ defmodule Philomena.UserIps do
   Loads a paginated IP history for `user` and cross-references the IPs on the
   current page for `actor`.
 
-  The actor must have the shared identity-metadata permission. Cross-references
-  are capped at the 50 most recently used rows per IP.
+  `actor` must be authorized to show `:identity_metadata`.
 
   ## Examples
 
@@ -105,16 +84,23 @@ defmodule Philomena.UserIps do
           {:ok, {Scrivener.Page.t(UserIp.t()), map()}} | {:error, :unauthorized}
   def load_user_history(%Actor{} = actor, %User{} = user, pagination) do
     with :ok <- authorize(actor, :show, :identity_metadata) do
-      user_ips = user |> history_query() |> Repo.paginate(pagination)
-      ips = user_ips.entries |> Enum.map(& &1.ip) |> Enum.uniq()
+      user_ips =
+        user
+        |> history_query()
+        |> Repo.paginate(pagination)
+
+      ips =
+        user_ips.entries
+        |> Enum.map(& &1.ip)
+        |> Enum.uniq()
 
       {:ok, {user_ips, cross_references(ips)}}
     end
   end
 
   @doc """
-  Returns the latest IP-history row for `user`, if any, after applying the
-  shared identity-metadata permission.
+  Returns the latest IP history row for `user`, if any, after authorizing the
+  `:identity_metadata` permission.
 
   ## Examples
 
@@ -126,7 +112,11 @@ defmodule Philomena.UserIps do
           {:ok, UserIp.t() | nil} | {:error, :unauthorized}
   def latest_for_user(%Actor{} = actor, %User{} = user) do
     with :ok <- authorize(actor, :show, :identity_metadata) do
-      {:ok, user |> history_query() |> limit(1) |> Repo.one()}
+      {:ok,
+       user
+       |> history_query()
+       |> limit(1)
+       |> Repo.one()}
     end
   end
 

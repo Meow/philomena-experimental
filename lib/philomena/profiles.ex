@@ -343,9 +343,8 @@ defmodule Philomena.Profiles do
   Loads a page of IP history for the active profile named by `slug`, plus other
   users seen on the IPs in that page.
 
-  The real visible profile is loaded before the `:show_details` and shared
-  identity-metadata gates. UserIps owns the paginated history and caps each
-  IP's cross-references at its 50 most recent rows.
+  The profile is loaded and authorized for `:show_details`, then the actor is
+  authorized to show `:identity_metadata`.
 
   ## Examples
 
@@ -367,9 +366,8 @@ defmodule Philomena.Profiles do
   Loads a page of fingerprint history for the active profile named by `slug`,
   plus other users seen with the fingerprints in that page.
 
-  The real visible profile is loaded before the `:show_details` and shared
-  identity-metadata gates. UserFingerprints owns the paginated history and caps
-  each fingerprint's cross-references at its 50 most recent rows.
+  The profile is loaded and authorized for `:show_details`, then the actor is
+  authorized to show `:identity_metadata`.
 
   ## Examples
 

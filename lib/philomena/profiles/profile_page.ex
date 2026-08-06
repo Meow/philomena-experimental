@@ -1,7 +1,7 @@
 defmodule Philomena.Profiles.ProfilePage do
   @moduledoc """
   Everything a user's public profile holds for one viewer: the user with its
-  profile associations, the recent-uploads/faves/artwork image strips, the
+  profile associations, the recent uploads/faves/artwork image strips, the
   viewer's interactions across them, the recent comments and posts, recent
   galleries, the 90-day statistics series, watcher counts for the user's
   verified-link tags, the user's public-link tags, and the user's bans.
