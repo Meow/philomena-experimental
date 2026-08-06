@@ -189,19 +189,15 @@ defmodule Philomena.Reports do
     |> Repo.aggregate(:count)
   end
 
-  defp insert_user_report(actor, attrs, target) do
+  defp create_loaded_report(actor, attrs, target) do
+    attrs = if is_map(attrs), do: attrs, else: %{}
     rule = Rules.find_rule(attrs["rule_id"])
 
     target
     |> Ecto.build_assoc(:reports)
     |> Report.user_creation_changeset(attrs, actor, rule)
     |> Repo.insert()
-  end
-
-  defp create_loaded_report(actor, attrs, target) do
-    attrs = if is_map(attrs), do: attrs, else: %{}
-
-    case insert_user_report(actor, attrs, target) do
+    |> case do
       {:ok, report} ->
         reindex_report(report)
         {:ok, report}
