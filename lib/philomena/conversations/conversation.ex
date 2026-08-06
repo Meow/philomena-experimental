@@ -3,6 +3,7 @@ defmodule Philomena.Conversations.Conversation do
   import Ecto.Changeset
 
   alias Philomena.Users.User
+  alias Philomena.Reports.Report
   alias Philomena.Conversations.Message
 
   @derive {Phoenix.Param, key: :slug}
@@ -13,6 +14,7 @@ defmodule Philomena.Conversations.Conversation do
     belongs_to :from, User
     belongs_to :to, User
     has_many :messages, Message
+    has_many :reports, Report
 
     field :title, :string
     field :to_read, :boolean, default: false

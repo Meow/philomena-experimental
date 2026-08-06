@@ -5,6 +5,7 @@ defmodule Philomena.Posts.Post do
   alias Philomena.Attribution.Actor
   alias Philomena.Users.User
   alias Philomena.Topics.Topic
+  alias Philomena.Reports.Report
   alias Philomena.Schema.Approval
 
   @type t :: %__MODULE__{}
@@ -13,6 +14,7 @@ defmodule Philomena.Posts.Post do
     belongs_to :user, User
     belongs_to :topic, Topic
     belongs_to :deleted_by, User
+    has_many :reports, Report
 
     field :body, :string
     field :edit_reason, :string

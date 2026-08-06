@@ -17,6 +17,7 @@ defmodule Philomena.Images.Image do
   alias Philomena.Comments.Comment
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.TagChanges.TagChange
+  alias Philomena.Reports.Report
 
   alias Philomena.Images.Image
   alias Philomena.Images.TagDiffer
@@ -49,6 +50,7 @@ defmodule Philomena.Images.Image do
     has_one :intensity, ImageIntensity
     has_many :galleries, through: [:gallery_interactions, :image]
     has_many :sources, Source, on_replace: :delete
+    has_many :reports, Report
 
     field :image, :string
     field :image_name, :string

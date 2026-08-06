@@ -15,6 +15,7 @@ defmodule Philomena.Users.User do
   alias Philomena.Users.Settings
   alias Philomena.Commissions.Commission
   alias Philomena.Roles.Role
+  alias Philomena.Reports.Report
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserIps.UserIp
   alias Philomena.Bans
@@ -40,6 +41,8 @@ defmodule Philomena.Users.User do
     many_to_many :roles, Role, join_through: "users_roles", on_replace: :delete
     has_many :name_changes, UserNameChange
     has_one :settings, Settings, on_replace: :update
+    has_many :reports, Report, foreign_key: :reported_user_id
+    has_many :created_reports, Report, foreign_key: :user_id
 
     belongs_to :current_filter, Filter
     belongs_to :forced_filter, Filter

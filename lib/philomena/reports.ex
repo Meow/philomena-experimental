@@ -93,8 +93,7 @@ defmodule Philomena.Reports do
     [%{open: :desc}, %{state: :desc}, %{created_at: :desc}]
   end
 
-  defp build_report_page(_actor, %{"rq" => query_string}, pagination)
-       when is_binary(query_string) do
+  defp build_report_page(_actor, %{"rq" => query_string}, pagination) do
     case Query.compile(query_string) do
       {:ok, query} ->
         {:ok,
@@ -157,18 +156,9 @@ defmodule Philomena.Reports do
     end
   end
 
-  defp report_target(%Image{id: id}), do: [image_id: id]
-  defp report_target(%Comment{id: id}), do: [comment_id: id]
-  defp report_target(%Post{id: id}), do: [post_id: id]
-  defp report_target(%User{id: id}), do: [reported_user_id: id]
-  defp report_target(%Commission{id: id}), do: [commission_id: id]
-  defp report_target(%Conversation{id: id}), do: [conversation_id: id]
-  defp report_target(%Gallery{id: id}), do: [gallery_id: id]
-
   defp change_report(target) do
     target
-    |> report_target()
-    |> then(&struct(Report, &1))
+    |> Ecto.build_assoc(:reports)
     |> Report.changeset(%{})
   end
 
@@ -212,8 +202,7 @@ defmodule Philomena.Reports do
     rule = Rules.find_rule(attrs["rule_id"])
 
     target
-    |> report_target()
-    |> then(&struct(Report, &1))
+    |> Ecto.build_assoc(:reports)
     |> Report.user_creation_changeset(attrs, actor, rule)
     |> Repo.insert()
   end
@@ -262,7 +251,7 @@ defmodule Philomena.Reports do
       with {:ok, report} <- lock_and_authorize_report(actor, action, id) do
         report
         |> transition.(actor.user)
-        |> apply_transition(report, actor, log_type, id, log_body)
+        |> apply_transition(report, actor, log_type, log_body)
       end
     end)
     |> case do
@@ -275,9 +264,9 @@ defmodule Philomena.Reports do
     end
   end
 
-  defp apply_transition(changeset, report, actor, log_type, id, log_body) do
+  defp apply_transition(changeset, report, actor, log_type, log_body) do
     if map_size(changeset.changes) > 0 do
-      path = Paths.admin_report_path(id)
+      path = Paths.admin_report_path(report.id)
 
       with {:ok, report} <- Repo.update(changeset),
            {:ok, _log} <- ModerationLogs.create_moderation_log(actor, log_type, path, log_body) do

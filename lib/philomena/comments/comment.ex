@@ -5,6 +5,7 @@ defmodule Philomena.Comments.Comment do
   alias Philomena.Attribution.Actor
   alias Philomena.Images.Image
   alias Philomena.Users.User
+  alias Philomena.Reports.Report
   alias Philomena.Schema.Approval
 
   @type t :: %__MODULE__{}
@@ -13,6 +14,7 @@ defmodule Philomena.Comments.Comment do
     belongs_to :user, User
     belongs_to :image, Image
     belongs_to :deleted_by, User
+    has_many :reports, Report
 
     field :body, :string
     field :ip, EctoNetwork.INET

@@ -4,6 +4,7 @@ defmodule Philomena.Galleries.Gallery do
 
   alias Philomena.Images.Image
   alias Philomena.Users.User
+  alias Philomena.Reports.Report
   alias Philomena.Galleries.Interaction
   alias Philomena.Galleries.Subscription
 
@@ -15,6 +16,7 @@ defmodule Philomena.Galleries.Gallery do
     has_many :interactions, Interaction
     has_many :subscriptions, Subscription
     has_many :subscribers, through: [:subscriptions, :user]
+    has_many :reports, Report
 
     field :title, :string
     field :spoiler_warning, :string, default: ""

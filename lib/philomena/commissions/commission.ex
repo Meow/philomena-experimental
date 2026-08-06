@@ -5,6 +5,7 @@ defmodule Philomena.Commissions.Commission do
   alias Philomena.Commissions.Item
   alias Philomena.Images.Image
   alias Philomena.Users.User
+  alias Philomena.Reports.Report
 
   @type t :: %__MODULE__{}
 
@@ -12,6 +13,7 @@ defmodule Philomena.Commissions.Commission do
     belongs_to :user, User
     belongs_to :sheet_image, Image
     has_many :items, Item
+    has_many :reports, Report
 
     field :open, :boolean
     field :categories, {:array, :string}, default: []
