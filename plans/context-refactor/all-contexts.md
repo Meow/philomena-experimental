@@ -178,7 +178,7 @@ Profiles is also complete. Profile pages carry Actor independently from image
 search state and resolve active users through one shared Users slug locator.
 Sensitive embedded metadata consistently requires `:show_details` before its
 owning context's authorization and query, while typed IP and fingerprint
-histories paginate the subject rows and cap per-identity cross-references.
+histories paginate the subject rows.
 
 ### Wave 0: characterize and establish the contract
 

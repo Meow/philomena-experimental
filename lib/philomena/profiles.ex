@@ -1,11 +1,7 @@
 defmodule Philomena.Profiles do
   @moduledoc """
-  Actor-scoped assembly of public profile pages and sensitive staff-only
-  account metadata, IP histories, and fingerprint histories.
-
-  Public pages exclude deactivated profiles. Sensitive loaders first authorize
-  profile details, then delegate their bounded data queries to the owning
-  context under its own permission.
+  Public profile pages and sensitive staff-only account metadata, IP histories,
+  and fingerprint histories.
   """
 
   import Ecto.Query, warn: false
@@ -231,7 +227,7 @@ defmodule Philomena.Profiles do
 
   The actor is carried separately from the image-search scope and the loaded
   profile is authorized with `:show`. Missing and deactivated profiles are
-  always not found. `current_filter` scopes the recent-comments strip; posts
+  always not found. `current_filter` scopes the recent comments strip. Posts
   and comments whose parents the actor cannot show are removed after search.
   The loaded user includes its forced filter for the caller's owner/staff-only
   presentation gate.
@@ -266,9 +262,9 @@ defmodule Philomena.Profiles do
   @doc """
   Loads sensitive account metadata about `user` for `actor`.
 
-  The actor must be authorized for `:show_details` on the user and for the
-  shared identity-metadata permission before the current filter or latest IP
-  and fingerprint rows are queried.
+  The actor must be authorized for `:show_details` on the user and to show
+  `:identity_metadata` before the current filter or latest IP and fingerprint
+  rows are queried.
 
   ## Examples
 
@@ -301,8 +297,8 @@ defmodule Philomena.Profiles do
   Loads up to 250 newest moderation notes on `user` for `actor`, processed
   through `collection_renderer`.
 
-  The `:show_details` gate runs before the ModNotes context applies its own
-  collection and target permissions.
+  The profile is loaded and authorized for `:show_details`, then any additional
+  ModNotes permissions are checked.
 
   ## Examples
 
@@ -321,8 +317,8 @@ defmodule Philomena.Profiles do
   @doc """
   Loads up to 250 newest name changes of `user` for `actor`.
 
-  The `:show_details` gate runs before UserNameChanges applies its collection
-  permission.
+  The profile is loaded and authorized for `:show_details`, then any additional
+  UserNameChanges permissions are checked.
 
   ## Examples
 

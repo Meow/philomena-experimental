@@ -38,7 +38,7 @@ fingerprint history controllers.
 - Introduce typed `ProfilePage`, `AdminMetadata`, `IpHistory`, and
   `FingerprintHistory` result structs. Rename public/result fields and function
   names from `fp` to `fingerprint`, with a coordinated controller/view change.
-- Ensure sensitive subqueries execute only after the details authorization gate
+- Ensure sensitive queries execute only after the details authorization gate
   and are bounded/paginated. Delegate mod notes/name/IP/fingerprint/source-change
   queries through actor-scoped context APIs rather than raw public helpers.
 - Move all private assembly/query helpers before the six public page APIs.
