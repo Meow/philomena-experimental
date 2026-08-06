@@ -2,6 +2,7 @@ defmodule Philomena.Reports.Report do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Philomena.Attribution.Actor
   alias Philomena.Users.User
   alias Philomena.Rules.Rule
   alias Philomena.Images.Image
@@ -108,13 +109,13 @@ defmodule Philomena.Reports.Report do
   end
 
   @doc false
-  def creation_changeset(report, attrs, attribution, rule) do
+  def creation_changeset(report, attrs, %Actor{} = actor, rule) do
     report
     |> cast(attrs, [:reason, :user_agent])
     |> put_assoc(:rule, rule)
     |> validate_length(:reason, max: 10_000, count: :bytes)
     |> validate_length(:user_agent, max: 1000, count: :bytes)
-    |> change(attribution)
+    |> change(Actor.to_changes(actor))
     |> validate_required([
       :reason,
       :ip,
@@ -124,9 +125,15 @@ defmodule Philomena.Reports.Report do
     |> validate_target()
   end
 
-  def user_creation_changeset(report, attrs, attribution, rule) do
+  def system_creation_changeset(report, attrs, %Actor{} = actor, %Rule{} = rule) do
     report
-    |> creation_changeset(attrs, attribution, rule)
+    |> creation_changeset(attrs, actor, rule)
+    |> change(system: true)
+  end
+
+  def user_creation_changeset(report, attrs, %Actor{} = actor, %Rule{} = rule) do
+    report
+    |> creation_changeset(attrs, actor, rule)
     |> validate_rule()
   end
 

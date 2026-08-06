@@ -451,13 +451,13 @@ defmodule Philomena.ReportsTest do
       attrs = %{"reason" => "bad target count", "user_agent" => "test"}
       rule = rule_fixture()
 
-      zero = Report.creation_changeset(%Report{}, attrs, attribution(), rule)
+      zero = Report.creation_changeset(%Report{}, attrs, actor(), rule)
 
       two =
         Report.creation_changeset(
           %Report{image_id: image.id, reported_user_id: user.id},
           attrs,
-          attribution(),
+          actor(),
           rule
         )
 

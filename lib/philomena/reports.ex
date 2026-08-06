@@ -47,7 +47,7 @@ defmodule Philomena.Reports do
   @default_preloads [:admin, :rule, user: :linked_tags]
   @reason_regex ~r/^(Rule|Other|Takedown|Verification|Approval|Review|System)([^:]*): (.*)$/
 
-  @typedoc "A route-shaped locator for one reportable target."
+  @typedoc "Locator for a reportable item."
   @type target_locator ::
           {:image, Loader.integer_id()}
           | {:comment, Loader.integer_id(), Loader.integer_id()}
@@ -137,32 +137,29 @@ defmodule Philomena.Reports do
      }}
   end
 
-  defp load_report_target(actor, {:image, image_id}) do
-    Images.load_report_target(actor, image_id)
-  end
+  defp load_report_target(%Actor{} = actor, locator) do
+    case locator do
+      {:image, image_id} ->
+        Images.load_report_target(actor, image_id)
 
-  defp load_report_target(actor, {:comment, image_id, comment_id}) do
-    Comments.load_report_target(actor, image_id, comment_id)
-  end
+      {:comment, image_id, comment_id} ->
+        Comments.load_report_target(actor, image_id, comment_id)
 
-  defp load_report_target(actor, {:post, forum_slug, topic_slug, post_id}) do
-    Posts.load_report_target(actor, forum_slug, topic_slug, post_id)
-  end
+      {:post, forum_slug, topic_slug, post_id} ->
+        Posts.load_report_target(actor, forum_slug, topic_slug, post_id)
 
-  defp load_report_target(actor, {:user, slug}) do
-    Users.load_report_target(actor, slug)
-  end
+      {:user, slug} ->
+        Users.load_report_target(actor, slug)
 
-  defp load_report_target(actor, {:commission, slug}) do
-    Commissions.load_report_target(actor, slug)
-  end
+      {:commission, slug} ->
+        Commissions.load_report_target(actor, slug)
 
-  defp load_report_target(actor, {:conversation, slug}) do
-    Conversations.load_report_target(actor, slug)
-  end
+      {:conversation, slug} ->
+        Conversations.load_report_target(actor, slug)
 
-  defp load_report_target(actor, {:gallery, gallery_id}) do
-    Galleries.load_report_target(actor, gallery_id)
+      {:gallery, gallery_id} ->
+        Galleries.load_report_target(actor, gallery_id)
+    end
   end
 
   defp report_target(%Image{id: id}), do: [image_id: id]
@@ -184,10 +181,6 @@ defmodule Philomena.Reports do
     %ReportForm{target: target, changeset: changeset || change_report(target)}
   end
 
-  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}) do
-    [ip: ip, fingerprint: fingerprint, user: user]
-  end
-
   defp ensure_report_limit(%Actor{} = actor) do
     if exempt_from_report_limit?(actor) or not too_many_reports?(actor) do
       :ok
@@ -201,16 +194,16 @@ defmodule Philomena.Reports do
   end
 
   defp too_many_reports?(%Actor{user: user, ip: ip}) do
-    open_reports_for_user?(user) or open_reports_for_ip?(ip)
+    too_many_user_open_reports?(user) or too_many_ip_open_reports?(ip)
   end
 
-  defp open_reports_for_user?(nil), do: false
+  defp too_many_user_open_reports?(nil), do: false
 
-  defp open_reports_for_user?(%User{id: user_id}) do
+  defp too_many_user_open_reports?(%User{id: user_id}) do
     open_report_count(where(Report, user_id: ^user_id)) >= @max_open_reports
   end
 
-  defp open_reports_for_ip?(ip) do
+  defp too_many_ip_open_reports?(ip) do
     open_report_count(where(Report, ip: ^ip)) >= @max_open_reports
   end
 
@@ -226,7 +219,7 @@ defmodule Philomena.Reports do
     target
     |> report_target()
     |> then(&struct(Report, &1))
-    |> Report.user_creation_changeset(attrs, actor_attributes(actor), rule)
+    |> Report.user_creation_changeset(attrs, actor, rule)
     |> Repo.insert()
   end
 
@@ -419,8 +412,8 @@ defmodule Philomena.Reports do
   @doc """
   Returns the number of open reports visible in the staff counter.
 
-  The count is authorized with `:index` on `Report`; unauthorized actors receive
-  `nil`, which lets the shared counter plug omit the value.
+  The count is authorized with `:index` on `Report`. Unauthorized users
+  receive `nil`.
 
   ## Examples
 
@@ -447,8 +440,7 @@ defmodule Philomena.Reports do
   @doc """
   Loads the signed-in actor's reports, newest first.
 
-  Results are scoped to `actor.user` before the target associations are
-  preloaded. Anonymous actors are unauthorized.
+  Results are scoped to `actor.user`. Anonymous actors are unauthorized.
 
   ## Examples
 
@@ -478,7 +470,7 @@ defmodule Philomena.Reports do
   Loads the staff report index described by `params` and `pagination`.
 
   Access is authorized with `:index` before any report query runs. An `"rq"`
-  parameter selects the report search language; malformed search text returns
+  parameter selects the report search language. Malformed search text returns
   `{:error, :invalid_query}` instead of raising.
 
   ## Examples
@@ -549,7 +541,7 @@ defmodule Philomena.Reports do
   Write access is verified before the owning context safely loads and authorizes
   the target. The returned `ReportForm` retains both the target and its empty
   report changeset. Malformed and missing locators are not-found for every
-  actor; hidden or otherwise forbidden real targets are unauthorized.
+  actor. Hidden or otherwise forbidden real targets are unauthorized.
 
   ## Examples
 
@@ -572,11 +564,11 @@ defmodule Philomena.Reports do
   @doc """
   Creates a report for the safely loaded target described by `locator`.
 
-  The same write-access, loading, and visibility checks as `new_report/2` run
-  before the open-report limit is queried. Staff with the named limit-bypass
-  ability are exempt. A rejected insert returns a `ReportForm` carrying the
-  loaded target and rejected changeset, while a successful insert queues the
-  report for search indexing.
+  The same write-access, loading, and visibility checks as `new_report/2` run.
+  Normal and anonymous users are subject to an open report limit; staff are
+  exempt. A rejected insert returns a `ReportForm` carrying the loaded target
+  and rejected changeset, while a successful insert queues the report for
+  search indexing.
 
   ## Examples
 
@@ -635,7 +627,7 @@ defmodule Philomena.Reports do
   @doc """
   Releases the claim on an open report.
 
-  The report is row-locked and authorized with `:unclaim`. Releasing an already
+  The report is locked and authorized with `:unclaim`. Releasing an already
   unclaimed report is an idempotent success with no write, log, or index job.
   A real update and its moderation log commit atomically.
 
@@ -661,7 +653,7 @@ defmodule Philomena.Reports do
   @doc """
   Closes a report on behalf of the acting staff member.
 
-  The report is row-locked and authorized with `:close`. Closing an already
+  The report is locked and authorized with `:close`. Closing an already
   closed report is an idempotent success with no write, log, or index job. A
   real close and its moderation log commit atomically.
 
@@ -687,7 +679,7 @@ defmodule Philomena.Reports do
   @doc """
   Adds a bulk close of reports for one already loaded target to `multi`.
 
-  This is the transaction-composition API for owning contexts that delete or
+  This is an internal composition API for owning contexts that delete or
   approve a reportable target. The step returns `{count, report_ids}`; pass the
   IDs to `reindex_closed_reports/1` only after the owning transaction commits.
 
@@ -743,8 +735,7 @@ defmodule Philomena.Reports do
     with {:ok, rule} <- Rules.fetch_rule_by_name(rule_name) do
       attrs = %{reason: reason, user_agent: "system"}
 
-      attribution = %{
-        system: true,
+      actor = %Actor{
         ip: %Postgrex.INET{address: {127, 0, 0, 1}, netmask: 32},
         fingerprint: "ffff"
       }
@@ -752,7 +743,7 @@ defmodule Philomena.Reports do
       result =
         target
         |> then(&struct(Report, &1))
-        |> Report.creation_changeset(attrs, attribution, rule)
+        |> Report.system_creation_changeset(attrs, actor, rule)
         |> Repo.insert()
 
       case result do
@@ -781,7 +772,7 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Updates indexed user-name fields without rewriting report rows.
+  Updates indexed user name fields.
 
   This maintenance callback is invoked after a committed user rename.
 
@@ -800,7 +791,7 @@ defmodule Philomena.Reports do
   @doc """
   Returns the associations required to serialize reports into OpenSearch.
 
-  This is the batch-indexer contract used by `Philomena.SearchIndexer`.
+  This is the batch-indexer behaviour used by `Philomena.SearchIndexer`.
 
   ## Examples
 
@@ -846,9 +837,6 @@ defmodule Philomena.Reports do
 
   @doc """
   Converts legacy report reasons to their structured rule and reason fields.
-
-  This release-maintenance operation processes reports in bounded batches and
-  raises on a database update failure.
 
   ## Examples
 

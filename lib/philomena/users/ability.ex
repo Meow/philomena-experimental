@@ -511,7 +511,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
   #
   # Regular users can...
 
-  # View their own reports through a user-scoped context query.
+  # View their own reports
   def can?(%User{}, :index_own, Report), do: true
   #
 
