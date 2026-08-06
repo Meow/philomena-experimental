@@ -104,7 +104,7 @@ defmodule Philomena.Posts do
     post_query =
       Post
       |> where(id: ^post.id)
-      |> preload(:user)
+      |> preload(topic: :forum, user: [awards: :badge])
       |> lock("FOR UPDATE")
 
     Multi.new()
