@@ -1,11 +1,6 @@
 defmodule Philomena.Commissions do
   @moduledoc """
-  Actor-scoped commission directory, profile listings, and nested listing-item
-  management.
-
-  Profiles are resolved through Users' active-profile locator. Commission
-  management permits the profile owner and staff, while item management remains
-  owner-only. Nested item IDs are always scoped to the commission in the route.
+  Commission directory, profile listings, and listing item management.
   """
 
   import Ecto.Query, warn: false
@@ -48,6 +43,12 @@ defmodule Philomena.Commissions do
     |> Loader.one()
   end
 
+  defp commission_page(%User{} = user, %Commission{} = commission) do
+    commission = Repo.preload(commission, @commission_preloads)
+
+    %CommissionPage{user: user, commission: commission}
+  end
+
   defp load_commission(actor, slug, action) do
     with {:ok, user} <- load_profile(actor, slug),
          {:ok, commission} <- commission_for_user(user),
@@ -82,25 +83,19 @@ defmodule Philomena.Commissions do
   end
 
   defp ensure_links_verified(%User{verified_links: links}) do
-    if Enum.any?(links), do: :ok, else: {:error, :no_verified_links}
+    if Enum.any?(links) do
+      :ok
+    else
+      {:error, :no_verified_links}
+    end
   end
 
-  defp commission_changeset(%Commission{} = commission, attrs) do
-    Commission.changeset(commission, attrs)
-  end
-
-  defp commission_form(user, commission, changeset) do
-    %CommissionForm{user: user, commission: commission, changeset: changeset}
-  end
-
-  defp commission_form(user, commission) do
-    commission_form(user, commission, commission_changeset(commission, %{}))
-  end
-
-  defp update_commission_record(%Commission{} = commission, attrs) do
-    commission
-    |> commission_changeset(attrs)
-    |> Repo.update()
+  defp commission_form(user, commission, changeset \\ nil) do
+    %CommissionForm{
+      user: user,
+      commission: commission,
+      changeset: changeset || Commission.changeset(commission, %{})
+    }
   end
 
   defp delete_commission_record(%Commission{} = commission, %User{} = closing_user) do
@@ -116,28 +111,6 @@ defmodule Philomena.Commissions do
       {:error, _step, reason, _changes} ->
         {:error, reason}
     end
-  end
-
-  defp ordered_items(%Commission{} = commission) do
-    items =
-      Enum.sort(commission.items, fn left, right ->
-        case Decimal.compare(left.base_price, right.base_price) do
-          :lt -> true
-          :gt -> false
-          :eq -> left.id <= right.id
-        end
-      end)
-
-    %{commission | items: items}
-  end
-
-  defp commission_page(%User{} = user, %Commission{} = commission) do
-    commission =
-      commission
-      |> Repo.preload(@commission_preloads)
-      |> ordered_items()
-
-    %CommissionPage{user: user, commission: commission}
   end
 
   defp item_for_commission(actor, commission, action, id) do
@@ -168,18 +141,20 @@ defmodule Philomena.Commissions do
     end
   end
 
-  defp item_changeset(%Item{} = item, attrs), do: Item.changeset(item, attrs)
-
-  defp item_form(user, commission, item, changeset) do
-    %ItemForm{user: user, commission: commission, item: item, changeset: changeset}
-  end
-
-  defp item_form(user, commission, item) do
-    item_form(user, commission, item, item_changeset(item, %{}))
+  defp item_form(user, commission, item, changeset \\ nil) do
+    %ItemForm{
+      user: user,
+      commission: commission,
+      item: item,
+      changeset: changeset || Item.changeset(item, %{})
+    }
   end
 
   defp insert_item(%Commission{} = commission, attrs) do
-    changeset = commission |> new_item() |> item_changeset(attrs)
+    changeset =
+      commission
+      |> new_item()
+      |> Item.changeset(attrs)
 
     counter_query =
       Commission
@@ -194,12 +169,6 @@ defmodule Philomena.Commissions do
       {:error, :item, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
       result -> result
     end
-  end
-
-  defp update_item_record(%Item{} = item, attrs) do
-    item
-    |> item_changeset(attrs)
-    |> Repo.update()
   end
 
   defp delete_item_record(%Item{} = item) do
@@ -256,7 +225,7 @@ defmodule Philomena.Commissions do
   Loads the public commission directory for `actor`.
 
   The `:index` commission ability is checked before searching. Results include
-  only open listings with items whose active owner has recent IP activity.
+  only open listings with items whose active owner has recent activity.
   Invalid search parameters return an empty page and the rejected search
   changeset. The signed-in viewer is returned with their commission preloaded.
 
@@ -306,7 +275,7 @@ defmodule Philomena.Commissions do
   @doc """
   Loads a visible commission listing as a report target.
 
-  This shares the active-profile and `:show` gates used by the listing page.
+  This shares the active profile and `:show` gates used by the listing page.
 
   ## Examples
 
@@ -349,7 +318,7 @@ defmodule Philomena.Commissions do
   @doc """
   Creates the sole commission listing for the active profile named by `slug`.
 
-  Authorization and verified-link rules match `new_commission/2`. The database
+  Authorization and verified link rules match `new_commission/2`. The database
   uniquely enforces one commission per profile. Validation failures return a
   `CommissionForm` retaining the safely loaded profile and attempted changes.
 
@@ -369,9 +338,10 @@ defmodule Philomena.Commissions do
   def create_commission(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, {user, commission}} <- load_new_commission(actor, slug, :create) do
-      changeset = commission_changeset(commission, attrs)
-
-      case Repo.insert(changeset) do
+      commission
+      |> Commission.changeset(attrs)
+      |> Repo.insert()
+      |> case do
         {:ok, commission} ->
           {:ok, commission_page(user, commission)}
 
@@ -384,7 +354,7 @@ defmodule Philomena.Commissions do
   @doc """
   Loads the existing commission form for the active profile named by `slug`.
 
-  Write access, owner/staff authorization, and verified-link requirements match
+  Write access, owner/staff authorization, and verified link requirements match
   the update operation.
 
   ## Examples
@@ -406,7 +376,7 @@ defmodule Philomena.Commissions do
   @doc """
   Updates the existing commission for the active profile named by `slug`.
 
-  Validation failures return a `CommissionForm`; successful updates preserve
+  Validation failures return a `CommissionForm`. Successful updates preserve
   item ordering and count.
 
   ## Examples
@@ -422,7 +392,10 @@ defmodule Philomena.Commissions do
   def update_commission(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, {user, commission}} <- load_manageable_commission(actor, slug, :update) do
-      case update_commission_record(commission, attrs) do
+      commission
+      |> Commission.changeset(attrs)
+      |> Repo.update()
+      |> case do
         {:ok, commission} ->
           {:ok, commission_page(user, commission)}
 
@@ -435,9 +408,8 @@ defmodule Philomena.Commissions do
   @doc """
   Deletes the commission for the active profile named by `slug`.
 
-  The commission, its items, and its report-target foreign keys are changed in
-  one database transaction. Open reports are closed by the acting user and
-  reindexed only after commit.
+  The commission, its items, and its report-target foreign keys are delete atomically.
+  Open reports are closed by the acting user and reindexed only after commit.
 
   ## Examples
 
@@ -485,7 +457,7 @@ defmodule Philomena.Commissions do
 
   @doc """
   Creates an item under the commission belonging to the active profile named by
-  `slug` and increments the listing's item counter in the same transaction.
+  `slug` and increments the listing's item count.
 
   Validation failures return an `ItemForm` retaining the scoped profile and
   commission.
@@ -558,7 +530,10 @@ defmodule Philomena.Commissions do
   def update_item(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, {user, commission, item}} <- load_existing_item(actor, slug, id, :update) do
-      case update_item_record(item, attrs) do
+      item
+      |> Item.changeset(attrs)
+      |> Repo.update()
+      |> case do
         {:ok, _item} -> {:ok, user}
         {:error, changeset} -> {:error, item_form(user, commission, item, changeset)}
       end
@@ -567,8 +542,7 @@ defmodule Philomena.Commissions do
 
   @doc """
   Deletes the item named by `id` under the commission belonging to the active
-  profile named by `slug` and decrements the item counter in the same
-  transaction.
+  profile named by `slug` and decrements the listing's item count.
 
   Malformed, absent, and wrong-commission IDs are all not found.
 

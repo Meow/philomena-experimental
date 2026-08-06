@@ -1,6 +1,6 @@
 defmodule Philomena.Commissions.Directory do
   @moduledoc """
-  A commission-directory result: the paginated listings, search form
+  Commission directory page: the paginated listings, search form
   changeset, and current viewer with their commission preloaded when signed in.
   """
 

@@ -1,6 +1,6 @@
 defmodule Philomena.Commissions.CommissionPage do
   @moduledoc """
-  A visible profile and its commission listing, with listing items ordered by
+  A visible profile and commission listing, with listing items ordered by
   base price and ID.
   """
 

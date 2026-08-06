@@ -12,7 +12,7 @@ defmodule Philomena.Commissions.Commission do
   schema "commissions" do
     belongs_to :user, User
     belongs_to :sheet_image, Image
-    has_many :items, Item
+    has_many :items, Item, preload_order: [asc: :base_price, asc: :id]
     has_many :reports, Report
 
     field :open, :boolean

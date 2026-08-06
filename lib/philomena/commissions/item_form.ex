@@ -1,7 +1,7 @@
 defmodule Philomena.Commissions.ItemForm do
   @moduledoc """
-  A safely loaded profile and commission, the new or existing item, and the
-  changeset rendered by commission-item forms.
+  A profile and commission, new or existing item, and the
+  changeset rendered by commission item forms.
   """
 
   alias Philomena.Commissions.Commission

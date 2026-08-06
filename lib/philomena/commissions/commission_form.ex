@@ -1,6 +1,6 @@
 defmodule Philomena.Commissions.CommissionForm do
   @moduledoc """
-  A safely loaded profile, its new or existing commission, and the changeset
+  A loaded profile, new or existing commission, and the changeset
   rendered by commission new/edit forms.
   """
 
