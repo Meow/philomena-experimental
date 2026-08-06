@@ -411,6 +411,7 @@ defmodule Philomena.Reports do
 
       iex> max_open_reports()
       5
+
   """
   @spec max_open_reports() :: pos_integer()
   def max_open_reports, do: @max_open_reports
@@ -428,6 +429,7 @@ defmodule Philomena.Reports do
 
       iex> count_open_reports(user)
       nil
+
   """
   @spec count_open_reports(Actor.t()) :: non_neg_integer() | nil
   def count_open_reports(%Actor{} = actor) do
@@ -455,6 +457,7 @@ defmodule Philomena.Reports do
 
       iex> load_user_reports(anonymous, pagination)
       {:error, :unauthorized}
+
   """
   @spec load_user_reports(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Report.t())} | {:error, :unauthorized}
@@ -485,6 +488,7 @@ defmodule Philomena.Reports do
 
       iex> load_report_index(user, %{}, pagination)
       {:error, :unauthorized}
+
   """
   @spec load_report_index(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, ReportPage.t()} | {:error, :unauthorized | :invalid_query}
@@ -507,6 +511,7 @@ defmodule Philomena.Reports do
 
       iex> load_report(moderator, "999999999")
       {:error, :not_found}
+
   """
   @spec load_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :unauthorized | :not_found}
@@ -528,6 +533,7 @@ defmodule Philomena.Reports do
 
       iex> mod_notes(user, report, renderer)
       nil
+
   """
   @spec mod_notes(Actor.t(), Report.t(), (list() -> list())) :: list() | nil
   def mod_notes(%Actor{} = actor, %Report{} = report, collection_renderer) do
@@ -552,6 +558,7 @@ defmodule Philomena.Reports do
 
       iex> new_report(banned_actor, {:image, "1"})
       {:error, :ban}
+
   """
   @spec new_report(Actor.t(), target_locator()) ::
           {:ok, ReportForm.t()} | {:error, request_error()}
@@ -581,6 +588,7 @@ defmodule Philomena.Reports do
 
       iex> create_report(actor, {:image, "1"}, attrs)
       {:error, :too_many_reports}
+
   """
   @spec create_report(Actor.t(), target_locator(), map() | nil) ::
           {:ok, Report.t()}
@@ -609,6 +617,7 @@ defmodule Philomena.Reports do
 
       iex> claim_report(user, "1")
       {:error, :unauthorized}
+
   """
   @spec claim_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, transition_error()}
@@ -634,6 +643,7 @@ defmodule Philomena.Reports do
 
       iex> unclaim_report(moderator, "1")
       {:ok, %Report{state: "open"}}
+
   """
   @spec unclaim_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, transition_error()}
@@ -659,6 +669,7 @@ defmodule Philomena.Reports do
 
       iex> close_report(moderator, "1")
       {:ok, %Report{state: "closed", open: false}}
+
   """
   @spec close_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, transition_error()}
@@ -684,6 +695,7 @@ defmodule Philomena.Reports do
 
       iex> put_close_reports(multi, :reports, moderator, image_id: image.id)
       %Ecto.Multi{}
+
   """
   @spec put_close_reports(Multi.t(), Multi.name(), User.t(), keyword()) :: Multi.t()
   def put_close_reports(%Multi{} = multi, step, %User{} = closing_user, target) do
@@ -700,6 +712,7 @@ defmodule Philomena.Reports do
 
       iex> close_reports(moderator, reported_user_id: user.id)
       {:ok, {2, [1, 2]}}
+
   """
   @spec close_reports(User.t(), keyword()) :: {:ok, {non_neg_integer(), [integer()]}}
   def close_reports(%User{} = closing_user, target) do
@@ -722,6 +735,7 @@ defmodule Philomena.Reports do
 
       iex> create_system_report("Missing", "Needs review", comment_id: comment.id)
       {:error, :not_found}
+
   """
   @spec create_system_report(String.t(), String.t(), keyword()) ::
           {:ok, Report.t()} | {:error, :not_found | Ecto.Changeset.t()}
@@ -758,6 +772,7 @@ defmodule Philomena.Reports do
 
       iex> reindex_closed_reports([1, 2])
       [1, 2]
+
   """
   @spec reindex_closed_reports([integer()]) :: [integer()]
   def reindex_closed_reports(report_ids) do
@@ -774,6 +789,7 @@ defmodule Philomena.Reports do
 
       iex> user_name_reindex("Old Name", "New Name")
       [{:ok, %Req.Response{}}]
+
   """
   @spec user_name_reindex(String.t(), String.t()) :: [term()]
   def user_name_reindex(old_name, new_name) do
@@ -790,6 +806,7 @@ defmodule Philomena.Reports do
 
       iex> indexing_preloads()
       [:user, :admin, ...]
+
   """
   @spec indexing_preloads() :: list()
   def indexing_preloads do
@@ -815,6 +832,7 @@ defmodule Philomena.Reports do
 
       iex> perform_reindex(:id, [1, 2])
       [:ok, :ok]
+
   """
   @spec perform_reindex(atom(), list()) :: list()
   def perform_reindex(column, condition) do
@@ -836,6 +854,7 @@ defmodule Philomena.Reports do
 
       iex> convert_reports!()
       :ok
+
   """
   @spec convert_reports!() :: :ok
   def convert_reports! do
