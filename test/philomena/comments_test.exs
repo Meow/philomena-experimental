@@ -1022,174 +1022,44 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "load_comment_for_report/3" do
-    # Backs a report write form, so it runs the global write prerequisite before
-    # authorizing the image and loading the comment within it.
+  describe "load_report_target/3" do
+    test "loads a visible comment through its image parent" do
+      image = image_fixture()
+      comment = comment_fixture(image)
 
-    setup do
-      %{image: image_fixture()}
-    end
-
-    test "a banned actor is rejected before any loading, even with garbage ids" do
-      actor = actor(confirmed_user_fixture(), ban: @ban)
-
-      assert Comments.load_comment_for_report(actor, "999999999", "abc") == {:error, :ban}
-    end
-
-    test "an actor without a fingerprint is rejected before loading" do
-      assert Comments.load_comment_for_report(actor(nil, fingerprint: nil), "1", "1") ==
-               {:error, :unauthorized}
-    end
-
-    test "an anonymous actor loads the report form for a visible comment", %{image: image} do
-      comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "A visible comment"})
-
-      assert {:ok, {%Comment{} = loaded, %Ecto.Changeset{} = changeset}} =
-               Comments.load_comment_for_report(actor(nil), "#{image.id}", "#{comment.id}")
+      assert {:ok, loaded} =
+               Comments.load_report_target(actor(), image.id, comment.id)
 
       assert loaded.id == comment.id
-
-      # The comment carries its image preloaded for building the form action.
-      assert %Image{} = loaded.image
-
-      # The changeset is over a Report addressed at this comment.
-      assert %Report{} = changeset.data
-      assert changeset.data.comment_id == comment.id
+      assert loaded.image_id == image.id
     end
 
-    test "a regular user cannot load a hidden comment's report form", %{image: image} do
-      comment = already_hidden_comment(image)
+    test "normalizes malformed, missing, and mismatched IDs" do
+      first_image = image_fixture()
+      second_image = image_fixture()
+      comment = comment_fixture(first_image)
 
-      assert Comments.load_comment_for_report(
-               actor(confirmed_user_fixture()),
-               "#{image.id}",
-               "#{comment.id}"
-             ) ==
-               {:error, :unauthorized}
-    end
+      assert Comments.load_report_target(actor(), first_image.id, "bad") ==
+               {:error, :not_found}
 
-    test "a moderator loads a hidden comment's report form", %{image: image} do
-      comment = already_hidden_comment(image)
+      assert Comments.load_report_target(actor(), first_image.id, "2147483647") ==
+               {:error, :not_found}
 
-      assert {:ok, {%Comment{} = loaded, %Ecto.Changeset{}}} =
-               Comments.load_comment_for_report(
-                 actor(moderator_user_fixture()),
-                 "#{image.id}",
-                 "#{comment.id}"
-               )
-
-      assert loaded.id == comment.id
-      assert loaded.hidden_from_users
-    end
-
-    test "an unknown comment id is not found", %{image: image} do
-      assert Comments.load_comment_for_report(actor(nil), "#{image.id}", "999999999") ==
+      assert Comments.load_report_target(actor(), second_image.id, comment.id) ==
                {:error, :not_found}
     end
 
-    test "an unknown image id is unauthorized" do
-      assert Comments.load_comment_for_report(actor(nil), "999999999", "1") ==
+    test "rejects a hidden comment for a regular user" do
+      image = image_fixture()
+      comment = comment_fixture(image)
+
+      hidden =
+        comment
+        |> Ecto.Changeset.change(hidden_from_users: true)
+        |> Repo.update!()
+
+      assert Comments.load_report_target(actor(confirmed_user_fixture()), image.id, hidden.id) ==
                {:error, :unauthorized}
-    end
-
-    test "a non-castable image id is not found" do
-      assert Comments.load_comment_for_report(actor(nil), "abc", "1") == {:error, :not_found}
-    end
-  end
-
-  describe "load_comment_for_report_creation/3" do
-    # Backs the report submission (a write), so it runs the write-access check
-    # first (ban -> :ban, missing fingerprint -> :unauthorized) and then the same
-    # image/comment load-and-authorize chain as the report form.
-
-    setup do
-      %{image: image_fixture()}
-    end
-
-    test "a banned actor is rejected before any loading, even with garbage ids" do
-      actor = actor(confirmed_user_fixture(), ban: @ban)
-
-      assert Comments.load_comment_for_report_creation(actor, "999999999", "abc") ==
-               {:error, :ban}
-    end
-
-    test "an actor with no fingerprint is unauthorized before any loading, signed in or not" do
-      signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
-      anonymous = actor(nil, fingerprint: nil)
-
-      assert Comments.load_comment_for_report_creation(signed_in, "999999999", "abc") ==
-               {:error, :unauthorized}
-
-      assert Comments.load_comment_for_report_creation(anonymous, "999999999", "abc") ==
-               {:error, :unauthorized}
-    end
-
-    test "a valid anonymous fingerprinted actor loads a visible comment", %{image: image} do
-      # actor(nil) carries the shared fingerprint, so it clears the write-access
-      # check and reaches the image/comment load.
-      comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "A visible comment"})
-
-      assert {:ok, %Comment{} = loaded} =
-               Comments.load_comment_for_report_creation(
-                 actor(nil),
-                 "#{image.id}",
-                 "#{comment.id}"
-               )
-
-      assert loaded.id == comment.id
-      assert %Image{} = loaded.image
-    end
-
-    test "a regular user cannot load a hidden comment", %{image: image} do
-      comment = already_hidden_comment(image)
-
-      assert Comments.load_comment_for_report_creation(
-               actor(confirmed_user_fixture()),
-               "#{image.id}",
-               "#{comment.id}"
-             ) ==
-               {:error, :unauthorized}
-    end
-
-    test "a moderator loads a hidden comment", %{image: image} do
-      comment = already_hidden_comment(image)
-
-      assert {:ok, %Comment{} = loaded} =
-               Comments.load_comment_for_report_creation(
-                 actor(moderator_user_fixture()),
-                 "#{image.id}",
-                 "#{comment.id}"
-               )
-
-      assert loaded.id == comment.id
-      assert loaded.hidden_from_users
-    end
-
-    test "an unknown comment id is not found", %{image: image} do
-      assert Comments.load_comment_for_report_creation(
-               actor(confirmed_user_fixture()),
-               "#{image.id}",
-               "999999999"
-             ) ==
-               {:error, :not_found}
-    end
-
-    test "an unknown image id is unauthorized" do
-      assert Comments.load_comment_for_report_creation(
-               actor(confirmed_user_fixture()),
-               "999999999",
-               "1"
-             ) ==
-               {:error, :unauthorized}
-    end
-
-    test "a non-castable image id is not found" do
-      assert Comments.load_comment_for_report_creation(
-               actor(confirmed_user_fixture()),
-               "abc",
-               "1"
-             ) ==
-               {:error, :not_found}
     end
   end
 

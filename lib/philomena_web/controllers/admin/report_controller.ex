@@ -7,15 +7,23 @@ defmodule PhilomenaWeb.Admin.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, page} <-
-           Reports.load_report_index(conn.assigns.actor, params, conn.assigns.pagination) do
-      render(conn, "index.html",
-        title: "Admin - Reports",
-        layout_class: "layout--wide",
-        reports: page.reports,
-        my_reports: page.my_reports,
-        system_reports: page.system_reports
-      )
+    case Reports.load_report_index(conn.assigns.actor, params, conn.assigns.pagination) do
+      {:ok, page} ->
+        render(conn, "index.html",
+          title: "Admin - Reports",
+          layout_class: "layout--wide",
+          reports: page.reports,
+          my_reports: page.my_reports,
+          system_reports: page.system_reports
+        )
+
+      {:error, :invalid_query} ->
+        conn
+        |> put_flash(:error, "Invalid report search query.")
+        |> redirect(to: ~p"/admin/reports")
+
+      {:error, _reason} = error ->
+        error
     end
   end
 

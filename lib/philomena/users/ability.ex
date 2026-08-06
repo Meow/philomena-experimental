@@ -88,8 +88,14 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   # Manage reports
   def can?(%User{role: "moderator"}, :index, Report), do: true
-  def can?(%User{role: "moderator"}, :show, %Report{}), do: true
-  def can?(%User{role: "moderator"}, :edit, %Report{}), do: true
+
+  def can?(%User{role: "moderator"}, action, %Report{})
+      when action in [:show, :claim, :unclaim, :close],
+      do: true
+
+  def can?(%User{role: role}, :bypass_submission_limit, Report)
+      when role in ["assistant", "moderator"],
+      do: true
 
   # Manage artist links
   def can?(%User{role: "moderator"}, :create_links, %User{}), do: true
@@ -504,6 +510,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   #
   # Regular users can...
+
+  # View their own reports through a user-scoped context query.
+  def can?(%User{}, :index_own, Report), do: true
   #
 
   # Batch tag

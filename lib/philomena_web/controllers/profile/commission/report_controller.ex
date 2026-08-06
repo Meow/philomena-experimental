@@ -11,8 +11,9 @@ defmodule PhilomenaWeb.Profile.Commission.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"profile_id" => slug}) do
-    with {:ok, {user, commission, changeset}} <-
-           Reports.load_commission_for_report(conn.assigns.actor, slug) do
+    with {:ok, form} <- Reports.new_report(conn.assigns.actor, {:commission, slug}) do
+      commission = form.target
+      user = commission.user
       action = ~p"/profiles/#{user}/commission/reports"
 
       conn
@@ -20,24 +21,18 @@ defmodule PhilomenaWeb.Profile.Commission.ReportController do
       |> render("new.html",
         title: "Reporting Commission",
         subject: commission,
-        changeset: changeset,
+        changeset: form.changeset,
         action: action
       )
     end
   end
 
   def create(conn, %{"profile_id" => slug} = params) do
-    with {:ok, {user, commission}} <-
-           Reports.load_commission_for_report_creation(conn.assigns.actor, slug) do
-      action = ~p"/profiles/#{user}/commission/reports"
-
-      ReportController.create(
-        conn,
-        action,
-        commission,
-        [commission_id: commission.id],
-        params
-      )
-    end
+    ReportController.create(
+      conn,
+      {:commission, slug},
+      fn commission -> ~p"/profiles/#{commission.user}/commission/reports" end,
+      params
+    )
   end
 end

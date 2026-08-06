@@ -25,7 +25,7 @@ defmodule Philomena.Images do
   alias Philomena.Images
   alias Philomena.IntegerId
   alias Philomena.IndexWorker
-  alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
   alias Philomena.ModerationLogs
@@ -394,11 +394,9 @@ defmodule Philomena.Images do
   end
 
   defp hide_image_multi(changeset, image, user, multi) do
-    report_query = Reports.close_report_query(user, image_id: image.id)
-
     multi
     |> Multi.update(:image, changeset)
-    |> Multi.update_all(:reports, report_query, [])
+    |> Reports.put_close_reports(:reports, user, image_id: image.id)
     |> Multi.run(:tags, fn repo, %{image: image} ->
       image = Repo.preload(image, :tags, force: true)
 
@@ -473,7 +471,7 @@ defmodule Philomena.Images do
         end)
 
         Comments.reindex_comments_on_image(image)
-        Reports.reindex_reports(reports)
+        Reports.reindex_closed_reports(reports)
         Tags.reindex_tags(tags)
         Galleries.reindex_galleries(gallery_ids)
         reindex_image(image)
@@ -1461,6 +1459,29 @@ defmodule Philomena.Images do
       :error ->
         {:error, :not_found}
     end
+  end
+
+  @doc """
+  Loads an image as a report target on behalf of `actor`.
+
+  The image is authorized for `:show` and carries the sources and tag aliases
+  rendered by the shared report form. Missing IDs are always not-found.
+
+  ## Examples
+
+      iex> load_report_target(actor, "1")
+      {:ok, %Image{}}
+  """
+  @spec load_report_target(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, image_id) do
+    Loader.fetch_and_authorize(
+      Image,
+      actor,
+      :show,
+      image_id,
+      [:sources, tags: :aliases]
+    )
   end
 
   @typedoc """

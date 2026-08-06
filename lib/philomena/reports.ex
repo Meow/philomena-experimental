@@ -1,191 +1,80 @@
 defmodule Philomena.Reports do
   @moduledoc """
-  The Reports context.
+  Report forms, submission limits, staff review, and report search indexing.
+
+  Request-facing functions take an attribution actor first. Report forms use a
+  tagged target locator so the form and its submission share one safely loaded,
+  authorized target. Staff transitions lock the report row and commit their
+  moderation log in the same database transaction.
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1]
-
-  alias Philomena.Repo
-  alias Philomena.Loader
-
-  alias PhilomenaQuery.Batch
-  alias PhilomenaQuery.Search
+  alias Ecto.Multi
   alias Philomena.Attribution.Actor
+  alias Philomena.Comments
+  alias Philomena.Comments.Comment
   alias Philomena.Commissions
   alias Philomena.Commissions.Commission
+  alias Philomena.Conversations
   alias Philomena.Conversations.Conversation
+  alias Philomena.Galleries
   alias Philomena.Galleries.Gallery
-  alias Philomena.Images.Image
   alias Philomena.Images
-  alias Philomena.IntegerId
-  alias Philomena.Users.User
-  alias Philomena.Reports.Report
-  alias Philomena.Reports.ReportPage
-  alias Philomena.Reports.Query
-  alias Philomena.Reports
-  alias Philomena.IndexWorker
-  alias Philomena.ModNotes
-  alias Philomena.Rules
-
   alias Philomena.Images.Image
-  alias Philomena.Comments.Comment
+  alias Philomena.IndexWorker
+  alias Philomena.IntegerId
+  alias Philomena.Loader
+  alias Philomena.ModerationLogs
+  alias Philomena.ModerationLogs.Paths
+  alias Philomena.ModNotes
+  alias Philomena.Posts
   alias Philomena.Posts.Post
-  alias Philomena.Commissions.Commission
-  alias Philomena.Conversations.Conversation
-  alias Philomena.Galleries.Gallery
+  alias Philomena.Repo
+  alias Philomena.Reports
+  alias Philomena.Reports.Query
+  alias Philomena.Reports.Report
+  alias Philomena.Reports.ReportForm
+  alias Philomena.Reports.ReportPage
+  alias Philomena.Rules
+  alias Philomena.Users
+  alias Philomena.Users.User
+  alias PhilomenaQuery.Batch
+  alias PhilomenaQuery.Search
 
   @max_open_reports 5
   @default_preloads [:admin, :rule, user: :linked_tags]
-
-  @doc """
-  The maximum number of simultaneously open reports a regular user (or an
-  anonymous visitor's IP) may hold before further submissions are refused.
-  """
-  @spec max_open_reports() :: pos_integer()
-  def max_open_reports, do: @max_open_reports
-
   @reason_regex ~r/^(Rule|Other|Takedown|Verification|Approval|Review|System)([^:]*): (.*)$/
 
-  @doc """
-  Returns the current number of open reports.
+  @typedoc "A route-shaped locator for one reportable target."
+  @type target_locator ::
+          {:image, Loader.integer_id()}
+          | {:comment, Loader.integer_id(), Loader.integer_id()}
+          | {:post, String.t(), String.t(), Loader.integer_id()}
+          | {:user, String.t()}
+          | {:commission, String.t()}
+          | {:conversation, String.t()}
+          | {:gallery, Loader.integer_id()}
 
-  If the user is allowed to view reports, returns the current count.
-  If the user is not allowed to view reports, returns `nil`.
+  @type request_error :: :ban | :unauthorized | :not_found
+  @type transition_error :: :unauthorized | :not_found | Ecto.Changeset.t()
 
-  ## Examples
-
-      iex> count_reports(%User{})
-      nil
-
-      iex> count_reports(%User{role: "admin"})
-      4
-
-  """
-  def count_open_reports(user) do
-    if Canada.Can.can?(user, :index, Report) do
-      Report
-      |> where(open: true)
-      |> Repo.aggregate(:count)
-    else
-      nil
-    end
-  end
-
-  @doc """
-  Returns the list of reports.
-
-  ## Examples
-
-      iex> list_reports()
-      [%Report{}, ...]
-
-  """
-  def list_reports do
-    Repo.all(Report)
-  end
-
-  @doc """
-  Gets a single report.
-
-  Raises `Ecto.NoResultsError` if the Report does not exist.
-
-  ## Examples
-
-      iex> get_report!(123)
-      %Report{}
-
-      iex> get_report!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_report!(id), do: Repo.get!(Report, id)
-
-  @doc """
-  Assembles the admin report listing, on behalf of `actor`, for the given
-  `params` and `pagination`.
-
-  Authorizes `:index` against the report model first, so a viewer without report
-  access is `{:error, :unauthorized}`. When `params` carries an `"rq"` search
-  string it is compiled and drives the searched-report list, and the own-open
-  and system-report lists are empty; otherwise the default view lists the
-  closed reports plus open reports the actor did not claim, alongside the
-  actor's own open reports and the open system reports. A malformed `"rq"`
-  raises `MatchError`.
-
-  Returns `{:ok, %Philomena.Reports.ReportPage{}}` or `{:error, :unauthorized}`.
-
-  ## Examples
-
-      iex> load_report_index(admin, %{"rq" => "open:true"}, pagination)
-      {:ok, %Philomena.Reports.ReportPage{}}
-
-  """
-  @spec load_report_index(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, ReportPage.t()} | {:error, :unauthorized}
-  def load_report_index(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, Report) do
-      {:ok, build_report_page(actor, params, pagination)}
-    end
-  end
-
-  defp build_report_page(_actor, %{"rq" => query_string}, pagination) do
-    {:ok, query} = Query.compile(query_string)
-
-    %ReportPage{
-      reports: searched_reports(query, pagination),
-      my_reports: [],
-      system_reports: []
-    }
-  end
-
-  defp build_report_page(actor, _params, pagination) do
-    query = %{
-      bool: %{
-        should: [
-          %{term: %{open: false}},
-          %{
-            bool: %{
-              must: %{term: %{open: true}},
-              must_not: [
-                %{term: %{admin_id: actor.user.id}},
-                %{term: %{system: true}}
-              ]
-            }
-          }
-        ]
-      }
-    }
-
-    %ReportPage{
-      reports: searched_reports(query, pagination),
-      my_reports: own_open_reports(actor),
-      system_reports: open_system_reports()
-    }
+  defp report_query(preloads) do
+    Report
+    |> preload(^preloads)
+    |> preload(^Report.target_preloads())
   end
 
   defp searched_reports(query, pagination) do
-    queryable =
-      Report
-      |> preload(^@default_preloads)
-      |> preload(^Report.target_preloads())
-
     Report
-    |> Search.search_definition(
-      %{
-        query: query,
-        sort: report_sorts()
-      },
-      pagination
-    )
-    |> Search.search_records(queryable)
+    |> Search.search_definition(%{query: query, sort: report_sorts()}, pagination)
+    |> Search.search_records(report_query(@default_preloads))
   end
 
-  defp own_open_reports(actor) do
+  defp own_open_reports(%Actor{user: %User{id: user_id}}) do
     Report
-    |> where(open: true, admin_id: ^actor.user.id)
+    |> where(open: true, admin_id: ^user_id)
     |> preload(^@default_preloads)
     |> preload(^Report.target_preloads())
     |> order_by(desc: :created_at)
@@ -202,529 +91,643 @@ defmodule Philomena.Reports do
   end
 
   defp report_sorts do
-    [
-      %{open: :desc},
-      %{state: :desc},
-      %{created_at: :desc}
-    ]
+    [%{open: :desc}, %{state: :desc}, %{created_at: :desc}]
   end
 
+  defp build_report_page(_actor, %{"rq" => query_string}, pagination)
+       when is_binary(query_string) do
+    case Query.compile(query_string) do
+      {:ok, query} ->
+        {:ok,
+         %ReportPage{
+           reports: searched_reports(query, pagination),
+           my_reports: [],
+           system_reports: []
+         }}
+
+      _error ->
+        {:error, :invalid_query}
+    end
+  end
+
+  defp build_report_page(_actor, %{"rq" => _query_string}, _pagination) do
+    {:error, :invalid_query}
+  end
+
+  defp build_report_page(%Actor{user: %User{id: user_id}} = actor, _params, pagination) do
+    query = %{
+      bool: %{
+        should: [
+          %{term: %{open: false}},
+          %{
+            bool: %{
+              must: %{term: %{open: true}},
+              must_not: [%{term: %{admin_id: user_id}}, %{term: %{system: true}}]
+            }
+          }
+        ]
+      }
+    }
+
+    {:ok,
+     %ReportPage{
+       reports: searched_reports(query, pagination),
+       my_reports: own_open_reports(actor),
+       system_reports: open_system_reports()
+     }}
+  end
+
+  defp load_report_target(actor, {:image, image_id}) do
+    Images.load_report_target(actor, image_id)
+  end
+
+  defp load_report_target(actor, {:comment, image_id, comment_id}) do
+    Comments.load_report_target(actor, image_id, comment_id)
+  end
+
+  defp load_report_target(actor, {:post, forum_slug, topic_slug, post_id}) do
+    Posts.load_report_target(actor, forum_slug, topic_slug, post_id)
+  end
+
+  defp load_report_target(actor, {:user, slug}) do
+    Users.load_report_target(actor, slug)
+  end
+
+  defp load_report_target(actor, {:commission, slug}) do
+    Commissions.load_report_target(actor, slug)
+  end
+
+  defp load_report_target(actor, {:conversation, slug}) do
+    Conversations.load_report_target(actor, slug)
+  end
+
+  defp load_report_target(actor, {:gallery, gallery_id}) do
+    Galleries.load_report_target(actor, gallery_id)
+  end
+
+  defp report_target(%Image{id: id}), do: [image_id: id]
+  defp report_target(%Comment{id: id}), do: [comment_id: id]
+  defp report_target(%Post{id: id}), do: [post_id: id]
+  defp report_target(%User{id: id}), do: [reported_user_id: id]
+  defp report_target(%Commission{id: id}), do: [commission_id: id]
+  defp report_target(%Conversation{id: id}), do: [conversation_id: id]
+  defp report_target(%Gallery{id: id}), do: [gallery_id: id]
+
+  defp change_report(target) do
+    target
+    |> report_target()
+    |> then(&struct(Report, &1))
+    |> Report.changeset(%{})
+  end
+
+  defp report_form(target, changeset \\ nil) do
+    %ReportForm{target: target, changeset: changeset || change_report(target)}
+  end
+
+  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}) do
+    [ip: ip, fingerprint: fingerprint, user: user]
+  end
+
+  defp ensure_report_limit(%Actor{} = actor) do
+    if exempt_from_report_limit?(actor) or not too_many_reports?(actor) do
+      :ok
+    else
+      {:error, :too_many_reports}
+    end
+  end
+
+  defp exempt_from_report_limit?(actor) do
+    authorize(actor, :bypass_submission_limit, Report) == :ok
+  end
+
+  defp too_many_reports?(%Actor{user: user, ip: ip}) do
+    open_reports_for_user?(user) or open_reports_for_ip?(ip)
+  end
+
+  defp open_reports_for_user?(nil), do: false
+
+  defp open_reports_for_user?(%User{id: user_id}) do
+    open_report_count(where(Report, user_id: ^user_id)) >= @max_open_reports
+  end
+
+  defp open_reports_for_ip?(ip) do
+    open_report_count(where(Report, ip: ^ip)) >= @max_open_reports
+  end
+
+  defp open_report_count(query) do
+    query
+    |> where([report], report.state in ["open", "in_progress"])
+    |> Repo.aggregate(:count, :id)
+  end
+
+  defp insert_user_report(actor, attrs, target) do
+    rule = Rules.find_rule(attrs["rule_id"])
+
+    target
+    |> report_target()
+    |> then(&struct(Report, &1))
+    |> Report.user_creation_changeset(attrs, actor_attributes(actor), rule)
+    |> Repo.insert()
+  end
+
+  defp create_loaded_report(actor, attrs, target) do
+    attrs = if is_map(attrs), do: attrs, else: %{}
+
+    case insert_user_report(actor, attrs, target) do
+      {:ok, report} ->
+        reindex_report(report)
+        {:ok, report}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, report_form(target, changeset)}
+    end
+  end
+
+  defp close_report_query(%User{id: user_id}, [{column, id}])
+       when column in [
+              :image_id,
+              :comment_id,
+              :post_id,
+              :reported_user_id,
+              :commission_id,
+              :conversation_id,
+              :gallery_id
+            ] do
+    now = DateTime.utc_now(:second)
+
+    from report in Report,
+      where: field(report, ^column) == ^id and report.open == true,
+      select: report.id,
+      update: [
+        set: [open: false, state: "closed", admin_id: ^user_id, updated_at: ^now]
+      ]
+  end
+
+  defp locked_report(repo, actor, id, action) do
+    report =
+      Report
+      |> where(id: ^id)
+      |> lock("FOR UPDATE")
+      |> repo.one()
+
+    with %Report{} <- report,
+         :ok <- authorize(actor, action, report) do
+      {:ok, report}
+    else
+      nil -> {:error, :not_found}
+      {:error, :unauthorized} = error -> error
+    end
+  end
+
+  defp invalid_transition(report, field, message) do
+    report
+    |> Report.changeset(%{})
+    |> Ecto.Changeset.add_error(field, message)
+  end
+
+  defp claim_transition(%Report{open: false} = report, _user) do
+    {:error, invalid_transition(report, :state, "must be open")}
+  end
+
+  defp claim_transition(%Report{admin_id: admin_id} = report, _user)
+       when not is_nil(admin_id) do
+    {:error, invalid_transition(report, :admin_id, "has already been claimed")}
+  end
+
+  defp claim_transition(report, user), do: {:ok, Report.claim_changeset(report, user)}
+
+  defp unclaim_transition(%Report{open: false} = report, _user) do
+    {:error, invalid_transition(report, :state, "must be open")}
+  end
+
+  defp unclaim_transition(%Report{admin_id: nil}, _user), do: {:ok, :noop}
+  defp unclaim_transition(report, _user), do: {:ok, Report.unclaim_changeset(report)}
+
+  defp close_transition(%Report{open: false}, _user), do: {:ok, :noop}
+  defp close_transition(report, user), do: {:ok, Report.close_changeset(report, user)}
+
+  defp transition_report(actor, id, action, transition, log_type, log_body) do
+    case IntegerId.parse(id) do
+      {:ok, report_id} ->
+        transact_report_transition(
+          actor,
+          report_id,
+          action,
+          transition,
+          log_type,
+          log_body
+        )
+        |> normalize_transition_result()
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp transact_report_transition(actor, report_id, action, transition, log_type, log_body) do
+    Repo.transaction(fn ->
+      with {:ok, report} <- locked_report(Repo, actor, report_id, action),
+           {:ok, transition_result} <- transition.(report, actor.user) do
+        persist_transition(
+          actor,
+          report_id,
+          report,
+          transition_result,
+          log_type,
+          log_body
+        )
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp persist_transition(_actor, _report_id, report, :noop, _log_type, _log_body) do
+    {report, false}
+  end
+
+  defp persist_transition(
+         actor,
+         report_id,
+         _report,
+         %Ecto.Changeset{} = changeset,
+         log_type,
+         log_body
+       ) do
+    Multi.new()
+    |> Multi.update(:report, changeset)
+    |> ModerationLogs.put_log(
+      :moderation_log,
+      actor,
+      log_type,
+      Paths.admin_report_path(report_id),
+      log_body
+    )
+    |> Repo.transact()
+    |> case do
+      {:ok, %{report: report}} -> {report, true}
+      {:error, _step, reason, _changes} -> Repo.rollback(reason)
+    end
+  end
+
+  defp normalize_transition_result({:ok, {report, changed?}}) do
+    if changed?, do: reindex_report(report)
+    {:ok, report}
+  end
+
+  defp normalize_transition_result({:error, reason}), do: {:error, reason}
+
+  defp reindex_report(%Report{id: id} = report) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", [id]])
+    report
+  end
+
+  defp preload_targets(reports) do
+    reports
+    |> List.wrap()
+    |> Repo.preload(Report.target_preloads())
+  end
+
+  defp convert_report(%Report{rule_id: 1, reason: report_reason} = report, rules) do
+    case Regex.run(@reason_regex, report_reason) do
+      [_, prefix, suffix, reason] ->
+        rule = Map.get(rules, "#{prefix}#{suffix}", %{id: 1})
+
+        report
+        |> Report.conversion_changeset(%{reason: String.trim(reason)}, rule)
+        |> Repo.update!()
+
+      _other ->
+        {:error, report}
+    end
+  end
+
+  defp convert_report(report, _rules), do: {:ok, report}
+
   @doc """
-  Loads the report named by `id`, on behalf of `actor`, with the admin, rule,
-  and reporting-user associations preloaded and its reportable resolved.
-
-  Authorizes `:show` against the loaded report: a non-castable id is
-  `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
-  which no ordinary rule permits, so it is `{:error, :unauthorized}`
-  (`{:error, :not_found}` for admins, whose grant covers `nil`).
-
-  Returns `{:ok, report}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
+  Returns the maximum number of open reports allowed for a regular submitter.
 
   ## Examples
 
-      iex> load_report(admin, "1")
+      iex> max_open_reports()
+      5
+  """
+  @spec max_open_reports() :: pos_integer()
+  def max_open_reports, do: @max_open_reports
+
+  @doc """
+  Returns the number of open reports visible in the staff counter.
+
+  The count is authorized with `:index` on `Report`; unauthorized actors receive
+  `nil`, which lets the shared counter plug omit the value.
+
+  ## Examples
+
+      iex> count_open_reports(moderator)
+      4
+
+      iex> count_open_reports(user)
+      nil
+  """
+  @spec count_open_reports(Actor.t()) :: non_neg_integer() | nil
+  def count_open_reports(%Actor{} = actor) do
+    case authorize(actor, :index, Report) do
+      :ok ->
+        Report
+        |> where(open: true)
+        |> Repo.aggregate(:count)
+
+      {:error, :unauthorized} ->
+        nil
+    end
+  end
+
+  @doc """
+  Loads the signed-in actor's reports, newest first.
+
+  Results are scoped to `actor.user` before the target associations are
+  preloaded. Anonymous actors are unauthorized.
+
+  ## Examples
+
+      iex> load_user_reports(actor, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_user_reports(anonymous, pagination)
+      {:error, :unauthorized}
+  """
+  @spec load_user_reports(Actor.t(), Repo.pagination_params()) ::
+          {:ok, Scrivener.Page.t(Report.t())} | {:error, :unauthorized}
+  def load_user_reports(%Actor{user: user} = actor, pagination) do
+    with :ok <- authorize(actor, :index_own, Report) do
+      reports =
+        Report
+        |> where(user_id: ^user.id)
+        |> order_by(desc: :created_at)
+        |> preload(:rule)
+        |> Repo.paginate(pagination)
+
+      {:ok, %{reports | entries: preload_targets(reports.entries)}}
+    end
+  end
+
+  @doc """
+  Loads the staff report index described by `params` and `pagination`.
+
+  Access is authorized with `:index` before any report query runs. An `"rq"`
+  parameter selects the report search language; malformed search text returns
+  `{:error, :invalid_query}` instead of raising.
+
+  ## Examples
+
+      iex> load_report_index(admin, %{"rq" => "open:true"}, pagination)
+      {:ok, %ReportPage{}}
+
+      iex> load_report_index(user, %{}, pagination)
+      {:error, :unauthorized}
+  """
+  @spec load_report_index(Actor.t(), map(), Repo.pagination_params()) ::
+          {:ok, ReportPage.t()} | {:error, :unauthorized | :invalid_query}
+  def load_report_index(%Actor{} = actor, params, pagination) do
+    with :ok <- authorize(actor, :index, Report) do
+      build_report_page(actor, params, pagination)
+    end
+  end
+
+  @doc """
+  Loads a report for the staff show page with its target associations resolved.
+
+  Malformed and missing IDs are always not-found. A real report the actor may
+  not show is unauthorized.
+
+  ## Examples
+
+      iex> load_report(moderator, "1")
       {:ok, %Report{}}
 
+      iex> load_report(moderator, "999999999")
+      {:error, :not_found}
   """
   @spec load_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :unauthorized | :not_found}
   def load_report(%Actor{} = actor, id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         report = load_report_with_preloads(id),
-         :ok <- authorize(actor, :show, report),
-         %Report{} <- report do
-      {:ok, report}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _ -> {:error, :not_found}
-    end
-  end
-
-  defp load_report_with_preloads(id) do
-    Report
-    |> preload(^@default_preloads)
-    |> preload(^Report.target_preloads())
-    |> Repo.get(id)
+    Loader.fetch_and_authorize(report_query(@default_preloads), actor, :show, id)
   end
 
   @doc """
-  Returns the mod notes attached to `report` for `viewer`, rendered with
-  `collection_renderer`, or `nil` when the viewer may not read mod notes.
+  Returns rendered moderator notes attached to `report`, or `nil` when the actor
+  may not read them.
+
+  The note context separately authorizes the report with `:show_mod_notes`, so
+  sensitive note queries do not run before that gate.
+
+  ## Examples
+
+      iex> mod_notes(moderator, report, renderer)
+      [{%ModNote{}, "rendered"}]
+
+      iex> mod_notes(user, report, renderer)
+      nil
   """
   @spec mod_notes(Actor.t(), Report.t(), (list() -> list())) :: list() | nil
-  def mod_notes(%Actor{} = viewer, report, collection_renderer) do
-    case ModNotes.list_for_target(viewer, {:report, report.id}, collection_renderer) do
+  def mod_notes(%Actor{} = actor, %Report{} = report, collection_renderer) do
+    case ModNotes.list_for_target(actor, {:report, report.id}, collection_renderer) do
       {:ok, notes} -> notes
       {:error, _reason} -> nil
     end
   end
 
   @doc """
-  Loads the image named by `image_id` for reporting, on behalf of `actor` (a
-  `Philomena.Attribution.Actor` whose user may be `nil` for an anonymous
-  visitor).
+  Builds a report form for the target described by `locator`.
 
-  This is a read that precedes a report: a banned actor is rejected with
-  `{:error, :ban}` first, but the fingerprint requirement that the write itself
-  enforces does not apply here. The image is then loaded and authorized for
-  `:show`.
-
-  Returns `{:ok, {image, changeset}}` - the image and a changeset for reporting
-  it - `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the
-  image is not visible, or `{:error, :not_found}` when the id cannot name a row.
+  Write access is verified before the owning context safely loads and authorizes
+  the target. The returned `ReportForm` retains both the target and its empty
+  report changeset. Malformed and missing locators are not-found for every
+  actor; hidden or otherwise forbidden real targets are unauthorized.
 
   ## Examples
 
-      iex> load_image_for_report(actor, "1")
-      {:ok, {%Image{}, %Ecto.Changeset{}}}
+      iex> new_report(actor, {:image, "1"})
+      {:ok, %ReportForm{target: %Image{}}}
 
+      iex> new_report(banned_actor, {:image, "1"})
+      {:error, :ban}
   """
-  @spec load_image_for_report(Actor.t(), any()) ::
-          {:ok, {Image.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_image_for_report(%Actor{} = actor, image_id) do
+  @spec new_report(Actor.t(), target_locator()) ::
+          {:ok, ReportForm.t()} | {:error, request_error()}
+  def new_report(%Actor{} = actor, locator) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <-
-           Images.load_visible_image(actor, image_id, [:sources, tags: :aliases]) do
-      changeset = change_report(%Report{image_id: image.id})
-      {:ok, {image, changeset}}
+         {:ok, target} <- load_report_target(actor, locator) do
+      {:ok, report_form(target)}
     end
   end
 
   @doc """
-  Loads the image named by `image_id` for creating its report, on behalf of
-  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil`).
+  Creates a report for the safely loaded target described by `locator`.
 
-  This is the write path, so `actor`'s write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint is
-  `{:error, :unauthorized}`. The image is then loaded and authorized for
-  `:show`.
-
-  Returns `{:ok, image}`, `{:error, :ban}` or `{:error, :unauthorized}` from the
-  write-access check, `{:error, :unauthorized}` when the image is not visible, or
-  `{:error, :not_found}` when the id cannot name a row.
+  The same write-access, loading, and visibility checks as `new_report/2` run
+  before the open-report limit is queried. Staff with the named limit-bypass
+  ability are exempt. A rejected insert returns a `ReportForm` carrying the
+  loaded target and rejected changeset, while a successful insert queues the
+  report for search indexing.
 
   ## Examples
 
-      iex> load_image_for_report_creation(actor, "1")
-      {:ok, %Image{}}
-
-  """
-  @spec load_image_for_report_creation(Actor.t(), any()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_image_for_report_creation(%Actor{} = actor, image_id) do
-    with :ok <- verify_write_access(actor) do
-      Images.load_visible_image(actor, image_id, [:sources, tags: :aliases])
-    end
-  end
-
-  @doc """
-  Loads the gallery named by `gallery_id` for reporting, on behalf of `actor`
-  (a `Philomena.Attribution.Actor` whose user may be `nil`).
-
-  Banned actors are rejected first with `{:error, :ban}`. The gallery is then
-  loaded and authorized for `:show`: a non-castable id is
-  `{:error, :not_found}`, and a well-formed id that names no row authorizes
-  `nil`, which no ordinary rule permits, so it is `{:error, :unauthorized}`
-  (`{:error, :not_found}` for viewers whose grants cover `nil`).
-
-  Returns `{:ok, {gallery, changeset}}` with a changeset for reporting it.
-
-  ## Examples
-
-      iex> load_gallery_for_report(actor, "1")
-      {:ok, {%Gallery{}, %Ecto.Changeset{}}}
-
-  """
-  @spec load_gallery_for_report(Actor.t(), any()) ::
-          {:ok, {Gallery.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_gallery_for_report(%Actor{} = actor, gallery_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, gallery} <- load_reportable_gallery(actor.user, gallery_id) do
-      changeset = change_report(%Report{gallery_id: gallery.id})
-      {:ok, {gallery, changeset}}
-    end
-  end
-
-  @doc """
-  Loads the gallery named by `gallery_id` for creating its report, on behalf of
-  `actor`.
-
-  This is the write path, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. Lookup and authorization follow
-  `load_gallery_for_report/2`.
-
-  ## Examples
-
-      iex> load_gallery_for_report_creation(actor, "1")
-      {:ok, %Gallery{}}
-
-  """
-  @spec load_gallery_for_report_creation(Actor.t(), any()) ::
-          {:ok, Gallery.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_gallery_for_report_creation(%Actor{} = actor, gallery_id) do
-    with :ok <- verify_write_access(actor) do
-      load_reportable_gallery(actor.user, gallery_id)
-    end
-  end
-
-  defp load_reportable_gallery(user, gallery_id) do
-    Loader.fetch_and_authorize(Gallery, user, :show, gallery_id)
-  end
-
-  @doc """
-  Loads the user named by the profile `slug` for reporting, on behalf of
-  `actor`.
-
-  Banned actors are rejected first with `{:error, :ban}`. The user is then
-  loaded by slug and authorized for `:show`; an unknown slug authorizes `nil`,
-  which no ordinary rule permits, so it is `{:error, :unauthorized}`
-  (`{:error, :not_found}` for viewers whose grants cover `nil`).
-
-  Returns `{:ok, {user, changeset}}` with a changeset for reporting them.
-
-  ## Examples
-
-      iex> load_user_for_report(actor, "administrator")
-      {:ok, {%User{}, %Ecto.Changeset{}}}
-
-  """
-  @spec load_user_for_report(Actor.t(), String.t()) ::
-          {:ok, {User.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_user_for_report(%Actor{} = actor, slug) do
-    with :ok <- verify_write_access(actor),
-         {:ok, user} <- load_reportable_user(actor.user, slug) do
-      changeset = change_report(%Report{reported_user_id: user.id})
-      {:ok, {user, changeset}}
-    end
-  end
-
-  @doc """
-  Loads the user named by the profile `slug` for creating their report, on
-  behalf of `actor`.
-
-  This is the write path, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. Lookup and authorization follow
-  `load_user_for_report/2`.
-
-  ## Examples
-
-      iex> load_user_for_report_creation(actor, "administrator")
-      {:ok, %User{}}
-
-  """
-  @spec load_user_for_report_creation(Actor.t(), String.t()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_user_for_report_creation(%Actor{} = actor, slug) do
-    with :ok <- verify_write_access(actor) do
-      load_reportable_user(actor.user, slug)
-    end
-  end
-
-  defp load_reportable_user(user, slug) do
-    reported = Repo.get_by(User, slug: slug)
-
-    with :ok <- authorize(user, :show, reported),
-         %User{} <- reported do
-      {:ok, reported}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
-  end
-
-  @doc """
-  Loads the user named by the profile `slug` together with their commission for
-  reporting, on behalf of `actor`.
-
-  Banned actors are rejected first with `{:error, :ban}`. Reporting a commission
-  needs no permission, so an unknown slug and a user without a commission are
-  both `{:error, :not_found}`. The commission carries its sheet image, items,
-  and example images preloaded.
-
-  Returns `{:ok, {user, commission, changeset}}` with a changeset for reporting
-  it.
-
-  ## Examples
-
-      iex> load_commission_for_report(actor, "artist")
-      {:ok, {%User{}, %Commission{}, %Ecto.Changeset{}}}
-
-  """
-  @spec load_commission_for_report(Actor.t(), String.t()) ::
-          {:ok, {User.t(), Commission.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_commission_for_report(%Actor{} = actor, slug) do
-    with :ok <- verify_write_access(actor),
-         {:ok, {user, commission}} <- Commissions.load_commission_for_show(slug) do
-      changeset =
-        change_report(%Report{commission_id: commission.id})
-
-      {:ok, {user, commission, changeset}}
-    end
-  end
-
-  @doc """
-  Loads the user named by the profile `slug` together with their commission for
-  creating its report, on behalf of `actor`.
-
-  This is the write path, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. Lookup follows `load_commission_for_report/2`.
-
-  ## Examples
-
-      iex> load_commission_for_report_creation(actor, "artist")
-      {:ok, {%User{}, %Commission{}}}
-
-  """
-  @spec load_commission_for_report_creation(Actor.t(), String.t()) ::
-          {:ok, {User.t(), Commission.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_commission_for_report_creation(%Actor{} = actor, slug) do
-    with :ok <- verify_write_access(actor) do
-      Commissions.load_commission_for_show(slug)
-    end
-  end
-
-  @doc """
-  Loads the conversation named by `slug` for reporting, on behalf of `actor`
-  (a `Philomena.Attribution.Actor` whose user may be `nil`).
-
-  Banned actors are rejected first with `{:error, :ban}`. The conversation is
-  then loaded by slug and authorized for `:show`: it is visible to its
-  participants, moderators, and admins, so a non-participant is
-  `{:error, :unauthorized}`, and a slug naming no row authorizes `nil`, which no
-  ordinary rule permits, so it is `{:error, :unauthorized}` (`{:error, :not_found}`
-  for admins).
-
-  Returns `{:ok, {conversation, changeset}}` with a changeset for reporting it.
-
-  ## Examples
-
-      iex> load_conversation_for_report(actor, "slug")
-      {:ok, {%Conversation{}, %Ecto.Changeset{}}}
-
-  """
-  @spec load_conversation_for_report(Actor.t(), String.t()) ::
-          {:ok, {Conversation.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_conversation_for_report(%Actor{} = actor, slug) do
-    with :ok <- verify_write_access(actor),
-         {:ok, conversation} <- load_reportable_conversation(actor.user, slug) do
-      changeset =
-        change_report(%Report{conversation_id: conversation.id})
-
-      {:ok, {conversation, changeset}}
-    end
-  end
-
-  @doc """
-  Loads the conversation named by `slug` for creating its report, on behalf of
-  `actor`.
-
-  This is the write path, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. Lookup and authorization follow
-  `load_conversation_for_report/2`.
-
-  ## Examples
-
-      iex> load_conversation_for_report_creation(actor, "slug")
-      {:ok, %Conversation{}}
-
-  """
-  @spec load_conversation_for_report_creation(Actor.t(), String.t()) ::
-          {:ok, Conversation.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_conversation_for_report_creation(%Actor{} = actor, slug) do
-    with :ok <- verify_write_access(actor) do
-      load_reportable_conversation(actor.user, slug)
-    end
-  end
-
-  defp load_reportable_conversation(user, slug) do
-    conversation =
-      Conversation
-      |> where(slug: ^slug)
-      |> preload([:from, :to])
-      |> Repo.one()
-
-    with :ok <- authorize(user, :show, conversation),
-         %Conversation{} <- conversation do
-      {:ok, conversation}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
-  end
-
-  @doc """
-  Creates a report against the target named by `target`, a one-entry keyword
-  list of the target foreign key column and its id (e.g. `image_id: image.id`),
-  on behalf of `actor`.
-
-  A regular user or an anonymous IP holding `max_open_reports/0` open reports is
-  refused with `{:error, :too_many_reports}`; staff are exempt. Otherwise the
-  report is inserted with the IP, fingerprint, and user carried by `actor`, and
-  reindexed.
-
-  Returns `{:ok, report}` on success, `{:error, :too_many_reports}` when the open
-  report limit is reached, or `{:error, %Ecto.Changeset{}}` when the insert is
-  rejected.
-
-  ## Examples
-
-      iex> create_report(actor, %{"reason" => "Spam"}, comment_id: 1)
+      iex> create_report(actor, {:image, "1"}, %{"reason" => "Spam"})
       {:ok, %Report{}}
 
-      iex> create_report(actor, %{"reason" => ""}, comment_id: 1)
-      {:error, %Ecto.Changeset{}}
+      iex> create_report(actor, {:image, "1"}, %{"reason" => ""})
+      {:error, %ReportForm{changeset: %Ecto.Changeset{}}}
 
-  """
-  @spec create_report(Actor.t(), map() | nil, keyword()) ::
-          {:ok, Report.t()} | {:error, :too_many_reports} | {:error, Ecto.Changeset.t()}
-  def create_report(%Actor{} = actor, params, target) do
-    if too_many_reports?(actor) do
+      iex> create_report(actor, {:image, "1"}, attrs)
       {:error, :too_many_reports}
-    else
-      create_report(actor_attributes(actor), params || %{}, target, nil)
+  """
+  @spec create_report(Actor.t(), target_locator(), map() | nil) ::
+          {:ok, Report.t()}
+          | {:error, :too_many_reports | request_error()}
+          | {:error, ReportForm.t()}
+  def create_report(%Actor{} = actor, locator, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, target} <- load_report_target(actor, locator),
+         :ok <- ensure_report_limit(actor) do
+      create_loaded_report(actor, attrs, target)
     end
   end
 
-  # The IP/fingerprint/user attribution the report changeset records, rebuilt
-  # from the actor into the keyword list it expects.
-  defp actor_attributes(%Actor{ip: ip, fingerprint: fingerprint, user: user}),
-    do: [ip: ip, fingerprint: fingerprint, user: user]
-
-  # Staff are never rate-limited; a regular user or an anonymous IP is refused
-  # once it holds the maximum number of open reports.
-  defp too_many_reports?(%Actor{user: %{role: role}}) when role != "user", do: false
-
-  defp too_many_reports?(%Actor{user: user, ip: ip}),
-    do: open_reports_for_user?(user) or open_reports_for_ip?(ip)
-
-  defp open_reports_for_user?(nil), do: false
-
-  defp open_reports_for_user?(user),
-    do: open_report_count(where(Report, user_id: ^user.id)) >= @max_open_reports
-
-  defp open_reports_for_ip?(ip),
-    do: open_report_count(where(Report, ip: ^ip)) >= @max_open_reports
-
-  defp open_report_count(query) do
-    query
-    |> where([r], r.state in ["open", "in_progress"])
-    |> Repo.aggregate(:count, :id)
-  end
-
   @doc """
-  Creates a report against the target named by `target`, a one-entry keyword
-  list of the target foreign key column and its id (e.g. `image_id: image.id`).
+  Claims an open, unclaimed report for the acting staff member.
+
+  The report is loaded under a row lock and authorized with `:claim`. A racing
+  or repeated claim returns a changeset error rather than reassigning the
+  report. The update and moderation log commit atomically; indexing is queued
+  only after they succeed.
 
   ## Examples
 
-      iex> create_report(attribution, %{"reason" => "..."}, image_id: image.id)
-      {:ok, %Report{}}
+      iex> claim_report(moderator, "1")
+      {:ok, %Report{state: "in_progress"}}
 
-      iex> create_report(attribution, %{"reason" => ""}, image_id: image.id)
-      {:error, %Ecto.Changeset{}}
-
+      iex> claim_report(user, "1")
+      {:error, :unauthorized}
   """
-  def create_report(attribution, attrs, target, _unused) do
-    rule = Rules.find_rule(attrs["rule_id"])
-
-    struct(Report, target)
-    |> Report.user_creation_changeset(attrs, attribution, rule)
-    |> Repo.insert()
-    |> reindex_after_update()
+  @spec claim_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, Report.t()} | {:error, transition_error()}
+  def claim_report(%Actor{} = actor, id) do
+    transition_report(
+      actor,
+      id,
+      :claim,
+      &claim_transition/2,
+      "Report.Claim:create",
+      "Claimed report"
+    )
   end
 
   @doc """
-  Returns an `m:Ecto.Query` which updates all open reports against the target
-  named by `target`, a one-entry keyword list of the target foreign key column
-  and its id (e.g. `image_id: image.id`), to close them.
+  Releases the claim on an open report.
 
-  Because this is only a query due to the limitations of `m:Ecto.Multi`, this must be
-  coupled with an associated call to `reindex_reports/1` to operate correctly, e.g.:
-
-      report_query = Reports.close_report_query(user, image_id: image.id)
-
-      Multi.new()
-      |> Multi.update_all(:reports, report_query, [])
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{reports: {_count, reports}} = result} ->
-          Reports.reindex_reports(reports)
-
-          {:ok, result}
-
-        error ->
-          error
-      end
-
-  Use `close_reports/2` to close and reindex reports in one step outside an `m:Ecto.Multi`.
+  The report is row-locked and authorized with `:unclaim`. Releasing an already
+  unclaimed report is an idempotent success with no write, log, or index job.
+  A real update and its moderation log commit atomically.
 
   ## Examples
 
-      iex> close_report_query(%User{}, image_id: 1)
-      #Ecto.Query<...>
-
+      iex> unclaim_report(moderator, "1")
+      {:ok, %Report{state: "open"}}
   """
-  def close_report_query(closing_user, [{column, id}]) do
-    now = DateTime.utc_now(:second)
-
-    from r in Report,
-      where: field(r, ^column) == ^id and r.open == true,
-      select: r.id,
-      update: [
-        set: [
-          open: false,
-          state: "closed",
-          admin_id: ^closing_user.id,
-          updated_at: ^now
-        ]
-      ]
+  @spec unclaim_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, Report.t()} | {:error, transition_error()}
+  def unclaim_report(%Actor{} = actor, id) do
+    transition_report(
+      actor,
+      id,
+      :unclaim,
+      &unclaim_transition/2,
+      "Report.Claim:delete",
+      "Released report"
+    )
   end
 
   @doc """
-  Closes all open reports against the target named by `target` (see
-  `close_report_query/2`), marking them as closed by the specified user.
-  Also reindexes the affected reports.
+  Closes a report on behalf of the acting staff member.
 
-  Returns `{:ok, {count, reports}}`.
+  The report is row-locked and authorized with `:close`. Closing an already
+  closed report is an idempotent success with no write, log, or index job. A
+  real close and its moderation log commit atomically.
+
+  ## Examples
+
+      iex> close_report(moderator, "1")
+      {:ok, %Report{state: "closed", open: false}}
   """
-  def close_reports(closing_user, target) do
-    {_count, reports} =
-      result = Repo.update_all(close_report_query(closing_user, target), [])
+  @spec close_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, Report.t()} | {:error, transition_error()}
+  def close_report(%Actor{} = actor, id) do
+    transition_report(
+      actor,
+      id,
+      :close,
+      &close_transition/2,
+      "Report.Close:create",
+      "Closed report"
+    )
+  end
 
-    reindex_reports(reports)
+  @doc """
+  Adds a bulk close of reports for one already loaded target to `multi`.
+
+  This is the transaction-composition API for owning contexts that delete or
+  approve a reportable target. The step returns `{count, report_ids}`; pass the
+  IDs to `reindex_closed_reports/1` only after the owning transaction commits.
+
+  ## Examples
+
+      iex> put_close_reports(multi, :reports, moderator, image_id: image.id)
+      %Ecto.Multi{}
+  """
+  @spec put_close_reports(Multi.t(), Multi.name(), User.t(), keyword()) :: Multi.t()
+  def put_close_reports(%Multi{} = multi, step, %User{} = closing_user, target) do
+    Multi.update_all(multi, step, close_report_query(closing_user, target), [])
+  end
+
+  @doc """
+  Closes and reindexes reports for one trusted, already loaded target.
+
+  This service is reserved for non-controller erasure workflows that cannot
+  compose the close into a larger `Ecto.Multi`.
+
+  ## Examples
+
+      iex> close_reports(moderator, reported_user_id: user.id)
+      {:ok, {2, [1, 2]}}
+  """
+  @spec close_reports(User.t(), keyword()) :: {:ok, {non_neg_integer(), [integer()]}}
+  def close_reports(%User{} = closing_user, target) do
+    result = Repo.update_all(close_report_query(closing_user, target), [])
+    {_count, report_ids} = result
+    reindex_closed_reports(report_ids)
     {:ok, result}
   end
 
   @doc """
-  Automatically create a report with the given rule and reason against the
-  target named by `target`, a one-entry keyword list of the target foreign key
-  column and its id (e.g. `comment_id: comment.id`).
+  Creates and indexes an internal system report for an already loaded target.
 
-  Returns `{:error, :not_found}` when the named rule is absent instead of
-  raising from this operational path.
+  The rule name must identify a reportable rule. This trusted service is used by
+  owning contexts after their target has been created or moderated.
 
   ## Examples
 
-      iex> create_system_report("Rule #0", "Custom report reason", comment_id: 1)
-      {:ok, %Report{}}
+      iex> create_system_report("Approval", "Needs review", comment_id: comment.id)
+      {:ok, %Report{system: true}}
 
+      iex> create_system_report("Missing", "Needs review", comment_id: comment.id)
+      {:error, :not_found}
   """
+  @spec create_system_report(String.t(), String.t(), keyword()) ::
+          {:ok, Report.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def create_system_report(rule_name, reason, target) do
     with {:ok, rule} <- Rules.fetch_rule_by_name(rule_name) do
-      attrs = %{
-        reason: reason,
-        user_agent: "system"
-      }
+      attrs = %{reason: reason, user_agent: "system"}
 
       attribution = %{
         system: true,
@@ -732,196 +735,91 @@ defmodule Philomena.Reports do
         fingerprint: "ffff"
       }
 
-      struct(Report, target)
-      |> Report.creation_changeset(attrs, attribution, rule)
-      |> Repo.insert()
-      |> reindex_after_update()
+      result =
+        target
+        |> then(&struct(Report, &1))
+        |> Report.creation_changeset(attrs, attribution, rule)
+        |> Repo.insert()
+
+      case result do
+        {:ok, report} -> {:ok, reindex_report(report)}
+        error -> error
+      end
     end
   end
 
   @doc """
-  Updates a report.
+  Queues report IDs returned by `put_close_reports/4` for indexing.
+
+  Call this only after the owning transaction commits, so a rolled-back close
+  never publishes stale search state.
 
   ## Examples
 
-      iex> update_report(report, %{field: new_value})
-      {:ok, %Report{}}
-
-      iex> update_report(report, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
+      iex> reindex_closed_reports([1, 2])
+      [1, 2]
   """
-  def update_report(%Report{} = report, attrs) do
-    report
-    |> Report.changeset(attrs)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Deletes a Report.
-
-  ## Examples
-
-      iex> delete_report(report)
-      {:ok, %Report{}}
-
-      iex> delete_report(report)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_report(%Report{} = report) do
-    Repo.delete(report)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking report changes.
-
-  ## Examples
-
-      iex> change_report(report)
-      %Ecto.Changeset{source: %Report{}}
-
-  """
-  def change_report(%Report{} = report) do
-    # FIXME: this should be private, and the functions that call it (comments/posts) moved to this context
-    Report.changeset(report, %{})
-  end
-
-  @doc """
-  Marks the report named by `id` as claimed by `actor`, on behalf of `actor`
-  (the acting staff user), and reindexes it.
-
-  Authorizes `:edit` against the loaded report: a non-castable id is
-  `{:error, :not_found}`, and a well-formed id naming no row authorizes `nil`,
-  which no ordinary rule permits, so it is `{:error, :unauthorized}`
-  (`{:error, :not_found}` for admins).
-
-  Returns `{:ok, report}`, `{:error, :unauthorized}`, `{:error, :not_found}`, or
-  `{:error, %Ecto.Changeset{}}`.
-
-  ## Example
-
-      iex> claim_report(moderator, "1")
-      {:ok, %Report{}}
-
-  """
-  @spec claim_report(Actor.t(), Loader.integer_id()) ::
-          {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def claim_report(%Actor{} = actor, id) do
-    with {:ok, report} <- load_report_for_edit(actor, id) do
-      report
-      |> Report.claim_changeset(actor.user)
-      |> Repo.update()
-      |> reindex_after_update()
-    end
-  end
-
-  @doc """
-  Marks the report named by `id` as unclaimed, on behalf of `actor` (the acting
-  staff user), and reindexes it.
-
-  Loading and authorization follow `claim_report/2`, authorizing `:edit`.
-
-  Returns `{:ok, report}`, `{:error, :unauthorized}`, `{:error, :not_found}`, or
-  `{:error, %Ecto.Changeset{}}`.
-
-  ## Example
-
-      iex> unclaim_report(moderator, "1")
-      {:ok, %Report{}}
-
-  """
-  @spec unclaim_report(Actor.t(), Loader.integer_id()) ::
-          {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def unclaim_report(%Actor{} = actor, id) do
-    with {:ok, report} <- load_report_for_edit(actor, id) do
-      report
-      |> Report.unclaim_changeset()
-      |> Repo.update()
-      |> reindex_after_update()
-    end
-  end
-
-  @doc """
-  Marks the report named by `id` as closed by `actor`, on behalf of `actor`
-  (the acting staff user), and reindexes it.
-
-  Loading and authorization follow `claim_report/2`, authorizing `:edit`.
-
-  Returns `{:ok, report}`, `{:error, :unauthorized}`, `{:error, :not_found}`, or
-  `{:error, %Ecto.Changeset{}}`.
-
-  ## Example
-
-      iex> close_report(moderator, "1")
-      {:ok, %Report{}}
-
-  """
-  @spec close_report(Actor.t(), Loader.integer_id()) ::
-          {:ok, Report.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def close_report(%Actor{} = actor, id) do
-    with {:ok, report} <- load_report_for_edit(actor, id) do
-      report
-      |> Report.close_changeset(actor.user)
-      |> Repo.update()
-      |> reindex_after_update()
-    end
-  end
-
-  # Loads the report named by `id` and authorizes `:edit` against it, the guard
-  # the claim and close actions share.
-  defp load_report_for_edit(actor, id) do
-    Loader.fetch_and_authorize(Report, actor, :edit, id)
-  end
-
-  @doc """
-  Reindex all reports where the user or admin has `old_name`.
-
-  ## Example
-
-      iex> user_name_reindex("Administrator", "Administrator2")
-      {:ok, %Req.Response{}}
-
-  """
-  def user_name_reindex(old_name, new_name) do
-    data = Reports.SearchIndex.user_name_update_by_query(old_name, new_name)
-
-    Search.update_by_query(Report, data.query, data.set_replacements, data.replacements)
-  end
-
-  defp reindex_after_update({:ok, report}) do
-    reindex_report(report)
-
-    {:ok, report}
-  end
-
-  defp reindex_after_update(result) do
-    result
-  end
-
-  @doc """
-  Callback for post-transaction update.
-
-  See `close_report_query/2` for more information and example.
-  """
-  def reindex_reports(report_ids) do
+  @spec reindex_closed_reports([integer()]) :: [integer()]
+  def reindex_closed_reports(report_ids) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", report_ids])
-
     report_ids
   end
 
-  @doc false
-  def reindex_report(%Report{} = report) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", [report.id]])
+  @doc """
+  Updates indexed user-name fields without rewriting report rows.
 
-    report
+  This maintenance callback is invoked after a committed user rename.
+
+  ## Examples
+
+      iex> user_name_reindex("Old Name", "New Name")
+      [{:ok, %Req.Response{}}]
+  """
+  @spec user_name_reindex(String.t(), String.t()) :: [term()]
+  def user_name_reindex(old_name, new_name) do
+    data = Reports.SearchIndex.user_name_update_by_query(old_name, new_name)
+    Search.update_by_query(Report, data.query, data.set_replacements, data.replacements)
   end
 
-  @doc false
+  @doc """
+  Returns the associations required to serialize reports into OpenSearch.
+
+  This is the batch-indexer contract used by `Philomena.SearchIndexer`.
+
+  ## Examples
+
+      iex> indexing_preloads()
+      [:user, :admin, ...]
+  """
+  @spec indexing_preloads() :: list()
+  def indexing_preloads do
+    [
+      :user,
+      :admin,
+      :reported_user,
+      image: from(image in Image, preload: :user),
+      comment: from(comment in Comment, preload: :user),
+      post: from(post in Post, preload: :user),
+      commission: from(commission in Commission, preload: :user),
+      conversation: from(conversation in Conversation, preload: [:from, :to]),
+      gallery: from(gallery in Gallery, preload: :user)
+    ]
+  end
+
+  @doc """
+  Reindexes reports matching `column` and `condition` for the index worker.
+
+  `column` is supplied by the trusted worker registry, not request input.
+
+  ## Examples
+
+      iex> perform_reindex(:id, [1, 2])
+      [:ok, :ok]
+  """
+  @spec perform_reindex(atom(), list()) :: list()
   def perform_reindex(column, condition) do
     Report
-    |> where([r], field(r, ^column) in ^condition)
+    |> where([report], field(report, ^column) in ^condition)
     |> preload([:user, :admin])
     |> Repo.all()
     |> preload_targets()
@@ -929,63 +827,25 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Preloads the target associations onto the given report(s).
+  Converts legacy report reasons to their structured rule and reason fields.
+
+  This release-maintenance operation processes reports in bounded batches and
+  raises on a database update failure.
+
+  ## Examples
+
+      iex> convert_reports!()
+      :ok
   """
-  def preload_targets(%Report{} = report) do
-    Repo.preload(report, Report.target_preloads())
-  end
-
-  def preload_targets(reports) do
-    reports
-    |> Enum.to_list()
-    |> Repo.preload(Report.target_preloads())
-  end
-
-  def indexing_preloads do
-    [
-      :user,
-      :admin,
-      :reported_user,
-      image: from(i in Image, preload: :user),
-      comment: from(c in Comment, preload: :user),
-      post: from(p in Post, preload: :user),
-      commission: from(x in Commission, preload: :user),
-      conversation: from(c in Conversation, preload: [:from, :to]),
-      gallery: from(g in Gallery, preload: :user)
-    ]
-  end
-
-  def convert_reports!() do
+  @spec convert_reports!() :: :ok
+  def convert_reports! do
     rules =
       Rules.list_reportable_rules()
-      |> Enum.map(&{&1.name, &1})
-      |> Map.new()
+      |> Map.new(&{&1.name, &1})
 
     Report
-    |> preload([:rule])
+    |> preload(:rule)
     |> Batch.records(batch_size: 128)
     |> Enum.each(&convert_report(&1, rules))
   end
-
-  defp convert_report(%Report{rule_id: 1, reason: report_reason} = report, rules) do
-    match = Regex.run(@reason_regex, report_reason)
-
-    case match do
-      [_, prefix, suffix, reason] ->
-        rule =
-          case Map.get(rules, "#{prefix}#{suffix}") do
-            nil -> %{id: 1}
-            rule -> rule
-          end
-
-        report
-        |> Report.conversion_changeset(%{reason: String.trim(reason)}, rule)
-        |> Repo.update!()
-
-      _ ->
-        {:error, report}
-    end
-  end
-
-  defp convert_report(report, _rules), do: {:ok, report}
 end

@@ -88,7 +88,6 @@ defmodule Philomena.Reports.Report do
   # attempting to claim
   def claim_changeset(report, user) do
     change(report)
-    |> validate_inclusion(:admin_id, [])
     |> put_change(:admin_id, user.id)
     |> put_change(:open, true)
     |> put_change(:state, "in_progress")

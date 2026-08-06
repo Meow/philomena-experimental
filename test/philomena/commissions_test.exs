@@ -24,7 +24,6 @@ defmodule Philomena.CommissionsTest do
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.Item
   alias Philomena.Repo
-  alias Philomena.Reports
   alias Philomena.Reports.Report
 
   # A truthy ban value in the shape production passes; only its presence matters
@@ -240,7 +239,7 @@ defmodule Philomena.CommissionsTest do
 
       assert {:ok, _commission} = Commissions.delete_commission(commission, admin, nil)
 
-      closed = Reports.get_report!(report.id)
+      closed = Repo.get!(Report, report.id)
       refute closed.open
       assert closed.state == "closed"
       assert closed.admin_id == admin.id

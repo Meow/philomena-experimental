@@ -542,152 +542,64 @@ defmodule Philomena.PostsTest do
     end
   end
 
-  describe "load_post_for_report/4" do
-    # This backs a report write form, so it enforces the same write prerequisite
-    # as submission before the forum/topic/post load-and-authorize chain.
+  describe "load_report_target/4" do
+    test "loads a visible post through its forum and topic parents" do
+      forum = forum_fixture()
+      topic = topic_fixture(forum)
+      post = hd(topic.posts)
 
-    test "a banned actor is rejected before any loading, even with an unknown forum" do
-      # The write prerequisite runs before loading, so the ban wins even against
-      # a forum slug that does not exist.
-      actor = actor(confirmed_user_fixture(), ban: @ban)
+      assert {:ok, loaded} =
+               Posts.load_report_target(actor(), forum.short_name, topic.slug, post.id)
 
-      assert Posts.load_post_for_report(actor, "nonexistent", "whatever", "1") ==
-               {:error, :ban}
+      assert loaded.id == post.id
+      assert loaded.topic.id == topic.id
+      assert loaded.topic.forum.id == forum.id
     end
 
-    test "an anonymous actor with no fingerprint cannot load the report form",
-         %{forum: forum, topic: topic} do
-      [post] = topic.posts
-      anonymous = actor(nil, fingerprint: nil)
+    test "normalizes malformed, missing, and mismatched route locators" do
+      first_forum = forum_fixture()
+      second_forum = forum_fixture()
+      topic = topic_fixture(first_forum)
+      post = hd(topic.posts)
 
-      assert Posts.load_post_for_report(
-               anonymous,
+      assert Posts.load_report_target(
+               actor(),
+               first_forum.short_name,
+               topic.slug,
+               "not-an-id"
+             ) == {:error, :not_found}
+
+      assert Posts.load_report_target(
+               actor(),
+               second_forum.short_name,
+               topic.slug,
+               post.id
+             ) == {:error, :not_found}
+
+      assert Posts.load_report_target(
+               actor(),
+               first_forum.short_name,
+               "missing-topic",
+               post.id
+             ) == {:error, :not_found}
+    end
+
+    test "rejects a hidden post for a regular user" do
+      forum = forum_fixture()
+      topic = topic_fixture(forum)
+      post = hd(topic.posts)
+
+      hidden =
+        post
+        |> Ecto.Changeset.change(hidden_from_users: true)
+        |> Repo.update!()
+
+      assert Posts.load_report_target(
+               actor(confirmed_user_fixture()),
                forum.short_name,
                topic.slug,
-               "#{post.id}"
+               hidden.id
              ) == {:error, :unauthorized}
-    end
-
-    test "an unknown forum is unauthorized", %{topic: topic} do
-      [post] = topic.posts
-
-      assert Posts.load_post_for_report(actor(nil), "nonexistent", topic.slug, "#{post.id}") ==
-               {:error, :unauthorized}
-    end
-
-    test "an unknown topic in a real forum is not found", %{forum: forum} do
-      assert Posts.load_post_for_report(actor(nil), forum.short_name, "nonexistent", "1") ==
-               {:error, :not_found}
-    end
-
-    test "an unknown post id in a real topic is not found", %{forum: forum, topic: topic} do
-      assert Posts.load_post_for_report(actor(nil), forum.short_name, topic.slug, "999999999") ==
-               {:error, :not_found}
-    end
-
-    test "a regular user cannot load a hidden post's report form",
-         %{forum: forum, topic: topic} do
-      post = already_hidden_post(topic)
-
-      assert Posts.load_post_for_report(
-               actor(confirmed_user_fixture()),
-               forum.short_name,
-               topic.slug,
-               "#{post.id}"
-             ) ==
-               {:error, :unauthorized}
-    end
-
-    test "a moderator loads a hidden post's report form", %{forum: forum, topic: topic} do
-      post = already_hidden_post(topic)
-
-      assert {:ok, {_topic, %Post{} = loaded_post, %Ecto.Changeset{}}} =
-               Posts.load_post_for_report(
-                 actor(moderator_user_fixture()),
-                 forum.short_name,
-                 topic.slug,
-                 "#{post.id}"
-               )
-
-      assert loaded_post.id == post.id
-      assert loaded_post.hidden_from_users
-    end
-  end
-
-  describe "load_post_for_report_creation/4" do
-    # This backs the report submission (a write), so it runs verify_write_access
-    # first (ban -> :ban, missing fingerprint -> :unauthorized) and then the same
-    # forum/topic/post load-and-authorize chain as post_history/4.
-
-    test "a banned actor is rejected before any loading, even with an unknown forum" do
-      # verify_write_access runs first, so a banned actor is {:error, :ban} even
-      # against a forum slug that does not exist.
-      actor = actor(confirmed_user_fixture(), ban: @ban)
-
-      assert Posts.load_post_for_report_creation(actor, "nonexistent", "whatever", "1") ==
-               {:error, :ban}
-    end
-
-    test "an actor with no fingerprint is unauthorized before any loading, signed in or not" do
-      # The fingerprint requirement applies regardless of whether a user is signed
-      # in, and precedes loading, so a missing forum still answers unauthorized
-      # from the write-access gate rather than the loader.
-      signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
-      anonymous = actor(nil, fingerprint: nil)
-
-      assert Posts.load_post_for_report_creation(signed_in, "nonexistent", "whatever", "1") ==
-               {:error, :unauthorized}
-
-      assert Posts.load_post_for_report_creation(anonymous, "nonexistent", "whatever", "1") ==
-               {:error, :unauthorized}
-    end
-
-    test "a valid signed-in actor loads a visible post", %{forum: forum, topic: topic} do
-      [post] = topic.posts
-
-      assert {:ok, {loaded_topic, %Post{} = loaded_post}} =
-               Posts.load_post_for_report_creation(
-                 actor(confirmed_user_fixture()),
-                 forum.short_name,
-                 topic.slug,
-                 "#{post.id}"
-               )
-
-      assert loaded_topic.id == topic.id
-      assert loaded_post.id == post.id
-
-      # The topic carries its forum preloaded for building the redirect action.
-      assert %Forum{} = loaded_topic.forum
-      assert loaded_topic.forum.id == forum.id
-    end
-
-    test "a valid anonymous fingerprinted actor loads a visible post",
-         %{forum: forum, topic: topic} do
-      # actor(nil) carries the shared fingerprint, so it clears verify_write_access
-      # and reaches the public forum/topic/post load.
-      [post] = topic.posts
-
-      assert {:ok, {_topic, %Post{} = loaded_post}} =
-               Posts.load_post_for_report_creation(
-                 actor(nil),
-                 forum.short_name,
-                 topic.slug,
-                 "#{post.id}"
-               )
-
-      assert loaded_post.id == post.id
-    end
-
-    test "a regular user cannot load a hidden post", %{forum: forum, topic: topic} do
-      post = already_hidden_post(topic)
-
-      assert Posts.load_post_for_report_creation(
-               actor(confirmed_user_fixture()),
-               forum.short_name,
-               topic.slug,
-               "#{post.id}"
-             ) ==
-               {:error, :unauthorized}
     end
   end
 

@@ -3,7 +3,7 @@ defmodule PhilomenaWeb.Image.Comment.ReportController do
 
   alias PhilomenaWeb.ReportController
   alias PhilomenaWeb.ReportView
-  alias Philomena.Comments
+  alias Philomena.Reports
 
   plug PhilomenaWeb.CaptchaPlug
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
@@ -11,8 +11,10 @@ defmodule PhilomenaWeb.Image.Comment.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"image_id" => image_id, "comment_id" => comment_id}) do
-    with {:ok, {comment, changeset}} <-
-           Comments.load_comment_for_report(conn.assigns.actor, image_id, comment_id) do
+    locator = {:comment, image_id, comment_id}
+
+    with {:ok, form} <- Reports.new_report(conn.assigns.actor, locator) do
+      comment = form.target
       action = ~p"/images/#{comment.image}/comments/#{comment}/reports"
 
       conn
@@ -20,18 +22,18 @@ defmodule PhilomenaWeb.Image.Comment.ReportController do
       |> render("new.html",
         title: "Reporting Comment",
         subject: comment,
-        changeset: changeset,
+        changeset: form.changeset,
         action: action
       )
     end
   end
 
   def create(conn, %{"image_id" => image_id, "comment_id" => comment_id} = params) do
-    with {:ok, comment} <-
-           Comments.load_comment_for_report_creation(conn.assigns.actor, image_id, comment_id) do
-      action = ~p"/images/#{comment.image}/comments/#{comment}/reports"
-
-      ReportController.create(conn, action, comment, [comment_id: comment.id], params)
-    end
+    ReportController.create(
+      conn,
+      {:comment, image_id, comment_id},
+      fn comment -> ~p"/images/#{comment.image}/comments/#{comment}/reports" end,
+      params
+    )
   end
 end

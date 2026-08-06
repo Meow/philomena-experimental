@@ -26,7 +26,6 @@ defmodule Philomena.GalleriesTest do
   alias Philomena.Images.Image
   alias Philomena.Images.Search.Scope
   alias Philomena.Repo
-  alias Philomena.Reports
   alias Philomena.Reports.Report
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
@@ -250,7 +249,7 @@ defmodule Philomena.GalleriesTest do
 
       assert {:ok, _gallery} = Galleries.delete_gallery(gallery, admin, nil)
 
-      closed = Reports.get_report!(report.id)
+      closed = Repo.get!(Report, report.id)
       refute closed.open
       assert closed.state == "closed"
       assert closed.admin_id == admin.id

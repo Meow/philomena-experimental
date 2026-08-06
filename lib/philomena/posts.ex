@@ -27,9 +27,8 @@ defmodule Philomena.Posts do
   alias Philomena.IndexWorker
   alias Philomena.Forums.Forum
   alias Philomena.Notifications
-  alias Philomena.Versions
   alias Philomena.Reports
-  alias Philomena.Reports.Report
+  alias Philomena.Versions
   alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
 
@@ -132,13 +131,13 @@ defmodule Philomena.Posts do
 
     Multi.new()
     |> Multi.update(:post, Post.hide_changeset(post, attrs, user))
-    |> Multi.update_all(:reports, Reports.close_report_query(user, post_id: post.id), [])
+    |> Reports.put_close_reports(:reports, user, post_id: post.id)
     |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
     |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
     |> Repo.transaction()
     |> case do
       {:ok, %{post: post, reports: {_count, reports}}} ->
-        Reports.reindex_reports(reports)
+        Reports.reindex_closed_reports(reports)
         reindex_post(post)
 
         {:ok, post}
@@ -885,17 +884,16 @@ defmodule Philomena.Posts do
   end
 
   defp approve_loaded_post(%Actor{user: user} = actor, %Post{} = post) do
-    report_query = Reports.close_report_query(user, post_id: post.id)
     changeset = Post.approve_changeset(post)
 
     Multi.new()
     |> Multi.update(:post, changeset)
-    |> Multi.update_all(:reports, report_query, [])
+    |> Reports.put_close_reports(:reports, user, post_id: post.id)
     |> Repo.transaction()
     |> case do
       {:ok, %{post: approved_post, reports: {_count, reports}}} ->
         UserStatistics.increment(approved_post.user_id, :posts_count)
-        Reports.reindex_reports(reports)
+        Reports.reindex_closed_reports(reports)
         reindex_post(approved_post)
         log_post_approval(actor, approved_post)
 
@@ -990,85 +988,28 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Loads the post named by `post_id` within the topic named by
-  `topic_slug` in the forum named by `forum_slug` for reporting, on behalf
-  of `actor`.
+  Loads a post as a report target within its route forum and topic.
 
-  The forum is loaded by short name and authorized for `:show`, and the topic is
-  loaded by slug with hidden topics visible only to actors who may `:show` them.
-  The post is then loaded by id within that topic: a missing post is
-  `{:error, :not_found}`, and a post hidden from users is visible only when
-  `actor` may `:show` it, otherwise `{:error, :unauthorized}`. The post id is not
-  integer-guarded before the query, so a non-integer id raises
-  `Ecto.Query.CastError`. (FIXME.)
-
-  Returns `{:ok, {topic, post, changeset}}` - the topic (with its forum
-  preloaded), the post, and a changeset for reporting the post -
-  `{:error, :ban}` for a banned actor,
-  `{:error, :unauthorized}` when the forum, topic, or hidden post is not visible,
-  or `{:error, :not_found}` when the topic or post does not exist.
+  The forum and topic visibility checks run before the post is loaded through a
+  parent-scoped query. Malformed, missing, and mismatched post IDs are always
+  not-found. The Reports context owns write access and form construction.
 
   ## Examples
 
-      iex> load_post_for_report(actor, "dis", "some-topic", "1")
-      {:ok, {%Topic{}, %Post{}, %Ecto.Changeset{}}}
-
+      iex> load_report_target(actor, "dis", "some-topic", "1")
+      {:ok, %Post{}}
   """
-  @spec load_post_for_report(
+  @spec load_report_target(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
           Loader.integer_id()
         ) ::
-          {:ok, {Topic.t(), Post.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_post_for_report(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, {topic, post}} <-
+          {:ok, Post.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, forum_slug, topic_slug, post_id) do
+    with {:ok, {_topic, post}} <-
            load_reportable_post(actor, forum_slug, topic_slug, post_id) do
-      changeset = Reports.change_report(%Report{post_id: post.id})
-      {:ok, {topic, post, changeset}}
-    end
-  end
-
-  @doc """
-  Loads the post named by `post_id` within the topic named by
-  `topic_slug` in the forum named by `forum_slug` for creating its report, on
-  behalf of `actor`.
-
-  The forum is loaded by short name and authorized for `:show`, and the topic is
-  loaded by slug with hidden topics visible only to actors who may `:show` them.
-  The post is then loaded by id within that topic: a missing post is
-  `{:error, :not_found}`, and a post hidden from users is visible only when
-  `actor` may `:show` it, otherwise `{:error, :unauthorized}`. The post id is not
-  integer-guarded before the query, so a non-integer id raises
-  `Ecto.Query.CastError`. (FIXME.)
-
-  Returns `{:ok, {topic, post}}` - the topic (with its forum preloaded) and post
-  - `{:error, :ban}` or
-  `{:error, :unauthorized}` from the write-access check, `{:error, :unauthorized}`
-  when the forum, topic, or hidden post is not visible, or `{:error, :not_found}`
-  when the topic or post does not exist.
-
-  FIXME: this function looks like a duplicate of the one above?
-
-  ## Examples
-
-      iex> load_post_for_report_creation(actor, "dis", "some-topic", "1")
-      {:ok, {%Topic{}, %Post{}}}
-
-  """
-  @spec load_post_for_report_creation(
-          actor :: Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          Loader.integer_id()
-        ) ::
-          {:ok, {Topic.t(), Post.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_post_for_report_creation(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with :ok <- verify_write_access(actor) do
-      load_reportable_post(actor, forum_slug, topic_slug, post_id)
+      {:ok, post}
     end
   end
 
@@ -1079,10 +1020,16 @@ defmodule Philomena.Posts do
   # actor's user here. The post is loaded with its topic and forum preloaded, so
   # the topic returned here carries its forum.
   defp load_reportable_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, _forum, topic} <-
+    with {:ok, _existing_forum} <-
+           Loader.one(from forum in Forum, where: forum.short_name == ^to_string(forum_slug)),
+         {:ok, _forum, topic} <-
            Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
+         {:ok, post_id} <- IntegerId.parse(post_id),
          {:ok, post} <- load_topic_post(actor, topic, post_id) do
       {:ok, {post.topic, post}}
+    else
+      :error -> {:error, :not_found}
+      error -> error
     end
   end
 

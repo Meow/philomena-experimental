@@ -3,7 +3,7 @@ defmodule PhilomenaWeb.Topic.Post.ReportController do
 
   alias PhilomenaWeb.ReportController
   alias PhilomenaWeb.ReportView
-  alias Philomena.Posts
+  alias Philomena.Reports
 
   plug PhilomenaWeb.CaptchaPlug
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
@@ -11,13 +11,16 @@ defmodule PhilomenaWeb.Topic.Post.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"forum_id" => forum_id, "topic_id" => topic_id, "post_id" => post_id}) do
-    with {:ok, {topic, post, changeset}} <-
-           Posts.load_post_for_report(conn.assigns.actor, forum_id, topic_id, post_id) do
+    locator = {:post, forum_id, topic_id, post_id}
+
+    with {:ok, form} <- Reports.new_report(conn.assigns.actor, locator) do
+      post = form.target
+      topic = post.topic
       action = ~p"/forums/#{topic.forum}/topics/#{topic}/posts/#{post}/reports"
 
       conn
       |> put_view(ReportView)
-      |> render("new.html", subject: post, changeset: changeset, action: action)
+      |> render("new.html", subject: post, changeset: form.changeset, action: action)
     end
   end
 
@@ -25,11 +28,13 @@ defmodule PhilomenaWeb.Topic.Post.ReportController do
         conn,
         %{"forum_id" => forum_id, "topic_id" => topic_id, "post_id" => post_id} = params
       ) do
-    with {:ok, {topic, post}} <-
-           Posts.load_post_for_report_creation(conn.assigns.actor, forum_id, topic_id, post_id) do
-      action = ~p"/forums/#{topic.forum}/topics/#{topic}/posts/#{post}/reports"
-
-      ReportController.create(conn, action, post, [post_id: post.id], params)
-    end
+    ReportController.create(
+      conn,
+      {:post, forum_id, topic_id, post_id},
+      fn post ->
+        ~p"/forums/#{post.topic.forum}/topics/#{post.topic}/posts/#{post}/reports"
+      end,
+      params
+    )
   end
 end

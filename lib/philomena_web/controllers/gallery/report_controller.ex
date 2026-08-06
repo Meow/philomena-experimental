@@ -11,8 +11,8 @@ defmodule PhilomenaWeb.Gallery.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"gallery_id" => gallery_id}) do
-    with {:ok, {gallery, changeset}} <-
-           Reports.load_gallery_for_report(conn.assigns.actor, gallery_id) do
+    with {:ok, form} <- Reports.new_report(conn.assigns.actor, {:gallery, gallery_id}) do
+      gallery = form.target
       action = ~p"/galleries/#{gallery}/reports"
 
       conn
@@ -20,18 +20,18 @@ defmodule PhilomenaWeb.Gallery.ReportController do
       |> render("new.html",
         title: "Reporting Gallery",
         subject: gallery,
-        changeset: changeset,
+        changeset: form.changeset,
         action: action
       )
     end
   end
 
   def create(conn, %{"gallery_id" => gallery_id} = params) do
-    with {:ok, gallery} <-
-           Reports.load_gallery_for_report_creation(conn.assigns.actor, gallery_id) do
-      action = ~p"/galleries/#{gallery}/reports"
-
-      ReportController.create(conn, action, gallery, [gallery_id: gallery.id], params)
-    end
+    ReportController.create(
+      conn,
+      {:gallery, gallery_id},
+      fn gallery -> ~p"/galleries/#{gallery}/reports" end,
+      params
+    )
   end
 end

@@ -1,5 +1,21 @@
 # Reports context plan
 
+## Status
+
+Wave 2 complete. Report forms and submissions now share the tagged locator API
+`new_report/2` and `create_report/3`, returning a typed `ReportForm` that retains
+the safely loaded target on validation failure. Comments and Posts expose only
+parent-scoped target locators; report changeset construction is private to
+Reports.
+
+Report IDs load before authorization, staff transitions use distinct
+`:claim`/`:unclaim`/`:close` abilities under a row lock, and transition updates
+commit with their moderation logs. Repeated unclaim/close operations are
+idempotent, while repeated or racing claims cannot reassign a claimed report.
+The direct CRUD and preload surface is gone; bulk-close composition,
+after-commit indexing, worker indexing, conversion, system reports, and rename
+index updates remain documented service APIs.
+
 Source: `lib/philomena/reports.ex`; consumers: report index/show/create plus
 claim/close controllers and report loaders delegated to Images, Galleries,
 Users, Commissions, Conversations, Posts, and Comments.

@@ -23,6 +23,7 @@ defmodule Philomena.ModerationLogs.Paths do
   alias Philomena.Forums.Forum
   alias Philomena.Topics.Topic
   alias Philomena.Posts.Post
+  alias Philomena.Reports.Report
   alias Philomena.DnpEntries.DnpEntry
   alias Philomena.ArtistLinks.ArtistLink
 
@@ -79,6 +80,14 @@ defmodule Philomena.ModerationLogs.Paths do
   Path to a DNP entry, e.g. `/dnp/123`.
   """
   def dnp_entry_path(%DnpEntry{id: id}), do: "/dnp/" <> encode_segment(id)
+
+  @doc """
+  Path to a report in the staff review interface, e.g. `/admin/reports/123`.
+
+  Accepts a report or an already parsed report ID.
+  """
+  def admin_report_path(%Report{id: id}), do: admin_report_path(id)
+  def admin_report_path(id) when is_integer(id), do: "/admin/reports/" <> encode_segment(id)
 
   @doc """
   Path to an artist link on a user's profile, e.g.

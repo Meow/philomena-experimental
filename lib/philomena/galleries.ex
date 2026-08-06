@@ -71,17 +71,14 @@ defmodule Philomena.Galleries do
       |> Repo.all()
 
     Multi.new()
-    |> Multi.update_all(
-      :reports,
-      Reports.close_report_query(closing_user, gallery_id: gallery.id),
-      []
-    )
+    |> Reports.put_close_reports(:reports, closing_user, gallery_id: gallery.id)
     |> Multi.delete(:gallery, gallery)
     |> Repo.transaction()
     |> case do
-      {:ok, %{gallery: gallery}} ->
+      {:ok, %{gallery: gallery, reports: {_count, reports}}} ->
         unindex_gallery(gallery)
         Images.reindex_images(images)
+        Reports.reindex_closed_reports(reports)
 
         {:ok, gallery}
 
@@ -318,6 +315,23 @@ defmodule Philomena.Galleries do
          {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :edit) do
       {:ok, {gallery, change_gallery(gallery)}}
     end
+  end
+
+  @doc """
+  Loads a gallery by ID as a report target on behalf of `actor`.
+
+  Missing and malformed IDs are always not-found. A real gallery the actor may
+  not show is unauthorized.
+
+  ## Examples
+
+      iex> load_report_target(actor, "1")
+      {:ok, %Gallery{}}
+  """
+  @spec load_report_target(Actor.t(), Loader.integer_id()) ::
+          {:ok, Gallery.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, gallery_id) do
+    Loader.fetch_and_authorize(Gallery, actor, :show, gallery_id, [:user])
   end
 
   @doc """

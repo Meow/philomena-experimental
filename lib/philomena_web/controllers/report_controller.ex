@@ -1,26 +1,15 @@
 defmodule PhilomenaWeb.ReportController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.Reports.Report
   alias Philomena.Reports
-  alias Philomena.Repo
-  import Ecto.Query
+  alias Philomena.Reports.ReportForm
+
+  action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    # FIXME: this wasn't migrated to the context
-
-    user = conn.assigns.current_user
-
-    reports =
-      Report
-      |> where(user_id: ^user.id)
-      |> order_by(desc: :created_at)
-      |> preload(:rule)
-      |> Repo.paginate(conn.assigns.scrivener)
-
-    reports = %{reports | entries: Reports.preload_targets(reports)}
-
-    render(conn, "index.html", title: "My Reports", reports: reports)
+    with {:ok, reports} <- Reports.load_user_reports(conn.assigns.actor, conn.assigns.scrivener) do
+      render(conn, "index.html", title: "My Reports", reports: reports)
+    end
   end
 
   # Make sure that you load the resource in your controller:
@@ -31,8 +20,8 @@ defmodule PhilomenaWeb.ReportController do
   # plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
   # plug :load_and_authorize_resource, model: Image, id_name: "image_id", persisted: true
 
-  def create(conn, action, subject, target, %{"report" => report_params}) do
-    case Reports.create_report(conn.assigns.actor, report_params, target) do
+  def create(conn, locator, action_for_target, params) do
+    case Reports.create_report(conn.assigns.actor, locator, params["report"]) do
       {:ok, _report} ->
         conn
         |> put_flash(
@@ -49,13 +38,20 @@ defmodule PhilomenaWeb.ReportController do
         )
         |> redirect(to: "/")
 
-      {:error, changeset} ->
+      {:error, %ReportForm{target: target, changeset: changeset}} ->
         # The calling controllers are thin wrappers with no view of their own,
         # so Phoenix's default view - derived from the caller's name - does
         # not exist. Name the shared one explicitly.
         conn
         |> put_view(PhilomenaWeb.ReportView)
-        |> render("new.html", subject: subject, changeset: changeset, action: action)
+        |> render("new.html",
+          subject: target,
+          changeset: changeset,
+          action: action_for_target.(target)
+        )
+
+      {:error, _reason} = error ->
+        error
     end
   end
 

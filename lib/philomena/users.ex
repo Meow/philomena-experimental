@@ -37,6 +37,7 @@ defmodule Philomena.Users do
   alias Philomena.ModerationLogs.Paths
   alias Philomena.IndexWorker
   alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.UserEraseWorker
   alias Philomena.UserRenameWorker
   alias Philomena.UserUnvoteWorker
@@ -204,6 +205,26 @@ defmodule Philomena.Users do
     else
       {:ok, user}
     end
+  end
+
+  @doc """
+  Loads a visible profile by slug as a report target on behalf of `actor`.
+
+  Deactivated and missing profiles are always not-found. A real profile the
+  actor may not show is unauthorized.
+
+  ## Examples
+
+      iex> load_report_target(actor, "somebody")
+      {:ok, %User{}}
+  """
+  @spec load_report_target(Actor.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, slug) do
+    User
+    |> where([user], user.slug == ^slug and is_nil(user.deleted_at))
+    |> preload(public_links: :tag, awards: :badge)
+    |> Loader.one_and_authorize(actor, :show)
   end
 
   @doc """

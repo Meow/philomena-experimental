@@ -11,7 +11,8 @@ defmodule PhilomenaWeb.Image.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"image_id" => image_id}) do
-    with {:ok, {image, changeset}} <- Reports.load_image_for_report(conn.assigns.actor, image_id) do
+    with {:ok, form} <- Reports.new_report(conn.assigns.actor, {:image, image_id}) do
+      image = form.target
       action = ~p"/images/#{image}/reports"
 
       conn
@@ -19,17 +20,18 @@ defmodule PhilomenaWeb.Image.ReportController do
       |> render("new.html",
         title: "Reporting Image",
         subject: image,
-        changeset: changeset,
+        changeset: form.changeset,
         action: action
       )
     end
   end
 
   def create(conn, %{"image_id" => image_id} = params) do
-    with {:ok, image} <- Reports.load_image_for_report_creation(conn.assigns.actor, image_id) do
-      action = ~p"/images/#{image}/reports"
-
-      ReportController.create(conn, action, image, [image_id: image.id], params)
-    end
+    ReportController.create(
+      conn,
+      {:image, image_id},
+      fn image -> ~p"/images/#{image}/reports" end,
+      params
+    )
   end
 end

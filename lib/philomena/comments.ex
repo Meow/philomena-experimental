@@ -9,6 +9,7 @@ defmodule Philomena.Comments do
     only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
+  alias Philomena.Loader
   alias Philomena.Repo
   alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
@@ -31,9 +32,8 @@ defmodule Philomena.Comments do
   alias Philomena.Images
   alias Philomena.Tags.Tag
   alias Philomena.Notifications
-  alias Philomena.Versions
   alias Philomena.Reports
-  alias Philomena.Reports.Report
+  alias Philomena.Versions
 
   # Inserts a comment built on `image` from `params` by the given `actor`,
   # incrementing the image's comment count, notifying subscribers, and
@@ -105,16 +105,16 @@ defmodule Philomena.Comments do
   @doc false
   def hide_loaded_comment(%Comment{} = comment, attrs, user) do
     # Also used by Users.Eraser (TODO what API should be exposed for that?)
-    report_query = Reports.close_report_query(user, comment_id: comment.id)
+    comment_id = comment.id
     comment = Comment.hide_changeset(comment, attrs, user)
 
     Multi.new()
     |> Multi.update(:comment, comment)
-    |> Multi.update_all(:reports, report_query, [])
+    |> Reports.put_close_reports(:reports, user, comment_id: comment_id)
     |> Repo.transaction()
     |> case do
       {:ok, %{comment: comment, reports: {_count, reports}}} ->
-        Reports.reindex_reports(reports)
+        Reports.reindex_closed_reports(reports)
         reindex_comment(comment)
 
         {:ok, comment}
@@ -720,76 +720,25 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads the comment named by `comment_id` on the image named by `image_id` for
-  reporting, on behalf of `actor`.
+  Loads a comment as a report target within the image named by `image_id`.
 
-  The image is authorized for `:show` as well as the comment loaded within it
-  (a hidden comment is reportable only to actors who may `:show` it).
-
-  ## Examples
-
-      iex> load_comment_for_report(actor, "1", "1")
-      {:ok, {%Comment{}, %Ecto.Changeset{}}}
-
-      iex> load_comment_for_report(banned_actor, "1", "1")
-      {:error, :ban}
-
-      iex> load_comment_for_report(actor, invalid_image_id, "1")
-      {:error, :not_found}
-
-      iex> load_comment_for_report(actor, "1", hidden_comment_id)
-      {:error, :unauthorized}
-
-  """
-  @spec load_comment_for_report(
-          actor :: Actor.t(),
-          image_id :: IntegerId.integer_id(),
-          comment_id :: IntegerId.integer_id()
-        ) ::
-          {:ok, {Comment.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-  def load_comment_for_report(%Actor{} = actor, image_id, comment_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, comment} <- load_reportable_comment(actor, image_id, comment_id) do
-      changeset =
-        Reports.change_report(%Report{comment_id: comment.id})
-
-      {:ok, {comment, changeset}}
-    end
-  end
-
-  @doc """
-  Loads the comment named by `comment_id` on the image named by `image_id` for
-  creating its report, on behalf of `actor`.
-
-  The image is authorized for `:show` as well as the comment loaded within it
-  (a hidden comment is reportable only to actors who may `:show` it).
+  Both the image and the parent-scoped comment must be visible to `actor`.
+  Malformed, missing, and mismatched IDs are always not-found. The Reports
+  context owns the write-access prerequisite and changeset construction.
 
   ## Examples
 
-      iex> load_comment_for_report_creation(actor, "1", "1")
+      iex> load_report_target(actor, "1", "2")
       {:ok, %Comment{}}
-
-      iex> load_comment_for_report(banned_actor, "1", "1")
-      {:error, :ban}
-
-      iex> load_comment_for_report(actor, invalid_image_id, "1")
-      {:error, :not_found}
-
-      iex> load_comment_for_report(actor, "1", hidden_comment_id)
-      {:error, :unauthorized}
-
   """
-  @spec load_comment_for_report_creation(
+  @spec load_report_target(
           actor :: Actor.t(),
           image_id :: IntegerId.integer_id(),
           comment_id :: IntegerId.integer_id()
         ) ::
-          {:ok, Comment.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_comment_for_report_creation(%Actor{} = actor, image_id, comment_id) do
-    with :ok <- verify_write_access(actor) do
-      load_reportable_comment(actor, image_id, comment_id)
-    end
+          {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, image_id, comment_id) do
+    load_reportable_comment(actor, image_id, comment_id)
   end
 
   # Shared image-and-comment load-and-authorize chain for the report actions: the
@@ -797,10 +746,18 @@ defmodule Philomena.Comments do
   # row is `{:error, :not_found}`), and a comment hidden from users is visible
   # only to a user who may `:show` it.
   defp load_reportable_comment(%Actor{user: user} = actor, image_id, comment_id) do
-    with {:ok, image} <- Images.load_visible_image(actor, image_id) do
-      image
-      |> load_scoped_comment(comment_id, [:image, :deleted_by, user: [awards: :badge]])
-      |> authorize_comment_visibility(user)
+    with {:ok, image} <- Images.load_report_target(actor, image_id),
+         {:ok, comment_id} <- IntegerId.parse(comment_id),
+         {:ok, comment} <-
+           Loader.one(
+             from comment in Comment,
+               where: comment.image_id == ^image.id and comment.id == ^comment_id,
+               preload: [:image, :deleted_by, user: [awards: :badge]]
+           ) do
+      authorize_comment_visibility(comment, user)
+    else
+      :error -> {:error, :not_found}
+      error -> error
     end
   end
 
@@ -1069,17 +1026,16 @@ defmodule Philomena.Comments do
   end
 
   defp approve_loaded_comment(%Actor{user: user} = actor, %Comment{} = comment) do
-    report_query = Reports.close_report_query(user, comment_id: comment.id)
     changeset = Comment.approve_changeset(comment)
 
     Multi.new()
     |> Multi.update(:comment, changeset)
-    |> Multi.update_all(:reports, report_query, [])
+    |> Reports.put_close_reports(:reports, user, comment_id: comment.id)
     |> Repo.transaction()
     |> case do
       {:ok, %{comment: approved_comment, reports: {_count, reports}}} ->
         UserStatistics.increment(approved_comment.user_id, :comments_count)
-        Reports.reindex_reports(reports)
+        Reports.reindex_closed_reports(reports)
         reindex_comment(approved_comment)
         log_comment_approval(actor, approved_comment)
 

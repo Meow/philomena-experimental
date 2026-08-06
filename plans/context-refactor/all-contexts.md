@@ -167,6 +167,13 @@ composes into the owning `Ecto.Multi` with Actor attribution, no-op suppression,
 rollback coupling, and deterministic same-second ordering. Legacy backfill
 support is retained until its release entry point and deployed-schema
 compatibility window are deliberately retired.
+Reports is the first completed wave 2 boundary. A tagged target locator and
+typed `ReportForm` now give all seven reportable types one form/create path with
+write-access parity, parent-scoped loading, and uniform missing results. User
+and staff listings are actor-scoped, report moderation uses distinct abilities,
+and row-locked claim/unclaim/close transitions atomically persist their audit
+logs. Bulk target cleanup and indexing remain explicit cross-context and worker
+service APIs.
 
 ### Wave 0: characterize and establish the contract
 

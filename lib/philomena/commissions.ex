@@ -5,7 +5,7 @@ defmodule Philomena.Commissions do
 
   import Ecto.Query, warn: false
 
-  import Philomena.Authorization, only: [verify_write_access: 1]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.IntegerId
   alias Ecto.Multi
@@ -47,16 +47,12 @@ defmodule Philomena.Commissions do
   @doc false
   def delete_commission(%Commission{} = commission, closing_user, _unused) do
     Multi.new()
-    |> Multi.update_all(
-      :reports,
-      Reports.close_report_query(closing_user, commission_id: commission.id),
-      []
-    )
+    |> Reports.put_close_reports(:reports, closing_user, commission_id: commission.id)
     |> Multi.delete(:commission, commission)
     |> Repo.transaction()
     |> case do
       {:ok, %{commission: commission, reports: {_count, reports}}} ->
-        Reports.reindex_reports(reports)
+        Reports.reindex_closed_reports(reports)
 
         {:ok, commission}
 
@@ -93,6 +89,30 @@ defmodule Philomena.Commissions do
     case load_profile_user(slug) do
       %User{commission: %Commission{} = commission} = user -> {:ok, {user, commission}}
       _other -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Loads a visible user's commission as a report target on behalf of `actor`.
+
+  The profile and commission are loaded together with the associations rendered
+  by the commission report form. Missing profiles and profiles without a
+  commission are not-found; profile visibility is authorized with `:show`.
+
+  ## Examples
+
+      iex> load_report_target(actor, "artist")
+      {:ok, %Commission{}}
+  """
+  @spec load_report_target(Actor.t(), String.t()) ::
+          {:ok, Commission.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, slug) do
+    with {:ok, {%User{deleted_at: nil} = user, commission}} <- load_commission_for_show(slug),
+         :ok <- authorize(actor, :show, user) do
+      {:ok, commission}
+    else
+      {:ok, {%User{}, %Commission{}}} -> {:error, :not_found}
+      error -> error
     end
   end
 

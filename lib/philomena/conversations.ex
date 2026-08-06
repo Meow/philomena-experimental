@@ -15,6 +15,7 @@ defmodule Philomena.Conversations do
   alias Philomena.Conversations.ConversationPage
   alias Philomena.Conversations.Message
   alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.RateLimiter
   alias Philomena.Reports
@@ -205,6 +206,26 @@ defmodule Philomena.Conversations do
     end
   end
 
+  @doc """
+  Loads a conversation by slug as a report target on behalf of `actor`.
+
+  Participants and authorized staff may report the conversation. Missing slugs
+  are always not-found and forbidden real conversations are unauthorized.
+
+  ## Examples
+
+      iex> load_report_target(actor, "conversation-slug")
+      {:ok, %Conversation{}}
+  """
+  @spec load_report_target(Actor.t(), String.t()) ::
+          {:ok, Conversation.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, slug) do
+    Conversation
+    |> where(slug: ^slug)
+    |> preload([:from, :to])
+    |> Loader.one_and_authorize(actor, :show)
+  end
+
   # Loads a conversation by slug and authorizes it for `:show`. A slug naming no
   # row authorizes `nil`: no ordinary rule permits it, so regular users get
   # `{:error, :unauthorized}`, while an admin's blanket grant lets `nil` through
@@ -385,17 +406,18 @@ defmodule Philomena.Conversations do
         where: c.id == ^message.conversation_id,
         update: [set: [from_read: false, to_read: false]]
 
-    reports_query =
-      Reports.close_report_query(actor.user, conversation_id: message.conversation_id)
-
     Multi.new()
     |> Multi.update(:message, message_changeset)
     |> Multi.update_all(:conversation, conversation_update_query, [])
-    |> Multi.update_all(:reports, reports_query, [])
+    |> Reports.put_close_reports(
+      :reports,
+      actor.user,
+      conversation_id: message.conversation_id
+    )
     |> Repo.transaction()
     |> case do
       {:ok, %{reports: {_count, reports}, message: message}} ->
-        Reports.reindex_reports(reports)
+        Reports.reindex_closed_reports(reports)
 
         ModerationLogs.create_moderation_log(
           actor,
