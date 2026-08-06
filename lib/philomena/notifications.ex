@@ -1,14 +1,12 @@
 defmodule Philomena.Notifications do
   @moduledoc """
-  Self-scoped unread-notification reads and internal event delivery.
+  Notification reads and internal event delivery.
 
-  Readers accept an `Actor` and can only inspect that actor's user. Event
-  broadcasts are idempotent upserts: one unread row exists per recipient and
-  event subject, and a repeated event refreshes it without changing its original
-  creation time. Production event owners call these services from
-  `Ecto.Multi.run/3`, so their database changes and notifications commit or roll
-  back together. Clear operations are idempotent and intentionally accept `nil`
-  users for anonymous read paths.
+  At most one unread row exists per recipient and event subject, and a repeated
+  broadcast refreshes it without changing its original creation time.
+
+  Event owners call these services from `Ecto.Multi.run/3`, so their database changes
+  and notifications commit or roll back together.
   """
 
   import Ecto.Query, warn: false
@@ -57,29 +55,31 @@ defmodule Philomena.Notifications do
   @typedoc "The number of notification rows affected by a broadcast or clear."
   @type count_result :: {:ok, non_neg_integer()}
 
-  defp category_query(:channel_live),
-    do: from(notification in ChannelLiveNotification, preload: :channel)
+  defp category_query(category) do
+    case category do
+      :channel_live ->
+        from(n in ChannelLiveNotification, preload: :channel)
 
-  defp category_query(:gallery_image),
-    do: from(notification in GalleryImageNotification, preload: [gallery: :user])
+      :gallery_image ->
+        from(n in GalleryImageNotification, preload: [gallery: :user])
 
-  defp category_query(:image_comment) do
-    from(notification in ImageCommentNotification,
-      preload: [image: [:sources, tags: :aliases], comment: :user]
-    )
+      :forum_post ->
+        from(n in ForumPostNotification, preload: [topic: :forum, post: :user])
+
+      :forum_topic ->
+        from(n in ForumTopicNotification, preload: [topic: [:forum, :user]])
+
+      :image_comment ->
+        from(n in ImageCommentNotification,
+          preload: [image: [:sources, tags: :aliases], comment: :user]
+        )
+
+      :image_merge ->
+        from(n in ImageMergeNotification,
+          preload: [:source, target: [:sources, tags: :aliases]]
+        )
+    end
   end
-
-  defp category_query(:image_merge) do
-    from(notification in ImageMergeNotification,
-      preload: [:source, target: [:sources, tags: :aliases]]
-    )
-  end
-
-  defp category_query(:forum_topic),
-    do: from(notification in ForumTopicNotification, preload: [topic: [:forum, :user]])
-
-  defp category_query(:forum_post),
-    do: from(notification in ForumPostNotification, preload: [topic: :forum, post: :user])
 
   defp user_category_query(category, %User{} = user) do
     category
@@ -87,26 +87,23 @@ defmodule Philomena.Notifications do
     |> where(user_id: ^user.id)
   end
 
-  defp union_all_queries([query | rest]) do
-    Enum.reduce(rest, query, fn next, union -> union_all(union, ^next) end)
-  end
-
   defp unread_count(%User{} = user) do
-    @categories
-    |> Enum.map(fn category ->
-      category
-      |> user_category_query(user)
-      |> exclude(:preload)
-      |> select([_notification], %{one: 1})
-    end)
-    |> union_all_queries()
+    queries =
+      Enum.map(@categories, fn category ->
+        category
+        |> user_category_query(user)
+        |> exclude(:preload)
+        |> select([_notification], %{one: 1})
+      end)
+
+    queries
+    |> Enum.reduce(&union_all(&2, ^&1))
     |> Repo.aggregate(:count)
   end
 
   defp grouped_unread(%User{} = user, pagination) do
     Enum.map(@categories, fn category ->
-      page = category |> unread_page(user, pagination)
-      {category, page}
+      {category, unread_page(category, user, pagination)}
     end)
   end
 
@@ -133,11 +130,17 @@ defmodule Philomena.Notifications do
     |> insert_notifications(notification_schema, unique_key)
   end
 
-  defp subscription_query(subscription, %User{id: user_id}) do
-    from(row in subscription, where: row.user_id != ^user_id)
-  end
+  defp subscription_query(subscription, author) do
+    case author do
+      %User{id: user_id} ->
+        # Avoid sending notifications to the user which performed the action
+        from(row in subscription, where: row.user_id != ^user_id)
 
-  defp subscription_query(subscription, _anonymous_author), do: subscription
+      _anonymous_author ->
+        # When not created by a user, send notifications to all subscribers
+        subscription
+    end
+  end
 
   defp convert_to_notification(subscription, extra) do
     now = dynamic([_row], type(^DateTime.utc_now(:second), :utc_datetime))
@@ -172,15 +175,18 @@ defmodule Philomena.Notifications do
   defp clear_for_user(_query, nil), do: {:ok, 0}
 
   defp clear_for_user(query, %User{} = user) do
-    {count, nil} = query |> where(user_id: ^user.id) |> Repo.delete_all()
+    {count, nil} =
+      query
+      |> where(user_id: ^user.id)
+      |> Repo.delete_all()
+
     {:ok, count}
   end
 
   @doc """
   Parses a notification category route parameter.
 
-  Unknown values are `{:error, :not_found}` rather than silently selecting a
-  different category.
+  Unknown categories are `{:error, :not_found}`.
 
   ## Examples
 
@@ -204,8 +210,7 @@ defmodule Philomena.Notifications do
   @doc """
   Counts unread notifications belonging to `actor`'s user.
 
-  Anonymous actors intentionally receive zero, allowing the browser-wide count
-  plug to remain a no-op for logged-out requests.
+  Anonymous actors receive zero.
 
   ## Examples
 
@@ -221,10 +226,9 @@ defmodule Philomena.Notifications do
   def total_unread_count(%Actor{user: %User{} = user}), do: unread_count(user)
 
   @doc """
-  Loads a paginated page for every unread category belonging to `actor`.
+  Loads paginated notifications for every unread category belonging to `actor`.
 
-  Anonymous actors are unauthorized. No user locator is accepted, so another
-  user's notifications cannot be selected.
+  Anonymous actors are considered unauthorized.
 
   ## Examples
 
@@ -246,8 +250,8 @@ defmodule Philomena.Notifications do
   @doc """
   Loads one parsed unread category belonging to `actor`.
 
-  Returns the parsed category with its page so controllers cannot diverge from
-  context parsing. Unknown categories are `{:error, :not_found}`.
+  Returns the parsed category with its page. Unknown categories are
+  `{:error, :not_found}`.
 
   ## Examples
 
@@ -271,11 +275,10 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Broadcasts a live-channel event to the channel's subscribers.
+  Broadcasts a channel go-live event to the channel's subscribers.
 
-  This duplicate-safe write participates in the caller's ambient Repo
-  transaction. The owning context is responsible for deciding that the event
-  is authorized.
+  This write participates in the caller's ambient Repo transaction.
+  The owning context is responsible for deciding that the event is authorized.
 
   ## Examples
 
@@ -294,10 +297,10 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Broadcasts a new-post event to topic subscribers other than the author.
+  Broadcasts a new post event to topic subscribers other than the author.
 
-  This duplicate-safe write participates in the caller's ambient Repo
-  transaction. The owning context is responsible for authorizing the post.
+  This write participates in the caller's ambient Repo transaction.
+  The owning context is responsible for authorizing the post.
 
   ## Examples
 
@@ -317,10 +320,10 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Broadcasts a new-topic event to forum subscribers other than the author.
+  Broadcasts a new topic event to forum subscribers other than the author.
 
-  This duplicate-safe write participates in the caller's ambient Repo
-  transaction. The owning context is responsible for authorizing the topic.
+  This write participates in the caller's ambient Repo transaction.
+  The owning context is responsible for authorizing the topic.
 
   ## Examples
 
@@ -340,10 +343,10 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Broadcasts a gallery-image event to gallery subscribers.
+  Broadcasts an images added event to gallery subscribers.
 
-  This duplicate-safe write participates in the caller's ambient Repo
-  transaction. The owning context is responsible for authorizing the change.
+  This write participates in the caller's ambient Repo transaction.
+  The owning context is responsible for authorizing the change.
 
   ## Examples
 
@@ -362,10 +365,10 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Broadcasts an image-comment event to image subscribers other than the author.
+  Broadcasts an image comment event to image subscribers other than the author.
 
-  This duplicate-safe write participates in the caller's ambient Repo
-  transaction. The owning context is responsible for authorizing the comment.
+  This write participates in the caller's ambient Repo transaction.
+  The owning context is responsible for authorizing the comment.
 
   ## Examples
 
@@ -385,10 +388,10 @@ defmodule Philomena.Notifications do
   end
 
   @doc """
-  Broadcasts an image-merge event to subscribers of the target image.
+  Broadcasts an image merge event to subscribers of the target image.
 
-  This duplicate-safe write participates in the caller's ambient Repo
-  transaction. The owning context is responsible for authorizing the merge.
+  This write participates in the caller's ambient Repo transaction.
+  The owning context is responsible for authorizing the merge.
 
   ## Examples
 
@@ -409,8 +412,8 @@ defmodule Philomena.Notifications do
   @doc """
   Clears `user`'s live notification for `channel`.
 
-  Repeated clears and a `nil` user remove zero rows. The delete participates in
-  the caller's ambient Repo transaction.
+  The clear participates in the caller's ambient Repo transaction.
+  Passing a `nil` user removes zero rows.
 
   ## Examples
 
@@ -431,8 +434,8 @@ defmodule Philomena.Notifications do
   @doc """
   Clears `user`'s new-post notification for `topic`.
 
-  Repeated clears and a `nil` user remove zero rows. The delete participates in
-  the caller's ambient Repo transaction.
+  The clear participates in the caller's ambient Repo transaction.
+  Passing a `nil` user removes zero rows.
 
   ## Examples
 
@@ -450,8 +453,8 @@ defmodule Philomena.Notifications do
   @doc """
   Clears `user`'s new-topic notification for `topic`.
 
-  Repeated clears and a `nil` user remove zero rows. The delete participates in
-  the caller's ambient Repo transaction.
+  The clear participates in the caller's ambient Repo transaction.
+  Passing a `nil` user removes zero rows.
 
   ## Examples
 
@@ -469,8 +472,8 @@ defmodule Philomena.Notifications do
   @doc """
   Clears `user`'s image notification for `gallery`.
 
-  Repeated clears and a `nil` user remove zero rows. The delete participates in
-  the caller's ambient Repo transaction.
+  The clear participates in the caller's ambient Repo transaction.
+  Passing a `nil` user removes zero rows.
 
   ## Examples
 
@@ -488,8 +491,8 @@ defmodule Philomena.Notifications do
   @doc """
   Clears `user`'s comment notification for `image`.
 
-  Repeated clears and a `nil` user remove zero rows. The delete participates in
-  the caller's ambient Repo transaction.
+  The clear participates in the caller's ambient Repo transaction.
+  Passing a `nil` user removes zero rows.
 
   ## Examples
 
@@ -507,8 +510,8 @@ defmodule Philomena.Notifications do
   @doc """
   Clears `user`'s merge notification for `image`.
 
-  Repeated clears and a `nil` user remove zero rows. The delete participates in
-  the caller's ambient Repo transaction.
+  The clear participates in the caller's ambient Repo transaction.
+  Passing a `nil` user removes zero rows.
 
   ## Examples
 
