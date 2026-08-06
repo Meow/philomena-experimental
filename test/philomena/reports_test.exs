@@ -316,6 +316,41 @@ defmodule Philomena.ReportsTest do
     end
   end
 
+  describe "report transition changesets" do
+    test "claim requires an open, unclaimed report" do
+      moderator = moderator_user_fixture()
+
+      closed = Report.claim_changeset(%Report{open: false}, moderator)
+      claimed = Report.claim_changeset(%Report{open: true, admin_id: moderator.id}, moderator)
+
+      refute closed.valid?
+      assert closed.errors[:state] == {"must be open", []}
+      refute claimed.valid?
+      assert claimed.errors[:admin_id] == {"has already been claimed", []}
+    end
+
+    test "unclaim requires an open report and is unchanged when already unclaimed" do
+      moderator = moderator_user_fixture()
+
+      closed = Report.unclaim_changeset(%Report{open: false, admin_id: moderator.id})
+      unclaimed = Report.unclaim_changeset(%Report{open: true, state: "open"})
+
+      refute closed.valid?
+      assert closed.errors[:state] == {"must be open", []}
+      assert unclaimed.valid?
+      assert unclaimed.changes == %{}
+    end
+
+    test "close is unchanged when the report is already closed" do
+      report = %Report{open: false, state: "closed", admin_id: moderator_user_fixture().id}
+
+      changeset = Report.close_changeset(report, moderator_user_fixture())
+
+      assert changeset.valid?
+      assert changeset.changes == %{}
+    end
+  end
+
   describe "staff transitions" do
     setup do
       %{report: report_fixture(image_id: image_fixture().id)}

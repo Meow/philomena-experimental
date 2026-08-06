@@ -24,7 +24,6 @@ defmodule Philomena.Reports do
   alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.IndexWorker
-  alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
@@ -256,74 +255,49 @@ defmodule Philomena.Reports do
       ]
   end
 
-  defp locked_report(repo, actor, id, action) do
-    report =
-      Report
-      |> where(id: ^id)
-      |> lock("FOR UPDATE")
-      |> repo.one()
-
-    with %Report{} <- report,
-         :ok <- authorize(actor, action, report) do
-      {:ok, report}
-    else
-      nil -> {:error, :not_found}
-      {:error, :unauthorized} = error -> error
-    end
-  end
-
-  defp invalid_transition(report, field, message) do
+  defp claim_transition(report, user) do
     report
-    |> Report.changeset(%{})
-    |> Ecto.Changeset.add_error(field, message)
+    |> Report.claim_changeset(user)
+    |> prepare_transition()
   end
 
-  defp claim_transition(%Report{open: false} = report, _user) do
-    {:error, invalid_transition(report, :state, "must be open")}
+  defp unclaim_transition(report, _user) do
+    report
+    |> Report.unclaim_changeset()
+    |> prepare_transition()
   end
 
-  defp claim_transition(%Report{admin_id: admin_id} = report, _user)
-       when not is_nil(admin_id) do
-    {:error, invalid_transition(report, :admin_id, "has already been claimed")}
+  defp close_transition(report, user) do
+    report
+    |> Report.close_changeset(user)
+    |> prepare_transition()
   end
 
-  defp claim_transition(report, user), do: {:ok, Report.claim_changeset(report, user)}
-
-  defp unclaim_transition(%Report{open: false} = report, _user) do
-    {:error, invalid_transition(report, :state, "must be open")}
+  defp prepare_transition(%Ecto.Changeset{valid?: false} = changeset) do
+    {:error, changeset}
   end
 
-  defp unclaim_transition(%Report{admin_id: nil}, _user), do: {:ok, :noop}
-  defp unclaim_transition(report, _user), do: {:ok, Report.unclaim_changeset(report)}
+  defp prepare_transition(%Ecto.Changeset{changes: changes}) when map_size(changes) == 0 do
+    {:ok, :noop}
+  end
 
-  defp close_transition(%Report{open: false}, _user), do: {:ok, :noop}
-  defp close_transition(report, user), do: {:ok, Report.close_changeset(report, user)}
+  defp prepare_transition(%Ecto.Changeset{} = changeset), do: {:ok, changeset}
 
   defp transition_report(actor, id, action, transition, log_type, log_body) do
-    case IntegerId.parse(id) do
-      {:ok, report_id} ->
-        transact_report_transition(
-          actor,
-          report_id,
-          action,
-          transition,
-          log_type,
-          log_body
-        )
-        |> normalize_transition_result()
-
-      :error ->
-        {:error, :not_found}
-    end
+    transact_report_transition(actor, id, action, transition, log_type, log_body)
+    |> normalize_transition_result()
   end
 
-  defp transact_report_transition(actor, report_id, action, transition, log_type, log_body) do
+  defp transact_report_transition(actor, id, action, transition, log_type, log_body) do
     Repo.transaction(fn ->
-      with {:ok, report} <- locked_report(Repo, actor, report_id, action),
+      with {:ok, report} <-
+             Report
+             |> lock("FOR UPDATE")
+             |> Loader.fetch_and_authorize(actor, action, id),
            {:ok, transition_result} <- transition.(report, actor.user) do
         persist_transition(
           actor,
-          report_id,
+          report.id,
           report,
           transition_result,
           log_type,

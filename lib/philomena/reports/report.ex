@@ -85,10 +85,10 @@ defmodule Philomena.Reports.Report do
     |> validate_required([:reason])
   end
 
-  # Ensure that the report is not currently claimed before
-  # attempting to claim
   def claim_changeset(report, user) do
     change(report)
+    |> validate_open()
+    |> validate_unclaimed()
     |> put_change(:admin_id, user.id)
     |> put_change(:open, true)
     |> put_change(:state, "in_progress")
@@ -96,16 +96,35 @@ defmodule Philomena.Reports.Report do
 
   def unclaim_changeset(report) do
     change(report)
+    |> validate_open()
     |> put_change(:admin_id, nil)
     |> put_change(:open, true)
     |> put_change(:state, "open")
   end
+
+  def close_changeset(%__MODULE__{open: false} = report, _user), do: change(report)
 
   def close_changeset(report, user) do
     change(report)
     |> put_change(:admin_id, user.id)
     |> put_change(:open, false)
     |> put_change(:state, "closed")
+  end
+
+  defp validate_open(changeset) do
+    if get_field(changeset, :open) do
+      changeset
+    else
+      add_error(changeset, :state, "must be open")
+    end
+  end
+
+  defp validate_unclaimed(changeset) do
+    if is_nil(get_field(changeset, :admin_id)) do
+      changeset
+    else
+      add_error(changeset, :admin_id, "has already been claimed")
+    end
   end
 
   @doc false
