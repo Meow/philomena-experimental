@@ -13,7 +13,7 @@ defmodule Philomena.Commissions.SearchQuery do
   end
 
   @doc false
-  def changeset(query, params) do
+  def changeset(query, params \\ %{}) do
     cast(query, params, [:item_type, :category, :keywords, :price_min, :price_max])
   end
 end

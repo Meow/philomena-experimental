@@ -21,7 +21,7 @@ defmodule Philomena.Commissions.QueryBuilder do
       * price_max - Maximum base price
 
   Returns `{:ok, query}` with a queryable that can be used with Repo.paginate/2,
-  or `{:error, changeset}` if the provided parameters are invalid.
+  or `{:error, default_query, changeset}` if the provided parameters are invalid.
   """
   def search_commissions(params \\ %{}) do
     %SearchQuery{}
@@ -37,7 +37,7 @@ defmodule Philomena.Commissions.QueryBuilder do
          |> maybe_filter_keywords(sq)}
 
       {:error, changeset} ->
-        {:error, changeset}
+        {:error, invalid_search_query(), changeset}
     end
   end
 
@@ -69,6 +69,10 @@ defmodule Philomena.Commissions.QueryBuilder do
       group_by: c.id,
       order_by: [asc: fragment("random()")],
       preload: [user: [awards: :badge], items: [example_image: [:sources, tags: :aliases]]]
+  end
+
+  defp invalid_search_query do
+    where(commission_search_query(), false)
   end
 
   defp maybe_filter_price(query, %SearchQuery{} = sq) do

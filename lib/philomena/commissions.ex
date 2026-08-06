@@ -183,28 +183,14 @@ defmodule Philomena.Commissions do
     |> Repo.transaction()
   end
 
-  defp change_search_query do
-    SearchQuery.changeset(%SearchQuery{}, %{})
-  end
-
   defp search_directory(params, pagination) do
     case QueryBuilder.search_commissions(params) do
       {:ok, commissions} ->
-        {Repo.paginate(commissions, pagination), change_search_query()}
+        {Repo.paginate(commissions, pagination), SearchQuery.changeset(%SearchQuery{})}
 
-      {:error, changeset} ->
-        {empty_page(pagination), changeset}
+      {:error, commissions, changeset} ->
+        {Repo.paginate(commissions, pagination), changeset}
     end
-  end
-
-  defp empty_page(pagination) do
-    %Scrivener.Page{
-      entries: [],
-      page_number: pagination[:page] || 1,
-      page_size: pagination[:page_size] || 25,
-      total_entries: 0,
-      total_pages: 1
-    }
   end
 
   @doc """
