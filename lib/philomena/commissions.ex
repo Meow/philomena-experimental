@@ -200,25 +200,11 @@ defmodule Philomena.Commissions do
   defp empty_page(pagination) do
     %Scrivener.Page{
       entries: [],
-      page_number: pagination_value(pagination, :page, 1),
-      page_size: pagination_value(pagination, :page_size, 25),
+      page_number: pagination[:page] || 1,
+      page_size: pagination[:page_size] || 25,
       total_entries: 0,
       total_pages: 1
     }
-  end
-
-  defp pagination_value(pagination, key, default) when is_map(pagination) do
-    Map.get(pagination, key, default)
-  end
-
-  defp pagination_value(pagination, key, default) do
-    Keyword.get(pagination, key, default)
-  end
-
-  defp current_user_with_commission(%Actor{user: nil}), do: nil
-
-  defp current_user_with_commission(%Actor{user: %User{} = user}) do
-    Repo.preload(user, :commission)
   end
 
   @doc """
@@ -227,7 +213,7 @@ defmodule Philomena.Commissions do
   The `:index` commission ability is checked before searching. Results include
   only open listings with items whose active owner has recent activity.
   Invalid search parameters return an empty page and the rejected search
-  changeset. The signed-in viewer is returned with their commission preloaded.
+  changeset. If present, the viewing user is returned with commission preloaded.
 
   ## Examples
 
@@ -239,14 +225,13 @@ defmodule Philomena.Commissions do
           {:ok, Directory.t()} | {:error, :unauthorized}
   def load_directory(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Commission) do
-      params = if is_map(params), do: params, else: %{}
       {commissions, changeset} = search_directory(params, pagination)
 
       {:ok,
        %Directory{
          commissions: commissions,
          changeset: changeset,
-         current_user: current_user_with_commission(actor)
+         current_user: Repo.preload(actor.user, :commission)
        }}
     end
   end
