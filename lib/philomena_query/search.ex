@@ -441,7 +441,7 @@ defmodule PhilomenaQuery.Search do
   each instance of a schema struct and can index with hundreds of times the throughput.
 
   The queryable should be a schema type with its indexing preloads included in
-  the query. The options are forwarded to `PhilomenaQuery.Batch.record_batches/3`.
+  the query. The options are forwarded to `PhilomenaQuery.Batch.record_batches/2`.
 
   Note that indexing is near real-time and requires an index refresh before documents will
   become visible. Unless changed in the mapping, this happens after 5 seconds have elapsed.
@@ -518,7 +518,7 @@ defmodule PhilomenaQuery.Search do
   each instance of a schema struct and can index with hundreds of times the throughput.
 
   The queryable should be a schema type with its indexing preloads included in
-  the query. The options are forwarded to `PhilomenaQuery.Batch.record_batches/3`.
+  the query. The options are forwarded to `PhilomenaQuery.Batch.record_batches/2`.
 
   Note that indexing is near real-time and requires an index refresh before documents will
   become visible. Unless changed in the mapping, this happens after 5 seconds have elapsed.

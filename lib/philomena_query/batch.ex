@@ -86,7 +86,7 @@ defmodule PhilomenaQuery.Batch do
   > #### Info {: .info}
   >
   > If you are looking to receive schema structures (e.g., you are querying for `Image`s,
-  > and you want to receive `Image` objects, then use `record_batches/3` instead.
+  > and you want to receive `Image` structs), then use `record_batches/2` instead.
 
   `m:Ecto.Query` structs which select the IDs in each batch are streamed out.
 
