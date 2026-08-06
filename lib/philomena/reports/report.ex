@@ -94,7 +94,7 @@ defmodule Philomena.Reports.Report do
     |> put_change(:state, "in_progress")
   end
 
-  def unclaim_changeset(report) do
+  def unclaim_changeset(report, _user) do
     change(report)
     |> validate_open()
     |> put_change(:admin_id, nil)

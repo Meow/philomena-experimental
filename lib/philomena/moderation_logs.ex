@@ -74,11 +74,9 @@ defmodule Philomena.ModerationLogs do
   end
 
   @doc """
-  Immediately inserts an audit record for a legacy or non-transactional action.
+  Inserts an audit record within the caller's ambient Repo transaction.
 
-  New transactional mutations should use `put_log/6`. This compatibility
-  service remains while later context waves move existing post-hoc log calls
-  into their owning `Ecto.Multi` transactions.
+  Transactional mutations should prefer `put_log/6`.
 
   ## Examples
 

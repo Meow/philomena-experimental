@@ -332,8 +332,8 @@ defmodule Philomena.ReportsTest do
     test "unclaim requires an open report and is unchanged when already unclaimed" do
       moderator = moderator_user_fixture()
 
-      closed = Report.unclaim_changeset(%Report{open: false, admin_id: moderator.id})
-      unclaimed = Report.unclaim_changeset(%Report{open: true, state: "open"})
+      closed = Report.unclaim_changeset(%Report{open: false, admin_id: moderator.id}, moderator)
+      unclaimed = Report.unclaim_changeset(%Report{open: true, state: "open"}, moderator)
 
       refute closed.valid?
       assert closed.errors[:state] == {"must be open", []}

@@ -109,10 +109,6 @@ defmodule Philomena.Reports do
     end
   end
 
-  defp build_report_page(_actor, %{"rq" => _query_string}, _pagination) do
-    {:error, :invalid_query}
-  end
-
   defp build_report_page(%Actor{user: %User{id: user_id}} = actor, _params, pagination) do
     query = %{
       bool: %{
@@ -209,7 +205,7 @@ defmodule Philomena.Reports do
   defp open_report_count(query) do
     query
     |> where([report], report.state in ["open", "in_progress"])
-    |> Repo.aggregate(:count, :id)
+    |> Repo.aggregate(:count)
   end
 
   defp insert_user_report(actor, attrs, target) do
@@ -255,94 +251,42 @@ defmodule Philomena.Reports do
       ]
   end
 
-  defp claim_transition(report, user) do
-    report
-    |> Report.claim_changeset(user)
-    |> prepare_transition()
+  defp lock_and_authorize_report(actor, action, id) do
+    Report
+    |> lock("FOR UPDATE")
+    |> Loader.fetch_and_authorize(actor, action, id)
   end
-
-  defp unclaim_transition(report, _user) do
-    report
-    |> Report.unclaim_changeset()
-    |> prepare_transition()
-  end
-
-  defp close_transition(report, user) do
-    report
-    |> Report.close_changeset(user)
-    |> prepare_transition()
-  end
-
-  defp prepare_transition(%Ecto.Changeset{valid?: false} = changeset) do
-    {:error, changeset}
-  end
-
-  defp prepare_transition(%Ecto.Changeset{changes: changes}) when map_size(changes) == 0 do
-    {:ok, :noop}
-  end
-
-  defp prepare_transition(%Ecto.Changeset{} = changeset), do: {:ok, changeset}
 
   defp transition_report(actor, id, action, transition, log_type, log_body) do
-    transact_report_transition(actor, id, action, transition, log_type, log_body)
-    |> normalize_transition_result()
-  end
-
-  defp transact_report_transition(actor, id, action, transition, log_type, log_body) do
-    Repo.transaction(fn ->
-      with {:ok, report} <-
-             Report
-             |> lock("FOR UPDATE")
-             |> Loader.fetch_and_authorize(actor, action, id),
-           {:ok, transition_result} <- transition.(report, actor.user) do
-        persist_transition(
-          actor,
-          report.id,
-          report,
-          transition_result,
-          log_type,
-          log_body
-        )
-      else
-        {:error, reason} -> Repo.rollback(reason)
+    Repo.transact(fn ->
+      with {:ok, report} <- lock_and_authorize_report(actor, action, id) do
+        report
+        |> transition.(actor.user)
+        |> apply_transition(report, actor, log_type, id, log_body)
       end
     end)
-  end
-
-  defp persist_transition(_actor, _report_id, report, :noop, _log_type, _log_body) do
-    {report, false}
-  end
-
-  defp persist_transition(
-         actor,
-         report_id,
-         _report,
-         %Ecto.Changeset{} = changeset,
-         log_type,
-         log_body
-       ) do
-    Multi.new()
-    |> Multi.update(:report, changeset)
-    |> ModerationLogs.put_log(
-      :moderation_log,
-      actor,
-      log_type,
-      Paths.admin_report_path(report_id),
-      log_body
-    )
-    |> Repo.transact()
     |> case do
-      {:ok, %{report: report}} -> {report, true}
-      {:error, _step, reason, _changes} -> Repo.rollback(reason)
+      {:ok, report} ->
+        reindex_report(report)
+        {:ok, report}
+
+      error ->
+        error
     end
   end
 
-  defp normalize_transition_result({:ok, {report, changed?}}) do
-    if changed?, do: reindex_report(report)
-    {:ok, report}
-  end
+  defp apply_transition(changeset, report, actor, log_type, id, log_body) do
+    if map_size(changeset.changes) > 0 do
+      path = Paths.admin_report_path(id)
 
-  defp normalize_transition_result({:error, reason}), do: {:error, reason}
+      with {:ok, report} <- Repo.update(changeset),
+           {:ok, _log} <- ModerationLogs.create_moderation_log(actor, log_type, path, log_body) do
+        {:ok, report}
+      end
+    else
+      {:ok, report}
+    end
+  end
 
   defp reindex_report(%Report{id: id} = report) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", [id]])
@@ -592,7 +536,7 @@ defmodule Philomena.Reports do
       actor,
       id,
       :claim,
-      &claim_transition/2,
+      &Report.claim_changeset/2,
       "Report.Claim:create",
       "Claimed report"
     )
@@ -618,7 +562,7 @@ defmodule Philomena.Reports do
       actor,
       id,
       :unclaim,
-      &unclaim_transition/2,
+      &Report.unclaim_changeset/2,
       "Report.Claim:delete",
       "Released report"
     )
@@ -644,7 +588,7 @@ defmodule Philomena.Reports do
       actor,
       id,
       :close,
-      &close_transition/2,
+      &Report.close_changeset/2,
       "Report.Close:create",
       "Closed report"
     )
