@@ -9,8 +9,7 @@ and message approval scopes the message query to the route conversation before
 authorization. Missing conversations and malformed, absent, or mismatched
 message IDs are consistently not-found.
 
-Index filters and creation/message params normalize before casting. Invalid
-partner filters produce an empty page plus an explicit query changeset;
+Index filters params normalize before casting. Invalid partner filters produce an empty page plus an explicit query changeset;
 non-map creation input returns a form error; active recipients resolve through
 Users, excluding deactivated accounts; and reply validation retains the actual
 message changeset for rendering. Raw creation/state/count helpers are private,
@@ -23,8 +22,7 @@ read/hide/report, and message approval controllers.
 
 ## Findings
 
-- `create_conversation_from/2` assumes map params and crashes otherwise; listing
-  can raise a cast error from malformed query params.
+- Listing can raise a cast error from malformed query params.
 - Conversation loading authorizes a possibly `nil` result before checking
   presence, creating the same role-dependent absent result as Loader.
 - New-conversation uses `verify_not_banned/1`; create and message writes use
@@ -38,8 +36,7 @@ read/hide/report, and message approval controllers.
 - Replace slug and message ID loading with shared safe query-based loaders:
   fetch a real conversation visible to the actor, and scope a message to it when
   the route provides both. Missing is always not-found.
-- Normalize params before changeset/query compilation. Non-map create input and
-  invalid listing filters return a changeset/query error suitable for the
+- Normalize params before changeset/query compilation. Invalid listing filters return a changeset/query error suitable for the
   controller instead of raising.
 - Require `verify_write_access/1` for the new form as well as create/message
   writes. Encode participant/admin visibility through abilities without passing
@@ -53,7 +50,6 @@ read/hide/report, and message approval controllers.
 
 ## TODO resolution
 
-- Gracefully handle non-map create params.
 - Convert list cast failures into an explicit query error.
 - Return message changesets on validation failure.
 
