@@ -1,56 +1,174 @@
 defmodule Philomena.Conversations do
   @moduledoc """
-  The Conversations context.
+  Actor-scoped conversation listing, creation, reading, replies, and message
+  approval.
+
+  Conversation slugs load before authorization, nested message IDs are scoped
+  to their route conversation, and missing resources have actor-independent
+  not-found results. Database writes complete before report indexing and rate
+  limiter side effects run. Conversation and message writes do not emit email
+  or notification events; the header count reads the persisted participant
+  flags directly.
   """
 
   import Ecto.Query, warn: false
-
-  import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
-  alias Philomena.Repo
   alias Philomena.Attribution.Actor
   alias Philomena.Conversations.Conversation
+  alias Philomena.Conversations.ConversationForm
+  alias Philomena.Conversations.ConversationIndex
   alias Philomena.Conversations.ConversationPage
+  alias Philomena.Conversations.ConversationQuery
   alias Philomena.Conversations.Message
+  alias Philomena.Conversations.MessageCreated
+  alias Philomena.Conversations.MessageForm
   alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.RateLimiter
+  alias Philomena.Repo
   alias Philomena.Reports
   alias Philomena.Users
+  alias Philomena.Users.User
 
   @conversation_create_window 60
 
-  # Creates a conversation with `from` as the sender. Visible for testing.
-  @doc false
-  def create_conversation_from(from, attrs \\ %{}) do
-    # TODO: handle non-map params gracefully instead of immediately crashing
-    to = Users.get_user_by_name(attrs["recipient"])
+  defp normalize_params(%{} = params), do: params
+  defp normalize_params(_params), do: %{}
 
-    %Conversation{}
-    |> Conversation.creation_changeset(from, to, attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, conversation} ->
-        report_non_approved_message(hd(conversation.messages))
-        {:ok, conversation}
-
-      error ->
-        error
+  defp normalized_recipient(params) do
+    case Map.get(params, "recipient") do
+      recipient when is_binary(recipient) -> recipient
+      _recipient -> nil
     end
   end
 
-  # Returns an `%Ecto.Changeset{}` for tracking conversation changes.
+  defp new_conversation(recipient) do
+    %Conversation{recipient: recipient, messages: [%Message{}]}
+  end
+
   defp change_conversation(%Conversation{} = conversation) do
     Conversation.changeset(conversation, %{})
   end
 
-  # Marks a conversation as read or unread from the perspective of the given user.
-  # Visible for testing.
-  @doc false
-  def mark_conversation_read(%Conversation{} = conversation, user, read \\ true) do
+  defp conversation_form(%Conversation{} = conversation, %Ecto.Changeset{} = changeset) do
+    %ConversationForm{conversation: conversation, changeset: changeset}
+  end
+
+  defp conversation_form(%Conversation{} = conversation) do
+    conversation_form(conversation, change_conversation(conversation))
+  end
+
+  defp recipient_for_creation(actor, recipient) do
+    case Users.load_active_user_by_name(actor, recipient) do
+      {:ok, user} -> user
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp insert_conversation(actor, attrs) do
+    attrs = normalize_params(attrs)
+    recipient = normalized_recipient(attrs)
+    conversation = %Conversation{recipient: recipient}
+    to = recipient_for_creation(actor, recipient)
+    changeset = Conversation.creation_changeset(conversation, actor.user, to, attrs)
+
+    case Repo.insert(changeset) do
+      {:ok, conversation} ->
+        conversation.messages
+        |> List.first()
+        |> report_non_approved_message()
+
+        {:ok, conversation}
+
+      {:error, changeset} ->
+        {:error, conversation_form(conversation, changeset)}
+    end
+  end
+
+  defp compile_index_query(params) do
+    changeset = ConversationQuery.changeset(%ConversationQuery{}, params)
+
+    case Ecto.Changeset.apply_action(changeset, :index) do
+      {:ok, query} -> {:ok, {query, changeset}}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp conversation_index_query(%User{id: user_id}, partner_id) do
+    Conversation
+    |> where(
+      [conversation],
+      (conversation.from_id == ^user_id and not conversation.from_hidden) or
+        (conversation.to_id == ^user_id and not conversation.to_hidden)
+    )
+    |> maybe_filter_partner(user_id, partner_id)
+    |> then(fn query ->
+      from conversation in query,
+        as: :conversation,
+        inner_lateral_join:
+          count in subquery(
+            from message in Message,
+              where: message.conversation_id == parent_as(:conversation).id,
+              select: %{value: count()}
+          ),
+        on: true,
+        order_by: [desc: conversation.last_message_at, desc: conversation.id],
+        preload: [:to, :from],
+        select: %{conversation | message_count: count.value}
+    end)
+  end
+
+  defp maybe_filter_partner(query, _user_id, nil), do: query
+
+  defp maybe_filter_partner(query, user_id, partner_id) do
+    where(
+      query,
+      [conversation],
+      (conversation.from_id == ^partner_id and conversation.to_id == ^user_id) or
+        (conversation.to_id == ^partner_id and conversation.from_id == ^user_id)
+    )
+  end
+
+  defp empty_page(pagination) do
+    %Scrivener.Page{
+      entries: [],
+      page_number:
+        pagination_value(
+          pagination,
+          :page,
+          pagination_value(pagination, :page_number, 1)
+        ),
+      page_size: pagination_value(pagination, :page_size, 25),
+      total_entries: 0,
+      total_pages: 1
+    }
+  end
+
+  defp pagination_value(pagination, key, default) when is_map(pagination) do
+    Map.get(pagination, key, default)
+  end
+
+  defp pagination_value(pagination, key, default) do
+    Keyword.get(pagination, key, default)
+  end
+
+  defp load_conversation(actor, slug, action, preloads \\ []) do
+    Conversation
+    |> where(slug: ^slug)
+    |> preload(^preloads)
+    |> Loader.one_and_authorize(actor, action)
+  end
+
+  defp participant?(%Conversation{} = conversation, %User{id: user_id}) do
+    conversation.from_id == user_id or conversation.to_id == user_id
+  end
+
+  defp participant?(%Conversation{}, nil), do: false
+
+  defp update_read_state(%Conversation{} = conversation, %User{} = user, read) do
     changes =
       %{}
       |> put_conditional(:to_read, read, conversation.to_id == user.id)
@@ -61,14 +179,7 @@ defmodule Philomena.Conversations do
     |> Repo.update()
   end
 
-  # Marks a conversation as hidden or visible from the perspective of the given user.
-  #
-  # Hidden conversations are not shown in the list of conversations for the user, and
-  # are not counted when retrieving the number of unread conversations.
-  #
-  # Visible for testing.
-  @doc false
-  def mark_conversation_hidden(%Conversation{} = conversation, user, hidden \\ true) do
+  defp update_hidden_state(%Conversation{} = conversation, %User{} = user, hidden) do
     changes =
       %{}
       |> put_conditional(:to_hidden, hidden, conversation.to_id == user.id)
@@ -79,109 +190,188 @@ defmodule Philomena.Conversations do
     |> Repo.update()
   end
 
-  defp put_conditional(map, key, value, condition) do
-    if condition do
-      Map.put(map, key, value)
-    else
-      map
-    end
-  end
+  defp put_conditional(map, key, value, true), do: Map.put(map, key, value)
+  defp put_conditional(map, _key, _value, false), do: map
 
-  @doc """
-  Returns the number of unread conversations for the given user.
-
-  Conversations hidden by the given user are not counted.
-
-  ## Examples
-
-      iex> count_unread_conversations(user1)
-      0
-
-      iex> count_unread_conversations(user2)
-      7
-
-  """
-  def count_unread_conversations(user) do
+  defp unread_count(%User{id: user_id}) do
     Conversation
     |> where(
-      [c],
-      ((c.to_id == ^user.id and c.to_read == false) or
-         (c.from_id == ^user.id and c.from_read == false)) and
-        not ((c.to_id == ^user.id and c.to_hidden == true) or
-               (c.from_id == ^user.id and c.from_hidden == true))
+      [conversation],
+      ((conversation.to_id == ^user_id and not conversation.to_read) or
+         (conversation.from_id == ^user_id and not conversation.from_read)) and
+        not ((conversation.to_id == ^user_id and conversation.to_hidden) or
+               (conversation.from_id == ^user_id and conversation.from_hidden))
     )
     |> Repo.aggregate(:count)
   end
 
-  @doc """
-  Returns a `m:Scrivener.Page` of the conversations `user` participates in, on
-  their own behalf.
+  defp change_message(%Message{} = message) do
+    Message.changeset(message, %{})
+  end
 
-  Conversations `user` has hidden are excluded. When `params` carries a
-  `"with"` key, the list is restricted to conversations exchanged with that
-  partner id; otherwise every conversation involving `user` is listed, newest
-  message first. The `"with"` value is compared against the id column directly,
-  so a non-numeric value raises `Ecto.Query.CastError`.
+  defp paginate_messages(conversation, user, pagination) do
+    direction = if user.settings.messages_newest_first, do: :desc, else: :asc
 
-  ## Examples
+    Message
+    |> where(conversation_id: ^conversation.id)
+    |> order_by([{^direction, :created_at}, {^direction, :id}])
+    |> preload(:from)
+    |> Repo.paginate(pagination)
+  end
 
-      iex> list_conversations(actor, %{}, page_size: 10)
-      %Scrivener.Page{}
+  defp message_count_query(%Conversation{id: conversation_id}) do
+    from message in Message,
+      where: message.conversation_id == ^conversation_id,
+      select: count(message.id)
+  end
 
-      iex> list_conversations(actor, %{"with" => "123"}, page_size: 10)
-      %Scrivener.Page{}
+  defp new_message(%Conversation{} = conversation) do
+    Ecto.build_assoc(conversation, :messages)
+  end
 
-  """
-  @spec list_conversations(Actor.t(), map(), keyword()) :: Scrivener.Page.t()
-  def list_conversations(%Actor{user: user}, params, pagination) do
-    case params do
-      %{"with" => partner_id} ->
-        # TODO: fix cast error?
-        query =
-          from c in Conversation,
-            where:
-              (c.from_id == ^partner_id and c.to_id == ^user.id) or
-                (c.to_id == ^partner_id and c.from_id == ^user.id)
+  defp insert_message(%Conversation{} = conversation, %User{} = user, attrs) do
+    message = new_message(conversation)
+    message_changeset = Message.creation_changeset(message, normalize_params(attrs), user)
+    conversation_changeset = Conversation.new_message_changeset(conversation)
 
-        paginate_conversations(query, user, pagination)
+    Multi.new()
+    |> Multi.insert(:message, message_changeset)
+    |> Multi.update(:conversation, conversation_changeset)
+    |> Multi.one(:message_count, message_count_query(conversation))
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->
+        report_non_approved_message(message)
 
-      _ ->
-        paginate_conversations(Conversation, user, pagination)
+        {:ok,
+         %MessageCreated{
+           conversation: conversation,
+           message: message,
+           message_count: message_count
+         }}
+
+      {:error, :message, %Ecto.Changeset{} = changeset, _changes} ->
+        {:error, %MessageForm{conversation: conversation, message: message, changeset: changeset}}
+
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
     end
   end
 
-  defp paginate_conversations(queryable, user, pagination) do
-    query =
-      from c in queryable,
-        as: :conversations,
-        where:
-          (c.from_id == ^user.id and not c.from_hidden) or
-            (c.to_id == ^user.id and not c.to_hidden),
-        inner_lateral_join:
-          cnt in subquery(
-            from m in Message,
-              where: m.conversation_id == parent_as(:conversations).id,
-              select: %{count: count()}
-          ),
-        on: true,
-        order_by: [desc: :last_message_at],
-        preload: [:to, :from],
-        select: %{c | message_count: cnt.count}
+  defp item_for_approval(actor, conversation, message_id) do
+    Message
+    |> where(conversation_id: ^conversation.id)
+    |> preload(:conversation)
+    |> Loader.fetch_and_authorize(actor, :approve, message_id)
+  end
 
-    Repo.paginate(query, pagination)
+  defp approve_loaded_message(actor, message) do
+    conversation_update_query =
+      from conversation in Conversation,
+        where: conversation.id == ^message.conversation_id,
+        update: [set: [from_read: false, to_read: false]]
+
+    log_body = "Approved private message in conversation ##{message.conversation_id}"
+
+    Multi.new()
+    |> Multi.update(:message, Message.approve_changeset(message))
+    |> Multi.update_all(:conversation, conversation_update_query, [])
+    |> Reports.put_close_reports(
+      :reports,
+      actor.user,
+      conversation_id: message.conversation_id
+    )
+    |> ModerationLogs.put_log(
+      :moderation_log,
+      actor,
+      "Conversation.Message.Approve:create",
+      "/",
+      log_body
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{reports: {_count, report_ids}, message: message}} ->
+        Reports.reindex_closed_reports(report_ids)
+        {:ok, message}
+
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
+    end
+  end
+
+  defp report_non_approved_message(nil), do: {:ok, nil}
+  defp report_non_approved_message(%Message{approved: true}), do: {:ok, nil}
+
+  defp report_non_approved_message(%Message{} = message) do
+    Reports.create_system_report(
+      "Approval",
+      "PM contains externally-embedded images",
+      conversation_id: message.conversation_id
+    )
   end
 
   @doc """
-  Loads the conversation named by `slug` and assembles its `ConversationPage`, on
-  behalf of `user`.
+  Loads the signed-in actor's paginated conversation index.
 
-  The conversation is loaded with both participants and authorized for `:show`
-  (participants, moderators, and admins); an unknown slug authorizes `nil`,
-  which no ordinary rule permits, so it is `{:error, :unauthorized}`
-  (`{:error, :not_found}` for admins). `user`'s side of the conversation is
-  marked read as a side effect. The returned page carries a `m:Scrivener.Page`
-  of the messages, ordered by `user`'s `messages_newest_first` preference,
-  and a reply changeset.
+  The optional `"with"` filter is parsed as a positive user ID before query
+  compilation. Invalid or out-of-range filters return an empty page and an
+  invalid changeset rather than raising a cast/encoding error.
+
+  ## Examples
+
+      iex> load_conversation_index(actor, %{}, page: 1, page_size: 25)
+      {:ok, %ConversationIndex{}}
+
+  """
+  @spec load_conversation_index(Actor.t(), term(), Repo.pagination_params()) ::
+          {:ok, ConversationIndex.t()} | {:error, :unauthorized}
+  def load_conversation_index(%Actor{user: user} = actor, params, pagination) do
+    with :ok <- authorize(actor, :index, Conversation) do
+      case compile_index_query(params) do
+        {:ok, {query, changeset}} ->
+          conversations =
+            user
+            |> conversation_index_query(query.partner_id)
+            |> Repo.paginate(pagination)
+
+          {:ok, %ConversationIndex{conversations: conversations, changeset: changeset}}
+
+        {:error, changeset} ->
+          {:ok,
+           %ConversationIndex{
+             conversations: empty_page(pagination),
+             changeset: changeset
+           }}
+      end
+    end
+  end
+
+  @doc """
+  Returns the authenticated actor's unread, non-hidden conversation count.
+
+  This is the narrow notification-header service; raw count queries remain
+  private to Conversations.
+
+  ## Examples
+
+      iex> unread_conversation_count(actor)
+      {:ok, 3}
+
+  """
+  @spec unread_conversation_count(Actor.t()) ::
+          {:ok, non_neg_integer()} | {:error, :unauthorized}
+  def unread_conversation_count(%Actor{user: user} = actor) do
+    with :ok <- authorize(actor, :index, Conversation) do
+      {:ok, unread_count(user)}
+    end
+  end
+
+  @doc """
+  Loads one visible conversation page for `actor`.
+
+  Missing slugs are not found for every actor. Participants and authorized
+  staff may view the page. A participant's own read flag is set idempotently;
+  staff viewing a conversation do not mutate either participant's state.
 
   ## Examples
 
@@ -191,360 +381,175 @@ defmodule Philomena.Conversations do
   """
   @spec load_conversation_page(Actor.t(), String.t(), Repo.pagination_params()) ::
           {:ok, ConversationPage.t()} | {:error, :unauthorized | :not_found}
-  def load_conversation_page(%Actor{user: user}, slug, pagination) do
-    with {:ok, conversation} <- load_authorized_conversation(user, slug, [:to, :from]) do
+  def load_conversation_page(%Actor{user: user} = actor, slug, pagination) do
+    with {:ok, conversation} <- load_conversation(actor, slug, :show, [:to, :from]) do
       messages = paginate_messages(conversation, user, pagination)
-      {:ok, _conversation} = mark_conversation_read(conversation, user)
 
-      page = %ConversationPage{
-        conversation: conversation,
-        messages: messages,
-        changeset: change_message(%Message{})
-      }
+      if participant?(conversation, user) do
+        {:ok, _conversation} = update_read_state(conversation, user, true)
+      end
 
-      {:ok, page}
+      {:ok,
+       %ConversationPage{
+         conversation: conversation,
+         messages: messages,
+         changeset: change_message(%Message{})
+       }}
     end
   end
 
   @doc """
-  Loads a conversation by slug as a report target on behalf of `actor`.
+  Loads a visible conversation as a report target.
 
-  Participants and authorized staff may report the conversation. Missing slugs
-  are always not-found and forbidden real conversations are unauthorized.
-
-  ## Examples
-
-      iex> load_report_target(actor, "conversation-slug")
-      {:ok, %Conversation{}}
+  This shares the canonical load-before-authorize slug contract used by the
+  conversation page.
   """
   @spec load_report_target(Actor.t(), String.t()) ::
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, slug) do
-    Conversation
-    |> where(slug: ^slug)
-    |> preload([:from, :to])
-    |> Loader.one_and_authorize(actor, :show)
-  end
-
-  # Loads a conversation by slug and authorizes it for `:show`. A slug naming no
-  # row authorizes `nil`: no ordinary rule permits it, so regular users get
-  # `{:error, :unauthorized}`, while an admin's blanket grant lets `nil` through
-  # to `{:error, :not_found}`.
-  defp load_authorized_conversation(user, slug, preloads \\ []) do
-    conversation =
-      Conversation
-      |> where(slug: ^slug)
-      |> preload(^preloads)
-      |> Repo.one()
-
-    with :ok <- authorize(user, :show, conversation),
-         %Conversation{} <- conversation do
-      {:ok, conversation}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
+    load_conversation(actor, slug, :show, [:from, :to])
   end
 
   @doc """
-  Builds the changeset for a new conversation, on behalf of `actor`.
+  Builds a new-conversation form for `actor`.
 
-  This is a read that precedes creating a conversation, so a banned actor is
-  rejected with `{:error, :ban}`; the changeset otherwise pre-fills the given
-  `recipient`.
+  New and create apply the same write-access and class-ability prerequisites.
+  Non-string recipient input is normalized to an empty recipient.
 
   ## Examples
 
-      iex> load_new_conversation(actor, "recipient-name")
-      {:ok, %Ecto.Changeset{}}
+      iex> new_conversation(actor, "Recipient")
+      {:ok, %ConversationForm{}}
 
   """
-  @spec load_new_conversation(Actor.t(), String.t() | nil) ::
-          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
-  def load_new_conversation(%Actor{} = actor, recipient) do
-    with :ok <- verify_write_access(actor) do
-      changeset = change_conversation(%Conversation{recipient: recipient, messages: [%Message{}]})
-      {:ok, changeset}
+  @spec new_conversation(Actor.t(), term()) ::
+          {:ok, ConversationForm.t()} | {:error, :ban | :unauthorized}
+  def new_conversation(%Actor{} = actor, recipient) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :new, Conversation) do
+      recipient = if is_binary(recipient), do: recipient, else: nil
+      {:ok, recipient |> new_conversation() |> conversation_form()}
     end
   end
 
   @doc """
-  Creates a conversation sent by `actor`, from `params`.
+  Creates a conversation and its single initial message for `actor`.
 
-  A banned actor is `{:error, :ban}` and an actor with no fingerprint is
-  `{:error, :unauthorized}`. A non-exempt actor who has created a conversation
-  within the last minute gets `{:error, :rate_limited}`. A system report is
-  filed against the conversation when the first message is held for approval.
+  Params of any shape are normalized before changeset construction. Active
+  recipients resolve through Users; missing or deactivated recipients produce
+  a `ConversationForm` validation error. Successful writes are rate-counted
+  after commit, and an unapproved first message creates its system report after
+  the conversation transaction succeeds.
 
   ## Examples
 
-      iex> create_conversation(actor, %{"recipient" => "name", "title" => "Hi"})
+      iex> create_conversation(actor, attrs)
       {:ok, %Conversation{}}
 
-      iex> create_conversation(actor, %{"recipient" => "nobody"})
-      {:error, %Ecto.Changeset{}}
+      iex> create_conversation(actor, invalid_attrs)
+      {:error, %ConversationForm{}}
 
   """
-  @spec create_conversation(Actor.t(), map() | nil) ::
+  @spec create_conversation(Actor.t(), term()) ::
           {:ok, Conversation.t()}
+          | {:error, ConversationForm.t()}
           | {:error, :ban | :unauthorized | :rate_limited}
-          | {:error, Ecto.Changeset.t()}
   def create_conversation(%Actor{} = actor, params) do
     with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, Conversation),
          :ok <- RateLimiter.check_rate_limit(actor, :conversation_create),
-         {:ok, conversation} <- create_conversation_from(actor.user, params || %{}) do
+         {:ok, conversation} <- insert_conversation(actor, params) do
       RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
       {:ok, conversation}
     end
   end
 
   @doc """
-  Marks the conversation named by `slug` as read (`read: true`) or unread
-  (`read: false`) for `user`, on their own behalf.
+  Marks `actor`'s participant side of the conversation read or unread.
 
-  The conversation is authorized for `:show` first; an unknown slug or a
-  conversation `user` may not view is `{:error, :unauthorized}` (an admin's
-  blanket grant turns an unknown slug into `{:error, :not_found}`). The read
-  flag is set only for `user`'s own side, so a moderator viewing a conversation
-  they are not part of succeeds without changing either flag.
-
-  Returns `{:ok, conversation}`.
-
-  ## Examples
-
-      iex> set_conversation_read(actor, "slug")
-      {:ok, %Conversation{}}
-
-      iex> set_conversation_read(actor, "slug", false)
-      {:ok, %Conversation{}}
-
+  The operation is idempotent. Authorized staff may view the conversation but,
+  because they are not a participant, do not change either participant flag.
+  Missing slugs are always not found.
   """
   @spec set_conversation_read(Actor.t(), String.t(), boolean()) ::
-          {:ok, Conversation.t()} | {:error, :unauthorized | :not_found}
-  def set_conversation_read(%Actor{user: user}, slug, read \\ true) do
-    with {:ok, conversation} <- load_authorized_conversation(user, slug) do
-      {:ok, _conversation} = mark_conversation_read(conversation, user, read)
-      {:ok, conversation}
+          {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def set_conversation_read(%Actor{user: user} = actor, slug, read \\ true) do
+    with {:ok, conversation} <- load_conversation(actor, slug, :show) do
+      if participant?(conversation, user) do
+        update_read_state(conversation, user, read)
+      else
+        {:ok, conversation}
+      end
     end
   end
 
   @doc """
-  Marks the conversation named by `slug` as hidden (`hidden: true`) or restored
-  (`hidden: false`) for `user`, on their own behalf.
+  Marks `actor`'s participant side of the conversation hidden or restored.
 
-  The conversation is authorized for `:show` first; an unknown slug or a
-  conversation `user` may not view is `{:error, :unauthorized}` (an admin's
-  blanket grant turns an unknown slug into `{:error, :not_found}`). The hidden
-  flag is set only for `user`'s own side.
-
-  Returns `{:ok, conversation}`.
-
-  ## Examples
-
-      iex> set_conversation_hidden(actor, "slug")
-      {:ok, %Conversation{}}
-
-      iex> set_conversation_hidden(actor, "slug", false)
-      {:ok, %Conversation{}}
-
+  The operation is idempotent, authorized staff viewing as nonparticipants
+  change neither participant flag, and missing slugs are always not found.
   """
   @spec set_conversation_hidden(Actor.t(), String.t(), boolean()) ::
-          {:ok, Conversation.t()} | {:error, :unauthorized | :not_found}
-  def set_conversation_hidden(%Actor{user: user}, slug, hidden \\ true) do
-    with {:ok, conversation} <- load_authorized_conversation(user, slug) do
-      {:ok, _conversation} = mark_conversation_hidden(conversation, user, hidden)
-      {:ok, conversation}
-    end
-  end
-
-  @doc """
-  Returns the number of messages in the given conversation.
-
-  ## Example
-
-      iex> count_messages(%Conversation{})
-      3
-
-  """
-  def count_messages(conversation) do
-    Message
-    |> where(conversation_id: ^conversation.id)
-    |> Repo.aggregate(:count)
-  end
-
-  # Creates a message within a conversation, sent by `user`, returning `{:ok, message}`
-  # or `{:error, changeset}`. Visible for testing.
-  @doc false
-  def create_conversation_message(conversation, user, attrs \\ %{}) do
-    message_changeset =
-      conversation
-      |> Ecto.build_assoc(:messages)
-      |> Message.creation_changeset(attrs, user)
-
-    conversation_changeset =
-      Conversation.new_message_changeset(conversation)
-
-    Multi.new()
-    |> Multi.insert(:message, message_changeset)
-    |> Multi.update(:conversation, conversation_changeset)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{message: message}} ->
-        report_non_approved_message(message)
-        {:ok, message}
-
-      _error ->
-        {:error, message_changeset}
-    end
-  end
-
-  defp approve_loaded_message(actor, message) do
-    message_changeset = Message.approve_changeset(message)
-
-    conversation_update_query =
-      from c in Conversation,
-        where: c.id == ^message.conversation_id,
-        update: [set: [from_read: false, to_read: false]]
-
-    Multi.new()
-    |> Multi.update(:message, message_changeset)
-    |> Multi.update_all(:conversation, conversation_update_query, [])
-    |> Reports.put_close_reports(
-      :reports,
-      actor.user,
-      conversation_id: message.conversation_id
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{reports: {_count, reports}, message: message}} ->
-        Reports.reindex_closed_reports(reports)
-
-        ModerationLogs.create_moderation_log(
-          actor,
-          "Conversation.Message.Approve:create",
-          "/",
-          "Approved private message in conversation ##{message.conversation_id}"
-        )
-
-        {:ok, message}
-
-      _error ->
-        {:error, message_changeset}
-    end
-  end
-
-  # Generates a system report for an unapproved message.
-  defp report_non_approved_message(message) do
-    if message.approved do
-      {:ok, nil}
-    else
-      Reports.create_system_report(
-        "Approval",
-        "PM contains externally-embedded images",
-        conversation_id: message.conversation_id
-      )
-    end
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking message changes.
-  defp change_message(%Message{} = message) do
-    Message.changeset(message, %{})
-  end
-
-  defp paginate_messages(conversation, user, pagination) do
-    direction =
-      if user.settings.messages_newest_first do
-        :desc
+          {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def set_conversation_hidden(%Actor{user: user} = actor, slug, hidden \\ true) do
+    with {:ok, conversation} <- load_conversation(actor, slug, :show) do
+      if participant?(conversation, user) do
+        update_hidden_state(conversation, user, hidden)
       else
-        :asc
+        {:ok, conversation}
       end
-
-    Message
-    |> where(conversation_id: ^conversation.id)
-    |> order_by([{^direction, :created_at}])
-    |> preload(:from)
-    |> Repo.paginate(pagination)
+    end
   end
 
   @doc """
-  Posts a message to the conversation named by `slug`, sent by `actor`.
+  Posts a reply to a visible conversation.
 
-  A banned actor is `{:error, :ban}` and an actor with no fingerprint is
-  `{:error, :unauthorized}`. The conversation is then authorized for `:show`;
-  an unknown slug or a conversation the actor may not view is
-  `{:error, :unauthorized}` (an admin's blanket grant turns an unknown slug
-  into `{:error, :not_found}`).
-
-  On success the message is inserted, both sides of the conversation are marked
-  unread, and a system report is filed when the message is withheld from
-  approval. Returns `{:ok, {conversation, message}}` so the caller can compute
-  the last page. A rejected insert (e.g. a blank body) is
-  `{:error, {:message_failed, conversation}}`, carrying the conversation for the
-  caller to reuse.
+  Write access is checked before loading. Participant and staff reply policy is
+  represented by the `:reply` ability. Validation failures return a
+  `MessageForm` containing the actual rejected changeset; success returns the
+  message and total count needed for the redirect page.
 
   ## Examples
 
       iex> create_message(actor, "slug", %{"body" => "hello"})
-      {:ok, {%Conversation{}, %Message{}}}
+      {:ok, %MessageCreated{}}
 
       iex> create_message(actor, "slug", %{"body" => ""})
-      {:error, {:message_failed, %Conversation{}}}
+      {:error, %MessageForm{}}
 
   """
-  @spec create_message(Actor.t(), String.t(), map() | nil) ::
-          {:ok, {Conversation.t(), Message.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
-          | {:error, {:message_failed, Conversation.t()}}
-  def create_message(%Actor{} = actor, slug, params) do
-    # TODO: return the message changeset on failure instead?
+  @spec create_message(Actor.t(), String.t(), term()) ::
+          {:ok, MessageCreated.t()}
+          | {:error, MessageForm.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+  def create_message(%Actor{user: user} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, conversation} <- load_authorized_conversation(actor.user, slug) do
-      case create_conversation_message(conversation, actor.user, params || %{}) do
-        {:ok, message} -> {:ok, {conversation, message}}
-        {:error, _changeset} -> {:error, {:message_failed, conversation}}
-      end
+         {:ok, conversation} <- load_conversation(actor, slug, :reply) do
+      insert_message(conversation, user, params)
     end
   end
 
   @doc """
-  Approves the message named by the `message_id`, on behalf of `actor`.
+  Approves one message scoped to the conversation named by `conversation_slug`.
 
-  The message is loaded with its conversation and authorized for `:approve`
-  (moderators and admins): a non-castable id is `{:error, :not_found}`, and a
-  well-formed id naming no row authorizes `nil`, which no moderator rule permits,
-  so it is `{:error, :unauthorized}` (`{:error, :not_found}` for admins). On
-  success the message is approved, both sides of the conversation are marked
-  unread, its open reports are closed and reindexed, and a moderation log is
-  written.
-
-  Returns `{:ok, message}` on success.
+  The route conversation loads before the nested message query. Malformed,
+  absent, and wrong-conversation message IDs are therefore all not found.
+  Approval, participant unread flags, report closure, and the moderation log
+  commit atomically; affected report documents are reindexed after commit.
 
   ## Examples
 
-      iex> approve_message(actor, "1")
+      iex> approve_message(actor, "conversation-slug", "1")
       {:ok, %Message{}}
 
   """
-  @spec approve_message(Actor.t(), any()) ::
-          {:ok, Message.t()} | {:error, :unauthorized | :not_found} | {:error, Ecto.Changeset.t()}
-  def approve_message(%Actor{} = actor, message_id) do
-    case IntegerId.parse(message_id) do
-      {:ok, id} ->
-        message =
-          Message
-          |> preload(:conversation)
-          |> Repo.get(id)
-
-        with :ok <- authorize(actor, :approve, message),
-             %Message{} <- message do
-          approve_loaded_message(actor, message)
-        else
-          {:error, :unauthorized} -> {:error, :unauthorized}
-          nil -> {:error, :not_found}
-        end
-
-      :error ->
-        {:error, :not_found}
+  @spec approve_message(Actor.t(), String.t(), IntegerId.integer_id()) ::
+          {:ok, Message.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def approve_message(%Actor{} = actor, conversation_slug, message_id) do
+    with {:ok, conversation} <- load_conversation(actor, conversation_slug, :show),
+         {:ok, message} <- item_for_approval(actor, conversation, message_id) do
+      approve_loaded_message(actor, message)
     end
   end
 end

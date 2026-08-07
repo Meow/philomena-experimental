@@ -4,15 +4,25 @@ defmodule PhilomenaWeb.ConversationController do
   alias PhilomenaWeb.NotificationCountPlug
   alias PhilomenaWeb.RateLimitedResponse
   alias Philomena.Conversations
+  alias Philomena.Conversations.ConversationForm
+  alias Philomena.Conversations.ConversationIndex
   alias PhilomenaWeb.MarkdownRenderer
 
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    conversations =
-      Conversations.list_conversations(conn.assigns.actor, params, conn.assigns.scrivener)
-
-    render(conn, "index.html", title: "Conversations", conversations: conversations)
+    with {:ok, %ConversationIndex{} = index} <-
+           Conversations.load_conversation_index(
+             conn.assigns.actor,
+             params,
+             conn.assigns.scrivener
+           ) do
+      render(conn, "index.html",
+        title: "Conversations",
+        conversations: index.conversations,
+        query_changeset: index.changeset
+      )
+    end
   end
 
   def show(conn, %{"id" => id}) do
@@ -39,9 +49,9 @@ defmodule PhilomenaWeb.ConversationController do
   end
 
   def new(conn, params) do
-    with {:ok, changeset} <-
-           Conversations.load_new_conversation(conn.assigns.actor, params["recipient"]) do
-      render(conn, "new.html", title: "New Conversation", changeset: changeset)
+    with {:ok, %ConversationForm{} = form} <-
+           Conversations.new_conversation(conn.assigns.actor, params["recipient"]) do
+      render(conn, "new.html", title: "New Conversation", changeset: form.changeset)
     end
   end
 
@@ -52,8 +62,8 @@ defmodule PhilomenaWeb.ConversationController do
         |> put_flash(:info, "Conversation successfully created.")
         |> redirect(to: ~p"/conversations/#{conversation}")
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        render(conn, "new.html", changeset: changeset)
+      {:error, %ConversationForm{} = form} ->
+        render(conn, "new.html", changeset: form.changeset)
 
       {:error, :rate_limited} ->
         RateLimitedResponse.call(conn, "You may only create a conversation once every minute.")

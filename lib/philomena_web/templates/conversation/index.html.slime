@@ -3,6 +3,8 @@ elixir:
   pagination = render PhilomenaWeb.PaginationView, "_pagination.html", page: @conversations, route: route, conn: @conn
 
 h1 My Conversations
+= if @query_changeset.action do
+  .alert.alert-danger Invalid conversation filter.
 .block
   .block__header.page__header
     .page__pagination = pagination

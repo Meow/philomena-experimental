@@ -231,6 +231,32 @@ defmodule Philomena.Users do
   end
 
   @doc """
+  Loads an active user by exact name for an actor-scoped cross-context lookup.
+
+  Conversations use this locator when resolving a recipient. Missing,
+  malformed, and deactivated recipients are always not found; a real active
+  user the actor may not show is unauthorized.
+
+  ## Examples
+
+      iex> load_active_user_by_name(actor, "Somebody")
+      {:ok, %User{}}
+
+      iex> load_active_user_by_name(actor, "missing")
+      {:error, :not_found}
+
+  """
+  @spec load_active_user_by_name(Actor.t(), term()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def load_active_user_by_name(%Actor{} = actor, name) when is_binary(name) do
+    User
+    |> where([user], user.name == ^name and is_nil(user.deleted_at))
+    |> Loader.one_and_authorize(actor, :show)
+  end
+
+  def load_active_user_by_name(%Actor{}, _name), do: {:error, :not_found}
+
+  @doc """
   Loads a visible profile by slug as a report target on behalf of `actor`.
 
   Deactivated and missing profiles are always not-found. A real profile the

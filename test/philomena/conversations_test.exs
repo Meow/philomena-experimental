@@ -3,12 +3,10 @@ defmodule Philomena.ConversationsTest do
   Context-level tests for the controller-facing `Philomena.Conversations`
   functions.
 
-  These pin the participant/moderator/admin authorization matrix on the show,
-  read, hide, and message paths (a non-participant regular user is
-  unauthorized, an unknown slug is unauthorized for a user and not-found for an
-  admin), the write-access checks on the create paths (banned and
-  missing-fingerprint actors), the `ConversationPage` struct and its
-  mark-read side effect, and the moderation log `approve_message/2` writes.
+  These pin typed index/form/message results, load-before-authorize missing
+  behavior, participant/staff abilities, form/write prerequisite parity,
+  normalized parameters, idempotent personal state, parent-scoped approval,
+  and transactional approval logging.
   """
 
   use Philomena.DataCase, async: true
@@ -20,10 +18,15 @@ defmodule Philomena.ConversationsTest do
 
   alias Philomena.Conversations
   alias Philomena.Conversations.Conversation
+  alias Philomena.Conversations.ConversationForm
+  alias Philomena.Conversations.ConversationIndex
   alias Philomena.Conversations.ConversationPage
   alias Philomena.Conversations.Message
+  alias Philomena.Conversations.MessageCreated
+  alias Philomena.Conversations.MessageForm
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Repo
+  alias Philomena.Reports.Report
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to the write-access and
@@ -53,16 +56,17 @@ defmodule Philomena.ConversationsTest do
     {conversation, message}
   end
 
-  describe "list_conversations/3" do
+  describe "load_conversation_index/3" do
     test "lists the user's sent and received conversations but not unrelated ones" do
       user = confirmed_user_fixture()
       received = conversation_fixture(confirmed_user_fixture(), user)
       sent = conversation_fixture(user, confirmed_user_fixture())
       unrelated = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
 
-      page = Conversations.list_conversations(actor(user), %{}, @pagination)
+      assert {:ok, %ConversationIndex{} = index} =
+               Conversations.load_conversation_index(actor(user), %{}, @pagination)
 
-      ids = Enum.map(page.entries, & &1.id)
+      ids = Enum.map(index.conversations.entries, & &1.id)
       assert received.id in ids
       assert sent.id in ids
       refute unrelated.id in ids
@@ -71,10 +75,12 @@ defmodule Philomena.ConversationsTest do
     test "does not list conversations the user has hidden" do
       user = confirmed_user_fixture()
       hidden = conversation_fixture(confirmed_user_fixture(), user)
-      {:ok, _} = Conversations.mark_conversation_hidden(hidden, user)
+      {:ok, _} = Conversations.set_conversation_hidden(actor(user), hidden.slug)
 
-      page = Conversations.list_conversations(actor(user), %{}, @pagination)
-      refute hidden.id in Enum.map(page.entries, & &1.id)
+      assert {:ok, %ConversationIndex{} = index} =
+               Conversations.load_conversation_index(actor(user), %{}, @pagination)
+
+      refute hidden.id in Enum.map(index.conversations.entries, & &1.id)
     end
 
     test "a with filter restricts the list to the named partner" do
@@ -83,20 +89,64 @@ defmodule Philomena.ConversationsTest do
       with_partner = conversation_fixture(partner, user)
       other = conversation_fixture(confirmed_user_fixture(), user)
 
-      page =
-        Conversations.list_conversations(actor(user), %{"with" => "#{partner.id}"}, @pagination)
+      assert {:ok, %ConversationIndex{} = index} =
+               Conversations.load_conversation_index(
+                 actor(user),
+                 %{"with" => "#{partner.id}"},
+                 @pagination
+               )
 
-      ids = Enum.map(page.entries, & &1.id)
+      ids = Enum.map(index.conversations.entries, & &1.id)
       assert with_partner.id in ids
       refute other.id in ids
     end
 
-    test "a non-numeric with value raises a cast error" do
+    test "malformed and out-of-range filters return an empty page and invalid changeset" do
       user = confirmed_user_fixture()
 
-      assert_raise Ecto.Query.CastError, fn ->
-        Conversations.list_conversations(actor(user), %{"with" => "not-a-number"}, @pagination)
+      for filter <- ["not-a-number", "99999999999999999999"] do
+        assert {:ok, %ConversationIndex{} = index} =
+                 Conversations.load_conversation_index(
+                   actor(user),
+                   %{"with" => filter},
+                   @pagination
+                 )
+
+        assert index.conversations.entries == []
+        refute index.changeset.valid?
       end
+    end
+
+    test "non-map params are normalized to an unfiltered index" do
+      user = confirmed_user_fixture()
+      conversation = conversation_fixture(confirmed_user_fixture(), user)
+
+      assert {:ok, %ConversationIndex{} = index} =
+               Conversations.load_conversation_index(actor(user), "invalid", @pagination)
+
+      assert conversation.id in Enum.map(index.conversations.entries, & &1.id)
+      assert index.changeset.valid?
+    end
+
+    test "anonymous actors are unauthorized" do
+      assert Conversations.load_conversation_index(actor(), %{}, @pagination) ==
+               {:error, :unauthorized}
+    end
+  end
+
+  describe "unread_conversation_count/1" do
+    test "counts unread visible conversations and excludes hidden ones" do
+      user = confirmed_user_fixture()
+      unread = conversation_fixture(confirmed_user_fixture(), user)
+      hidden = conversation_fixture(confirmed_user_fixture(), user)
+      {:ok, _} = Conversations.set_conversation_hidden(actor(user), hidden.slug)
+
+      assert {:ok, 1} = Conversations.unread_conversation_count(actor(user))
+      assert unread.id != hidden.id
+    end
+
+    test "anonymous actors are unauthorized" do
+      assert Conversations.unread_conversation_count(actor()) == {:error, :unauthorized}
     end
   end
 
@@ -143,42 +193,44 @@ defmodule Philomena.ConversationsTest do
              ) == {:error, :unauthorized}
     end
 
-    test "an unknown slug is unauthorized for a user, not-found for an admin" do
-      assert Conversations.load_conversation_page(
-               actor(confirmed_user_fixture()),
-               "no-such-slug",
-               @pagination
-             ) == {:error, :unauthorized}
-
-      assert Conversations.load_conversation_page(
-               actor(admin_user_fixture()),
-               "no-such-slug",
-               @pagination
-             ) == {:error, :not_found}
+    test "an unknown slug is not found for users, moderators, and admins" do
+      for viewer <- [
+            confirmed_user_fixture(),
+            moderator_user_fixture(),
+            admin_user_fixture()
+          ] do
+        assert Conversations.load_conversation_page(
+                 actor(viewer),
+                 "no-such-slug",
+                 @pagination
+               ) == {:error, :not_found}
+      end
     end
   end
 
-  describe "load_new_conversation/2" do
+  describe "new_conversation/2" do
     test "a signed-in actor gets a changeset prefilled with the recipient" do
       recipient = confirmed_user_fixture()
 
-      assert {:ok, %Ecto.Changeset{data: %Conversation{recipient: recipient_name}}} =
-               Conversations.load_new_conversation(
+      assert {:ok, %ConversationForm{} = form} =
+               Conversations.new_conversation(
                  actor(confirmed_user_fixture()),
                  recipient.name
                )
 
+      assert form.conversation.recipient == recipient.name
+      assert %Ecto.Changeset{data: %Conversation{recipient: recipient_name}} = form.changeset
       assert recipient_name == recipient.name
     end
 
     test "a banned actor is rejected even while carrying a fingerprint" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Conversations.load_new_conversation(actor, "anyone") == {:error, :ban}
+      assert Conversations.new_conversation(actor, "anyone") == {:error, :ban}
     end
 
     test "an actor without a fingerprint may not reach the form" do
-      assert Conversations.load_new_conversation(actor(nil, fingerprint: nil), "anyone") ==
+      assert Conversations.new_conversation(actor(nil, fingerprint: nil), "anyone") ==
                {:error, :unauthorized}
     end
   end
@@ -209,10 +261,32 @@ defmodule Philomena.ConversationsTest do
         "messages" => %{"0" => %{"body" => "A fine day to you"}}
       }
 
-      assert {:error, %Ecto.Changeset{} = changeset} =
+      assert {:error, %ConversationForm{} = form} =
                Conversations.create_conversation(actor(confirmed_user_fixture()), params)
 
-      refute changeset.valid?
+      refute form.changeset.valid?
+    end
+
+    test "a deactivated recipient is a rejected changeset" do
+      sender = confirmed_user_fixture()
+      recipient = deactivated_user_fixture()
+
+      assert {:error, %ConversationForm{} = form} =
+               Conversations.create_conversation(actor(sender), %{
+                 "recipient" => recipient.name,
+                 "title" => "Hello",
+                 "messages" => %{"0" => %{"body" => "Hello"}}
+               })
+
+      refute form.changeset.valid?
+      assert {"can't be blank", _} = form.changeset.errors[:to]
+    end
+
+    test "non-map params return a form error instead of raising" do
+      assert {:error, %ConversationForm{} = form} =
+               Conversations.create_conversation(actor(confirmed_user_fixture()), "invalid")
+
+      refute form.changeset.valid?
     end
 
     test "a banned actor is rejected" do
@@ -272,7 +346,7 @@ defmodule Philomena.ConversationsTest do
 
     test "the rate check precedes validation: over-limit with an unknown recipient is still rate limited" do
       # An unknown recipient would fail the required-recipient validation, but the
-      # rate check runs before create_conversation_from, so the actor gets
+      # The rate check runs before changeset construction, so the actor gets
       # :rate_limited rather than a changeset error.
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :conversation_create)
@@ -327,12 +401,24 @@ defmodule Philomena.ConversationsTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is unauthorized for a user, not-found for an admin" do
-      assert Conversations.set_conversation_read(actor(confirmed_user_fixture()), "no-such-slug") ==
-               {:error, :unauthorized}
+    test "repeated updates are idempotent" do
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(confirmed_user_fixture(), recipient)
 
-      assert Conversations.set_conversation_read(actor(admin_user_fixture()), "no-such-slug") ==
-               {:error, :not_found}
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_read(actor(recipient), conversation.slug)
+
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_read(actor(recipient), conversation.slug)
+
+      assert Repo.reload!(conversation).to_read
+    end
+
+    test "an unknown slug is always not found" do
+      for viewer <- [confirmed_user_fixture(), admin_user_fixture()] do
+        assert Conversations.set_conversation_read(actor(viewer), "no-such-slug") ==
+                 {:error, :not_found}
+      end
     end
   end
 
@@ -363,15 +449,24 @@ defmodule Philomena.ConversationsTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is unauthorized for a user, not-found for an admin" do
-      assert Conversations.set_conversation_hidden(
-               actor(confirmed_user_fixture()),
-               "no-such-slug"
-             ) ==
-               {:error, :unauthorized}
+    test "repeated updates are idempotent" do
+      recipient = confirmed_user_fixture()
+      conversation = conversation_fixture(confirmed_user_fixture(), recipient)
 
-      assert Conversations.set_conversation_hidden(actor(admin_user_fixture()), "no-such-slug") ==
-               {:error, :not_found}
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_hidden(actor(recipient), conversation.slug)
+
+      assert {:ok, %Conversation{}} =
+               Conversations.set_conversation_hidden(actor(recipient), conversation.slug)
+
+      assert Repo.reload!(conversation).to_hidden
+    end
+
+    test "an unknown slug is always not found" do
+      for viewer <- [confirmed_user_fixture(), admin_user_fixture()] do
+        assert Conversations.set_conversation_hidden(actor(viewer), "no-such-slug") ==
+                 {:error, :not_found}
+      end
     end
   end
 
@@ -381,14 +476,15 @@ defmodule Philomena.ConversationsTest do
       recipient = confirmed_user_fixture()
       conversation = conversation_fixture(sender, recipient)
       # The recipient reads the conversation, clearing their unread flag.
-      {:ok, _} = Conversations.mark_conversation_read(conversation, recipient)
+      {:ok, _} = Conversations.set_conversation_read(actor(recipient), conversation.slug)
 
-      assert {:ok, {%Conversation{}, %Message{} = message}} =
+      assert {:ok, %MessageCreated{} = created} =
                Conversations.create_message(actor(recipient), conversation.slug, %{
                  "body" => "a reply from the recipient"
                })
 
-      assert message.body == "a reply from the recipient"
+      assert created.message.body == "a reply from the recipient"
+      assert created.message_count == 2
 
       # Posting a message marks both sides unread again.
       reloaded = Repo.reload!(conversation)
@@ -396,15 +492,17 @@ defmodule Philomena.ConversationsTest do
       refute reloaded.from_read
     end
 
-    test "a blank body is a message failure carrying the conversation" do
+    test "a blank body returns the actual message changeset and conversation" do
       sender = confirmed_user_fixture()
       recipient = confirmed_user_fixture()
       conversation = conversation_fixture(sender, recipient)
 
-      assert {:error, {:message_failed, %Conversation{} = returned}} =
+      assert {:error, %MessageForm{} = form} =
                Conversations.create_message(actor(recipient), conversation.slug, %{"body" => ""})
 
-      assert returned.id == conversation.id
+      assert form.conversation.id == conversation.id
+      assert form.message.conversation_id == conversation.id
+      refute form.changeset.valid?
     end
 
     test "a non-participant regular user is unauthorized" do
@@ -435,29 +533,38 @@ defmodule Philomena.ConversationsTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown slug is unauthorized for a user, not-found for an admin" do
-      assert Conversations.create_message(actor(confirmed_user_fixture()), "no-such-slug", %{
-               "body" => "hi"
-             }) == {:error, :unauthorized}
-
-      assert Conversations.create_message(actor(admin_user_fixture()), "no-such-slug", %{
-               "body" => "hi"
-             }) == {:error, :not_found}
+    test "an unknown slug is always not found" do
+      for viewer <- [confirmed_user_fixture(), admin_user_fixture()] do
+        assert Conversations.create_message(actor(viewer), "no-such-slug", %{
+                 "body" => "hi"
+               }) == {:error, :not_found}
+      end
     end
   end
 
-  describe "approve_message/2" do
+  describe "approve_message/3" do
+    test "a missing route conversation is not found before the message lookup" do
+      assert Conversations.approve_message(
+               actor(moderator_user_fixture()),
+               "missing-conversation",
+               "1"
+             ) == {:error, :not_found}
+    end
+
     test "a moderator approves a withheld message and a moderation log is written" do
       sender = confirmed_user_fixture()
       recipient = confirmed_user_fixture()
       {conversation, message} = unapproved_message(sender, recipient)
       moderator = moderator_user_fixture()
+      report = Repo.get_by!(Report, conversation_id: conversation.id)
+      assert report.open
 
       assert {:ok, %Message{} = approved} =
-               Conversations.approve_message(actor(moderator), "#{message.id}")
+               Conversations.approve_message(actor(moderator), conversation.slug, "#{message.id}")
 
       assert approved.id == message.id
       assert Repo.reload!(message).approved
+      refute Repo.reload!(report).open
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -469,31 +576,39 @@ defmodule Philomena.ConversationsTest do
     test "an admin approves a withheld message" do
       sender = confirmed_user_fixture()
       recipient = confirmed_user_fixture()
-      {_conversation, message} = unapproved_message(sender, recipient)
+      {conversation, message} = unapproved_message(sender, recipient)
 
       assert {:ok, %Message{}} =
-               Conversations.approve_message(actor(admin_user_fixture()), "#{message.id}")
+               Conversations.approve_message(
+                 actor(admin_user_fixture()),
+                 conversation.slug,
+                 "#{message.id}"
+               )
 
       assert Repo.reload!(message).approved
     end
 
     test "a non-integer message id is not-found" do
-      assert Conversations.approve_message(actor(moderator_user_fixture()), "not-a-number") ==
+      conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+
+      assert Conversations.approve_message(
+               actor(moderator_user_fixture()),
+               conversation.slug,
+               "not-a-number"
+             ) ==
                {:error, :not_found}
     end
 
-    test "a well-formed id naming no row is unauthorized for a moderator" do
-      # The moderator's :approve grant is on a Message struct; a nil load matches
-      # no rule, so it is unauthorized rather than not-found.
-      assert Conversations.approve_message(actor(moderator_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
-    end
+    test "missing and wrong-conversation message IDs are always not found" do
+      conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+      other = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
+      other_message = message_fixture(other, other.from)
 
-    test "a well-formed id naming no row is not-found for an admin" do
-      # The admin's blanket grant authorizes the nil load; the struct guard then
-      # reports the missing row.
-      assert Conversations.approve_message(actor(admin_user_fixture()), "999999999") ==
-               {:error, :not_found}
+      for staff <- [moderator_user_fixture(), admin_user_fixture()],
+          id <- ["999999999", "#{other_message.id}"] do
+        assert Conversations.approve_message(actor(staff), conversation.slug, id) ==
+                 {:error, :not_found}
+      end
     end
   end
 end

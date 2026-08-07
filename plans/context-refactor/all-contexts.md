@@ -184,6 +184,11 @@ profile locator, named commission and item abilities replace role/ownership
 checks, and nested items are parent-scoped before authorization. The database
 enforces one listing per profile; directory reads exclude deactivated owners,
 and transactional report cleanup retains after-commit report indexing.
+Conversations is complete. Typed index/form/message results normalize malformed
+filters and params, active recipient lookup rejects deactivated users, and
+conversation slugs load before authorization. Nested approvals are
+parent-scoped; approval, report closure, and audit logging commit together,
+with report indexing after commit.
 
 ### Wave 0: characterize and establish the contract
 

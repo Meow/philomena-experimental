@@ -37,6 +37,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
   @badge_member_actions [:edit, :update, :update_image, :show_users]
   @commission_management_actions [:new, :create, :edit, :update, :delete]
   @commission_item_actions [:new, :create, :edit, :update, :delete]
+  @conversation_class_actions [:index, :new, :create]
 
   # Commission items deliberately remain owner-only, including for staff.
   def can?(%User{id: id}, action, %Item{commission: %Commission{user_id: id}})
@@ -87,6 +88,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   # View and approve conversations
   def can?(%User{role: "moderator"}, :show, %Conversation{}), do: true
+  def can?(%User{role: "moderator"}, :reply, %Conversation{}), do: true
   def can?(%User{role: "moderator"}, :approve, %Message{}), do: true
 
   # View sensitive identity metadata such as IP addresses and fingerprints
@@ -540,9 +542,12 @@ defimpl Canada.Can, for: Philomena.Users.User do
     DateTime.diff(user.last_renamed_at, time_ago) < 0
   end
 
-  # View conversations they are involved in
+  # List and create conversations, and view/reply to ones they participate in.
+  def can?(%User{}, action, Conversation) when action in @conversation_class_actions, do: true
   def can?(%User{id: id}, :show, %Conversation{to_id: id}), do: true
   def can?(%User{id: id}, :show, %Conversation{from_id: id}), do: true
+  def can?(%User{id: id}, :reply, %Conversation{to_id: id}), do: true
+  def can?(%User{id: id}, :reply, %Conversation{from_id: id}), do: true
 
   # View filters they own and public/system filters
   def can?(%User{}, :show, %Filter{system: true}), do: true

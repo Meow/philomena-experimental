@@ -1,5 +1,23 @@
 # Conversations context plan
 
+## Status
+
+Wave 2 complete. Conversation indexes, new/create forms, reply failures, reply
+successes, and show pages now use typed results behind actor-scoped APIs.
+Conversation slugs load before authorization, reply policy is a named ability,
+and message approval scopes the message query to the route conversation before
+authorization. Missing conversations and malformed, absent, or mismatched
+message IDs are consistently not-found.
+
+Index filters and creation/message params normalize before casting. Invalid
+partner filters produce an empty page plus an explicit query changeset;
+non-map creation input returns a form error; active recipients resolve through
+Users, excluding deactivated accounts; and reply validation retains the actual
+message changeset for rendering. Raw creation/state/count helpers are private,
+while unread count remains a documented actor-scoped notification service.
+Read/hide changes are idempotent. Approval, unread-state changes, report
+closure, and moderation logging commit atomically, followed by report indexing.
+
 Source: `lib/philomena/conversations.ex`; consumers: conversation/message,
 read/hide/report, and message approval controllers.
 
