@@ -19,7 +19,7 @@ defmodule Philomena.Conversations.Message do
   end
 
   @doc false
-  def changeset(message, attrs) do
+  def changeset(message, attrs \\ %{}) do
     message
     |> cast(attrs, [])
     |> validate_required([])

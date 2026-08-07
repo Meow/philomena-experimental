@@ -1,6 +1,6 @@
 defmodule Philomena.Conversations.MessageForm do
   @moduledoc """
-  A safely loaded conversation, attempted reply, and message changeset returned
+  A loaded conversation, attempted reply, and message changeset returned
   after reply validation fails.
   """
 

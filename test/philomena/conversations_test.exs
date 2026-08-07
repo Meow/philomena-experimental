@@ -282,11 +282,11 @@ defmodule Philomena.ConversationsTest do
       assert {"can't be blank", _} = form.changeset.errors[:to]
     end
 
-    test "non-map params return a form error instead of raising" do
-      assert {:error, %ConversationForm{} = form} =
-               Conversations.create_conversation(actor(confirmed_user_fixture()), "invalid")
-
-      refute form.changeset.valid?
+    test "non-map params raise" do
+      assert_raise Ecto.CastError,
+                   fn ->
+                     Conversations.create_conversation(actor(confirmed_user_fixture()), "invalid")
+                   end
     end
 
     test "a banned actor is rejected" do

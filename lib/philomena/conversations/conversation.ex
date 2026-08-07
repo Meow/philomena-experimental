@@ -50,7 +50,7 @@ defmodule Philomena.Conversations.Conversation do
   @doc false
   def creation_changeset(conversation, from, to, attrs) do
     conversation
-    |> cast(attrs, [:title])
+    |> cast(attrs, [:title, :recipient])
     |> put_assoc(:from, from)
     |> put_assoc(:to, to)
     |> put_change(:slug, Ecto.UUID.generate())

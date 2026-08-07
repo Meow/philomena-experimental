@@ -1,7 +1,7 @@
 defmodule Philomena.Conversations.ConversationIndex do
   @moduledoc """
-  A conversation-index result containing the paginated conversations and the
-  normalized partner-filter changeset.
+  A conversation index result containing paginated conversations and the
+  partner filter changeset.
   """
 
   alias Philomena.Conversations.Conversation

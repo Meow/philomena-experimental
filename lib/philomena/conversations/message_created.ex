@@ -1,7 +1,7 @@
 defmodule Philomena.Conversations.MessageCreated do
   @moduledoc """
   The result of posting a conversation message, including the total needed to
-  compute the redirect page without exposing a raw count query.
+  compute the redirect page.
   """
 
   alias Philomena.Conversations.Conversation

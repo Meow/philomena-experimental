@@ -1,14 +1,6 @@
 defmodule Philomena.Conversations do
   @moduledoc """
-  Actor-scoped conversation listing, creation, reading, replies, and message
-  approval.
-
-  Conversation slugs load before authorization, nested message IDs are scoped
-  to their route conversation, and missing resources have actor-independent
-  not-found results. Database writes complete before report indexing and rate
-  limiter side effects run. Conversation and message writes do not emit email
-  or notification events; the header count reads the persisted participant
-  flags directly.
+  Conversation listing, creation, reading, replies, and message approval.
   """
 
   import Ecto.Query, warn: false
@@ -35,16 +27,6 @@ defmodule Philomena.Conversations do
 
   @conversation_create_window 60
 
-  defp normalize_params(%{} = params), do: params
-  defp normalize_params(_params), do: %{}
-
-  defp normalized_recipient(params) do
-    case Map.get(params, "recipient") do
-      recipient when is_binary(recipient) -> recipient
-      _recipient -> nil
-    end
-  end
-
   defp new_conversation(recipient) do
     %Conversation{recipient: recipient, messages: [%Message{}]}
   end
@@ -61,19 +43,18 @@ defmodule Philomena.Conversations do
     conversation_form(conversation, change_conversation(conversation))
   end
 
-  defp recipient_for_creation(actor, recipient) do
-    case Users.load_active_user_by_name(actor, recipient) do
-      {:ok, user} -> user
-      {:error, _reason} -> nil
+  defp recipient_for_creation(actor, params) do
+    with %{"recipient" => recipient} when is_binary(recipient) <- params,
+         {:ok, user} <- Users.load_active_user_by_name(actor, recipient) do
+      user
+    else
+      _ ->
+        nil
     end
   end
 
-  defp insert_conversation(actor, attrs) do
-    attrs = normalize_params(attrs)
-    recipient = normalized_recipient(attrs)
-    conversation = %Conversation{recipient: recipient}
-    to = recipient_for_creation(actor, recipient)
-    changeset = Conversation.creation_changeset(conversation, actor.user, to, attrs)
+  defp insert_conversation(actor, attrs, to) do
+    changeset = Conversation.creation_changeset(%Conversation{}, actor.user, to, attrs)
 
     case Repo.insert(changeset) do
       {:ok, conversation} ->
@@ -84,7 +65,7 @@ defmodule Philomena.Conversations do
         {:ok, conversation}
 
       {:error, changeset} ->
-        {:error, conversation_form(conversation, changeset)}
+        {:error, conversation_form(changeset.data, changeset)}
     end
   end
 
@@ -132,27 +113,11 @@ defmodule Philomena.Conversations do
     )
   end
 
-  defp empty_page(pagination) do
-    %Scrivener.Page{
-      entries: [],
-      page_number:
-        pagination_value(
-          pagination,
-          :page,
-          pagination_value(pagination, :page_number, 1)
-        ),
-      page_size: pagination_value(pagination, :page_size, 25),
-      total_entries: 0,
-      total_pages: 1
-    }
-  end
-
-  defp pagination_value(pagination, key, default) when is_map(pagination) do
-    Map.get(pagination, key, default)
-  end
-
-  defp pagination_value(pagination, key, default) do
-    Keyword.get(pagination, key, default)
+  defp empty_page(%User{} = user, pagination) do
+    user
+    |> conversation_index_query(nil)
+    |> where(false)
+    |> Repo.paginate(pagination)
   end
 
   defp load_conversation(actor, slug, action, preloads \\ []) do
@@ -161,12 +126,6 @@ defmodule Philomena.Conversations do
     |> preload(^preloads)
     |> Loader.one_and_authorize(actor, action)
   end
-
-  defp participant?(%Conversation{} = conversation, %User{id: user_id}) do
-    conversation.from_id == user_id or conversation.to_id == user_id
-  end
-
-  defp participant?(%Conversation{}, nil), do: false
 
   defp update_read_state(%Conversation{} = conversation, %User{} = user, read) do
     changes =
@@ -205,10 +164,6 @@ defmodule Philomena.Conversations do
     |> Repo.aggregate(:count)
   end
 
-  defp change_message(%Message{} = message) do
-    Message.changeset(message, %{})
-  end
-
   defp paginate_messages(conversation, user, pagination) do
     direction = if user.settings.messages_newest_first, do: :desc, else: :asc
 
@@ -225,13 +180,9 @@ defmodule Philomena.Conversations do
       select: count(message.id)
   end
 
-  defp new_message(%Conversation{} = conversation) do
-    Ecto.build_assoc(conversation, :messages)
-  end
-
   defp insert_message(%Conversation{} = conversation, %User{} = user, attrs) do
-    message = new_message(conversation)
-    message_changeset = Message.creation_changeset(message, normalize_params(attrs), user)
+    message = Ecto.build_assoc(conversation, :messages)
+    message_changeset = Message.creation_changeset(message, attrs, user)
     conversation_changeset = Conversation.new_message_changeset(conversation)
 
     Multi.new()
@@ -314,8 +265,8 @@ defmodule Philomena.Conversations do
   Loads the signed-in actor's paginated conversation index.
 
   The optional `"with"` filter is parsed as a positive user ID before query
-  compilation. Invalid or out-of-range filters return an empty page and an
-  invalid changeset rather than raising a cast/encoding error.
+  compilation. Invalid or out-of-range filters return an empty page and a
+  rejected changeset.
 
   ## Examples
 
@@ -339,7 +290,7 @@ defmodule Philomena.Conversations do
         {:error, changeset} ->
           {:ok,
            %ConversationIndex{
-             conversations: empty_page(pagination),
+             conversations: empty_page(user, pagination),
              changeset: changeset
            }}
       end
@@ -348,9 +299,6 @@ defmodule Philomena.Conversations do
 
   @doc """
   Returns the authenticated actor's unread, non-hidden conversation count.
-
-  This is the narrow notification-header service; raw count queries remain
-  private to Conversations.
 
   ## Examples
 
@@ -385,15 +333,13 @@ defmodule Philomena.Conversations do
     with {:ok, conversation} <- load_conversation(actor, slug, :show, [:to, :from]) do
       messages = paginate_messages(conversation, user, pagination)
 
-      if participant?(conversation, user) do
-        {:ok, _conversation} = update_read_state(conversation, user, true)
-      end
+      {:ok, _conversation} = update_read_state(conversation, user, true)
 
       {:ok,
        %ConversationPage{
          conversation: conversation,
          messages: messages,
-         changeset: change_message(%Message{})
+         changeset: Message.changeset(%Message{})
        }}
     end
   end
@@ -428,15 +374,18 @@ defmodule Philomena.Conversations do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Conversation) do
       recipient = if is_binary(recipient), do: recipient, else: nil
-      {:ok, recipient |> new_conversation() |> conversation_form()}
+
+      {:ok,
+       recipient
+       |> new_conversation()
+       |> conversation_form()}
     end
   end
 
   @doc """
   Creates a conversation and its single initial message for `actor`.
 
-  Params of any shape are normalized before changeset construction. Active
-  recipients resolve through Users; missing or deactivated recipients produce
+  Active recipients resolve through Users; missing or deactivated recipients produce
   a `ConversationForm` validation error. Successful writes are rate-counted
   after commit, and an unapproved first message creates its system report after
   the conversation transaction succeeds.
@@ -458,7 +407,8 @@ defmodule Philomena.Conversations do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Conversation),
          :ok <- RateLimiter.check_rate_limit(actor, :conversation_create),
-         {:ok, conversation} <- insert_conversation(actor, params) do
+         recipient = recipient_for_creation(actor, params),
+         {:ok, conversation} <- insert_conversation(actor, params, recipient) do
       RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
       {:ok, conversation}
     end
@@ -475,29 +425,22 @@ defmodule Philomena.Conversations do
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def set_conversation_read(%Actor{user: user} = actor, slug, read \\ true) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show) do
-      if participant?(conversation, user) do
-        update_read_state(conversation, user, read)
-      else
-        {:ok, conversation}
-      end
+      update_read_state(conversation, user, read)
     end
   end
 
   @doc """
   Marks `actor`'s participant side of the conversation hidden or restored.
 
-  The operation is idempotent, authorized staff viewing as nonparticipants
-  change neither participant flag, and missing slugs are always not found.
+  The operation is idempotent. Authorized staff may view the conversation but,
+  because they are not a participant, do not change either participant flag.
+  Missing slugs are always not found.
   """
   @spec set_conversation_hidden(Actor.t(), String.t(), boolean()) ::
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def set_conversation_hidden(%Actor{user: user} = actor, slug, hidden \\ true) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show) do
-      if participant?(conversation, user) do
-        update_hidden_state(conversation, user, hidden)
-      else
-        {:ok, conversation}
-      end
+      update_hidden_state(conversation, user, hidden)
     end
   end
 
@@ -535,7 +478,7 @@ defmodule Philomena.Conversations do
   The route conversation loads before the nested message query. Malformed,
   absent, and wrong-conversation message IDs are therefore all not found.
   Approval, participant unread flags, report closure, and the moderation log
-  commit atomically; affected report documents are reindexed after commit.
+  commit atomically. Affected reports are reindexed after commit.
 
   ## Examples
 

@@ -158,12 +158,12 @@ defmodule PhilomenaWeb.ConversationControllerTest do
     assert Repo.aggregate(from(c in Conversation, where: c.from_id == ^user.id), :count) == 0
   end
 
-  test "POST /conversations with non-map params re-renders instead of raising", %{conn: conn} do
+  test "POST /conversations with non-map params raises", %{conn: conn} do
     %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
-    conn = post(conn, ~p"/conversations", %{"conversation" => "invalid"})
-
-    assert html_response(conn, 200) =~ "New Conversation"
+    assert_raise Ecto.CastError, fn ->
+      post(conn, ~p"/conversations", %{"conversation" => "invalid"})
+    end
   end
 
   test "POST /conversations as a banned user redirects with the ban flash", %{conn: conn} do
