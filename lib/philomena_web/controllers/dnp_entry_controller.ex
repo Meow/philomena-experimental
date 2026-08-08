@@ -3,6 +3,7 @@ defmodule PhilomenaWeb.DnpEntryController do
 
   alias PhilomenaWeb.MarkdownRenderer
   alias Philomena.DnpEntries
+  alias Philomena.DnpEntries.{DnpEntryForm, DnpEntryPage}
 
   action_fallback PhilomenaWeb.FallbackController
 
@@ -27,7 +28,10 @@ defmodule PhilomenaWeb.DnpEntryController do
   end
 
   def show(conn, %{"id" => id}) do
-    with {:ok, dnp_entry} <- DnpEntries.load_dnp_entry(conn.assigns.actor, id) do
+    renderer = &MarkdownRenderer.render_collection(&1, conn)
+
+    with {:ok, %DnpEntryPage{dnp_entry: dnp_entry, mod_notes: mod_notes}} <-
+           DnpEntries.load_dnp_entry_page(conn.assigns.actor, id, renderer) do
       [conditions, reason, instructions] =
         MarkdownRenderer.render_collection(
           [
@@ -38,8 +42,6 @@ defmodule PhilomenaWeb.DnpEntryController do
           conn
         )
 
-      renderer = &MarkdownRenderer.render_collection(&1, conn)
-
       assigns = [
         title: "Showing DNP Listing",
         dnp_entry: dnp_entry,
@@ -48,18 +50,14 @@ defmodule PhilomenaWeb.DnpEntryController do
         instructions: instructions
       ]
 
-      assigns =
-        case DnpEntries.mod_notes(conn.assigns.actor, dnp_entry, renderer) do
-          nil -> assigns
-          mod_notes -> [{:mod_notes, mod_notes} | assigns]
-        end
+      assigns = if is_nil(mod_notes), do: assigns, else: [{:mod_notes, mod_notes} | assigns]
 
       render(conn, "show.html", assigns)
     end
   end
 
   def new(conn, params) do
-    with {:ok, %{changeset: changeset, selectable_tags: selectable_tags}} <-
+    with {:ok, %DnpEntryForm{changeset: changeset, selectable_tags: selectable_tags}} <-
            DnpEntries.load_new_dnp_entry(conn.assigns.actor, params) do
       render(conn, "new.html",
         title: "New DNP Listing",
@@ -76,7 +74,7 @@ defmodule PhilomenaWeb.DnpEntryController do
         |> put_flash(:info, "Successfully submitted DNP request.")
         |> redirect(to: ~p"/dnp/#{dnp_entry}")
 
-      {:error, %{changeset: changeset, selectable_tags: selectable_tags}} ->
+      {:error, %DnpEntryForm{changeset: changeset, selectable_tags: selectable_tags}} ->
         render(conn, "new.html", changeset: changeset, selectable_tags: selectable_tags)
 
       {:error, _} = error ->
@@ -85,7 +83,12 @@ defmodule PhilomenaWeb.DnpEntryController do
   end
 
   def edit(conn, %{"id" => id} = params) do
-    with {:ok, %{dnp_entry: dnp_entry, changeset: changeset, selectable_tags: selectable_tags}} <-
+    with {:ok,
+          %DnpEntryForm{
+            dnp_entry: dnp_entry,
+            changeset: changeset,
+            selectable_tags: selectable_tags
+          }} <-
            DnpEntries.load_dnp_entry_for_edit(conn.assigns.actor, id, params) do
       render(conn, "edit.html",
         title: "Editing DNP Listing",
@@ -103,7 +106,12 @@ defmodule PhilomenaWeb.DnpEntryController do
         |> put_flash(:info, "Successfully updated DNP request.")
         |> redirect(to: ~p"/dnp/#{dnp_entry}")
 
-      {:error, %{dnp_entry: dnp_entry, changeset: changeset, selectable_tags: selectable_tags}} ->
+      {:error,
+       %DnpEntryForm{
+         dnp_entry: dnp_entry,
+         changeset: changeset,
+         selectable_tags: selectable_tags
+       }} ->
         render(conn, "edit.html",
           dnp_entry: dnp_entry,
           changeset: changeset,

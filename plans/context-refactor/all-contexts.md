@@ -189,6 +189,12 @@ reason or invariant is non-obvious; comments that restate code should go.
   conversation slugs load before authorization. Nested approvals are
   parent-scoped; approval, report closure, and audit logging commit together,
   with report indexing after commit.
+- DnpEntries is complete. Typed listing, page, and form results preserve page
+  data and rejected changesets; distinct abilities cover every controller action
+  and privileged tag selection. Entry and tag IDs load safely, edit forms default
+  to the loaded entry's tag, and row-locked transitions commit atomically with
+  their moderation logs. Raw persistence and loaded-transition helpers are
+  private.
 
 ### Wave 0: characterize and establish the contract
 

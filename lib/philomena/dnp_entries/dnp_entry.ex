@@ -24,7 +24,7 @@ defmodule Philomena.DnpEntries.DnpEntry do
   end
 
   @doc false
-  def changeset(dnp_entry, attrs) do
+  def changeset(dnp_entry, attrs \\ %{}) do
     dnp_entry
     |> cast(attrs, [])
     |> validate_required([])
@@ -56,6 +56,7 @@ defmodule Philomena.DnpEntries.DnpEntry do
     dnp_entry
     |> change(modifying_user_id: user.id)
     |> change(aasm_state: new_state)
+    |> validate_required([:aasm_state])
     |> validate_inclusion(:aasm_state, states())
   end
 

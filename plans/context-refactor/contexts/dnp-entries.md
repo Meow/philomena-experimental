@@ -1,5 +1,24 @@
 # DnpEntries context plan
 
+## Status
+
+Wave 2 complete. Public, mine, and admin listings retain a typed `DnpListing`;
+show pages now return a `DnpEntryPage` containing the authorized entry and
+optional moderation notes; and new/edit plus validation failures share a typed
+`DnpEntryForm`. Successful writes return the saved entry directly.
+
+Every form and mutation uses the global write prerequisite. DNP abilities now
+name admin index, new/create, edit/update, transition, and privileged tag
+selection separately. Entries load before instance authorization with their tag
+preloaded, while privileged tag IDs use `Loader` and normalize malformed or
+missing values to not-found. A moderator edit defaults to the entry's current
+tag, and unoffered submitted tags remain changeset errors.
+
+Raw insert and loaded-transition helpers are private. Staff transitions lock the
+entry and commit the state update with its moderation log in one transaction;
+missing or invalid states are rejected by the schema changeset rather than the
+database.
+
 Source: `lib/philomena/dnp_entries.ex`; consumers: public/mine/admin DNP listing,
 CRUD, and transition controllers.
 

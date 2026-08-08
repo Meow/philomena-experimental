@@ -5,7 +5,9 @@ defmodule PhilomenaWeb.Admin.DnpEntry.TransitionController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, %{"dnp_entry_id" => dnp_entry_id, "state" => new_state}) do
+  def create(conn, %{"dnp_entry_id" => dnp_entry_id} = params) do
+    new_state = params["state"]
+
     case DnpEntries.transition_dnp_entry(conn.assigns.actor, dnp_entry_id, new_state) do
       {:ok, dnp_entry} ->
         conn

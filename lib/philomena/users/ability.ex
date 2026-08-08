@@ -38,6 +38,15 @@ defimpl Canada.Can, for: Philomena.Users.User do
   @commission_management_actions [:new, :create, :edit, :update, :delete]
   @commission_item_actions [:new, :create, :edit, :update, :delete]
   @conversation_class_actions [:index, :new, :create]
+  @dnp_entry_class_actions [:index, :new, :create, :select_any_tag]
+  @dnp_entry_member_actions [
+    :show,
+    :show_reason,
+    :show_feedback,
+    :edit,
+    :update,
+    :transition
+  ]
 
   # Commission items deliberately remain owner-only, including for staff.
   def can?(%User{id: id}, action, %Item{commission: %Commission{user_id: id}})
@@ -132,9 +141,14 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{role: "moderator"}, :delete, %Comment{}), do: true
   def can?(%User{role: "moderator"}, :approve, %Comment{}), do: true
 
-  # Show the DNP list
-  def can?(%User{role: "moderator"}, _action, DnpEntry), do: true
-  def can?(%User{role: "moderator"}, _action, %DnpEntry{}), do: true
+  # Manage DNP entries
+  def can?(%User{role: "moderator"}, action, DnpEntry)
+      when action in @dnp_entry_class_actions,
+      do: true
+
+  def can?(%User{role: "moderator"}, action, %DnpEntry{})
+      when action in @dnp_entry_member_actions,
+      do: true
 
   # Manage bans. Deletion deliberately remains admin-only via the admin rule
   # above; context member flows authorize both the class and the loaded record.

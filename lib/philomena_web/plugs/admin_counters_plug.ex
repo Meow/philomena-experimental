@@ -36,7 +36,7 @@ defmodule PhilomenaWeb.AdminCountersPlug do
     duplicate_reports = DuplicateReports.count_duplicate_reports(user)
     reports = Reports.count_open_reports(conn.assigns.actor)
     artist_links = ArtistLinks.count_artist_links(user)
-    dnps = DnpEntries.count_dnp_entries(user)
+    dnps = DnpEntries.count_dnp_entries(conn.assigns.actor)
 
     conn
     |> assign(:pending_approval_count, pending_approvals)
