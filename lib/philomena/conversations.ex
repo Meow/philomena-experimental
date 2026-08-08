@@ -432,9 +432,8 @@ defmodule Philomena.Conversations do
   @doc """
   Marks `actor`'s participant side of the conversation hidden or restored.
 
-  The operation is idempotent. Authorized staff may view the conversation but,
-  because they are not a participant, do not change either participant flag.
-  Missing slugs are always not found.
+  The operation is idempotent. Authorized staff may view the conversation, but
+  do not change either participant flag. Missing slugs are always not found.
   """
   @spec set_conversation_hidden(Actor.t(), String.t(), boolean()) ::
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
@@ -449,7 +448,7 @@ defmodule Philomena.Conversations do
 
   Write access is checked before loading. Participant and staff reply policy is
   represented by the `:reply` ability. Validation failures return a
-  `MessageForm` containing the actual rejected changeset; success returns the
+  `MessageForm` containing the actual rejected changeset. Success returns the
   message and total count needed for the redirect page.
 
   ## Examples

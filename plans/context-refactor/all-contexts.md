@@ -129,66 +129,66 @@ reason or invariant is non-obvious; comments that restate code should go.
 
 ### Implementation status
 
-Wave 0 is implemented. `Philomena.Loader` now loads before authorization and
-provides query-based `one/1` and `one_and_authorize/3` primitives; shared error
-types live in `Philomena.Authorization`; `verify_not_banned/1` and all callers
-are gone; the loader/authorization role matrix and known-oddities register are
-present; and subscription persistence functions are explicitly internal, with
-the channel index using an actor-scoped wrapper. SiteNotices is the canonical
-ID-based exemplar. Rules and Donations are the first wave 1 examples for a
-position query and a slug query, respectively.
-Wave 1 now also includes Bans, UserFingerprints, and UserIps: ban administration
-uses transactional actor-scoped flows and private persistence helpers, while
-sensitive IP/fingerprint readers share the named `:identity_metadata`
-permission and canonical invalid-input behavior.
-Adverts, ArtistLinks, and Badges are complete: their controller-facing flows
-load and authorize through Actor-scoped APIs, database-only mutations use
-explicit transactions, and uploader work remains outside PostgreSQL
-transactions until object-storage uploads can be staged transactionally.
-Autocomplete, Roles, UserStatistics, and UserNameChanges are also complete:
-autocomplete reads use a normalized result and generation atomically replaces
-the PostgreSQL artifact; the unused generated Roles CRUD context is gone because
-Users owns role assignment/reference reads; daily statistics expose one finite,
-atomic increment service; and rename history now owns transaction composition
-plus actor-scoped paginated reads.
-Channels, ModNotes, and ModerationLogs are now complete as well: channel visits,
-read state, and subscription toggles use named abilities and guarded,
-idempotent writes; sensitive notes use typed, safely loaded target descriptors
-with separate target authorization; and moderation logs provide an
-`Ecto.Multi` composition API, used by note CRUD so the audit record and mutation
-succeed or roll back together. The direct log insert remains explicitly
-transitional while later context waves migrate their existing post-hoc calls.
-Notifications and Versions complete wave 1. Notification reads are self-scoped
-through Actor, route-category parsing has a normalized not-found result, and
-the six event kinds share documented duplicate-safe broadcast and idempotent
-clear mechanics that participate in their owners' ambient transactions.
-Post/comment history reads now accept loaded parents only, while edit history
-composes into the owning `Ecto.Multi` with Actor attribution, no-op suppression,
-rollback coupling, and deterministic same-second ordering. Legacy backfill
-support is retained until its release entry point and deployed-schema
-compatibility window are deliberately retired.
-Reports is the first completed wave 2 boundary. A tagged target locator and
-typed `ReportForm` now give all seven reportable types one form/create path with
-write-access parity, parent-scoped loading, and uniform missing results. User
-and staff listings are actor-scoped, report moderation uses distinct abilities,
-and row-locked claim/unclaim/close transitions atomically persist their audit
-logs. Bulk target cleanup and indexing remain explicit cross-context and worker
-service APIs.
-Profiles is also complete. Profile pages carry Actor independently from image
-search state and resolve active users through one shared Users slug locator.
-Sensitive embedded metadata consistently requires `:show_details` before its
-owning context's authorization and query, while typed IP and fingerprint
-histories paginate the subject rows.
-Commissions is complete. Typed page/form/directory results wrap an active
-profile locator, named commission and item abilities replace role/ownership
-checks, and nested items are parent-scoped before authorization. The database
-enforces one listing per profile; directory reads exclude deactivated owners,
-and transactional report cleanup retains after-commit report indexing.
-Conversations is complete. Typed index/form/message results normalize malformed
-filters and params, active recipient lookup rejects deactivated users, and
-conversation slugs load before authorization. Nested approvals are
-parent-scoped; approval, report closure, and audit logging commit together,
-with report indexing after commit.
+- Wave 0 is implemented. `Philomena.Loader` now loads before authorization and
+  provides query-based `one/1` and `one_and_authorize/3` primitives; shared error
+  types live in `Philomena.Authorization`; `verify_not_banned/1` and all callers
+  are gone; the loader/authorization role matrix and known-oddities register are
+  present; and subscription persistence functions are explicitly internal, with
+  the channel index using an actor-scoped wrapper. SiteNotices is the canonical
+  ID-based exemplar. Rules and Donations are the first wave 1 examples for a
+  position query and a slug query, respectively.
+- Wave 1 now also includes Bans, UserFingerprints, and UserIps: ban administration
+  uses transactional actor-scoped flows and private persistence helpers, while
+  sensitive IP/fingerprint readers share the named `:identity_metadata`
+  permission and canonical invalid-input behavior.
+- Adverts, ArtistLinks, and Badges are complete: their controller-facing flows
+  load and authorize through Actor-scoped APIs, database-only mutations use
+  explicit transactions, and uploader work remains outside PostgreSQL
+  transactions until object-storage uploads can be staged transactionally.
+  Autocomplete, Roles, UserStatistics, and UserNameChanges are also complete:
+  autocomplete reads use a normalized result and generation atomically replaces
+  the PostgreSQL artifact; the unused generated Roles CRUD context is gone because
+  Users owns role assignment/reference reads; daily statistics expose one finite,
+  atomic increment service; and rename history now owns transaction composition
+  plus actor-scoped paginated reads.
+- Channels, ModNotes, and ModerationLogs are now complete as well: channel visits,
+  read state, and subscription toggles use named abilities and guarded,
+  idempotent writes; sensitive notes use typed, safely loaded target descriptors
+  with separate target authorization; and moderation logs provide an
+  `Ecto.Multi` composition API, used by note CRUD so the audit record and mutation
+  succeed or roll back together. The direct log insert remains explicitly
+  transitional while later context waves migrate their existing post-hoc calls.
+- Notifications and Versions complete wave 1. Notification reads are self-scoped
+  through Actor, route-category parsing has a normalized not-found result, and
+  the six event kinds share documented duplicate-safe broadcast and idempotent
+  clear mechanics that participate in their owners' ambient transactions.
+  Post/comment history reads now accept loaded parents only, while edit history
+  composes into the owning `Ecto.Multi` with Actor attribution, no-op suppression,
+  rollback coupling, and deterministic same-second ordering. Legacy backfill
+  support is retained until its release entry point and deployed-schema
+  compatibility window are deliberately retired.
+- Reports is the first completed wave 2 boundary. A tagged target locator and
+  typed `ReportForm` now give all seven reportable types one form/create path with
+  write-access parity, parent-scoped loading, and uniform missing results. User
+  and staff listings are actor-scoped, report moderation uses distinct abilities,
+  and row-locked claim/unclaim/close transitions atomically persist their audit
+  logs. Bulk target cleanup and indexing remain explicit cross-context and worker
+  service APIs.
+- Profiles is also complete. Profile pages carry Actor independently from image
+  search state and resolve active users through one shared Users slug locator.
+  Sensitive embedded metadata consistently requires `:show_details` before its
+  owning context's authorization and query, while typed IP and fingerprint
+  histories paginate the subject rows.
+- Commissions is complete. Typed page/form/directory results wrap an active
+  profile locator, named commission and item abilities replace role/ownership
+  checks, and nested items are parent-scoped before authorization. The database
+  enforces one listing per profile; directory reads exclude deactivated owners,
+  and transactional report cleanup retains after-commit report indexing.
+- Conversations is complete. Typed index/form/message results normalize malformed
+  filters and params, active recipient lookup rejects deactivated users, and
+  conversation slugs load before authorization. Nested approvals are
+  parent-scoped; approval, report closure, and audit logging commit together,
+  with report indexing after commit.
 
 ### Wave 0: characterize and establish the contract
 
