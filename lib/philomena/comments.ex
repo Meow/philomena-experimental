@@ -76,7 +76,9 @@ defmodule Philomena.Comments do
     |> Repo.transaction()
   end
 
-  defp change_comment(%Comment{} = comment), do: Comment.changeset(comment, %{})
+  defp change_comment(%Comment{} = comment) do
+    Comment.changeset(comment)
+  end
 
   defp moderation_changeset(:hide, comment, attrs, user),
     do: Comment.hide_changeset(comment, attrs, user)
@@ -182,10 +184,10 @@ defmodule Philomena.Comments do
     |> maybe_put_erasure_counts(comment)
     |> Repo.transaction()
     |> case do
-      {:ok, %{comment: erased_comment, reports: {_count, report_ids}}} ->
+      {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
         Reports.reindex_closed_reports(report_ids)
-        reindex_comment(erased_comment)
-        {:ok, erased_comment}
+        reindex_comment(comment)
+        {:ok, comment}
 
       {:error, _step, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
@@ -230,7 +232,7 @@ defmodule Philomena.Comments do
     comment
   end
 
-  defp load_global_comment(actor, id) do
+  defp load_global_comment(%Actor{} = actor, id) do
     with {:ok, id} <- IntegerId.parse(id),
          {:ok, comment} <-
            Comment
@@ -246,11 +248,11 @@ defmodule Philomena.Comments do
     end
   end
 
-  defp load_image(actor, image_id, action, preloads) do
+  defp load_image(%Actor{} = actor, image_id, action, preloads) do
     Loader.fetch_and_authorize(Image, actor, action, image_id, preloads)
   end
 
-  defp load_comment_in_image(actor, %Image{} = image, comment_id, action, preloads) do
+  defp load_comment_in_image(%Actor{} = actor, %Image{} = image, comment_id, action, preloads) do
     with {:ok, comment_id} <- IntegerId.parse(comment_id),
          {:ok, comment} <-
            Comment
@@ -264,7 +266,14 @@ defmodule Philomena.Comments do
     end
   end
 
-  defp load_image_comment(actor, image_id, comment_id, action, image_preloads, comment_preloads) do
+  defp load_image_comment(
+         %Actor{} = actor,
+         image_id,
+         comment_id,
+         action,
+         image_preloads,
+         comment_preloads
+       ) do
     with {:ok, image} <- load_image(actor, image_id, :show, image_preloads),
          {:ok, comment} <-
            load_comment_in_image(actor, image, comment_id, action, comment_preloads) do
@@ -272,37 +281,37 @@ defmodule Philomena.Comments do
     end
   end
 
-  defp load_editable_comment(actor, image, comment_id, action) do
+  defp load_editable_comment(%Actor{} = actor, image, comment_id, action) do
     with :ok <- authorize(actor, :create_comment, image) do
       load_comment_in_image(actor, image, comment_id, action, @display_preloads)
     end
   end
 
-  defp load_commentable_image_for_action(actor, image_id, :index) do
+  defp load_commentable_image_for_action(%Actor{} = actor, image_id, :index) do
     load_image(actor, image_id, :index, [:sources, tags: :aliases])
   end
 
-  defp load_commentable_image_for_action(actor, image_id, :show) do
+  defp load_commentable_image_for_action(%Actor{} = actor, image_id, :show) do
     with {:ok, image} <- load_image(actor, image_id, :show, [:sources, tags: :aliases]) do
       resolve_duplicate(actor, image)
     end
   end
 
-  defp load_commentable_image_for_action(actor, image_id, action)
+  defp load_commentable_image_for_action(%Actor{} = actor, image_id, action)
        when action in [:create, :edit, :update] do
     load_image(actor, image_id, :create_comment, [:sources, tags: :aliases])
   end
 
   defp resolve_duplicate(_actor, %Image{duplicate_id: nil} = image), do: {:ok, image}
 
-  defp resolve_duplicate(actor, %Image{duplicate_id: duplicate_id}) do
+  defp resolve_duplicate(%Actor{} = actor, %Image{duplicate_id: duplicate_id}) do
     load_image(actor, duplicate_id, :show, [:sources, tags: :aliases])
   end
 
-  defp authorized?(actor, action, subject),
+  defp authorized?(%Actor{} = actor, action, subject),
     do: authorize(actor, action, subject) == :ok
 
-  defp visibility_policy(actor, allow_privileged?) do
+  defp visibility_policy(%Actor{} = actor, allow_privileged?) do
     %{
       show_hidden_comments?:
         allow_privileged? and
@@ -413,12 +422,6 @@ defmodule Philomena.Comments do
         (candidate.created_at == ^comment.created_at and candidate.id > ^comment.id)
     )
   end
-
-  defp pagination_value(pagination, key) when is_list(pagination),
-    do: Keyword.fetch!(pagination, key)
-
-  defp pagination_value(pagination, key) when is_map(pagination),
-    do: Map.fetch!(pagination, key)
 
   @doc false
   @spec create_comment_for_fixture(Image.t(), Actor.t(), map()) ::
@@ -621,7 +624,7 @@ defmodule Philomena.Comments do
         |> filter_direction(comment, actor.user)
         |> Repo.aggregate(:count, :id)
 
-      {:ok, div(offset, pagination_value(pagination, :page_size)) + 1}
+      {:ok, div(offset, pagination[:page_size]) + 1}
     else
       :error -> {:error, :not_found}
       error -> error
@@ -640,7 +643,7 @@ defmodule Philomena.Comments do
   @spec last_comment_page(Actor.t(), Image.t(), Repo.pagination_params()) :: pos_integer()
   def last_comment_page(%Actor{} = actor, %Image{} = image, pagination) do
     count = actor |> visible_image_comments(image) |> Repo.aggregate(:count, :id)
-    max(Integer.ceil_div(count, pagination_value(pagination, :page_size)), 1)
+    max(Integer.ceil_div(count, pagination[:page_size]), 1)
   end
 
   @doc """

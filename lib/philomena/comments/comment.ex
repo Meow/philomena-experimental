@@ -40,7 +40,7 @@ defmodule Philomena.Comments.Comment do
     |> Approval.maybe_put_approval(actor.user, :external_links)
   end
 
-  def changeset(comment, attrs, edited_at \\ nil) do
+  def changeset(comment, attrs \\ %{}, edited_at \\ nil) do
     comment
     |> cast(attrs, [:body, :edit_reason])
     |> put_change(:edited_at, edited_at)

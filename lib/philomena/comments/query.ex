@@ -1,9 +1,6 @@
 defmodule Philomena.Comments.Query do
   @moduledoc """
   Compiles the user-facing comment search language.
-
-  The actor's comment-search ability selects the public or sensitive field set;
-  attribution data itself never grants additional query fields.
   """
 
   import Philomena.Authorization, only: [authorize: 3]

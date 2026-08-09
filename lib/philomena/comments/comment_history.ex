@@ -1,6 +1,6 @@
 defmodule Philomena.Comments.CommentHistory do
   @moduledoc """
-  A parent-scoped comment and the versions displayed on its history page.
+  An image's comment and the versions displayed on its history page.
   """
 
   alias Philomena.Comments.{Comment, CommentVersion}
