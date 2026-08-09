@@ -7,6 +7,7 @@ defmodule PhilomenaWeb.ActivityController do
   def index(conn, _params) do
     page =
       Activities.load_front_page(
+        conn.assigns.actor,
         ImageScope.search_scope(conn),
         conn.assigns.current_filter,
         conn.cookies["chan_nsfw"] == "true"

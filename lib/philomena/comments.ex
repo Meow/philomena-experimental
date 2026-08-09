@@ -1,12 +1,6 @@
 defmodule Philomena.Comments do
   @moduledoc """
-  Image-comment reads, writes, moderation, search, and indexing.
-
-  Request-facing functions accept an attribution actor and constrain comments
-  through their route image before authorizing the requested action. Collection
-  visibility is expressed in PostgreSQL or OpenSearch so counting and pagination
-  do not materialize unauthorized comments. Trusted indexing, duplicate-image,
-  fixture, and account-erasure services are named separately from request APIs.
+  Image comment reads, writes, moderation, search, and indexing.
   """
 
   import Ecto.Query, warn: false
@@ -39,9 +33,6 @@ defmodule Philomena.Comments do
   @comment_create_window 15
   @display_preloads [:deleted_by, user: [awards: :badge]]
   @search_preloads [:deleted_by, image: [:sources, tags: :aliases], user: [awards: :badge]]
-
-  @typedoc "An actor-aware principal or a legacy user-only search principal."
-  @type principal :: Actor.t() | User.t() | nil
 
   @typedoc "A normalized request-facing Comments failure."
   @type request_error :: :ban | :unauthorized | :not_found
@@ -292,9 +283,8 @@ defmodule Philomena.Comments do
   end
 
   defp load_commentable_image_for_action(actor, image_id, :show) do
-    with {:ok, image} <- load_image(actor, image_id, :show, [:sources, tags: :aliases]),
-         {:ok, target} <- resolve_duplicate(actor, image) do
-      {:ok, target}
+    with {:ok, image} <- load_image(actor, image_id, :show, [:sources, tags: :aliases]) do
+      resolve_duplicate(actor, image)
     end
   end
 
@@ -309,30 +299,24 @@ defmodule Philomena.Comments do
     load_image(actor, duplicate_id, :show, [:sources, tags: :aliases])
   end
 
-  defp authorized?(principal, action, subject),
-    do: authorize(principal, action, subject) == :ok
+  defp authorized?(actor, action, subject),
+    do: authorize(actor, action, subject) == :ok
 
-  defp visibility_policy(principal, allow_privileged?) do
+  defp visibility_policy(actor, allow_privileged?) do
     %{
       show_hidden_comments?:
         allow_privileged? and
-          authorized?(principal, :show, %Comment{hidden_from_users: true}),
+          authorized?(actor, :show, %Comment{hidden_from_users: true}),
       show_hidden_images?:
-        allow_privileged? and authorized?(principal, :show, %Image{hidden_from_users: true}),
-      show_destroyed_comments?: allow_privileged? and authorized?(principal, :delete, %Comment{}),
-      show_unapproved_comments?:
-        allow_privileged? and authorized?(principal, :approve, %Comment{}),
-      show_unapproved_images?: allow_privileged? and authorized?(principal, :approve, %Image{})
+        allow_privileged? and authorized?(actor, :show, %Image{hidden_from_users: true}),
+      show_destroyed_comments?: allow_privileged? and authorized?(actor, :delete, %Comment{}),
+      show_unapproved_comments?: allow_privileged? and authorized?(actor, :approve, %Comment{}),
+      show_unapproved_images?: allow_privileged? and authorized?(actor, :approve, %Image{})
     }
   end
 
-  defp principal_user(%Actor{user: user}), do: user
-  defp principal_user(%User{} = user), do: user
-  defp principal_user(nil), do: nil
-
-  defp search_exclusions(principal, filter, allow_privileged?) do
-    policy = visibility_policy(principal, allow_privileged?)
-    user = principal_user(principal)
+  defp search_exclusions(%Actor{user: user} = actor, filter, allow_privileged?) do
+    policy = visibility_policy(actor, allow_privileged?)
 
     [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
     |> exclude_hidden_comments(policy.show_hidden_comments?)
@@ -554,11 +538,9 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Builds an unexecuted comment search definition for `principal`.
+  Builds an unexecuted comment search definition for `actor`.
 
-  This batching service accepts an Actor when the caller has one; `User` or
-  `nil` remain supported for the legacy homepage search scope. `show_hidden:
-  false` forces public visibility even for privileged actors.
+  `show_hidden: false` forces public visibility even for privileged actors.
 
   ## Examples
 
@@ -566,9 +548,9 @@ defmodule Philomena.Comments do
       %{module: Comment, ...}
 
   """
-  @spec comment_search_definition(principal(), Filter.t(), map() | [map()], keyword()) ::
+  @spec comment_search_definition(Actor.t(), Filter.t(), map() | [map()], keyword()) ::
           Search.search_definition()
-  def comment_search_definition(principal, %Filter{} = filter, body, opts \\ []) do
+  def comment_search_definition(%Actor{} = actor, %Filter{} = filter, body, opts \\ []) do
     pagination = Keyword.get(opts, :pagination, %{})
     allow_privileged? = Keyword.get(opts, :show_hidden, true)
 
@@ -578,7 +560,7 @@ defmodule Philomena.Comments do
         query: %{
           bool: %{
             must: body,
-            must_not: search_exclusions(principal, filter, allow_privileged?)
+            must_not: search_exclusions(actor, filter, allow_privileged?)
           }
         },
         sort: %{created_at: :desc}

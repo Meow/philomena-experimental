@@ -1293,7 +1293,7 @@ defmodule Philomena.CommentsTest do
   describe "comment_search_definition/4" do
     test "an anonymous viewer excludes deleted, non-approved, and hidden-tag comments" do
       filter = %Filter{hidden_tag_ids: [7, 8]}
-      definition = Comments.comment_search_definition(nil, filter, %{match_all: %{}})
+      definition = Comments.comment_search_definition(actor(), filter, %{match_all: %{}})
 
       assert definition.module == Comment
       assert definition.body.query.bool.must == %{match_all: %{}}
@@ -1312,7 +1312,9 @@ defmodule Philomena.CommentsTest do
       user = confirmed_user_fixture()
 
       filters =
-        must_not(Comments.comment_search_definition(user, @empty_filter, %{match_all: %{}}))
+        must_not(
+          Comments.comment_search_definition(actor(user), @empty_filter, %{match_all: %{}})
+        )
 
       # Comment and image approval are independent. The comment exclusion keeps
       # the viewer's own pending comment; an unapproved image stays excluded.
@@ -1333,7 +1335,9 @@ defmodule Philomena.CommentsTest do
     test "an authorized moderator drops deleted and non-approved excludes by default" do
       moderator = moderator_user_fixture()
       filter = %Filter{hidden_tag_ids: [7]}
-      filters = must_not(Comments.comment_search_definition(moderator, filter, %{match_all: %{}}))
+
+      filters =
+        must_not(Comments.comment_search_definition(actor(moderator), filter, %{match_all: %{}}))
 
       assert filters == [%{terms: %{"image.tag_ids" => [7]}}]
     end
@@ -1344,7 +1348,7 @@ defmodule Philomena.CommentsTest do
       filters =
         must_not(
           Comments.comment_search_definition(
-            moderator,
+            actor(moderator),
             @empty_filter,
             %{match_all: %{}},
             show_hidden: false
@@ -1365,7 +1369,7 @@ defmodule Philomena.CommentsTest do
     test "passes pagination through to the search window" do
       definition =
         Comments.comment_search_definition(
-          nil,
+          actor(),
           @empty_filter,
           %{match_all: %{}},
           pagination: %{page_number: 3, page_size: 10}

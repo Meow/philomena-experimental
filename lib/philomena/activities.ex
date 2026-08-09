@@ -7,6 +7,7 @@ defmodule Philomena.Activities do
   import Ecto.Query
 
   alias Philomena.Activities.FrontPage
+  alias Philomena.Attribution.Actor
   alias Philomena.Channels.Channel
   alias Philomena.Comments
   alias Philomena.Comments.Comment
@@ -40,9 +41,9 @@ defmodule Philomena.Activities do
       %FrontPage{}
 
   """
-  @spec load_front_page(Scope.t(), Filter.t(), boolean()) :: FrontPage.t()
-  def load_front_page(%Scope{} = scope, %Filter{} = filter, show_nsfw_channels?) do
-    user = scope.user
+  @spec load_front_page(Actor.t(), Scope.t(), Filter.t(), boolean()) :: FrontPage.t()
+  def load_front_page(%Actor{} = actor, %Scope{} = scope, %Filter{} = filter, show_nsfw_channels?) do
+    user = actor.user
 
     {images_definition, _tags} =
       ImageSearch.default_query(scope, pagination: %{scope.pagination | page_number: 1})
@@ -57,7 +58,7 @@ defmodule Philomena.Activities do
 
     comments_definition =
       Comments.comment_search_definition(
-        user,
+        actor,
         filter,
         %{range: %{created_at: %{gt: "now-1w"}}},
         pagination: %{page_number: 1, page_size: 6},

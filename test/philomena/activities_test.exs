@@ -1,6 +1,6 @@
 defmodule Philomena.ActivitiesTest do
   @moduledoc """
-  Context-level tests for `Philomena.Activities.load_front_page/3`, which
+  Context-level tests for `Philomena.Activities.load_front_page/4`, which
   assembles the homepage strips for a viewer.
 
   The recent, top-scoring, comment, and watched strips run against the real
@@ -12,6 +12,7 @@ defmodule Philomena.ActivitiesTest do
 
   @moduletag :search
 
+  import Philomena.AttributionFixtures
   import Philomena.ChannelsFixtures
   import Philomena.CommentsFixtures
   import Philomena.ForumsFixtures
@@ -73,7 +74,7 @@ defmodule Philomena.ActivitiesTest do
     |> Repo.update!()
   end
 
-  describe "load_front_page/3 for an anonymous scope" do
+  describe "load_front_page/4 for an anonymous scope" do
     test "returns a FrontPage struct with every key populated" do
       image = image_fixture(created_at: hours_ago(1))
       comment = comment_fixture(image, confirmed_user_fixture())
@@ -82,7 +83,7 @@ defmodule Philomena.ActivitiesTest do
       SearchHelpers.reindex_all!(Image)
       SearchHelpers.reindex_all!(Comment)
 
-      front = Activities.load_front_page(scope(), filter(), false)
+      front = Activities.load_front_page(actor(), scope(), filter(), false)
 
       assert %FrontPage{} = front
 
@@ -109,7 +110,7 @@ defmodule Philomena.ActivitiesTest do
       image = image_fixture(created_at: hours_ago(1))
       SearchHelpers.reindex_all!(Image)
 
-      front = Activities.load_front_page(scope(), filter(), false)
+      front = Activities.load_front_page(actor(), scope(), filter(), false)
 
       entry = Enum.find(front.images.entries, &(&1.id == image.id))
       assert Ecto.assoc_loaded?(entry.tags)
@@ -121,28 +122,28 @@ defmodule Philomena.ActivitiesTest do
 
       SearchHelpers.reindex_all!(Image)
 
-      front = Activities.load_front_page(scope(), filter(), false)
+      front = Activities.load_front_page(actor(), scope(), filter(), false)
 
       assert front.featured_image.id == image.id
     end
   end
 
-  describe "load_front_page/3 for a signed-in scope" do
+  describe "load_front_page/4 for a signed-in scope" do
     test "the watched strip is a page rather than nil" do
       user = confirmed_user_fixture()
 
-      front = Activities.load_front_page(scope(user), filter(), false)
+      front = Activities.load_front_page(actor(user), scope(user), filter(), false)
 
       assert %Scrivener.Page{} = front.watched
       assert is_list(front.watched.entries)
     end
   end
 
-  describe "load_front_page/3 stream strip" do
+  describe "load_front_page/4 stream strip" do
     test "a channel with a fetch time appears in the streams" do
       channel = live_channel(%{})
 
-      front = Activities.load_front_page(scope(), filter(), false)
+      front = Activities.load_front_page(actor(), scope(), filter(), false)
 
       assert Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -151,7 +152,7 @@ defmodule Philomena.ActivitiesTest do
       channel = channel_fixture(%{})
       assert channel.last_fetched_at == nil
 
-      front = Activities.load_front_page(scope(), filter(), false)
+      front = Activities.load_front_page(actor(), scope(), filter(), false)
 
       refute Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -159,7 +160,7 @@ defmodule Philomena.ActivitiesTest do
     test "an nsfw channel is hidden when nsfw channels are off" do
       channel = live_channel(%{nsfw: true})
 
-      front = Activities.load_front_page(scope(), filter(), false)
+      front = Activities.load_front_page(actor(), scope(), filter(), false)
 
       refute Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -167,7 +168,7 @@ defmodule Philomena.ActivitiesTest do
     test "an nsfw channel appears when nsfw channels are on" do
       channel = live_channel(%{nsfw: true})
 
-      front = Activities.load_front_page(scope(), filter(), true)
+      front = Activities.load_front_page(actor(), scope(), filter(), true)
 
       assert Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -176,7 +177,7 @@ defmodule Philomena.ActivitiesTest do
       channel = live_channel(%{nsfw: false})
 
       assert %Channel{} = channel
-      front = Activities.load_front_page(scope(), filter(), false)
+      front = Activities.load_front_page(actor(), scope(), filter(), false)
 
       assert Enum.any?(front.streams, &(&1.id == channel.id))
     end
