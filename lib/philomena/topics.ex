@@ -156,7 +156,7 @@ defmodule Philomena.Topics do
     |> case do
       {:ok, %{topic: topic}} ->
         UserStatistics.increment(topic.user_id, :topics_count, -1)
-        Posts.reindex_posts_in_topic(topic.id)
+        Posts.reindex_posts_in_topic(topic)
 
         {:ok, topic}
 
@@ -179,7 +179,7 @@ defmodule Philomena.Topics do
     |> case do
       {:ok, %{topic: topic}} ->
         UserStatistics.increment(topic.user_id, :topics_count)
-        Posts.reindex_posts_in_topic(topic.id)
+        Posts.reindex_posts_in_topic(topic)
 
         {:ok, topic}
 

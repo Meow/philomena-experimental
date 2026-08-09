@@ -1,11 +1,6 @@
 defmodule Philomena.Posts do
   @moduledoc """
-  Parent-scoped forum-post reads, writes, moderation, and search indexing.
-
-  Request-facing functions accept an attribution actor and constrain posts by
-  their route forum and topic before authorization. Explicit worker and
-  cross-context services own indexing and topic bookkeeping without exposing
-  request bypass loaders.
+  Forum post reads, writes, moderation, and search indexing.
   """
 
   import Ecto.Query, warn: false
@@ -38,7 +33,7 @@ defmodule Philomena.Posts do
 
   @post_create_window 15
 
-  defp persist_post(topic, %Actor{user: user} = actor, params) do
+  defp persist_post(%Topic{} = topic, %Actor{user: user} = actor, params) do
     now = DateTime.utc_now(:second)
 
     topic_query =
@@ -124,7 +119,7 @@ defmodule Philomena.Posts do
     end
   end
 
-  defp hide_loaded_post(%Post{} = post, attrs, user) do
+  defp hide_loaded_post(%Post{} = post, attrs, %User{} = user) do
     post = post |> Repo.preload(:topic)
 
     Multi.new()
@@ -222,74 +217,14 @@ defmodule Philomena.Posts do
     end
   end
 
-  defp hide_authorized_post(actor, %Post{} = post, post_params) do
-    case hide_loaded_post(post, post_params, actor.user) do
-      {:ok, hidden_post} ->
-        log_post_hide(actor, hidden_post)
-        {:ok, hidden_post}
-
-      {:error, %Ecto.Changeset{}} ->
-        {:error, post}
-    end
-  end
-
-  defp log_post_hide(actor, %Post{topic: topic} = post) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Topic.Post.Hide:create",
-      Paths.forum_post_path(post),
-      "Deleted forum post ##{post.id} in topic '#{topic.title}' (#{post.deletion_reason})"
-    )
-  end
-
-  defp unhide_authorized_post(actor, %Post{} = post) do
-    case unhide_post(post) do
-      {:ok, restored_post} ->
-        log_post_unhide(actor, restored_post)
-        {:ok, restored_post}
-
-      _error ->
-        {:error, post}
-    end
-  end
-
-  defp log_post_unhide(actor, %Post{topic: topic} = post) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Topic.Post.Hide:delete",
-      Paths.forum_post_path(post),
-      "Restored forum post ##{post.id} in topic '#{topic.title}'"
-    )
-  end
-
-  defp destroy_authorized_post(actor, %Post{} = post) do
-    case destroy_loaded_post(post) do
-      {:ok, destroyed_post} ->
-        log_post_destroy(actor, destroyed_post)
-        {:ok, destroyed_post}
-
-      _error ->
-        {:error, post}
-    end
-  end
-
-  defp log_post_destroy(actor, %Post{topic: topic} = post) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Topic.Post.Delete:create",
-      Paths.forum_post_path(post),
-      "Destroyed forum post ##{post.id} in topic '#{topic.title}'"
-    )
-  end
-
-  defp load_moderated_post(actor, forum_slug, topic_slug, post_id, action) do
+  defp load_moderated_post(%Actor{} = actor, forum_slug, topic_slug, post_id, action) do
     with {:ok, %ForumTopic{topic: topic}} <-
            Topics.load_forum_topic(actor, forum_slug, topic_slug) do
       load_post_in_topic(actor, topic, post_id, action)
     end
   end
 
-  defp approve_loaded_post(%Actor{user: user} = actor, %Post{} = post) do
+  defp approve_loaded_post(%Actor{user: user}, %Post{} = post) do
     changeset = Post.approve_changeset(post)
 
     Multi.new()
@@ -297,26 +232,16 @@ defmodule Philomena.Posts do
     |> Reports.put_close_reports(:reports, user, post_id: post.id)
     |> Repo.transaction()
     |> case do
-      {:ok, %{post: approved_post, reports: {_count, reports}}} ->
-        UserStatistics.increment(approved_post.user_id, :posts_count)
+      {:ok, %{post: post, reports: {_count, reports}}} ->
+        UserStatistics.increment(post.user_id, :posts_count)
         Reports.reindex_closed_reports(reports)
-        reindex_post(approved_post)
-        log_post_approval(actor, approved_post)
+        reindex_post(post)
 
-        {:ok, approved_post}
+        {:ok, post}
 
       _error ->
         {:error, post}
     end
-  end
-
-  defp log_post_approval(actor, %Post{topic: topic} = post) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Topic.Post.Approve:create",
-      Paths.forum_post_path(post),
-      "Approved forum post ##{post.id} in topic '#{topic.title}'"
-    )
   end
 
   defp load_post_in_topic(%Actor{} = actor, topic, post_id, action, opts \\ []) do
@@ -596,10 +521,10 @@ defmodule Philomena.Posts do
   @doc """
   Hides and destroys one loaded post for permanent user erasure.
 
-  This narrow collaboration service owns the post counters, report cleanup,
-  and indexing required by `Philomena.Users.Eraser`. It is not a request
-  authorization boundary; the erasure workflow has already selected both the
-  post and the staff user responsible for the wipe.
+  This function owns the post counters, report cleanup, and indexing required
+  by `Philomena.Users.Eraser`. It is not a request authorization boundary;
+  the erasure workflow has already selected both the post and the staff user
+  responsible for the wipe.
 
   ## Examples
 
@@ -731,11 +656,24 @@ defmodule Philomena.Posts do
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
           | {:error, Post.t()}
-  def hide_post(%Actor{} = actor, forum_slug, topic_slug, post_id, post_params) do
+  def hide_post(%Actor{user: user} = actor, forum_slug, topic_slug, post_id, post_params) do
     with :ok <- verify_write_access(actor),
          {:ok, post} <-
            load_moderated_post(actor, forum_slug, topic_slug, post_id, :hide) do
-      hide_authorized_post(actor, post, post_params)
+      case hide_loaded_post(post, post_params, user) do
+        {:ok, %Post{topic: topic} = post} ->
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Post.Hide:create",
+            Paths.forum_post_path(post),
+            "Deleted forum post ##{post.id} in topic '#{topic.title}' (#{post.deletion_reason})"
+          )
+
+          {:ok, post}
+
+        _error ->
+          {:error, post}
+      end
     end
   end
 
@@ -767,7 +705,20 @@ defmodule Philomena.Posts do
     with :ok <- verify_write_access(actor),
          {:ok, post} <-
            load_moderated_post(actor, forum_slug, topic_slug, post_id, :unhide) do
-      unhide_authorized_post(actor, post)
+      case unhide_post(post) do
+        {:ok, %Post{topic: topic} = post} ->
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Post.Hide:delete",
+            Paths.forum_post_path(post),
+            "Restored forum post ##{post.id} in topic '#{topic.title}'"
+          )
+
+          {:ok, post}
+
+        _error ->
+          {:error, post}
+      end
     end
   end
 
@@ -804,7 +755,20 @@ defmodule Philomena.Posts do
     with :ok <- verify_write_access(actor),
          {:ok, post} <-
            load_moderated_post(actor, forum_slug, topic_slug, post_id, :delete) do
-      destroy_authorized_post(actor, post)
+      case destroy_loaded_post(post) do
+        {:ok, %Post{topic: topic} = post} ->
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Post.Delete:create",
+            Paths.forum_post_path(post),
+            "Destroyed forum post ##{post.id} in topic '#{topic.title}'"
+          )
+
+          {:ok, post}
+
+        _error ->
+          {:error, post}
+      end
     end
   end
 
@@ -839,14 +803,27 @@ defmodule Philomena.Posts do
     with :ok <- verify_write_access(actor),
          {:ok, post} <-
            load_moderated_post(actor, forum_slug, topic_slug, post_id, :approve) do
-      approve_loaded_post(actor, post)
+      case approve_loaded_post(actor, post) do
+        {:ok, post} ->
+          ModerationLogs.create_moderation_log(
+            actor,
+            "Topic.Post.Approve:create",
+            Paths.forum_post_path(post),
+            "Approved forum post ##{post.id} in topic '#{post.topic.title}'"
+          )
+
+          {:ok, post}
+
+        _error ->
+          {:error, post}
+      end
     end
   end
 
   @doc """
   Loads the edit history of the post named by `post_id` within
   the topic named by `topic_slug` in the forum named by `forum_slug`, on behalf
-  of `actor`. This is a public read with no ban check.
+  of `actor`.
 
   The forum is loaded by short name and authorized for `:show`, and the topic is
   loaded by slug with hidden topics visible only to actors who may `:show` them.
@@ -856,9 +833,8 @@ defmodule Philomena.Posts do
   `{:error, :unauthorized}`.
 
   On success the loaded post (with its topic, forum, and author associations
-  preloaded) is returned alongside the topic
-  and the last 25 versions of the post, newest first, with diffs and version
-  authors resolved.
+  preloaded) is returned alongside the topic and the last 25 versions of the
+  post, newest first, with diffs and version authors resolved.
 
   Returns `{:ok, {topic, post, versions}}`, `{:error, :unauthorized}` when the
   forum, topic, or hidden post is not visible to `actor`, or
@@ -961,9 +937,9 @@ defmodule Philomena.Posts do
       :ok
 
   """
-  @spec reindex_posts_in_topic(integer()) :: :ok
-  def reindex_posts_in_topic(topic_id) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Posts", "topic_id", [topic_id]])
+  @spec reindex_posts_in_topic(Topic.t()) :: :ok
+  def reindex_posts_in_topic(%Topic{} = topic) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Posts", "topic_id", [topic.id]])
 
     :ok
   end
@@ -977,7 +953,7 @@ defmodule Philomena.Posts do
       [user: user_query, topic: topic_query]
 
   """
-  @spec indexing_preloads() :: keyword(Ecto.Query.t())
+  @spec indexing_preloads() :: list()
   def indexing_preloads do
     user_query = select(User, [u], map(u, [:id, :name]))
 

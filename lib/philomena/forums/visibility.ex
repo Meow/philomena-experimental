@@ -92,7 +92,7 @@ defmodule Philomena.Forums.Visibility do
       []
 
       iex> search_visibility_filters(actor)
-      [%{term: %{access_level: "normal}}, ...]
+      [%{term: %{access_level: "normal"}}, ...]
 
   """
   @spec search_visibility_filters(Actor.t()) :: list()
