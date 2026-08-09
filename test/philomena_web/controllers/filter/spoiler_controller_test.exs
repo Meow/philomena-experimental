@@ -44,7 +44,7 @@ defmodule PhilomenaWeb.Filter.SpoilerControllerTest do
   test "POST spoilers the tag on the user's own current filter", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     filter = filter_fixture(user)
-    {:ok, _} = Users.update_filter(user, filter)
+    {:ok, _} = Users.set_current_filter(user, filter)
     tag = tag_fixture()
 
     path = ~p"/filters/spoiler?#{[tag: tag.slug]}"
@@ -57,7 +57,7 @@ defmodule PhilomenaWeb.Filter.SpoilerControllerTest do
   test "DELETE unspoilers the tag on the user's own current filter", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     filter = filter_fixture(user)
-    {:ok, _} = Users.update_filter(user, filter)
+    {:ok, _} = Users.set_current_filter(user, filter)
     tag = tag_fixture()
     {:ok, _} = Filters.spoiler_tag(filter, tag)
 
@@ -73,7 +73,7 @@ defmodule PhilomenaWeb.Filter.SpoilerControllerTest do
     # loads nil, authorization passes on the nil load, so it returns not_found
     # and redirects instead of passing nil into Filters.spoiler_tag/2.
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
-    {:ok, _} = Users.update_filter(user, filter_fixture(user))
+    {:ok, _} = Users.set_current_filter(user, filter_fixture(user))
 
     conn = post(conn, ~p"/filters/spoiler?tag=unknown-slug")
 

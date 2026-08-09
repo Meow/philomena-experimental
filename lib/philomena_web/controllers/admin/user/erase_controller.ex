@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.Admin.User.EraseController do
 
   defp render_erase_error(conn, error) do
     case error do
-      {:error, :not_erasable} ->
+      {:error, :not_found} ->
         conn
         |> put_flash(:error, "Couldn't find that username. Was it already erased?")
         |> redirect(to: ~p"/admin/users")

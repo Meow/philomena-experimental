@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Post.PreviewController do
   alias Philomena.Users
 
   def create(conn, params) do
-    user = Users.preload_awards(conn.assigns.current_user)
+    user = Users.preload_preview_awards(conn.assigns.current_user)
     body = to_string(params["body"])
     anonymous = params["anonymous"] == true
 

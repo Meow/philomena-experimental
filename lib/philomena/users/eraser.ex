@@ -23,10 +23,10 @@ defmodule Philomena.Users.Eraser do
 
   def erase_permanently!(user, moderator) do
     # Erase avatar
-    {:ok, user} = Users.remove_avatar(user)
+    {:ok, user} = Users.clear_avatar_for_erasure(user)
 
     # Erase "about me" and personal title
-    {:ok, user} = Users.update_description(user, %{description: "", personal_title: ""})
+    {:ok, user} = Users.clear_profile_for_erasure(user)
 
     # Delete all forum posts
     Post

@@ -1,10 +1,11 @@
 defmodule PhilomenaWeb.Tag.WatchControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
+  import Philomena.AttributionFixtures
   import Philomena.TagsFixtures
 
   alias Philomena.Repo
-  alias Philomena.Users
+  alias Philomena.Tags
 
   test "anonymous POST redirects to the login page", %{conn: conn} do
     conn = post(conn, ~p"/tags/dummy-slug/watch")
@@ -30,7 +31,7 @@ defmodule PhilomenaWeb.Tag.WatchControllerTest do
   test "POST when already watching keeps a single entry", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     tag = tag_fixture()
-    {:ok, _} = Users.watch_tag(user, tag)
+    {:ok, _} = Tags.watch_tag(actor(user), tag.slug)
 
     conn = post(conn, ~p"/tags/#{tag}/watch")
 
@@ -41,7 +42,7 @@ defmodule PhilomenaWeb.Tag.WatchControllerTest do
   test "DELETE removes the tag from the user's watched tags", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     tag = tag_fixture()
-    {:ok, _} = Users.watch_tag(user, tag)
+    {:ok, _} = Tags.watch_tag(actor(user), tag.slug)
 
     conn = delete(conn, ~p"/tags/#{tag}/watch")
 
@@ -59,22 +60,18 @@ defmodule PhilomenaWeb.Tag.WatchControllerTest do
     assert Repo.reload!(user).watched_tag_ids == []
   end
 
-  test "banned users can still watch tags", %{conn: conn} do
-    # NOTE: no FilterBannedUsersPlug here, same as the subscription
-    # controllers
+  test "banned users are rejected by the write prerequisite", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_banned_user(%{conn: conn})
     tag = tag_fixture()
 
     conn = post(conn, ~p"/tags/#{tag}/watch")
 
-    assert response(conn, 200) == ""
-    assert Repo.reload!(user).watched_tag_ids == [tag.id]
+    assert redirected_to(conn) == "/"
+    assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You are currently banned."
+    assert Repo.reload!(user).watched_tag_ids == []
   end
 
   test "POST for an unknown tag redirects with the not-found flash", %{conn: conn} do
-    # NOTE: the context authorizes the loaded record on :create; an unknown slug
-    # loads nil, authorization passes on the nil load, so it returns not_found
-    # and redirects instead of passing nil into Users.watch_tag/2.
     %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
     conn = post(conn, ~p"/tags/unknown-slug/watch")

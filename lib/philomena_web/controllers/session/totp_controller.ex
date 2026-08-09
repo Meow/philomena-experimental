@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Session.TotpController do
   alias Philomena.Users
 
   def new(conn, _params) do
-    changeset = Users.change_user(conn.assigns.current_user)
+    changeset = Users.totp_changeset(conn.assigns.current_user)
 
     render(conn, "new.html", layout: {LayoutView, "two_factor.html"}, changeset: changeset)
   end

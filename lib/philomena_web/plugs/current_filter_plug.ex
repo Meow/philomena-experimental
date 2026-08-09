@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.CurrentFilterPlug do
   defp maybe_set_default_filter(%{current_filter: nil} = user) do
     filter = Filters.default_filter()
 
-    {:ok, user} = Users.update_filter(user, filter)
+    {:ok, user} = Users.set_current_filter(user, filter)
 
     Map.put(user, :current_filter, filter)
   end

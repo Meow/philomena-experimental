@@ -66,7 +66,7 @@ defmodule PhilomenaWeb.ConfirmationControllerTest do
       conn = get(conn, ~p"/confirmations/#{token}")
       assert redirected_to(conn) == "/"
       assert Flash.get(conn.assigns.flash, :info) =~ "Account confirmed successfully"
-      assert Users.get_user!(user.id).confirmed_at
+      assert Users.fetch_user_for_worker!(user.id).confirmed_at
       refute get_session(conn, :user_token)
       assert Repo.all(Users.UserToken) == []
 
@@ -84,7 +84,7 @@ defmodule PhilomenaWeb.ConfirmationControllerTest do
       assert Flash.get(conn.assigns.flash, :error) =~
                "Confirmation link is invalid or it has expired"
 
-      refute Users.get_user!(user.id).confirmed_at
+      refute Users.fetch_user_for_worker!(user.id).confirmed_at
     end
   end
 
@@ -112,7 +112,7 @@ defmodule PhilomenaWeb.ConfirmationControllerTest do
       assert redirected_to(conn) == "/"
       assert Flash.get(conn.assigns.flash, :info) =~ "Account confirmed successfully."
       assert get_session(conn, :user_token)
-      assert Users.get_user!(user.id).confirmed_at
+      assert Users.fetch_user_for_worker!(user.id).confirmed_at
     end
 
     # A deactivated (deleted_at set) account is locked out everywhere,
@@ -132,7 +132,7 @@ defmodule PhilomenaWeb.ConfirmationControllerTest do
       assert redirected_to(conn) == "/"
       assert Flash.get(conn.assigns.flash, :error) =~ "Your account is not currently active."
       refute get_session(conn, :user_token)
-      refute Users.get_user!(user.id).confirmed_at
+      refute Users.fetch_user_for_worker!(user.id).confirmed_at
     end
 
     # NOTE: GET /confirmations/:id is no longer guarded by

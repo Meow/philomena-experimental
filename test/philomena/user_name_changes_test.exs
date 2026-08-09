@@ -9,6 +9,7 @@ defmodule Philomena.UserNameChangesTest do
   alias Philomena.UserNameChanges
   alias Philomena.UserNameChanges.UserNameChange
   alias Philomena.Users
+  alias Philomena.Users.UserForm
 
   @pagination %{page: 1, page_size: 1}
 
@@ -45,19 +46,21 @@ defmodule Philomena.UserNameChangesTest do
 
     test "Users records case-only renames and duplicate-name failures atomically" do
       user = confirmed_user_fixture(%{name: "MixedCaseRename"})
+      user = Users.fetch_user_for_worker!(user.id)
 
-      assert {:ok, renamed} = Users.rename_user(user, %{"name" => "mixedcaserename"})
+      assert {:ok, renamed} = Users.update_name(actor(user), %{"name" => "mixedcaserename"})
       assert renamed.name == "mixedcaserename"
       assert Repo.get_by(UserNameChange, user_id: user.id, name: "MixedCaseRename")
 
       occupied = confirmed_user_fixture(%{name: "AlreadyTakenName"})
       other = confirmed_user_fixture(%{name: "RenameMustRollback"})
+      other = Users.fetch_user_for_worker!(other.id)
 
-      assert {:error, %Ecto.Changeset{}} =
-               Users.rename_user(other, %{"name" => occupied.name})
+      assert {:error, %UserForm{changeset: %Ecto.Changeset{}}} =
+               Users.update_name(actor(other), %{"name" => occupied.name})
 
       refute Repo.get_by(UserNameChange, user_id: other.id)
-      assert Users.get_user!(other.id).name == "RenameMustRollback"
+      assert Users.fetch_user_for_worker!(other.id).name == "RenameMustRollback"
     end
   end
 

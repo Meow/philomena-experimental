@@ -16,7 +16,7 @@ defmodule PhilomenaWeb.Registration.TotpController do
         redirect(conn, to: ~p"/registrations/totp/edit")
 
       _ ->
-        changeset = Users.change_user(user)
+        changeset = Users.totp_changeset(user)
         secret = User.totp_secret(user)
         qrcode = User.totp_qrcode(user)
 

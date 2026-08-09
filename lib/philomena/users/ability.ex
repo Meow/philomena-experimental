@@ -47,6 +47,24 @@ defimpl Canada.Can, for: Philomena.Users.User do
     :update,
     :transition
   ]
+  @user_management_actions [
+    :index,
+    :edit,
+    :update,
+    :reactivate,
+    :deactivate,
+    :reset_api_key,
+    :remove_avatar,
+    :wipe_downvotes,
+    :erase,
+    :force_filter,
+    :unforce_filter,
+    :unlock,
+    :verify,
+    :unverify,
+    :wipe_votes,
+    :wipe
+  ]
 
   # Commission items deliberately remain owner-only, including for staff.
   def can?(%User{id: id}, action, %Item{commission: %Commission{user_id: id}})
@@ -258,14 +276,16 @@ defimpl Canada.Can, for: Philomena.Users.User do
     do: true
 
   # Manage users
-  def can?(%User{role: "moderator", role_map: %{"User" => %{"moderator" => _}}}, _action, User),
-    do: true
+  def can?(%User{role: "moderator", role_map: %{"User" => %{"moderator" => _}}}, action, User)
+      when action in @user_management_actions,
+      do: true
 
   def can?(
         %User{role: "moderator", role_map: %{"User" => %{"moderator" => _}}},
-        _action,
+        action,
         %User{}
-      ),
+      )
+      when action in @user_management_actions,
       do: true
 
   # Manage advertisements
@@ -322,6 +342,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   def can?(%User{role: role}, action, %User{})
       when role in ~W(assistant moderator) and action in @mod_note_target_actions,
+      do: true
+
+  def can?(%User{role: role}, :edit_scratchpad, %User{})
+      when role in ~W(assistant moderator),
       do: true
 
   def can?(%User{role: role}, action, %Report{})
@@ -549,6 +573,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
   # Edit their description and personal title
   def can?(%User{id: id}, :edit_description, %User{id: id}), do: true
   def can?(%User{id: id}, :edit_title, %User{id: id}), do: true
+  def can?(%User{id: id}, :deactivate_account, %User{id: id}), do: true
 
   # Edit their username
   def can?(%User{id: id}, :change_username, %User{id: id} = user) do

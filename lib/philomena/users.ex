@@ -1,6 +1,13 @@
 defmodule Philomena.Users do
   @moduledoc """
-  The Users context.
+  Owns authentication, registration, profiles, account settings, and staff user
+  management.
+
+  Request-facing profile and management services accept an `Actor` first, use
+  safe ID or slug locators, and authorize a loaded user with an action-specific
+  ability. Authentication token services deliberately have no actor because the
+  token is the credential. Loaded-record entry points are limited to explicit
+  worker, indexing, filter, and erasure collaboration services.
   """
 
   import Ecto.Query, warn: false
@@ -15,12 +22,22 @@ defmodule Philomena.Users do
   alias Philomena.Schema.Approval
   alias PhilomenaQuery.Search
   alias Philomena.Users
-  alias Philomena.Users.{User, UserToken, UserNotifier, Uploader, Settings}
+
+  alias Philomena.Users.{
+    AdminUserForm,
+    AliasMatches,
+    Settings,
+    Uploader,
+    User,
+    UserForm,
+    UserNotifier,
+    UserToken
+  }
+
   alias Philomena.{Forums, Forums.Forum}
   alias Philomena.Bans
   alias Philomena.Topics
   alias Philomena.Roles.Role
-  alias Philomena.ModNotes.ModNote
   alias Philomena.UserIps.UserIp
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserNameChanges
@@ -52,6 +69,72 @@ defmodule Philomena.Users do
           fingerprint: String.t(),
           user: %User{} | nil
         ]
+
+  defp user_form(%User{} = user, changeset \\ nil) do
+    %UserForm{user: user, changeset: changeset || User.changeset(user, %{})}
+  end
+
+  defp admin_user_form(%User{} = user, changeset \\ nil) do
+    %AdminUserForm{
+      user: user,
+      changeset: changeset || User.changeset(user, %{}),
+      roles: Repo.all(Role)
+    }
+  end
+
+  defp load_user_by_slug(actor, action, slug, preloads \\ [])
+
+  defp load_user_by_slug(actor, action, slug, preloads) when is_binary(slug) do
+    User
+    |> where([user], user.slug == ^slug)
+    |> preload(^preloads)
+    |> Loader.one_and_authorize(actor, action)
+  end
+
+  defp load_user_by_slug(_actor, _action, _slug, _preloads), do: {:error, :not_found}
+
+  defp managed_user_transaction(actor, slug, action, mutation, log_type, log_body) do
+    with :ok <- verify_write_access(actor) do
+      Repo.transact(fn ->
+        with {:ok, user} <- load_user_by_slug(actor, action, slug),
+             {:ok, user} <- mutation.(user),
+             {:ok, _log} <-
+               ModerationLogs.create_moderation_log(
+                 actor,
+                 log_type,
+                 Paths.profile_path(user),
+                 log_body.(user)
+               ) do
+          {:ok, user}
+        end
+      end)
+      |> reindex_transaction_result()
+    end
+  end
+
+  defp logged_managed_user(actor, slug, action, log_type, log_body) do
+    with :ok <- verify_write_access(actor) do
+      Repo.transact(fn ->
+        with {:ok, user} <- load_user_by_slug(actor, action, slug),
+             {:ok, _log} <-
+               ModerationLogs.create_moderation_log(
+                 actor,
+                 log_type,
+                 Paths.profile_path(user),
+                 log_body.(user)
+               ) do
+          {:ok, user}
+        end
+      end)
+    end
+  end
+
+  defp reindex_transaction_result({:ok, %User{} = user}) do
+    reindex_user(user)
+    {:ok, user}
+  end
+
+  defp reindex_transaction_result(error), do: error
 
   ## Database getters
 
@@ -158,53 +241,27 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Gets a single user.
+  Loads the active profile named by integer `id` for `actor`, with public links
+  and badge awards preloaded.
 
-  Raises `Ecto.NoResultsError` if the User does not exist.
-
-  ## Examples
-
-      iex> get_user!(123)
-      %User{}
-
-      iex> get_user!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_user!(id), do: Repo.get!(User, id)
-
-  @doc """
-  Loads the user named by `id`, with their public links and badge awards
-  preloaded.
-
-  An unknown or deactivated user is `{:error, :not_found}`.
-
-  Returns `{:ok, user}` or `{:error, :not_found}`.
+  Malformed, missing, and deactivated IDs are consistently not-found. A real
+  active user the actor may not show is unauthorized.
 
   ## Examples
 
-      iex> load_profile("1")
+      iex> load_profile_by_id(actor, "1")
       {:ok, %User{}}
 
-      iex> load_profile("999999999")
+      iex> load_profile_by_id(actor, "not-an-id")
       {:error, :not_found}
 
   """
-  @spec load_profile(any()) :: {:ok, User.t()} | {:error, :not_found}
-  def load_profile(id) do
-    # The id is interpolated without casting, so a non-integer id raises
-    # Ecto.Query.CastError.
-    user =
-      User
-      |> where(id: ^id)
-      |> preload(public_links: :tag, awards: :badge)
-      |> Repo.one()
-
-    if is_nil(user) or user.deleted_at do
-      {:error, :not_found}
-    else
-      {:ok, user}
-    end
+  @spec load_profile_by_id(Actor.t(), Loader.integer_id()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def load_profile_by_id(%Actor{} = actor, id) do
+    User
+    |> where([user], is_nil(user.deleted_at))
+    |> Loader.fetch_and_authorize(actor, :show, id, public_links: :tag, awards: :badge)
   end
 
   @doc """
@@ -289,9 +346,9 @@ defmodule Philomena.Users do
       nil
 
   """
-  @spec preload_awards(User.t() | nil) :: User.t() | nil
-  def preload_awards(nil), do: nil
-  def preload_awards(%User{} = user), do: Repo.preload(user, awards: :badge)
+  @spec preload_preview_awards(User.t() | nil) :: User.t() | nil
+  def preload_preview_awards(nil), do: nil
+  def preload_preview_awards(%User{} = user), do: Repo.preload(user, awards: :badge)
 
   @doc """
   Returns the site staff grouped into categories, as a keyword list of
@@ -484,22 +541,6 @@ defmodule Philomena.Users do
     Ecto.Multi.new()
     |> Ecto.Multi.update(:user, changeset)
     |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["unlock"]))
-  end
-
-  @doc """
-  Unconditionally unlocks the given user.
-
-  ## Examples
-
-      iex> unlock_user(user)
-      {:ok, %User{}}
-
-  """
-  def unlock_user(user) do
-    user
-    |> User.unlock_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
   end
 
   @doc ~S"""
@@ -848,50 +889,21 @@ defmodule Philomena.Users do
     end
   end
 
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking user changes.
-
-  ## Examples
-
-      iex> change_user(user)
-      %Ecto.Changeset{data: %User{}}
-
-  """
-  def change_user(%User{} = user) do
+  defp change_user(%User{} = user) do
     User.changeset(user, %{})
   end
 
-  @doc """
-  Updates a user.
+  @doc "Returns the general settings changeset for a loaded user."
+  @spec settings_changeset(User.t()) :: Ecto.Changeset.t()
+  def settings_changeset(%User{} = user), do: change_user(user)
 
-  ## Examples
+  @doc "Returns the filter-selection changeset for a loaded user."
+  @spec filter_selection_changeset(User.t()) :: Ecto.Changeset.t()
+  def filter_selection_changeset(%User{} = user), do: change_user(user)
 
-      iex> update_user(user, %{field: new_value})
-      {:ok, %User{}}
-
-      iex> update_user(user, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_user(%User{} = user, attrs) do
-    changeset = update_user_changeset(user, attrs)
-
-    Multi.new()
-    |> Multi.update(:user, changeset)
-    |> Multi.run(:unsubscribe, fn _repo, %{user: user} ->
-      unsubscribe_restricted_actors(user)
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{user: user}} ->
-        reindex_user(user)
-
-        {:ok, user}
-
-      {:error, :user, changeset, _} ->
-        {:error, changeset}
-    end
-  end
+  @doc "Returns the TOTP form changeset for a loaded user."
+  @spec totp_changeset(User.t()) :: Ecto.Changeset.t()
+  def totp_changeset(%User{} = user), do: change_user(user)
 
   defp update_user_changeset(user, attrs) do
     with {:ok, role_ids} <- parse_role_ids(attrs["roles"]),
@@ -1009,40 +1021,19 @@ defmodule Philomena.Users do
   defp user_search_direction(_params), do: "desc"
 
   @doc """
-  Returns every assignable role.
-
-  ## Examples
-
-      iex> list_roles()
-      [%Role{}, ...]
-
-  """
-  @spec list_roles() :: [Role.t()]
-  def list_roles do
-    Repo.all(Role)
-  end
-
-  @doc """
   Loads the user named by `slug` for editing, on behalf of `actor`.
 
-  The user is loaded by slug and authorized for `:edit`; an unknown slug
-  authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for actors whose grants
-  cover `nil`). The returned user has its roles preloaded.
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`; real targets are authorized for `:edit`.
 
-  Returns `{:ok, user}`.
+  Returns a typed form containing the user, changeset, and assignable roles.
   """
   @spec load_user_for_edit(Actor.t(), String.t()) ::
-          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+          {:ok, AdminUserForm.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_user_for_edit(%Actor{} = actor, slug) do
-    target = user_by_slug_with_roles(slug)
-
-    with :ok <- authorize(actor, :edit, target),
-         %User{} = user <- target do
-      {:ok, user}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :edit, slug, [:roles]) do
+      {:ok, admin_user_form(user)}
     end
   end
 
@@ -1050,39 +1041,52 @@ defmodule Philomena.Users do
   Updates the details of the user named by `slug`, on behalf of `actor`, from
   `params`.
 
-  The user is loaded by slug and authorized for `:update`; an unknown slug
-  authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for actors whose grants
-  cover `nil`). On success the user is updated, reindexed, unsubscribed from any
-  now-restricted forums, and a moderation log is written.
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`; real targets are authorized for `:update`. On success
+  the user is updated, reindexed, unsubscribed from any now-restricted forums,
+  and a moderation log is written in the transaction.
 
-  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
-  rejected.
+  Returns `{:ok, user}`, or a typed admin form when validation rejects the
+  update.
   """
   @spec update_user_details(Actor.t(), String.t(), map()) ::
-          {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, User.t()}
+          | {:error, :ban | :unauthorized | :not_found | AdminUserForm.t()}
   def update_user_details(%Actor{} = actor, slug, params) do
-    target = user_by_slug_with_roles(slug)
+    with :ok <- verify_write_access(actor) do
+      Repo.transact(fn ->
+        with {:ok, user} <- load_user_by_slug(actor, :update, slug, [:roles]),
+             {:ok, user} <- Repo.update(update_user_changeset(user, params)),
+             {:ok, _} <- unsubscribe_restricted_actors(user),
+             {:ok, _log} <-
+               ModerationLogs.create_moderation_log(
+                 actor,
+                 "Admin.User:update",
+                 Paths.profile_path(user),
+                 "Updated user details for #{user.name}"
+               ) do
+          {:ok, user}
+        end
+      end)
+      |> case do
+        {:ok, %User{} = user} ->
+          reindex_user(user)
+          {:ok, user}
 
-    with :ok <- authorize(actor, :update, target),
-         %User{} = user <- target,
-         {:ok, user} <- update_user(user, params) do
-      log_managed_user(actor, user, "Admin.User:update", "Updated user details for #{user.name}")
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, admin_user_form(changeset.data, changeset)}
 
-      {:ok, user}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-      {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
+        error ->
+          error
+      end
     end
   end
 
   @doc """
   Reactivates the deactivated user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success the account is reactivated, reindexed, and
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success the account is reactivated, reindexed, and
   a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1090,21 +1094,25 @@ defmodule Philomena.Users do
   @spec admin_reactivate_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_reactivate_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = reactivate_user(user)
-      log_managed_user(actor, user, "Admin.User.Activation:create", "Reactivated #{user.name}")
-
-      {:ok, user}
-    end
+    managed_user_transaction(
+      actor,
+      slug,
+      :reactivate,
+      fn user ->
+        Repo.delete_all(UserToken.user_and_contexts_query(user, ["reactivate"]))
+        Repo.update(User.reactivate_changeset(user))
+      end,
+      "Admin.User.Activation:create",
+      &"Reactivated #{&1.name}"
+    )
   end
 
   @doc """
   Deactivates the user named by `slug`, on behalf of `actor`, recording `actor`
   as the deactivator.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success the account is deactivated, reindexed, and
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success the account is deactivated, reindexed, and
   a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1112,20 +1120,21 @@ defmodule Philomena.Users do
   @spec admin_deactivate_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_deactivate_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = deactivate_user(actor.user, user)
-      log_managed_user(actor, user, "Admin.User.Activation:delete", "Deactivated #{user.name}")
-
-      {:ok, user}
-    end
+    managed_user_transaction(
+      actor,
+      slug,
+      :deactivate,
+      &Repo.update(User.deactivate_changeset(&1, actor.user)),
+      "Admin.User.Activation:delete",
+      &"Deactivated #{&1.name}"
+    )
   end
 
   @doc """
   Resets the API token of the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success a fresh token is generated, the account
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success a fresh token is generated, the account
   reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1133,20 +1142,21 @@ defmodule Philomena.Users do
   @spec admin_reset_api_key(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_reset_api_key(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = reset_api_key(user)
-      log_managed_user(actor, user, "Admin.User.ApiKey:delete", "Reset API key for #{user.name}")
-
-      {:ok, user}
-    end
+    managed_user_transaction(
+      actor,
+      slug,
+      :reset_api_key,
+      &Repo.update(User.api_key_changeset(&1)),
+      "Admin.User.ApiKey:delete",
+      &"Reset API key for #{&1.name}"
+    )
   end
 
   @doc """
   Removes the avatar of the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success the avatar is cleared, the old file
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success the avatar is cleared, the old file
   unpersisted, the account reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1154,10 +1164,16 @@ defmodule Philomena.Users do
   @spec admin_remove_avatar(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_remove_avatar(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = remove_avatar(user)
-      log_managed_user(actor, user, "Admin.User.Avatar:delete", "Removed avatar for #{user.name}")
-
+    with {:ok, user} <-
+           managed_user_transaction(
+             actor,
+             slug,
+             :remove_avatar,
+             &Repo.update(User.remove_avatar_changeset(&1)),
+             "Admin.User.Avatar:delete",
+             &"Removed avatar for #{&1.name}"
+           ) do
+      Uploader.unpersist_old_upload(user)
       {:ok, user}
     end
   end
@@ -1165,9 +1181,8 @@ defmodule Philomena.Users do
   @doc """
   Starts a downvote wipe for the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success a background job to remove the user's
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success a background job to remove the user's
   downvotes is enqueued and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1175,16 +1190,15 @@ defmodule Philomena.Users do
   @spec admin_wipe_downvotes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_wipe_downvotes(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
+    with {:ok, user} <-
+           logged_managed_user(
+             actor,
+             slug,
+             :wipe_downvotes,
+             "Admin.User.Downvote:delete",
+             &"Wiped downvotes for #{&1.name}"
+           ) do
       Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, false])
-
-      log_managed_user(
-        actor,
-        user,
-        "Admin.User.Downvote:delete",
-        "Wiped downvotes for #{user.name}"
-      )
-
       {:ok, user}
     end
   end
@@ -1193,10 +1207,10 @@ defmodule Philomena.Users do
   Loads the user named by `slug` for erasure, on behalf of `actor`, applying the
   eligibility guards.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  `{:error, :unauthorized}`. Only ordinary, unverified accounts may be erased:
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`; real targets are authorized with the `:erase` ability.
+  Only ordinary, unverified accounts may be erased:
 
-    * a slug naming no user is `{:error, :not_erasable}`;
     * a privileged (non-`"user"` role) target is `{:error, {:privileged, user}}`;
     * a verified target is `{:error, {:verified, user}}`.
 
@@ -1205,13 +1219,11 @@ defmodule Philomena.Users do
   @spec load_user_for_erase(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error,
-             :unauthorized | :not_erasable | {:privileged, User.t()} | {:verified, User.t()}}
+             :ban | :unauthorized | :not_found | {:privileged, User.t()} | {:verified, User.t()}}
   def load_user_for_erase(%Actor{} = actor, slug) do
-    with :ok <- authorize(actor, :edit, %User{}) do
-      user = user_by_slug_with_roles(slug)
-
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :erase, slug, [:roles]) do
       cond do
-        is_nil(user) -> {:error, :not_erasable}
         user.role != "user" -> {:error, {:privileged, user}}
         user.verified -> {:error, {:verified, user}}
         true -> {:ok, user}
@@ -1232,12 +1244,34 @@ defmodule Philomena.Users do
   @spec admin_erase_user(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error,
-             :unauthorized | :not_erasable | {:privileged, User.t()} | {:verified, User.t()}}
+             :ban | :unauthorized | :not_found | {:privileged, User.t()} | {:verified, User.t()}}
   def admin_erase_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_user_for_erase(actor, slug),
-         {:ok, erased} <- erase_user(user, actor.user) do
-      log_managed_user(actor, erased, "Admin.User.Erase:create", "Erased #{user.name}")
+    result =
+      Repo.transact(fn ->
+        with {:ok, user} <- load_user_for_erase(actor, slug) do
+          original_name = user.name
+          random_hex = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
 
+          with {:ok, user} <- Repo.update(User.deactivate_changeset(user, actor.user)),
+               {:ok, erased} <-
+                 Repo.update(
+                   update_user_changeset(user, %{"name" => "deactivated_#{random_hex}"})
+                 ),
+               {:ok, _log} <-
+                 ModerationLogs.create_moderation_log(
+                   actor,
+                   "Admin.User.Erase:create",
+                   Paths.profile_path(erased),
+                   "Erased #{original_name}"
+                 ) do
+            {:ok, erased}
+          end
+        end
+      end)
+
+    with {:ok, erased} <- result do
+      reindex_user(erased)
+      Exq.enqueue(Exq, "indexing", UserEraseWorker, [erased.id, actor.user.id])
       {:ok, erased}
     end
   end
@@ -1245,54 +1279,58 @@ defmodule Philomena.Users do
   @doc """
   Loads the user named by `slug` for forcing a filter, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`.
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability.
 
-  Returns `{:ok, user}`.
+  Returns a typed form containing the user and force-filter changeset.
   """
   @spec load_user_for_force_filter(Actor.t(), String.t()) ::
-          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+          {:ok, UserForm.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_user_for_force_filter(%Actor{} = actor, slug) do
-    load_managed_user(actor, slug)
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :force_filter, slug) do
+      {:ok, user_form(user)}
+    end
   end
 
   @doc """
   Forces a filter on the user named by `slug`, on behalf of `actor`, from
   `params`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success the filter is forced, the account
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success the filter is forced, the account
   reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
   """
   @spec admin_force_filter(Actor.t(), String.t(), map()) ::
-          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+          {:ok, User.t()}
+          | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
   def admin_force_filter(%Actor{} = actor, slug, params) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      # A `forced_filter_id` naming no filter fails the foreign-key constraint;
-      # the raise on that mismatch is pinned.
-      {:ok, user} = force_filter(user, params)
-
-      log_managed_user(
+    result =
+      managed_user_transaction(
         actor,
-        user,
+        slug,
+        :force_filter,
+        &Repo.update(User.force_filter_changeset(&1, params)),
         "Admin.User.ForceFilter:create",
-        "Forced filter #{user.forced_filter_id} for #{user.name}"
+        &"Forced filter #{&1.forced_filter_id} for #{&1.name}"
       )
 
-      {:ok, user}
+    case result do
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, user_form(changeset.data, changeset)}
+
+      result ->
+        result
     end
   end
 
   @doc """
   Removes the forced filter from the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success the forced filter is cleared, the account
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success the forced filter is cleared, the account
   reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1300,26 +1338,21 @@ defmodule Philomena.Users do
   @spec admin_unforce_filter(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_unforce_filter(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = unforce_filter(user)
-
-      log_managed_user(
-        actor,
-        user,
-        "Admin.User.ForceFilter:delete",
-        "Removed forced filter for #{user.name}"
-      )
-
-      {:ok, user}
-    end
+    managed_user_transaction(
+      actor,
+      slug,
+      :unforce_filter,
+      &Repo.update(User.unforce_filter_changeset(&1)),
+      "Admin.User.ForceFilter:delete",
+      &"Removed forced filter for #{&1.name}"
+    )
   end
 
   @doc """
   Unlocks the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success the account is unlocked, reindexed, and a
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success the account is unlocked, reindexed, and a
   moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1327,20 +1360,21 @@ defmodule Philomena.Users do
   @spec admin_unlock_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_unlock_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = unlock_user(user)
-      log_managed_user(actor, user, "Admin.User.Unlock:create", "Unlocked #{user.name}")
-
-      {:ok, user}
-    end
+    managed_user_transaction(
+      actor,
+      slug,
+      :unlock,
+      &Repo.update(User.unlock_changeset(&1)),
+      "Admin.User.Unlock:create",
+      &"Unlocked #{&1.name}"
+    )
   end
 
   @doc """
   Grants verification to the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success verification is granted, the account
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success verification is granted, the account
   reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1348,26 +1382,21 @@ defmodule Philomena.Users do
   @spec admin_verify_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_verify_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = verify_user(user)
-
-      log_managed_user(
-        actor,
-        user,
-        "Admin.User.Verification:create",
-        "Granted verification to #{user.name}"
-      )
-
-      {:ok, user}
-    end
+    managed_user_transaction(
+      actor,
+      slug,
+      :verify,
+      &Repo.update(User.verify_changeset(&1)),
+      "Admin.User.Verification:create",
+      &"Granted verification to #{&1.name}"
+    )
   end
 
   @doc """
   Revokes verification from the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success verification is revoked, the account
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success verification is revoked, the account
   reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1375,27 +1404,22 @@ defmodule Philomena.Users do
   @spec admin_unverify_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_unverify_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
-      {:ok, user} = unverify_user(user)
-
-      log_managed_user(
-        actor,
-        user,
-        "Admin.User.Verification:delete",
-        "Revoked verification from #{user.name}"
-      )
-
-      {:ok, user}
-    end
+    managed_user_transaction(
+      actor,
+      slug,
+      :unverify,
+      &Repo.update(User.unverify_changeset(&1)),
+      "Admin.User.Verification:delete",
+      &"Revoked verification from #{&1.name}"
+    )
   end
 
   @doc """
   Starts a vote and fave wipe for the user named by `slug`, on behalf of
   `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success a background job to remove the user's votes
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success a background job to remove the user's votes
   and faves is enqueued and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1403,16 +1427,15 @@ defmodule Philomena.Users do
   @spec admin_wipe_votes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_wipe_votes(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
+    with {:ok, user} <-
+           logged_managed_user(
+             actor,
+             slug,
+             :wipe_votes,
+             "Admin.User.Vote:delete",
+             &"Wiped votes and faves for #{&1.name}"
+           ) do
       Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, true])
-
-      log_managed_user(
-        actor,
-        user,
-        "Admin.User.Vote:delete",
-        "Wiped votes and faves for #{user.name}"
-      )
-
       {:ok, user}
     end
   end
@@ -1420,9 +1443,8 @@ defmodule Philomena.Users do
   @doc """
   Queues a PII wipe for the user named by `slug`, on behalf of `actor`.
 
-  Managing a user requires the user-edit permission, so an actor without it is
-  rejected before the target is loaded; a well-formed slug naming no user is
-  `{:error, :not_found}`. On success a background job to wipe the user's
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
+  real targets are authorized with the action-specific ability. On success a background job to wipe the user's
   personally identifying information is enqueued and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1430,36 +1452,17 @@ defmodule Philomena.Users do
   @spec admin_wipe_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
   def admin_wipe_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_managed_user(actor, slug) do
+    with {:ok, user} <-
+           logged_managed_user(
+             actor,
+             slug,
+             :wipe,
+             "Admin.User.Wipe:create",
+             &"Wiped PII for #{&1.name}"
+           ) do
       Exq.enqueue(Exq, "indexing", UserWipeWorker, [user.id])
-      log_managed_user(actor, user, "Admin.User.Wipe:create", "Wiped PII for #{user.name}")
-
       {:ok, user}
     end
-  end
-
-  defp user_by_slug_with_roles(slug) do
-    User
-    |> Repo.get_by(slug: slug)
-    |> Repo.preload([:roles])
-  end
-
-  # Authorizes `actor` for `:edit` against the user schema, matching the gate
-  # shared by the staff user-management actions, then loads the target by slug. An
-  # unauthorized actor is rejected before the load; a well-formed slug naming no
-  # row is `{:error, :not_found}`.
-  defp load_managed_user(actor, slug) do
-    with :ok <- authorize(actor, :edit, %User{}),
-         %User{} = user <- Repo.get_by(User, slug: slug) do
-      {:ok, user}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-    end
-  end
-
-  defp log_managed_user(actor, user, type, body) do
-    ModerationLogs.create_moderation_log(actor, type, Paths.profile_path(user), body)
   end
 
   @doc """
@@ -1471,7 +1474,7 @@ defmodule Philomena.Users do
       %Ecto.Changeset{data: %Settings{}}
 
   """
-  def change_spoiler_type(%User{} = user) do
+  def spoiler_type_changeset(%User{} = user) do
     Settings.spoiler_type_changeset(user.settings, %{})
   end
 
@@ -1487,10 +1490,12 @@ defmodule Philomena.Users do
       {:error, %Ecto.Changeset{}}
 
   """
-  def update_spoiler_type(%User{} = user, attrs) do
-    user.settings
-    |> Settings.spoiler_type_changeset(attrs)
-    |> Repo.update()
+  def update_spoiler_type(%Actor{user: %User{} = user} = actor, attrs) do
+    with :ok <- verify_write_access(actor) do
+      user.settings
+      |> Settings.spoiler_type_changeset(attrs)
+      |> Repo.update()
+    end
   end
 
   @doc """
@@ -1505,30 +1510,30 @@ defmodule Philomena.Users do
       {:error, %Ecto.Changeset{}}
 
   """
-  def update_settings(%User{} = user, attrs) do
-    user
-    |> User.settings_changeset(attrs)
-    |> Repo.update()
-    |> reindex_after_update()
+  def update_settings(%Actor{user: %User{} = user} = actor, attrs) do
+    with :ok <- verify_write_access(actor) do
+      user
+      |> User.settings_changeset(attrs)
+      |> Repo.update()
+      |> reindex_after_update()
+    end
   end
 
   @doc """
   Loads the user named by the profile `slug` for editing the description, on
   behalf of `actor`.
 
-  A banned actor is rejected first with `{:error, :ban}`. The user is then
-  loaded by slug and authorized for `:edit_description`; an unknown slug
-  authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
-  cover `nil`).
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`; real targets are authorized for `:edit_description`.
 
-  Returns `{:ok, user}`.
+  Returns a typed form containing the user and description changeset.
   """
   @spec load_profile_for_description_edit(Actor.t(), String.t()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, UserForm.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_profile_for_description_edit(%Actor{} = actor, slug) do
-    with :ok <- verify_write_access(actor) do
-      load_authorized_profile(actor.user, :edit_description, slug)
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :edit_description, slug) do
+      {:ok, user_form(user)}
     end
   end
 
@@ -1543,32 +1548,19 @@ defmodule Philomena.Users do
   the description and personal title are updated and the user reindexed; a
   profile that gains an unapproved external link files a system report.
 
-  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
-  rejected.
+  Returns `{:ok, user}`, or a typed user form when validation rejects the
+  update.
   """
   @spec update_description(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
   def update_description(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, user} <- load_authorized_profile(actor.user, :edit_description, slug) do
-      update_description(user, attrs)
-    end
-  end
-
-  # Loads a user by profile slug and authorizes the acting user for `action`
-  # against the loaded record. An unknown slug authorizes a `nil` record, so an
-  # actor whose grants do not cover `nil` gets `{:error, :unauthorized}` and one
-  # who is permitted to act on `nil` gets `{:error, :not_found}`.
-  defp load_authorized_profile(user, action, slug) do
-    target = Repo.get_by(User, slug: slug)
-
-    with :ok <- authorize(user, action, target),
-         %User{} <- target do
-      {:ok, target}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
+         {:ok, user} <- load_user_by_slug(actor, :edit_description, slug) do
+      case update_profile_description(user, attrs) do
+        {:ok, user} -> {:ok, user}
+        {:error, changeset} -> {:error, user_form(user, changeset)}
+      end
     end
   end
 
@@ -1577,26 +1569,17 @@ defmodule Philomena.Users do
   of `actor`: other users who share one of the subject's IP addresses, one of
   its fingerprints, or both.
 
-  The subject is loaded by slug and authorized for `:show_details`; an unknown
-  slug authorizes `nil`, which no ordinary rule permits, so it is
-  `{:error, :unauthorized}` (`{:error, :not_found}` for viewers whose grants
-  cover `nil`).
+  Missing targets are `{:error, :not_found}`; real targets are authorized for
+  `:show_details`.
 
-  Returns `{:ok, %{user: user, both_matches: [...], ip_matches: [...],
-  fp_matches: [...]}}` with each match list carrying the matched users and their
-  bans.
+  Returns a typed alias-match result with each match list carrying the matched
+  users and their bans.
   """
   @spec load_alias_matches(Actor.t(), String.t()) ::
-          {:ok, map()} | {:error, :unauthorized | :not_found}
+          {:ok, AliasMatches.t()} | {:error, :unauthorized | :not_found}
   def load_alias_matches(%Actor{} = actor, slug) do
-    user = Repo.get_by(User, slug: slug)
-
-    with :ok <- authorize(actor, :show_details, user),
-         %User{} <- user do
+    with {:ok, user} <- load_user_by_slug(actor, :show_details, slug) do
       {:ok, alias_matches(user)}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
     end
   end
 
@@ -1631,7 +1614,7 @@ defmodule Philomena.Users do
 
     fp_matches = Map.drop(fp_matches, Map.keys(both_matches))
 
-    %{
+    %AliasMatches{
       user: user,
       both_matches: Map.values(both_matches),
       ip_matches: Map.values(ip_matches),
@@ -1639,19 +1622,7 @@ defmodule Philomena.Users do
     }
   end
 
-  @doc """
-  Updates a user's profile description and personal title.
-
-  ## Examples
-
-      iex> update_description(user, %{"description" => "Hello world"})
-      {:ok, %User{}}
-
-      iex> update_description(user, %{"personal_title" => "Site Admin"})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_description(%User{} = user, attrs) do
+  defp update_profile_description(%User{} = user, attrs) do
     user
     |> User.description_changeset(attrs)
     |> Repo.update()
@@ -1678,23 +1649,17 @@ defmodule Philomena.Users do
   Loads the user named by the profile `slug` for editing the moderation
   scratchpad, on behalf of `actor`.
 
-  A banned actor is rejected first with `{:error, :ban}`. Editing the scratchpad
-  requires the mod-note viewing permission, so an actor without it is
-  `{:error, :unauthorized}`; a permitted actor naming an unknown slug is
-  `{:error, :not_found}`.
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`; real targets are authorized for `:edit_scratchpad`.
 
-  Returns `{:ok, user}`.
+  Returns a typed form containing the user and scratchpad changeset.
   """
   @spec load_profile_for_scratchpad_edit(Actor.t(), String.t()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, UserForm.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_profile_for_scratchpad_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor.user, :index, ModNote),
-         %User{} = user <- Repo.get_by(User, slug: slug) do
-      {:ok, user}
-    else
-      {:error, _} = error -> error
-      nil -> {:error, :not_found}
+         {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
+      {:ok, user_form(user)}
     end
   end
 
@@ -1709,33 +1674,23 @@ defmodule Philomena.Users do
   actor naming an unknown slug is `{:error, :not_found}`. On success the
   scratchpad is updated and the user reindexed.
 
-  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
-  rejected.
+  Returns `{:ok, user}`, or a typed user form when validation rejects the
+  update.
   """
   @spec update_scratchpad(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
   def update_scratchpad(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor.user, :index, ModNote),
-         %User{} = user <- Repo.get_by(User, slug: slug) do
-      update_scratchpad(user, attrs)
-    else
-      {:error, _} = error -> error
-      nil -> {:error, :not_found}
+         {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
+      case update_profile_scratchpad(user, attrs) do
+        {:ok, user} -> {:ok, user}
+        {:error, changeset} -> {:error, user_form(user, changeset)}
+      end
     end
   end
 
-  @doc """
-  Updates a user's moderation scratchpad content.
-
-  ## Examples
-
-      iex> update_scratchpad(user, %{"scratchpad" => "My notes"})
-      {:ok, %User{}}
-
-  """
-  def update_scratchpad(%User{} = user, attrs) do
+  defp update_profile_scratchpad(%User{} = user, attrs) do
     user
     |> User.scratchpad_changeset(attrs)
     |> Repo.update()
@@ -1751,13 +1706,15 @@ defmodule Philomena.Users do
       {:ok, %User{}}
 
   """
-  def watch_tag(%User{} = user, tag) do
+  def watch_tag(%Actor{user: %User{} = user} = actor, tag) do
     watched_tag_ids = Enum.uniq([tag.id | user.watched_tag_ids])
 
-    user
-    |> User.watched_tags_changeset(watched_tag_ids)
-    |> Repo.update()
-    |> reindex_after_update()
+    with :ok <- verify_write_access(actor) do
+      user
+      |> User.watched_tags_changeset(watched_tag_ids)
+      |> Repo.update()
+      |> reindex_after_update()
+    end
   end
 
   @doc """
@@ -1769,27 +1726,28 @@ defmodule Philomena.Users do
       {:ok, %User{}}
 
   """
-  def unwatch_tag(%User{} = user, tag) do
+  def unwatch_tag(%Actor{user: %User{} = user} = actor, tag) do
     watched_tag_ids = user.watched_tag_ids -- [tag.id]
 
-    user
-    |> User.watched_tags_changeset(watched_tag_ids)
-    |> Repo.update()
-    |> reindex_after_update()
+    with :ok <- verify_write_access(actor) do
+      user
+      |> User.watched_tags_changeset(watched_tag_ids)
+      |> Repo.update()
+      |> reindex_after_update()
+    end
   end
 
   @doc """
   Loads the avatar changeset for the acting user's own account, on behalf of
   `actor`.
 
-  A banned actor is rejected with `{:error, :ban}`; otherwise returns
-  `{:ok, %Ecto.Changeset{}}`.
+  Write access is checked first; otherwise returns a typed user form.
   """
   @spec load_user_for_avatar_edit(Actor.t()) ::
-          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
+          {:ok, UserForm.t()} | {:error, :ban | :unauthorized}
   def load_user_for_avatar_edit(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor) do
-      {:ok, change_user(user)}
+      {:ok, user_form(user)}
     end
   end
 
@@ -1801,22 +1759,21 @@ defmodule Philomena.Users do
   `{:error, :unauthorized}`. On success the uploaded file is analyzed, persisted,
   and the user reindexed.
 
-  Given a `%User{}` instead, updates that user's avatar directly with no
-  write-access check, handling file analysis and persistence.
-
-  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when analysis or the
-  update is rejected.
+  Returns `{:ok, user}`, or a typed user form when analysis or validation
+  rejects the update.
   """
   @spec update_avatar(Actor.t(), map()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  @spec update_avatar(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, User.t()} | {:error, :ban | :unauthorized | UserForm.t()}
   def update_avatar(%Actor{user: user} = actor, attrs) do
     with :ok <- verify_write_access(actor) do
-      update_avatar(user, attrs)
+      case persist_avatar(user, attrs) do
+        {:ok, user} -> {:ok, user}
+        {:error, changeset} -> {:error, user_form(user, changeset)}
+      end
     end
   end
 
-  def update_avatar(%User{} = user, attrs) do
+  defp persist_avatar(%User{} = user, attrs) do
     user
     |> Uploader.analyze_upload(attrs)
     |> Repo.update()
@@ -1841,20 +1798,16 @@ defmodule Philomena.Users do
   actor is `{:error, :ban}` and an actor with no fingerprint
   `{:error, :unauthorized}`.
 
-  Given a `%User{}` instead, removes that user's avatar directly with no
-  write-access check.
-
   Returns `{:ok, user}`.
   """
   @spec remove_avatar(Actor.t()) :: {:ok, User.t()} | {:error, :ban | :unauthorized}
-  @spec remove_avatar(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def remove_avatar(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor) do
-      remove_avatar(user)
+      clear_avatar(user)
     end
   end
 
-  def remove_avatar(%User{} = user) do
+  defp clear_avatar(%User{} = user) do
     user
     |> User.remove_avatar_changeset()
     |> Repo.update()
@@ -1880,14 +1833,14 @@ defmodule Philomena.Users do
   gate on the 90-day rename window, so an actor who renamed within the window
   gets `{:error, :unauthorized}`.
 
-  Returns `{:ok, %Ecto.Changeset{}}`.
+  Returns a typed user form.
   """
   @spec load_user_for_rename(Actor.t()) ::
-          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
+          {:ok, UserForm.t()} | {:error, :ban | :unauthorized}
   def load_user_for_rename(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(user, :change_username, user) do
-      {:ok, change_user(user)}
+      {:ok, user_form(user)}
     end
   end
 
@@ -1903,31 +1856,22 @@ defmodule Philomena.Users do
   the account is reindexed, and a background job rewrites references to the old
   username.
 
-  Returns `{:ok, user}`, or `{:error, %Ecto.Changeset{}}` when the update is
-  rejected.
+  Returns `{:ok, user}`, or a typed user form when validation rejects the
+  update.
   """
   @spec update_name(Actor.t(), map()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
+          {:ok, User.t()} | {:error, :ban | :unauthorized | UserForm.t()}
   def update_name(%Actor{user: user} = actor, user_params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(user, :change_username, user) do
-      rename_user(user, user_params)
+      case rename_user(user, user_params) do
+        {:ok, user} -> {:ok, user}
+        {:error, changeset} -> {:error, user_form(user, changeset)}
+      end
     end
   end
 
-  @doc """
-  Updates a user's name and records the change in history.
-
-  Triggers a background job to update references to the old username.
-
-  ## Examples
-
-      iex> rename_user(user, %{"name" => "new_name"})
-      {:ok, %User{}}
-
-  """
-  @spec rename_user(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def rename_user(user, user_params) do
+  defp rename_user(user, user_params) do
     old_name = user.name
 
     account = User.name_changeset(user, user_params)
@@ -1972,91 +1916,43 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Reactivates a previously deactivated user account. Removes all "reactivate" user tokens for that user if they exist.
+  Deactivates the acting user's own account and sends a reactivation token.
 
-  ## Examples
-
-      iex> reactivate_user(user)
-      {:ok, %User{}}
-
+  The database change commits before token delivery and indexing are queued.
   """
-  def reactivate_user(%User{} = user) do
-    UserToken.user_and_contexts_query(user, ["reactivate"]) |> Repo.delete_all()
-
-    user
-    |> User.reactivate_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Deactivates a user account.
-
-  Takes a moderator who is recorded as performing the deactivation.
-
-  ## Examples
-
-      iex> deactivate_user(moderator, user)
-      {:ok, %User{}}
-
-  """
-  def deactivate_user(moderator, %User{} = user) do
-    user
-    |> User.deactivate_changeset(moderator)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Deactivates a user account with the user recorded performing the deactivation.
-
-  ## Examples
-
-      iex> deactivate_user(user)
-      {:ok, %User{}}
-
-  """
-  def deactivate_user(%User{} = user) do
-    user
-    |> User.deactivate_changeset(user)
-    |> Repo.update()
-  end
-
-  @doc """
-  Gets the user by reactivation token.
-
-  ## Examples
-
-      iex> get_user_by_reactivation_token("validtoken")
-      %User{}
-
-      iex> get_user_by_reactivation_token("invalidtoken")
-      nil
-
-  """
-  def get_user_by_reactivation_token(token) do
-    with {:ok, query} <- UserToken.verify_email_token_query(token, "reactivate"),
-         %User{} = user <- Repo.one(query) do
-      user
-    else
-      _ -> nil
+  @spec deactivate_account(Actor.t(), (String.t() -> String.t())) ::
+          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
+  def deactivate_account(%Actor{user: %User{} = user} = actor, reactivation_url_fun) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :deactivate_account, user),
+         {:ok, user} <- Repo.update(User.deactivate_changeset(user, user)) do
+      reindex_user(user)
+      deliver_user_reactivation_instructions(user, reactivation_url_fun)
+      {:ok, user}
     end
   end
 
   @doc """
-  Generates a new API key for the user.
+  Reactivates an account by one-time email token.
 
-  ## Examples
-
-      iex> reset_api_key(user)
-      {:ok, %User{}}
-
+  Invalid, expired, and already consumed tokens all return `:error` without
+  revealing whether an account exists.
   """
-  def reset_api_key(%User{} = user) do
-    user
-    |> User.api_key_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
+  @spec reactivate_user_by_token(String.t()) :: {:ok, User.t()} | :error
+  def reactivate_user_by_token(token) do
+    with {:ok, query} <- UserToken.verify_email_token_query(token, "reactivate"),
+         %User{} = user <- Repo.one(query),
+         {:ok, %{user: user}} <-
+           Repo.transaction(
+             Multi.new()
+             |> Multi.update(:user, User.reactivate_changeset(user))
+             |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["reactivate"]))
+           ) do
+      reindex_user(user)
+      {:ok, user}
+    else
+      _ -> :error
+    end
   end
 
   @doc """
@@ -2064,49 +1960,13 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> update_filter(user, filter)
+      iex> set_current_filter(user, filter)
       {:ok, %User{}}
 
   """
-  def update_filter(%User{} = user, %Filter{} = filter) do
+  def set_current_filter(%User{} = user, %Filter{} = filter) do
     user
     |> User.filter_changeset(filter)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Forces a specific filter on a user's account, which will be applied in
-  conjunction to the user's current filter.
-
-  ## Examples
-
-      iex> force_filter(user, %{"forced_filter_id" => 123})
-      {:ok, %User{}}
-
-      iex> force_filter(user, %{"forced_filter_id" => bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def force_filter(%User{} = user, user_params) do
-    user
-    |> User.force_filter_changeset(user_params)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Removes a forced filter from a user's account.
-
-  ## Examples
-
-      iex> unforce_filter(user)
-      {:ok, %User{}}
-
-  """
-  def unforce_filter(%User{} = user) do
-    user
-    |> User.unforce_filter_changeset()
     |> Repo.update()
     |> reindex_after_update()
   end
@@ -2116,15 +1976,29 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> clear_recent_filters(user)
+      iex> clear_recent_filters(actor)
       {:ok, %User{}}
 
   """
-  def clear_recent_filters(%User{} = user) do
-    user
-    |> User.clear_recent_filters_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
+  def clear_recent_filters(%Actor{user: %User{} = user} = actor) do
+    with :ok <- verify_write_access(actor) do
+      user
+      |> User.clear_recent_filters_changeset()
+      |> Repo.update()
+      |> reindex_after_update()
+    end
+  end
+
+  @doc "Clears an already loaded user's avatar during the trusted erase workflow."
+  @spec clear_avatar_for_erasure(User.t()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def clear_avatar_for_erasure(%User{} = user), do: clear_avatar(user)
+
+  @doc "Clears public profile text during the trusted erase workflow."
+  @spec clear_profile_for_erasure(User.t()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def clear_profile_for_erasure(%User{} = user) do
+    update_profile_description(user, %{description: "", personal_title: ""})
   end
 
   defp load_with_roles(query) do
@@ -2132,66 +2006,6 @@ defmodule Philomena.Users do
     |> Repo.one()
     |> Repo.preload([:roles, :current_filter, :settings])
     |> setup_roles()
-  end
-
-  @doc """
-  Marks a user as verified for the purposes of automatically approving uploads,
-  and posting images in comments/posts/messages without moderator review.
-
-  ## Examples
-
-      iex> verify_user(user)
-      {:ok, %User{}}
-
-  """
-  def verify_user(%User{} = user) do
-    user
-    |> User.verify_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Unverifies a user, removing the automatic approval status.
-
-  ## Examples
-
-      iex> unverify_user(user)
-      {:ok, %User{}}
-
-  """
-  def unverify_user(%User{} = user) do
-    user
-    |> User.unverify_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  @doc """
-  Erases all changes associated with a user account, removing all personal
-  data and anonymizing the account.
-
-  This is primarily intended for use with spam accounts or other situations
-  where all of a user's data should be removed from the system.
-
-  ## Examples
-
-      iex> erase_user(user, moderator)
-      {:ok, %User{}}
-
-  """
-  def erase_user(%User{} = user, %User{} = moderator) do
-    # Deactivate to prevent the user from racing these changes
-    {:ok, user} = deactivate_user(moderator, user)
-
-    # Rename to prevent usage for brand recognition SEO
-    random_hex = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-    {:ok, user} = update_user(user, %{name: "deactivated_#{random_hex}"})
-
-    # Enqueue a background job to perform the rest of the deletion
-    Exq.enqueue(Exq, "indexing", UserEraseWorker, [user.id, moderator.id])
-
-    {:ok, user}
   end
 
   defp setup_roles(nil), do: nil
@@ -2242,6 +2056,15 @@ defmodule Philomena.Users do
 
     user
   end
+
+  @doc """
+  Loads a user by trusted background-job ID.
+
+  Job arguments originate from already persisted users, so an absent row is an
+  invariant violation and intentionally raises.
+  """
+  @spec fetch_user_for_worker!(integer()) :: User.t()
+  def fetch_user_for_worker!(id) when is_integer(id), do: Repo.get!(User, id)
 
   @doc """
   Returns the preload configuration for user indexing.

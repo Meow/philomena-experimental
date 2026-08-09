@@ -841,10 +841,10 @@ defmodule Philomena.Tags do
   """
   @spec watch_tag(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
-  def watch_tag(%Actor{user: user}, slug) do
+  def watch_tag(%Actor{} = actor, slug) do
     case tag_by_slug(slug, []) do
       nil -> {:error, :not_found}
-      tag -> Users.watch_tag(user, tag)
+      tag -> Users.watch_tag(actor, tag)
     end
   end
 
@@ -865,10 +865,10 @@ defmodule Philomena.Tags do
   """
   @spec unwatch_tag(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
-  def unwatch_tag(%Actor{user: user}, slug) do
+  def unwatch_tag(%Actor{} = actor, slug) do
     case tag_by_slug(slug, []) do
       nil -> {:error, :not_found}
-      tag -> Users.unwatch_tag(user, tag)
+      tag -> Users.unwatch_tag(actor, tag)
     end
   end
 

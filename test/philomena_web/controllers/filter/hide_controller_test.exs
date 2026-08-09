@@ -47,7 +47,7 @@ defmodule PhilomenaWeb.Filter.HideControllerTest do
   test "POST hides the tag on the user's own current filter", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     filter = filter_fixture(user)
-    {:ok, _} = Users.update_filter(user, filter)
+    {:ok, _} = Users.set_current_filter(user, filter)
     tag = tag_fixture()
 
     path = ~p"/filters/hide?#{[tag: tag.slug]}"
@@ -60,7 +60,7 @@ defmodule PhilomenaWeb.Filter.HideControllerTest do
   test "DELETE unhides the tag on the user's own current filter", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     filter = filter_fixture(user)
-    {:ok, _} = Users.update_filter(user, filter)
+    {:ok, _} = Users.set_current_filter(user, filter)
     tag = tag_fixture()
     {:ok, _} = Filters.hide_tag(filter, tag)
 
@@ -76,7 +76,7 @@ defmodule PhilomenaWeb.Filter.HideControllerTest do
     # loads nil, authorization passes on the nil load, so it returns not_found
     # and redirects instead of passing nil into Filters.hide_tag/2.
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
-    {:ok, _} = Users.update_filter(user, filter_fixture(user))
+    {:ok, _} = Users.set_current_filter(user, filter_fixture(user))
 
     conn = post(conn, ~p"/filters/hide?tag=unknown-slug")
 

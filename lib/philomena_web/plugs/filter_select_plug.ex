@@ -37,8 +37,8 @@ defmodule PhilomenaWeb.FilterSelectPlug do
     filters = Filters.recent_and_user_filters(user)
 
     conn
-    |> Conn.assign(:user_changeset, Users.change_user(user))
-    |> Conn.assign(:spoiler_changeset, Users.change_spoiler_type(user))
+    |> Conn.assign(:user_changeset, Users.filter_selection_changeset(user))
+    |> Conn.assign(:spoiler_changeset, Users.spoiler_type_changeset(user))
     |> Conn.assign(:available_filters, filters)
     |> Conn.assign(:spoiler_types, @spoiler_types)
   end

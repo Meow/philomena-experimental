@@ -1,5 +1,25 @@
 # Users context plan
 
+## Status
+
+Wave 2 complete. Request-facing profile and staff management APIs are
+actor-scoped, load real active users before action-specific authorization, and
+normalize malformed, missing, and deactivated locators. Authentication tokens
+remain the deliberate actor-less credential boundary. `UserForm`,
+`AdminUserForm`, and `AliasMatches` replace ad-hoc form/result shapes, including
+validation failures.
+
+Generic user CRUD, loaded-record admin modifiers, role enumeration, and the bang
+request loader are gone. Settings, tag watches, avatar, rename, deactivation,
+reactivation, and staff actions enforce write-access parity; moderation logs
+participate in staff transactions, while indexing, jobs, mail, and object
+storage run after database commit. Workers and erasure retain narrow, documented
+collaboration services instead of generic persistence access.
+
+The `Philomena.Schema.TagList` settings/filter normalization is intentionally
+deferred to the separately coordinated schema work required by the all-context
+plan; this wave does not introduce a partial relation migration.
+
 Source: `lib/philomena/users.ex`; consumers: authentication/registration/session/
 settings/profile/admin account controllers, many contexts, workers, and mailers.
 

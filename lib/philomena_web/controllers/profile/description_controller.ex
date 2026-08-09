@@ -2,14 +2,16 @@ defmodule PhilomenaWeb.Profile.DescriptionController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Users
+  alias Philomena.Users.UserForm
 
   action_fallback PhilomenaWeb.FallbackController
 
   def edit(conn, %{"profile_id" => slug}) do
-    with {:ok, user} <- Users.load_profile_for_description_edit(conn.assigns.actor, slug) do
+    with {:ok, %UserForm{user: user, changeset: changeset}} <-
+           Users.load_profile_for_description_edit(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing Profile Description",
-        changeset: Users.change_user(user),
+        changeset: changeset,
         user: user
       )
     end
@@ -22,8 +24,8 @@ defmodule PhilomenaWeb.Profile.DescriptionController do
         |> put_flash(:info, "Description successfully updated.")
         |> redirect(to: ~p"/profiles/#{user}")
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        render(conn, "edit.html", changeset: changeset, user: changeset.data)
+      {:error, %UserForm{user: user, changeset: changeset}} ->
+        render(conn, "edit.html", changeset: changeset, user: user)
 
       {:error, _} = error ->
         error

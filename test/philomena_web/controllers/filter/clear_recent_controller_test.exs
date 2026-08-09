@@ -21,8 +21,8 @@ defmodule PhilomenaWeb.Filter.ClearRecentControllerTest do
       %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
       old_filter = filter_fixture(user)
       filter = filter_fixture(user)
-      {:ok, user} = Users.update_filter(user, old_filter)
-      {:ok, user} = Users.update_filter(user, filter)
+      {:ok, user} = Users.set_current_filter(user, old_filter)
+      {:ok, user} = Users.set_current_filter(user, filter)
       assert user.recent_filter_ids == [filter.id, old_filter.id]
 
       conn = delete(conn, ~p"/filters/clear_recent")

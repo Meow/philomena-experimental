@@ -452,7 +452,7 @@ defmodule Philomena.Filters do
   defp persist_current_filter(nil, _filter), do: :ok
 
   defp persist_current_filter(user, filter) do
-    {:ok, _user} = Users.update_filter(user, filter)
+    {:ok, _user} = Users.set_current_filter(user, filter)
     :ok
   end
 

@@ -283,7 +283,7 @@ defmodule PhilomenaWeb.FilterControllerTest do
     test "a filter in use as a current filter is not deleted", %{conn: conn} do
       %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
       filter = filter_fixture(user)
-      {:ok, _user} = Users.update_filter(user, filter)
+      {:ok, _user} = Users.set_current_filter(user, filter)
 
       conn = delete(conn, ~p"/filters/#{filter}")
 

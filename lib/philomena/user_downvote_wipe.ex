@@ -11,7 +11,7 @@ defmodule Philomena.UserDownvoteWipe do
   import Ecto.Query
 
   def perform(user_id, upvotes_and_faves_too \\ false) do
-    user = Users.get_user!(user_id)
+    user = Users.fetch_user_for_worker!(user_id)
 
     ImageVote
     |> where(user_id: ^user.id, up: false)

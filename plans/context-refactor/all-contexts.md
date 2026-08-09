@@ -195,6 +195,15 @@ reason or invariant is non-obvious; comments that restate code should go.
   to the loaded entry's tag, and row-locked transitions commit atomically with
   their moderation logs. Raw persistence and loaded-transition helpers are
   private.
+- Users completes wave 2. Profile and staff request paths use safe actor-scoped
+  locators and action-specific abilities; typed user/admin forms preserve loaded
+  subjects and validation failures. Generic CRUD and loaded-record management
+  escape hatches are gone. Staff mutations and audit logs commit together, with
+  indexing, destructive jobs, mail, and object storage kept after commit; token
+  authentication and narrowly named worker/erasure services remain explicit
+  exceptions. The TagList schema migration remains deferred as required above.
+
+Wave 2 is complete.
 
 ### Wave 0: characterize and establish the contract
 

@@ -17,7 +17,7 @@ defmodule Philomena.UserWipe do
   import Ecto.Query
 
   def perform(user_id) do
-    user = Users.get_user!(user_id)
+    user = Users.fetch_user_for_worker!(user_id)
 
     random_hex = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 

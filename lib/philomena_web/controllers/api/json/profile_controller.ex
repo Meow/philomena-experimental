@@ -5,7 +5,7 @@ defmodule PhilomenaWeb.Api.Json.ProfileController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def show(conn, %{"id" => id}) do
-    case Users.load_profile(id) do
+    case Users.load_profile_by_id(conn.assigns.actor, id) do
       {:ok, user} ->
         render(conn, "show.json", user: user)
 

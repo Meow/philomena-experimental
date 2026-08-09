@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.Admin.UserController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Users
+  alias Philomena.Users.AdminUserForm
 
   action_fallback PhilomenaWeb.FallbackController
 
@@ -28,12 +29,13 @@ defmodule PhilomenaWeb.Admin.UserController do
   end
 
   def edit(conn, %{"id" => slug}) do
-    with {:ok, user} <- Users.load_user_for_edit(conn.assigns.actor, slug) do
+    with {:ok, %AdminUserForm{} = form} <-
+           Users.load_user_for_edit(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing User",
-        user: user,
-        changeset: Users.change_user(user),
-        roles: Users.list_roles()
+        user: form.user,
+        changeset: form.changeset,
+        roles: form.roles
       )
     end
   end
@@ -44,11 +46,11 @@ defmodule PhilomenaWeb.Admin.UserController do
       |> put_flash(:info, "User successfully updated.")
       |> redirect(to: ~p"/profiles/#{user}")
     else
-      {:error, %Ecto.Changeset{} = changeset} ->
+      {:error, %AdminUserForm{} = form} ->
         render(conn, "edit.html",
-          user: changeset.data,
-          changeset: changeset,
-          roles: Users.list_roles()
+          user: form.user,
+          changeset: form.changeset,
+          roles: form.roles
         )
 
       error ->

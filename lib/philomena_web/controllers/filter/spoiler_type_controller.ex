@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Filter.SpoilerTypeController do
   plug PhilomenaWeb.RequireUserPlug
 
   def update(conn, %{"settings" => settings_params}) when is_map(settings_params) do
-    case Users.update_spoiler_type(conn.assigns.current_user, settings_params) do
+    case Users.update_spoiler_type(conn.assigns.actor, settings_params) do
       {:ok, settings} ->
         conn
         |> put_flash(:info, "Changed spoiler type to #{settings.spoiler_type}")
