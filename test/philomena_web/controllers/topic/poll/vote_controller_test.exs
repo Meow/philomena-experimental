@@ -64,9 +64,9 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
       assert Repo.reload!(poll).total_votes == 1
     end
 
-    test "records only the first option on a single-vote poll",
+    test "rejects multiple options on a single-vote poll",
          %{conn: conn, forum: forum, topic: topic, option_a: option_a, option_b: option_b} do
-      %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
+      %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
       conn =
         post(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes", %{
@@ -74,11 +74,8 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
         })
 
       assert redirected_to(conn) == ~p"/forums/#{forum}/topics/#{topic}"
-
-      assert [%{poll_option_id: recorded}] =
-               Repo.all(from pv in PollVote, where: pv.user_id == ^user.id)
-
-      assert recorded == option_a.id
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Your vote was not recorded."
+      assert Repo.aggregate(PollVote, :count) == 0
     end
 
     test "does not record a second vote by the same user",
@@ -324,26 +321,30 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
 
     # NOTE: the vote is now loaded with get_poll_vote/1, so an unknown id
     # redirects back to the topic with the failure flash rather than raising.
-    test "for an unknown vote id redirects back with the failure flash",
+    test "for an unknown vote id redirects with the not-found flash",
          %{conn: conn, forum: forum, topic: topic} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes/999999999")
 
-      assert redirected_to(conn) == ~p"/forums/#{forum}/topics/#{topic}"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Vote was not removed."
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer id is parsed first (IntegerId.parse), so it takes the
     # same nil path and redirects back with the failure flash.
-    test "for a non-integer vote id redirects back with the failure flash",
+    test "for a non-integer vote id redirects with the not-found flash",
          %{conn: conn, forum: forum, topic: topic} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes/not-a-number")
 
-      assert redirected_to(conn) == ~p"/forums/#{forum}/topics/#{topic}"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Vote was not removed."
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
   end
 end

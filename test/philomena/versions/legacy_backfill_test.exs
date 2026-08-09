@@ -343,7 +343,10 @@ defmodule Philomena.Versions.LegacyBackfillTest do
 
       # A real edit populates post_versions through the normal path.
       {:ok, _} =
-        Posts.update_post(post, actor(editor), %{"body" => "edited", "edit_reason" => "x"})
+        Posts.update_post_for_fixture(post, actor(editor), %{
+          "body" => "edited",
+          "edit_reason" => "x"
+        })
 
       assert Repo.aggregate(PostVersion, :count) > 0
 

@@ -31,7 +31,7 @@ defmodule Philomena.ForumsFixtures do
         description: "A forum for testing",
         access_level: "normal"
       })
-      |> Forums.create_forum()
+      |> Forums.create_forum_for_fixture()
 
     forum
   end

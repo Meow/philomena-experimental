@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.Topic.Post.HideControllerTest do
 
   defp hidden_post(post) do
     {:ok, post} =
-      Posts.hide_loaded_post(
+      Posts.hide_post_for_fixture(
         post,
         %{"deletion_reason" => "Spam"},
         Philomena.UsersFixtures.moderator_user_fixture()
@@ -91,7 +91,7 @@ defmodule PhilomenaWeb.Topic.Post.HideControllerTest do
       refute Repo.reload!(post).hidden_from_users
     end
 
-    test "for an unknown post_id redirects with the authorization flash",
+    test "for an unknown post_id redirects with the not-found flash",
          %{conn: conn, forum: forum, topic: topic} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
@@ -101,7 +101,9 @@ defmodule PhilomenaWeb.Topic.Post.HideControllerTest do
         })
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer post_id short-circuits to NotFoundPlug via the central

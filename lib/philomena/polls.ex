@@ -1,149 +1,143 @@
 defmodule Philomena.Polls do
   @moduledoc """
-  The Polls context.
+  Parent-scoped poll forms, updates, and collaboration services for voting.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.Attribution.Actor
+  alias Philomena.Loader
+  alias Philomena.Polls.{Poll, PollForm, TopicPoll}
   alias Philomena.Repo
   alias Philomena.Topics
-  alias Philomena.Forums.Forum
-  alias Philomena.Topics.Topic
-  alias Philomena.Polls.Poll
+  alias Philomena.Topics.ForumTopic
 
-  # Updates a poll.
-  defp update_poll(%Poll{} = poll, attrs) do
-    poll
-    |> Poll.changeset(attrs)
-    |> Repo.update()
+  defp persist_poll_update(%Poll{} = poll, attrs) do
+    Repo.transact(fn ->
+      with {:ok, locked_poll} <-
+             Poll
+             |> where(id: ^poll.id)
+             |> preload(:options)
+             |> lock("FOR UPDATE")
+             |> Loader.one() do
+        locked_poll
+        |> Poll.changeset(attrs)
+        |> Repo.update()
+      end
+    end)
   end
 
-  # Returns an `%Ecto.Changeset{}` for tracking poll changes.
-  defp change_poll(%Poll{} = poll) do
-    Poll.changeset(poll, %{})
+  defp poll_form(%TopicPoll{} = result, changeset \\ nil) do
+    %PollForm{
+      forum: result.forum,
+      topic: result.topic,
+      poll: result.poll,
+      changeset: changeset || Poll.changeset(result.poll, %{})
+    }
   end
 
   @doc """
-  Loads the poll attached to the topic named by `topic_slug` within the forum
-  named by `forum_slug` for editing, on behalf of `actor`.
+  Loads a poll through its route forum and topic and authorizes `action` on the
+  topic before returning it.
 
-  The forum is loaded by short name and authorized for `:show`, the topic is
-  loaded by slug with hidden topics kept invisible unless the actor may `:show` them,
-  the poll is loaded, and the `:hide` permission on the topic is checked.
-  The poll's options are preloaded so the existing choices are available.
-
-  Returns `{:ok, {forum, topic, poll, changeset}}` (the forum and topic are
-  returned for the caller to reuse, and the changeset tracks changes to the
-  poll), `{:error, :unauthorized}` when the actor may not see the forum/topic
-  or hide the topic, or `{:error, :not_found}` when the topic or its poll does
-  not exist.
+  This narrow service is shared with `Philomena.PollVotes`; callers cannot load
+  a poll independently of an authorized parent chain.
 
   ## Examples
 
-      iex> load_poll_for_edit(moderator, "dis", "some-topic")
-      {:ok, {%Forum{}, %Topic{}, %Poll{}, %Ecto.Changeset{}}}
+      iex> load_topic_poll(actor, "dis", "favorite-pony", :vote)
+      {:ok, %TopicPoll{}}
+
+      iex> load_topic_poll(actor, "dis", "topic-without-poll", :vote)
+      {:error, :not_found}
 
   """
-  @spec load_poll_for_edit(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
-          {:ok, {Forum.t(), Topic.t(), Poll.t(), Ecto.Changeset.t()}}
-          | {:error, :unauthorized | :not_found}
+  @spec load_topic_poll(Actor.t(), String.t(), String.t(), atom()) ::
+          {:ok, TopicPoll.t()} | {:error, :not_found | :unauthorized}
+  def load_topic_poll(%Actor{} = actor, forum_slug, topic_slug, action) do
+    with {:ok, %ForumTopic{forum: forum, topic: topic}} <-
+           Topics.load_forum_topic(actor, forum_slug, topic_slug),
+         {:ok, poll} <-
+           Poll
+           |> where([poll], poll.topic_id == ^topic.id)
+           |> preload(:options)
+           |> Loader.one(),
+         :ok <- authorize(actor, action, topic) do
+      {:ok, %TopicPoll{forum: forum, topic: topic, poll: poll}}
+    end
+  end
+
+  @doc """
+  Loads an authorized poll edit form.
+
+  The same write-access prerequisite used by update is enforced before the
+  parent-scoped lookup. Existing options are included in the form.
+
+  ## Examples
+
+      iex> load_poll_for_edit(moderator_actor, "dis", "favorite-pony")
+      {:ok, %PollForm{}}
+
+  """
+  @spec load_poll_for_edit(Actor.t(), String.t(), String.t()) ::
+          {:ok, PollForm.t()} | {:error, :ban | :not_found | :unauthorized}
   def load_poll_for_edit(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug) do
-      {:ok, {forum, topic, poll, change_poll(poll)}}
-    end
-  end
-
-  # The forum `:show`, topic visibility, poll existence, and topic `:hide` checks
-  # run in that order. Options are preloaded here so the existing choices are
-  # present for editing and on the update-error path.
-  defp load_forum_topic_poll(actor, forum_slug, topic_slug) do
-    with {:ok, forum, topic} <-
-           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
-         {:ok, poll} <- load_poll(topic),
-         :ok <- authorize(actor, :hide, topic) do
-      {:ok, forum, topic, Repo.preload(poll, :options)}
+    with :ok <- verify_write_access(actor),
+         {:ok, result} <- load_topic_poll(actor, forum_slug, topic_slug, :edit_poll) do
+      {:ok, poll_form(result)}
     end
   end
 
   @doc """
-  Loads the poll attached to `topic`.
+  Updates the poll beneath the authorized route topic.
 
-  Returns `{:ok, poll}`, or `{:error, :not_found}` when the topic has no poll.
-  """
-  @spec load_poll(Topic.t()) :: {:ok, Poll.t()} | {:error, :not_found}
-  def load_poll(topic) do
-    Poll
-    |> where(topic_id: ^topic.id)
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      poll -> {:ok, poll}
-    end
-  end
-
-  @doc """
-  Updates the poll attached to the topic named by `topic_slug` within the forum
-  named by `forum_slug` from `poll_params`, on behalf of `actor` (the acting
-  user).
-
-  Loading and authorization mirror `load_poll_for_edit/3` exactly, so an actor
-  who may not edit the poll never reaches the update.
-
-  Returns `{:ok, {forum, topic}}` on success (both are returned for the caller
-  to reuse), `{:error, forum, topic, changeset}` when the poll changeset is
-  rejected (the forum, topic, and changeset are returned for the caller to
-  reuse), `{:error, :unauthorized}` when the actor may not see the forum/topic or
-  hide the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
+  The poll is row-locked while it and its options update transactionally. Invalid close
+  times, vote methods, titles, or option sets return a form carrying the
+  rejected changeset. Once voting has started, the vote method and options are
+  immutable so existing votes retain their meaning; the title and end time may
+  still be changed.
 
   ## Examples
 
-      iex> update_poll(moderator, "dis", "some-topic", %{"title" => "New title"})
-      {:ok, {%Forum{}, %Topic{}}}
+      iex> update_poll(moderator_actor, "dis", "favorite-pony", attrs)
+      {:ok, %TopicPoll{}}
 
-      iex> update_poll(moderator, "dis", "some-topic", %{"title" => ""})
-      {:error, %Forum{}, %Topic{}, %Ecto.Changeset{}}
+      iex> update_poll(moderator_actor, "dis", "favorite-pony", invalid_attrs)
+      {:error, %PollForm{}}
 
   """
-  @spec update_poll(
-          actor :: Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          poll_params :: map()
-        ) ::
-          {:ok, {Forum.t(), Topic.t()}}
-          | {:error, Forum.t(), Topic.t(), Ecto.Changeset.t()}
-          | {:error, :unauthorized | :not_found}
-  def update_poll(%Actor{} = actor, forum_slug, topic_slug, poll_params) do
-    with {:ok, forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug) do
-      case update_poll(poll, poll_params) do
-        {:ok, _poll} ->
-          {:ok, {forum, topic}}
-
-        {:error, %Ecto.Changeset{} = changeset} ->
-          {:error, forum, topic, changeset}
+  @spec update_poll(Actor.t(), String.t(), String.t(), map()) ::
+          {:ok, TopicPoll.t()}
+          | {:error, PollForm.t()}
+          | {:error, :ban | :not_found | :unauthorized}
+  def update_poll(%Actor{} = actor, forum_slug, topic_slug, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, result} <- load_topic_poll(actor, forum_slug, topic_slug, :update_poll) do
+      case persist_poll_update(result.poll, attrs) do
+        {:ok, poll} -> {:ok, %{result | poll: poll}}
+        {:error, changeset} -> {:error, poll_form(result, changeset)}
       end
     end
   end
 
   @doc """
-  Returns whether the given poll is currently active.
+  Returns whether a loaded poll is accepting votes at `now`.
+
+  The close instant itself is inactive. This pure service avoids a second,
+  potentially stale database read inside the vote transaction.
 
   ## Examples
 
-      iex> active?(poll)
+      iex> active?(poll, DateTime.utc_now())
       true
 
   """
-  @spec active?(Poll.t()) :: boolean()
-  def active?(%Poll{id: poll_id}) do
-    now = DateTime.utc_now()
+  @spec active?(Poll.t() | nil, DateTime.t()) :: boolean()
+  def active?(poll, now \\ DateTime.utc_now())
 
-    Poll
-    |> where([p], p.id == ^poll_id and p.active_until > ^now)
-    |> Repo.exists?()
-  end
+  def active?(%Poll{active_until: %DateTime{} = active_until}, %DateTime{} = now),
+    do: DateTime.compare(active_until, now) == :gt
 
-  def active?(_poll), do: false
+  def active?(_poll, _now), do: false
 end

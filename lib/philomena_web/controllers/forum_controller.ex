@@ -6,19 +6,23 @@ defmodule PhilomenaWeb.ForumController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    {forums, topic_count} = Forums.load_forum_index(conn.assigns.actor)
+    index = Forums.load_forum_index(conn.assigns.actor)
 
-    render(conn, "index.html", title: "Forums", forums: forums, topic_count: topic_count)
+    render(conn, "index.html",
+      title: "Forums",
+      forums: index.forums,
+      topic_count: index.topic_count
+    )
   end
 
   def show(conn, %{"id" => short_name}) do
-    with {:ok, {forum, topics, watching}} <-
+    with {:ok, page} <-
            Forums.load_forum_show(conn.assigns.actor, short_name, conn.assigns.scrivener) do
       render(conn, "show.html",
-        title: forum.name,
-        forum: forum,
-        watching: watching,
-        topics: topics
+        title: page.forum.name,
+        forum: page.forum,
+        watching: page.watching,
+        topics: page.topics
       )
     end
   end

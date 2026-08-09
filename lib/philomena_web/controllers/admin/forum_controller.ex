@@ -6,8 +6,8 @@ defmodule PhilomenaWeb.Admin.ForumController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with :ok <- Forums.authorize_admin(conn.assigns.actor) do
-      render(conn, "index.html", title: "Admin - Forums")
+    with {:ok, forums} <- Forums.load_admin_forums(conn.assigns.actor) do
+      render(conn, "index.html", title: "Admin - Forums", forums: forums)
     end
   end
 

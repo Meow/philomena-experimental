@@ -45,7 +45,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
         topic_fixture(staff_forum, nil, %{"posts" => %{"0" => %{"body" => "chartreuse vicuna"}}})
 
       hidden = post_fixture(topic, nil, %{"body" => "chartreuse guanaco"})
-      {:ok, _} = Posts.hide_loaded_post(hidden, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} = Posts.hide_post_for_fixture(hidden, %{"deletion_reason" => "spam"}, moderator)
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")
@@ -59,7 +59,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       forum = forum_fixture()
       topic = topic_fixture(forum, nil, %{"posts" => %{"0" => %{"body" => "chartreuse okapi"}}})
 
-      {:ok, _} = Topics.hide_topic(topic, "spam", moderator)
+      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")
@@ -78,7 +78,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       topic = topic_fixture(forum, nil, %{"posts" => %{"0" => %{"body" => "chartreuse okapi"}}})
 
       # Hiding the topic and reindexing folds its posts to hidden, excluding them.
-      {:ok, hidden_topic} = Topics.hide_topic(topic, "spam", moderator)
+      {:ok, hidden_topic} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")
@@ -87,7 +87,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       # Unhiding it (which enqueues a topic-wide post reindex in production; here
       # we drive the reindex explicitly) folds the posts back to visible, so the
       # post is searchable again with its real body.
-      {:ok, _} = Topics.unhide_topic(hidden_topic)
+      {:ok, _} = Topics.unhide_topic_for_fixture(hidden_topic)
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")

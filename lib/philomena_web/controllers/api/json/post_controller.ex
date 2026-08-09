@@ -5,13 +5,13 @@ defmodule PhilomenaWeb.Api.Json.PostController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def show(conn, %{"id" => post_id}) do
-    case Posts.load_public_post(post_id) do
+    case Posts.load_post(conn.assigns.actor, post_id) do
       {:ok, post} ->
         conn
         |> put_view(PhilomenaWeb.Api.Json.Forum.Topic.PostView)
         |> render("show.json", post: post)
 
-      {:error, :not_found} ->
+      {:error, reason} when reason in [:not_found, :unauthorized] ->
         not_found(conn)
     end
   end

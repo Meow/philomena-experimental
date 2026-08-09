@@ -20,6 +20,8 @@ defmodule Philomena.PollsTest do
   import Philomena.UsersFixtures
 
   alias Philomena.Polls
+  alias Philomena.Polls.{PollForm, TopicPoll}
+  alias Philomena.PollVotes
   alias Philomena.Repo
 
   # A visible topic (in a normal, publicly readable forum) that carries a poll,
@@ -35,31 +37,31 @@ defmodule Philomena.PollsTest do
       moderator = moderator_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, {loaded_forum, loaded_topic, loaded_poll, changeset}} =
+      assert {:ok, %PollForm{} = form} =
                Polls.load_poll_for_edit(actor(moderator), forum.short_name, topic.slug)
 
-      assert loaded_forum.id == forum.id
-      assert loaded_topic.id == topic.id
-      assert loaded_poll.id == poll.id
+      assert form.forum.id == forum.id
+      assert form.topic.id == topic.id
+      assert form.poll.id == poll.id
 
       # The options are preloaded so the edit form can render existing choices:
       # a loaded list, not an unloaded association.
-      assert is_list(loaded_poll.options)
-      assert length(loaded_poll.options) == 2
+      assert is_list(form.poll.options)
+      assert length(form.poll.options) == 2
 
       # The changeset drives the edit form and is built from the loaded poll.
-      assert %Ecto.Changeset{data: %Philomena.Polls.Poll{}} = changeset
-      assert changeset.data.id == poll.id
+      assert %Ecto.Changeset{data: %Philomena.Polls.Poll{}} = form.changeset
+      assert form.changeset.data.id == poll.id
     end
 
     test "an admin loads the poll" do
       admin = admin_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, {_forum, _topic, loaded_poll, %Ecto.Changeset{}}} =
+      assert {:ok, %PollForm{} = form} =
                Polls.load_poll_for_edit(actor(admin), forum.short_name, topic.slug)
 
-      assert loaded_poll.id == poll.id
+      assert form.poll.id == poll.id
     end
 
     test "a regular user is unauthorized even though the poll exists" do
@@ -83,11 +85,9 @@ defmodule Philomena.PollsTest do
                {:error, :unauthorized}
     end
 
-    test "an unknown forum is unauthorized for a regular user" do
-      # The forum is loaded by short name and authorized for :show; the nil result
-      # is denied for a regular user before any topic or poll load.
+    test "an unknown forum is not found for a regular user" do
       assert Polls.load_poll_for_edit(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic is not found" do
@@ -133,13 +133,13 @@ defmodule Philomena.PollsTest do
       moderator = moderator_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, {loaded_forum, loaded_topic}} =
+      assert {:ok, %TopicPoll{} = result} =
                Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
                  "title" => "Moderator updated title"
                })
 
-      assert loaded_forum.id == forum.id
-      assert loaded_topic.id == topic.id
+      assert result.forum.id == forum.id
+      assert result.topic.id == topic.id
       assert Repo.reload!(poll).title == "Moderator updated title"
     end
 
@@ -147,12 +147,54 @@ defmodule Philomena.PollsTest do
       admin = admin_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, {_forum, _topic}} =
+      assert {:ok, %TopicPoll{}} =
                Polls.update_poll(actor(admin), forum.short_name, topic.slug, %{
                  "title" => "Admin updated title"
                })
 
       assert Repo.reload!(poll).title == "Admin updated title"
+    end
+
+    test "options can be edited before voting starts" do
+      moderator = moderator_user_fixture()
+      {forum, topic, poll} = forum_topic_poll()
+      [option_a, option_b] = poll |> Repo.preload(:options) |> Map.fetch!(:options)
+
+      assert {:ok, %TopicPoll{}} =
+               Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
+                 "options" => %{
+                   "0" => %{"id" => option_a.id, "label" => "Renamed option"},
+                   "1" => %{"id" => option_b.id, "label" => option_b.label}
+                 }
+               })
+
+      assert Repo.reload!(option_a).label == "Renamed option"
+    end
+
+    test "options and vote method are immutable after voting starts" do
+      moderator = moderator_user_fixture()
+      voter = confirmed_user_fixture()
+      {forum, topic, poll} = forum_topic_poll()
+      [option_a, option_b] = poll |> Repo.preload(:options) |> Map.fetch!(:options)
+
+      assert {:ok, [_vote]} =
+               PollVotes.create_poll_votes(voter, poll, %{
+                 "option_ids" => [to_string(option_a.id)]
+               })
+
+      assert {:error, %PollForm{changeset: changeset}} =
+               Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
+                 "vote_method" => "multiple",
+                 "options" => %{
+                   "0" => %{"id" => option_a.id, "label" => "Rewritten choice"},
+                   "1" => %{"id" => option_b.id, "label" => option_b.label}
+                 }
+               })
+
+      assert "cannot be changed after voting has started" in errors_on(changeset).options
+      assert "cannot be changed after voting has started" in errors_on(changeset).vote_method
+      assert Repo.reload!(option_a).label == option_a.label
+      assert Repo.reload!(poll).vote_method == "single"
     end
 
     test "a rejected changeset yields the 4-tuple error and leaves the poll unchanged" do
@@ -164,7 +206,7 @@ defmodule Philomena.PollsTest do
       moderator = moderator_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:error, error_forum, error_topic, changeset} =
+      assert {:error, %PollForm{} = form} =
                Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
                  "title" => "",
                  "active_until" =>
@@ -172,9 +214,9 @@ defmodule Philomena.PollsTest do
                  "vote_method" => "single"
                })
 
-      assert error_forum.id == forum.id
-      assert error_topic.id == topic.id
-      assert %Ecto.Changeset{valid?: false} = changeset
+      assert form.forum.id == forum.id
+      assert form.topic.id == topic.id
+      assert %Ecto.Changeset{valid?: false} = form.changeset
       assert Repo.reload!(poll).title == "Best test option?"
     end
 
@@ -197,10 +239,10 @@ defmodule Philomena.PollsTest do
       assert Repo.reload!(poll).title == "Best test option?"
     end
 
-    test "an unknown forum is unauthorized for a regular user" do
+    test "an unknown forum is not found for a regular user" do
       assert Polls.update_poll(actor(confirmed_user_fixture()), "nonexistent", "whatever", %{
                "title" => "New title"
-             }) == {:error, :unauthorized}
+             }) == {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic is not found" do

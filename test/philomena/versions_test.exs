@@ -44,7 +44,7 @@ defmodule Philomena.VersionsTest do
       editor = confirmed_user_fixture()
 
       {:ok, _result} =
-        Posts.update_post(post, actor(editor), %{
+        Posts.update_post_for_fixture(post, actor(editor), %{
           "body" => "Edited body",
           "edit_reason" => "typo fix"
         })
@@ -67,10 +67,16 @@ defmodule Philomena.VersionsTest do
       editor = confirmed_user_fixture()
 
       {:ok, %{post: post}} =
-        Posts.update_post(post, actor(editor), %{"body" => "v1", "edit_reason" => "r1"})
+        Posts.update_post_for_fixture(post, actor(editor), %{
+          "body" => "v1",
+          "edit_reason" => "r1"
+        })
 
       {:ok, _result} =
-        Posts.update_post(post, actor(editor), %{"body" => "v2", "edit_reason" => "r2"})
+        Posts.update_post_for_fixture(post, actor(editor), %{
+          "body" => "v2",
+          "edit_reason" => "r2"
+        })
 
       assert [initial, first_edit, second_edit] = post_versions(post)
       assert initial.body == "v0"
@@ -85,13 +91,13 @@ defmodule Philomena.VersionsTest do
       editor = confirmed_user_fixture()
 
       assert {:ok, _result} =
-               Posts.update_post(stale_post, actor(editor), %{
+               Posts.update_post_for_fixture(stale_post, actor(editor), %{
                  "body" => "v1",
                  "edit_reason" => "first reason"
                })
 
       assert {:ok, _result} =
-               Posts.update_post(stale_post, actor(editor), %{"body" => "v2"})
+               Posts.update_post_for_fixture(stale_post, actor(editor), %{"body" => "v2"})
 
       assert [_initial, _first_edit, second_edit] = post_versions(stale_post)
       assert second_edit.body == "v2"
@@ -103,7 +109,7 @@ defmodule Philomena.VersionsTest do
       {post, _author} = post_fixture_with_body("same body")
 
       assert {:ok, %{version: nil}} =
-               Posts.update_post(post, actor(confirmed_user_fixture()), %{
+               Posts.update_post_for_fixture(post, actor(confirmed_user_fixture()), %{
                  "body" => post.body,
                  "edit_reason" => post.edit_reason
                })
@@ -145,7 +151,7 @@ defmodule Philomena.VersionsTest do
             send(parent, {:ready, self()})
 
             receive do
-              :edit -> Posts.update_post(original, actor(editor), %{"body" => body})
+              :edit -> Posts.update_post_for_fixture(original, actor(editor), %{"body" => body})
             end
           end)
         end
@@ -215,10 +221,16 @@ defmodule Philomena.VersionsTest do
       editor = confirmed_user_fixture()
 
       {:ok, %{post: post}} =
-        Posts.update_post(post, actor(editor), %{"body" => "v1", "edit_reason" => "r1"})
+        Posts.update_post_for_fixture(post, actor(editor), %{
+          "body" => "v1",
+          "edit_reason" => "r1"
+        })
 
       {:ok, _result} =
-        Posts.update_post(post, actor(editor), %{"body" => "v2", "edit_reason" => "r2"})
+        Posts.update_post_for_fixture(post, actor(editor), %{
+          "body" => "v2",
+          "edit_reason" => "r2"
+        })
 
       assert [newest, older] = Versions.for_post(post)
       assert {newest.body, newest.previous_body, newest.edit_reason} == {"v2", "v1", "r2"}

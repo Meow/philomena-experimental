@@ -27,22 +27,19 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       assert reply_id == reply.id
     end
 
-    test "includes hidden posts with a null body", %{conn: conn} do
+    test "excludes hidden posts", %{conn: conn} do
       user = confirmed_user_fixture()
       moderator = moderator_user_fixture()
       forum = forum_fixture()
       topic = topic_fixture(forum, user)
       reply = post_fixture(topic, user, %{"body" => "Rule-breaking reply"})
 
-      {:ok, _} = Posts.hide_loaded_post(reply, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} = Posts.hide_post_for_fixture(reply, %{"deletion_reason" => "spam"}, moderator)
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts")
 
-      # NOTE: hidden posts are not filtered from the index; they render with
-      # a null body.
-      assert %{"posts" => [_first, hidden], "total" => 2} = json_response(conn, 200)
-      assert %{"body" => nil, "id" => hidden_id} = hidden
-      assert hidden_id == reply.id
+      assert %{"posts" => [first], "total" => 1} = json_response(conn, 200)
+      refute first["id"] == reply.id
     end
 
     test "paginates in windows of 25 by topic position by default", %{conn: conn} do
@@ -141,7 +138,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       topic = topic_fixture(forum)
       post = post_fixture(topic, nil)
 
-      {:ok, _} = Posts.destroy_post(post)
+      {:ok, _} = Posts.destroy_post_for_fixture(post)
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts/#{post.id}")
 
@@ -154,7 +151,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       topic = topic_fixture(forum)
       post = post_fixture(topic, nil)
 
-      {:ok, _} = Topics.hide_topic(topic, "spam", moderator)
+      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts/#{post.id}")
 

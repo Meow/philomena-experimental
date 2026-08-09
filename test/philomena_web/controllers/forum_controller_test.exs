@@ -57,11 +57,13 @@ defmodule PhilomenaWeb.ForumControllerTest do
     test "redirects to / for an unknown short name", %{conn: conn} do
       # NOTE: an unknown forum is a 302 redirect with a flash, not a 404 page
       # (unlike the JSON API, which returns a bare 404) - and the flash is the
-      # *authorization* message, not the not-found one.
+      # not-found message.
       conn = get(conn, ~p"/forums/nonexistent")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Couldn't find what you were looking for!"
     end
 
     test "redirects to / for a restricted forum", %{conn: conn} do

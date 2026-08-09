@@ -32,7 +32,7 @@ defmodule Philomena.TopicsFixtures do
         "posts" => %{"0" => %{"body" => "Test topic body"}}
       })
 
-    {:ok, %{topic: topic}} = Topics.create_topic(forum, actor(user), attrs, nil)
+    {:ok, %{topic: topic}} = Topics.create_topic_for_fixture(forum, actor(user), attrs)
 
     topic
   end

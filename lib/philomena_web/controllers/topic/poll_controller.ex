@@ -6,27 +6,32 @@ defmodule PhilomenaWeb.Topic.PollController do
   action_fallback PhilomenaWeb.FallbackController
 
   def edit(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug}) do
-    with {:ok, {forum, topic, poll, changeset}} <-
+    with {:ok, form} <-
            Polls.load_poll_for_edit(conn.assigns.actor, forum_slug, topic_slug) do
       render(conn, "edit.html",
         title: "Editing Poll",
-        forum: forum,
-        topic: topic,
-        poll: poll,
-        changeset: changeset
+        forum: form.forum,
+        topic: form.topic,
+        poll: form.poll,
+        changeset: form.changeset
       )
     end
   end
 
   def update(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug, "poll" => poll_params}) do
     case Polls.update_poll(conn.assigns.actor, forum_slug, topic_slug, poll_params) do
-      {:ok, {forum, topic}} ->
+      {:ok, result} ->
         conn
         |> put_flash(:info, "Poll successfully updated.")
-        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
+        |> redirect(to: ~p"/forums/#{result.forum}/topics/#{result.topic}")
 
-      {:error, forum, topic, changeset} ->
-        render(conn, "edit.html", forum: forum, topic: topic, changeset: changeset)
+      {:error, %Philomena.Polls.PollForm{} = form} ->
+        render(conn, "edit.html",
+          forum: form.forum,
+          topic: form.topic,
+          poll: form.poll,
+          changeset: form.changeset
+        )
 
       {:error, _} = error ->
         error

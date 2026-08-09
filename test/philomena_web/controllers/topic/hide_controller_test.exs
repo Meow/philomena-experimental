@@ -16,7 +16,11 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
 
   defp hidden_topic(topic) do
     {:ok, topic} =
-      Topics.hide_topic(topic, "Spam", Philomena.UsersFixtures.moderator_user_fixture())
+      Topics.hide_topic_for_fixture(
+        topic,
+        "Spam",
+        Philomena.UsersFixtures.moderator_user_fixture()
+      )
 
     topic
   end

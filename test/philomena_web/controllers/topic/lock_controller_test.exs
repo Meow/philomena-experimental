@@ -76,7 +76,7 @@ defmodule PhilomenaWeb.Topic.LockControllerTest do
   describe "DELETE /forums/:forum_id/topics/:topic_id/lock" do
     setup %{topic: topic} do
       {:ok, topic} =
-        Philomena.Topics.lock_topic(
+        Philomena.Topics.lock_topic_for_fixture(
           topic,
           %{"lock_reason" => "Off topic"},
           Philomena.UsersFixtures.moderator_user_fixture()

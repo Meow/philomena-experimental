@@ -6,8 +6,13 @@ defmodule PhilomenaWeb.Topic.Post.HideController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, %{"post_id" => post_id, "post" => post_params}) do
-    case Posts.hide_post(conn.assigns.actor, post_id, post_params) do
+  def create(conn, %{
+        "forum_id" => forum_id,
+        "topic_id" => topic_id,
+        "post_id" => post_id,
+        "post" => post_params
+      }) do
+    case Posts.hide_post(conn.assigns.actor, forum_id, topic_id, post_id, post_params) do
       {:ok, post} ->
         conn
         |> put_flash(:info, "Post successfully deleted.")
@@ -23,8 +28,8 @@ defmodule PhilomenaWeb.Topic.Post.HideController do
     end
   end
 
-  def delete(conn, %{"post_id" => post_id}) do
-    case Posts.unhide_post(conn.assigns.actor, post_id) do
+  def delete(conn, %{"forum_id" => forum_id, "topic_id" => topic_id, "post_id" => post_id}) do
+    case Posts.unhide_post(conn.assigns.actor, forum_id, topic_id, post_id) do
       {:ok, post} ->
         conn
         |> put_flash(:info, "Post successfully restored.")

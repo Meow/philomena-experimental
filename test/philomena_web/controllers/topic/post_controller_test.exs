@@ -74,7 +74,7 @@ defmodule PhilomenaWeb.Topic.PostControllerTest do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
       {:ok, _topic} =
-        Topics.lock_topic(
+        Topics.lock_topic_for_fixture(
           topic,
           %{"lock_reason" => "Test lock"},
           Philomena.UsersFixtures.moderator_user_fixture()

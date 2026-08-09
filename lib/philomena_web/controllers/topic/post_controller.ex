@@ -9,18 +9,6 @@ defmodule PhilomenaWeb.Topic.PostController do
   def create(conn, %{"forum_id" => forum_id, "topic_id" => topic_id} = params) do
     case Posts.create_post(conn.assigns.actor, forum_id, topic_id, params["post"]) do
       {:ok, %{post: post, topic: topic, forum: forum}} ->
-        if forum.access_level == "normal" do
-          PhilomenaWeb.Endpoint.broadcast!(
-            "firehose",
-            "post:create",
-            PhilomenaWeb.Api.Json.Forum.Topic.PostView.render("firehose.json", %{
-              post: post,
-              topic: topic,
-              forum: forum
-            })
-          )
-        end
-
         conn
         |> put_flash(:info, "Post created successfully.")
         |> redirect(

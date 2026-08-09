@@ -12,7 +12,6 @@
   {"lib/philomena/images/tag_validator.ex", :call_without_opaque},
   {"lib/philomena/interactions.ex", :call_without_opaque},
   {"lib/philomena/mod_notes.ex", :call_without_opaque},
-  {"lib/philomena/poll_votes.ex", :call_without_opaque},
   {"lib/philomena/posts.ex", :call_without_opaque},
   {"lib/philomena/static_pages.ex", :call_without_opaque},
   {"lib/philomena/tags.ex", :call_without_opaque},

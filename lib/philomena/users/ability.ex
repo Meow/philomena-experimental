@@ -38,6 +38,25 @@ defimpl Canada.Can, for: Philomena.Users.User do
   @commission_management_actions [:new, :create, :edit, :update, :delete]
   @commission_item_actions [:new, :create, :edit, :update, :delete]
   @conversation_class_actions [:index, :new, :create]
+  @topic_moderation_actions [
+    :show,
+    :subscribe,
+    :unsubscribe,
+    :mark_read,
+    :stick,
+    :unstick,
+    :lock,
+    :unlock,
+    :move,
+    :hide,
+    :unhide,
+    :update_title,
+    :edit_poll,
+    :update_poll,
+    :list_poll_votes,
+    :delete_poll_vote
+  ]
+  @post_moderation_actions [:edit, :update, :hide, :unhide, :approve]
   @dnp_entry_class_actions [:index, :new, :create, :select_any_tag]
   @dnp_entry_member_actions [
     :show,
@@ -107,7 +126,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{role: "moderator"}, :show, %Comment{}), do: true
 
   # View forums
-  def can?(%User{role: "moderator"}, :show, %Forum{}), do: true
+  def can?(%User{role: "moderator"}, action, %Forum{})
+      when action in [:show, :subscribe, :unsubscribe, :create_topic],
+      do: true
 
   def can?(%User{role: "moderator"}, :show, %Topic{hidden_from_users: true}), do: true
 
@@ -150,10 +171,11 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{role: "moderator"}, :reveal_anon, _object), do: true
 
   # Edit posts and comments
-  def can?(%User{role: "moderator"}, :edit, %Post{}), do: true
-  def can?(%User{role: "moderator"}, :hide, %Post{}), do: true
+  def can?(%User{role: "moderator"}, action, %Post{})
+      when action in @post_moderation_actions,
+      do: true
+
   def can?(%User{role: "moderator"}, :delete, %Post{}), do: true
-  def can?(%User{role: "moderator"}, :approve, %Post{}), do: true
   def can?(%User{role: "moderator"}, :edit, %Comment{}), do: true
   def can?(%User{role: "moderator"}, :hide, %Comment{}), do: true
   def can?(%User{role: "moderator"}, :delete, %Comment{}), do: true
@@ -196,9 +218,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
       do: true
 
   # Hide topics
-  def can?(%User{role: "moderator"}, :show, %Topic{}), do: true
-  def can?(%User{role: "moderator"}, :hide, %Topic{}), do: true
-  def can?(%User{role: "moderator"}, :edit, %Topic{}), do: true
+  def can?(%User{role: "moderator"}, action, %Topic{})
+      when action in @topic_moderation_actions,
+      do: true
+
   def can?(%User{role: "moderator"}, :create_post, %Topic{}), do: true
 
   # Edit tags
@@ -471,39 +494,21 @@ defimpl Canada.Can, for: Philomena.Users.User do
   # Topic assistant actions
   def can?(
         %User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}},
-        :show,
+        action,
         %Topic{}
-      ),
-      do: true
-
-  def can?(
-        %User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}},
-        :edit,
-        %Topic{}
-      ),
-      do: true
-
-  def can?(
-        %User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}},
-        :hide,
-        %Topic{}
-      ),
+      )
+      when action in @topic_moderation_actions,
       do: true
 
   def can?(%User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}}, :show, %Post{}),
     do: true
 
-  def can?(%User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}}, :edit, %Post{}),
-    do: true
-
-  def can?(%User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}}, :hide, %Post{}),
-    do: true
-
   def can?(
         %User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}},
-        :approve,
+        action,
         %Post{}
-      ),
+      )
+      when action in @post_moderation_actions,
       do: true
 
   # Tag assistant actions
@@ -554,8 +559,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
       do: true
 
   # View forums
-  def can?(%User{role: "assistant"}, :show, %Forum{access_level: level})
-      when level in ["normal", "assistant"],
+  def can?(%User{role: "assistant"}, action, %Forum{access_level: level})
+      when action in [:show, :subscribe, :unsubscribe, :create_topic] and
+             level in ["normal", "assistant"],
       do: true
 
   def can?(%User{role: "assistant"}, :show, %Topic{hidden_from_users: true}), do: true
@@ -651,8 +657,16 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   # View forums
   def can?(%User{}, :index, Forum), do: true
-  def can?(%User{}, :show, %Forum{access_level: "normal"}), do: true
-  def can?(%User{}, :show, %Topic{hidden_from_users: false}), do: true
+
+  def can?(%User{}, action, %Forum{access_level: "normal"})
+      when action in [:show, :subscribe, :unsubscribe, :create_topic],
+      do: true
+
+  def can?(%User{}, action, %Topic{hidden_from_users: false})
+      when action in [:show, :subscribe, :unsubscribe, :mark_read, :vote],
+      do: true
+
+  def can?(%User{}, action, %Topic{}) when action in [:unsubscribe, :mark_read], do: true
   def can?(%User{}, :show, %Post{hidden_from_users: false}), do: true
 
   # Create and edit posts
@@ -752,6 +766,7 @@ defimpl Canada.Can, for: Atom do
   def can?(_user, :index, Forum), do: true
   def can?(_user, :show, %Forum{access_level: "normal"}), do: true
   def can?(_user, :show, %Topic{hidden_from_users: false}), do: true
+  def can?(_user, :mark_read, %Topic{hidden_from_users: false}), do: true
   def can?(_user, :show, %Post{hidden_from_users: false}), do: true
 
   # Create and edit posts

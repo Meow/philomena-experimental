@@ -58,7 +58,7 @@ defmodule PhilomenaWeb.Topic.ReadControllerTest do
     forum = forum_fixture()
     topic = topic_fixture(forum)
     {:ok, _} = Topics.create_subscription(topic, user)
-    {:ok, topic} = Topics.hide_topic(topic, "test hiding", moderator_user_fixture())
+    {:ok, topic} = Topics.hide_topic_for_fixture(topic, "test hiding", moderator_user_fixture())
 
     conn = post(conn, ~p"/forums/#{forum}/topics/#{topic}/read")
 

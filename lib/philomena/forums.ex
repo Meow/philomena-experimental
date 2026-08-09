@@ -1,325 +1,308 @@
 defmodule Philomena.Forums do
   @moduledoc """
-  The Forums context.
+  Forum discovery, subscription state, and staff-managed forum settings.
+
+  Controller-facing operations load forums by their stable short name before
+  authorization. Unknown or malformed names are therefore always not-found.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.Attribution.Actor
+  alias Philomena.Forums.{Forum, ForumIndex, ForumPage}
+  alias Philomena.Loader
   alias Philomena.Repo
-
-  alias Philomena.Forums.Forum
   alias Philomena.Topics.Topic
 
-  use Philomena.Subscriptions,
-    id_name: :forum_id
+  use Philomena.Subscriptions, id_name: :forum_id
 
-  # Creates a forum. Visible for testing.
-  @doc false
-  def create_forum(attrs \\ %{}) do
+  defp insert_forum(attrs) do
     %Forum{}
     |> Forum.changeset(attrs)
     |> Repo.insert()
   end
 
-  # Updates a forum.
-  defp update_forum(%Forum{} = forum, attrs) do
+  defp persist_forum_update(%Forum{} = forum, attrs) do
     forum
     |> Forum.changeset(attrs)
     |> Repo.update()
   end
 
-  # Returns an `%Ecto.Changeset{}` for tracking forum changes.
-  defp change_forum(%Forum{} = forum) do
-    Forum.changeset(forum, %{})
+  defp load_authorized_forum(actor, action, short_name) when is_binary(short_name) do
+    Forum
+    |> where([forum], forum.short_name == ^short_name)
+    |> Loader.one_and_authorize(actor, action)
   end
 
-  @doc """
-  Subscribes `actor` to the forum named by `short_name`.
+  defp load_authorized_forum(_actor, _action, _short_name), do: {:error, :not_found}
 
-  The forum is loaded by its short name and authorized for `:show`.
+  defp visible_forums(actor) do
+    Forum
+    |> order_by(asc: :name)
+    |> preload(last_post: [:user, topic: :forum])
+    |> Repo.all()
+    |> Enum.filter(&(authorize(actor, :show, &1) == :ok))
+  end
+
+  defp visible_topic_count(_actor, []), do: 0
+
+  defp visible_topic_count(actor, forums) do
+    forum_ids = Enum.map(forums, & &1.id)
+
+    Topic
+    |> where([topic], topic.forum_id in ^forum_ids)
+    |> select([topic], %{id: topic.id, hidden_from_users: topic.hidden_from_users})
+    |> Repo.all()
+    |> Enum.count(fn topic -> authorize(actor, :show, struct(Topic, topic)) == :ok end)
+  end
+
+  defp forum_topics(actor, forum, pagination) do
+    Topic
+    |> where([topic], topic.forum_id == ^forum.id)
+    |> order_by(desc: :sticky, desc: :last_replied_to_at)
+    |> preload([:poll, :forum, :user, last_post: :user])
+    |> Repo.all()
+    |> Enum.filter(&(authorize(actor, :show, &1) == :ok))
+    |> paginate_visible_topics(pagination)
+  end
+
+  defp paginate_visible_topics(topics, pagination) do
+    page_number =
+      pagination_value(pagination, :page_number, pagination_value(pagination, :page, 1))
+
+    page_size = pagination_value(pagination, :page_size, 25)
+    total_entries = length(topics)
+
+    %Scrivener.Page{
+      entries: Enum.slice(topics, (page_number - 1) * page_size, page_size),
+      page_number: page_number,
+      page_size: page_size,
+      total_entries: total_entries,
+      total_pages: max(ceil(total_entries / page_size), 1)
+    }
+  end
+
+  defp pagination_value(pagination, key, default) when is_list(pagination),
+    do: Keyword.get(pagination, key, default)
+
+  defp pagination_value(pagination, key, default) when is_map(pagination),
+    do: Map.get(pagination, key, default)
+
+  @doc false
+  @spec create_forum_for_fixture(map()) :: {:ok, Forum.t()} | {:error, Ecto.Changeset.t()}
+  def create_forum_for_fixture(attrs \\ %{}), do: insert_forum(attrs)
+
+  @doc """
+  Lists the forums visible to `actor`, ordered by name.
+
+  The topic count includes only topics whose parent forum and topic are visible
+  to the actor.
 
   ## Examples
 
-      iex> subscribe(user, "dis")
+      iex> load_forum_index(actor)
+      %ForumIndex{forums: [%Forum{}], topic_count: 42}
+
+  """
+  @spec load_forum_index(Actor.t()) :: ForumIndex.t()
+  def load_forum_index(%Actor{} = actor) do
+    forums = visible_forums(actor)
+    %ForumIndex{forums: forums, topic_count: visible_topic_count(actor, forums)}
+  end
+
+  @doc """
+  Lists the forums visible to `actor` using API pagination.
+
+  ## Examples
+
+      iex> list_forums(actor, pagination)
+      %Scrivener.Page{}
+
+  """
+  @spec list_forums(Actor.t(), Repo.pagination_params()) :: Scrivener.Page.t(Forum.t())
+  def list_forums(%Actor{} = actor, pagination) do
+    actor
+    |> visible_forums()
+    |> paginate_visible_topics(pagination)
+  end
+
+  @doc """
+  Loads every forum for the staff administration index.
+
+  ## Examples
+
+      iex> load_admin_forums(admin_actor)
+      {:ok, [%Forum{}]}
+
+  """
+  @spec load_admin_forums(Actor.t()) :: {:ok, [Forum.t()]} | {:error, :unauthorized}
+  def load_admin_forums(%Actor{} = actor) do
+    with :ok <- authorize(actor, :manage, Forum) do
+      {:ok, Repo.all(from forum in Forum, order_by: forum.name)}
+    end
+  end
+
+  @doc """
+  Loads a forum visible to `actor` by short name.
+
+  Malformed or unknown names are not-found; a real restricted forum is
+  unauthorized.
+
+  ## Examples
+
+      iex> load_forum(actor, "dis")
       {:ok, %Forum{}}
 
-      iex> subscribe(user, "nonexistent")
-      {:error, :unauthorized}
+      iex> load_forum(actor, "missing")
+      {:error, :not_found}
+
+  """
+  @spec load_forum(Actor.t(), String.t()) ::
+          {:ok, Forum.t()} | {:error, :not_found | :unauthorized}
+  def load_forum(%Actor{} = actor, short_name) do
+    load_authorized_forum(actor, :show, short_name)
+  end
+
+  @doc """
+  Loads a visible forum and its actor-visible topic page.
+
+  ## Examples
+
+      iex> load_forum_show(actor, "dis", pagination)
+      {:ok, %ForumPage{}}
+
+  """
+  @spec load_forum_show(Actor.t(), String.t(), Repo.pagination_params()) ::
+          {:ok, ForumPage.t()} | {:error, :not_found | :unauthorized}
+  def load_forum_show(%Actor{} = actor, short_name, pagination) do
+    with {:ok, forum} <- load_authorized_forum(actor, :show, short_name) do
+      {:ok,
+       %ForumPage{
+         forum: forum,
+         topics: forum_topics(actor, forum, pagination),
+         watching: subscribed?(forum, actor.user)
+       }}
+    end
+  end
+
+  @doc """
+  Subscribes `actor` to a visible forum after verifying write access.
+
+  ## Examples
+
+      iex> subscribe(actor, "dis")
+      {:ok, %Forum{}}
 
   """
   @spec subscribe(Actor.t(), String.t()) ::
-          {:ok, Forum.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+          {:ok, Forum.t()} | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def subscribe(%Actor{} = actor, short_name) do
-    with {:ok, forum} <- load_forum(actor, short_name),
+    with :ok <- verify_write_access(actor),
+         {:ok, forum} <- load_authorized_forum(actor, :subscribe, short_name),
          {:ok, _subscription} <- create_subscription(forum, actor.user) do
       {:ok, forum}
     end
   end
 
   @doc """
-  Unsubscribes `actor` from the forum named by `short_name`.
+  Idempotently unsubscribes `actor` from a visible forum after verifying write
+  access.
 
   ## Examples
 
-      iex> unsubscribe(user, "dis")
+      iex> unsubscribe(actor, "dis")
       {:ok, %Forum{}}
-
-      iex> unsubscribe(user, "staff")
-      {:error, :unauthorized}
 
   """
   @spec unsubscribe(Actor.t(), String.t()) ::
-          {:ok, Forum.t()} | {:error, :unauthorized}
+          {:ok, Forum.t()} | {:error, :ban | :not_found | :unauthorized}
   def unsubscribe(%Actor{} = actor, short_name) do
-    with {:ok, forum} <- load_forum(actor, short_name) do
-      # Deletion is idempotent and cannot fail; the hard match crashes if it does.
-      {:ok, _subscription} = delete_subscription(forum, actor.user)
+    with :ok <- verify_write_access(actor),
+         {:ok, forum} <- load_authorized_forum(actor, :unsubscribe, short_name),
+         {:ok, _subscription} <- delete_subscription(forum, actor.user) do
       {:ok, forum}
     end
   end
 
-  # The forum is loaded by short name and authorized for `:show`. An unknown
-  # forum authorizes `nil`, which no ordinary rule permits, so it is
-  # unauthorized; the admin blanket rule authorizes `nil` and the nil forum then
-  # flows into the subscription helper unchanged.
-  defp load_forum(actor, short_name) do
-    forum = Repo.get_by(Forum, short_name: to_string(short_name))
-
-    with :ok <- authorize(actor, :show, forum) do
-      {:ok, forum}
-    end
-  end
-
-  defp fetch_forum(short_name) do
-    # TODO: shouldn't this be folded into the above function?
-    case Repo.get_by(Forum, short_name: to_string(short_name)) do
-      nil -> {:error, :not_found}
-      forum -> {:ok, forum}
-    end
-  end
-
   @doc """
-  Assembles the forum index for `actor`.
-
-  Returns `{forums, topic_count}`: every forum `actor` may `:show`, ordered by
-  name with each forum's last post preloaded, and the total topic count summed
-  across all forums.
+  Builds an authorized forum creation form.
 
   ## Examples
 
-      iex> load_forum_index(user)
-      {[%Forum{}, ...], 1234}
-
-  """
-  @spec load_forum_index(Actor.t()) :: {[Forum.t()], integer() | nil}
-  def load_forum_index(%Actor{} = actor) do
-    forums =
-      Forum
-      |> order_by(asc: :name)
-      |> preload(last_post: [:user, topic: :forum])
-      |> Repo.all()
-      |> Enum.filter(&(authorize(actor, :show, &1) == :ok))
-
-    # FIXME: shouldn't it be the topic count of forums visible to the actor?
-    topic_count = Repo.aggregate(Forum, :sum, :topic_count)
-
-    {forums, topic_count}
-  end
-
-  @doc """
-  Assembles the forum named by `short_name` and its topics for `actor`.
-
-  The forum is loaded by its short name and authorized for `:show`. On success,
-  returns `{:ok, {forum, topics, watching}}`: the forum, its visible topics
-  paginated with `pagination` (ordered sticky first, then most recently replied to),
-  and whether `actor` subscribes to the forum.
-
-  ## Examples
-
-      iex> load_forum_show(user, "dis", pagination)
-      {:ok, {%Forum{}, %Scrivener.Page{}, false}}
-
-      iex> load_forum_show(user, "staff", pagination)
-      {:error, :unauthorized}
-
-  """
-  @spec load_forum_show(Actor.t(), String.t(), Repo.pagination_params()) ::
-          {:ok, {Forum.t(), Scrivener.Page.t(Topic.t()), boolean()}} | {:error, :unauthorized}
-  def load_forum_show(%Actor{} = actor, short_name, pagination) do
-    forum = Repo.get_by(Forum, short_name: short_name)
-
-    with :ok <- authorize(actor, :show, forum) do
-      topics =
-        Topic
-        |> where(forum_id: ^forum.id)
-        |> where(hidden_from_users: false)
-        |> order_by(desc: :sticky, desc: :last_replied_to_at)
-        |> preload([:poll, :forum, :user, last_post: :user])
-        |> Repo.paginate(pagination)
-
-      {:ok, {forum, topics, subscribed?(forum, actor.user)}}
-    end
-  end
-
-  @doc """
-  Lists publicly accessible forums, paginated with `pagination`.
-
-  Only forums whose access level is `"normal"` are returned.
-
-  ## Examples
-
-      iex> list_public_forums(pagination)
-      %Scrivener.Page{}
-
-  """
-  @spec list_public_forums(Repo.pagination_params()) :: Scrivener.Page.t(Forum.t())
-  def list_public_forums(pagination) do
-    # TODO: get rid of this and use load_forum_index
-    Forum
-    |> where(access_level: "normal")
-    |> order_by(asc: :name)
-    |> Repo.paginate(pagination)
-  end
-
-  @doc """
-  Fetches a single publicly accessible forum by its `short_name`.
-
-  Only a forum whose access level is `"normal"` is returned.
-
-  Returns `{:ok, forum}` or `{:error, :not_found}`.
-
-  ## Examples
-
-      iex> load_public_forum("dis")
-      {:ok, %Forum{}}
-
-      iex> load_public_forum("staff")
-      {:error, :not_found}
-
-  """
-  @spec load_public_forum(String.t()) :: {:ok, Forum.t()} | {:error, :not_found}
-  def load_public_forum(short_name) do
-    # TODO: get rid of this and use load_forum_show
-    Forum
-    |> where(short_name: ^short_name)
-    |> where(access_level: "normal")
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      forum -> {:ok, forum}
-    end
-  end
-
-  # Authorizes `actor` to manage forums.
-  # FIXME: this function shouldn't be public and the controller is wrong to directly depend on it
-  @doc false
-  @spec authorize_admin(Actor.t()) :: :ok | {:error, :unauthorized}
-  def authorize_admin(%Actor{} = actor) do
-    authorize(actor, :edit, Forum)
-  end
-
-  @doc """
-  Builds a changeset for creating a new forum, on behalf of `actor`.
-
-  ## Examples
-
-      iex> new_forum(admin)
+      iex> new_forum(admin_actor)
       {:ok, %Ecto.Changeset{}}
 
-      iex> new_forum(user)
-      {:error, :unauthorized}
-
   """
-  @spec new_forum(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  @spec new_forum(Actor.t()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def new_forum(%Actor{} = actor) do
-    with :ok <- authorize_admin(actor) do
-      {:ok, change_forum(%Forum{})}
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :new, Forum) do
+      {:ok, Forum.changeset(%Forum{}, %{})}
     end
   end
 
   @doc """
-  Creates a forum on behalf of `actor`.
+  Creates a forum on behalf of an authorized actor.
 
   ## Examples
 
-      iex> create_forum(admin, forum_params)
+      iex> create_forum(admin_actor, attrs)
       {:ok, %Forum{}}
 
-      iex> create_forum(admin, invalid_params)
+      iex> create_forum(admin_actor, invalid_attrs)
       {:error, %Ecto.Changeset{}}
-
-      iex> create_forum(user, forum_params)
-      {:error, :unauthorized}
 
   """
   @spec create_forum(Actor.t(), map()) ::
-          {:ok, Forum.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+          {:ok, Forum.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def create_forum(%Actor{} = actor, attrs) do
-    with :ok <- authorize_admin(actor) do
-      create_forum(attrs)
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, Forum) do
+      insert_forum(attrs)
     end
   end
 
   @doc """
-  Loads the forum named by `short_name` for editing, on behalf of `actor`,
-  pairing it with a change-tracking changeset for it.
-
-  Authorizes forum administration, then loads the forum by its short name.
-  Returns `{:ok, {forum, changeset}}`, `{:error, :unauthorized}`, or
-  `{:error, :not_found}` for an unknown short name.
+  Loads a forum edit form by short name.
 
   ## Examples
 
-      iex> load_forum_for_edit(admin, short_name)
+      iex> load_forum_for_edit(admin_actor, "dis")
       {:ok, {%Forum{}, %Ecto.Changeset{}}}
-
-      iex> load_forum_for_edit(admin, invalid_name)
-      {:error, :not_found}
-
-      iex> load_forum_for_edit(user, short_name)
-      {:error, :unauthorized}
 
   """
   @spec load_forum_for_edit(Actor.t(), String.t()) ::
-          {:ok, {Forum.t(), Ecto.Changeset.t()}} | {:error, :unauthorized | :not_found}
+          {:ok, {Forum.t(), Ecto.Changeset.t()}} | {:error, :ban | :not_found | :unauthorized}
   def load_forum_for_edit(%Actor{} = actor, short_name) do
-    with :ok <- authorize_admin(actor),
-         {:ok, forum} <- fetch_forum(short_name) do
-      {:ok, {forum, change_forum(forum)}}
+    with :ok <- verify_write_access(actor),
+         {:ok, forum} <- load_authorized_forum(actor, :edit, short_name) do
+      {:ok, {forum, Forum.changeset(forum, %{})}}
     end
   end
 
   @doc """
-  Updates the forum named by `short_name`, on behalf of `actor`.
+  Updates a forum selected by short name.
 
   ## Examples
 
-      iex> update_forum(admin, short_name, forum_params)
+      iex> update_forum(admin_actor, "dis", attrs)
       {:ok, %Forum{}}
-
-      iex> update_forum(admin, short_name, invalid_params)
-      {:error, %Ecto.Changeset{}}
-
-      iex> update_forum(admin, invalid_name, forum_params)
-      {:error, :not_found}
-
-      iex> update_forum(user, short_name, forum_params)
-      {:error, :unauthorized}
 
   """
   @spec update_forum(Actor.t(), String.t(), map()) ::
-          {:ok, Forum.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, Forum.t()} | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_forum(%Actor{} = actor, short_name, attrs) do
-    with :ok <- authorize_admin(actor),
-         {:ok, forum} <- fetch_forum(short_name) do
-      update_forum(forum, attrs)
+    with :ok <- verify_write_access(actor),
+         {:ok, forum} <- load_authorized_forum(actor, :update, short_name) do
+      persist_forum_update(forum, attrs)
     end
   end
 
   @doc """
-  Returns an `m:Ecto.Query` which updates the last post for the given forum.
+  Returns the internal query used when topic or post changes recompute a forum's
+  last visible post.
 
   ## Examples
 
@@ -327,6 +310,7 @@ defmodule Philomena.Forums do
       #Ecto.Query<...>
 
   """
+  @spec update_forum_last_post_query(integer()) :: Ecto.Query.t()
   def update_forum_last_post_query(forum_id) do
     Forum
     |> where(id: ^forum_id)

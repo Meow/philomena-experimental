@@ -141,10 +141,15 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
           )
           |> case do
             {:ok, %{post: post}} ->
-              Posts.approve_post(admin_actor, post.id)
+              Posts.approve_post(
+                admin_actor,
+                forum.short_name,
+                topic.slug,
+                post.id
+              )
 
-            {:error, :post, changeset, _so_far} ->
-              IO.inspect(changeset.errors)
+            {:error, forum, topic} ->
+              IO.inspect({forum.short_name, topic.slug})
           end
 
           RateLimiter.reset_limits_globally!()

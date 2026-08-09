@@ -1,104 +1,93 @@
 defmodule Philomena.PollOptions do
   @moduledoc """
-  The PollOptions context.
+  Safe parent-scoped poll-option loading for the PollVotes aggregate.
+
+  Poll options are not independent resources. Persistence is owned by the
+  poll changeset and vote transactions.
   """
 
   import Ecto.Query, warn: false
+
+  alias Philomena.IntegerId
+  alias Philomena.Loader
+  alias Philomena.PollOptions.PollOption
+  alias Philomena.Polls.Poll
   alias Philomena.Repo
 
-  alias Philomena.PollOptions.PollOption
+  defp parse_unique_ids(option_ids) when is_list(option_ids) and option_ids != [] do
+    option_ids
+    |> Enum.reduce_while({:ok, []}, fn option_id, {:ok, ids} ->
+      case IntegerId.parse(option_id) do
+        {:ok, id} -> {:cont, {:ok, [id | ids]}}
+        :error -> {:halt, {:error, :not_found}}
+      end
+    end)
+    |> case do
+      {:ok, ids} ->
+        ids = Enum.reverse(ids)
+        if Enum.uniq(ids) == ids, do: {:ok, ids}, else: {:error, :duplicate}
+
+      error ->
+        error
+    end
+  end
+
+  defp parse_unique_ids(_option_ids), do: {:error, :not_found}
 
   @doc """
-  Returns the list of poll_options.
+  Loads every selected option under `poll` while preserving input order.
+
+  Empty, malformed, duplicate, missing, and wrong-poll IDs reject the entire
+  selection. No user-controlled option ID can raise.
 
   ## Examples
 
-      iex> list_poll_options()
-      [%PollOption{}, ...]
+      iex> load_selected_options(poll, ["1", "2"])
+      {:ok, [%PollOption{}, %PollOption{}]}
+
+      iex> load_selected_options(poll, ["1", "1"])
+      {:error, :duplicate}
 
   """
-  def list_poll_options do
-    Repo.all(PollOption)
+  @spec load_selected_options(Poll.t(), [IntegerId.integer_id()]) ::
+          {:ok, [PollOption.t()]} | {:error, :duplicate | :not_found}
+  def load_selected_options(%Poll{} = poll, option_ids) do
+    with {:ok, ids} <- parse_unique_ids(option_ids) do
+      options =
+        PollOption
+        |> where([option], option.poll_id == ^poll.id and option.id in ^ids)
+        |> Repo.all()
+
+      options_by_id = Map.new(options, &{&1.id, &1})
+
+      case Enum.map(ids, &Map.fetch(options_by_id, &1)) do
+        results when length(options) == length(ids) ->
+          {:ok, Enum.map(results, fn {:ok, option} -> option end)}
+
+        _results ->
+          {:error, :not_found}
+      end
+    end
   end
 
   @doc """
-  Gets a single poll_option.
-
-  Raises `Ecto.NoResultsError` if the Poll option does not exist.
+  Safely loads one option beneath a loaded poll.
 
   ## Examples
 
-      iex> get_poll_option!(123)
-      %PollOption{}
-
-      iex> get_poll_option!(456)
-      ** (Ecto.NoResultsError)
-
-  """
-  def get_poll_option!(id), do: Repo.get!(PollOption, id)
-
-  @doc """
-  Creates a poll_option.
-
-  ## Examples
-
-      iex> create_poll_option(%{field: value})
+      iex> load_option(poll, "1")
       {:ok, %PollOption{}}
 
-      iex> create_poll_option(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
   """
-  def create_poll_option(attrs \\ %{}) do
-    %PollOption{}
-    |> PollOption.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Updates a poll_option.
-
-  ## Examples
-
-      iex> update_poll_option(poll_option, %{field: new_value})
-      {:ok, %PollOption{}}
-
-      iex> update_poll_option(poll_option, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_poll_option(%PollOption{} = poll_option, attrs) do
-    poll_option
-    |> PollOption.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes a PollOption.
-
-  ## Examples
-
-      iex> delete_poll_option(poll_option)
-      {:ok, %PollOption{}}
-
-      iex> delete_poll_option(poll_option)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_poll_option(%PollOption{} = poll_option) do
-    Repo.delete(poll_option)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking poll_option changes.
-
-  ## Examples
-
-      iex> change_poll_option(poll_option)
-      %Ecto.Changeset{source: %PollOption{}}
-
-  """
-  def change_poll_option(%PollOption{} = poll_option) do
-    PollOption.changeset(poll_option, %{})
+  @spec load_option(Poll.t(), IntegerId.integer_id()) ::
+          {:ok, PollOption.t()} | {:error, :not_found}
+  def load_option(%Poll{} = poll, id) do
+    with {:ok, id} <- IntegerId.parse(id) do
+      PollOption
+      |> where([option], option.poll_id == ^poll.id and option.id == ^id)
+      |> Loader.one()
+    else
+      :error -> {:error, :not_found}
+    end
   end
 end

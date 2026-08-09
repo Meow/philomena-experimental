@@ -33,8 +33,7 @@ defmodule Philomena.Users.Eraser do
     |> where(user_id: ^user.id)
     |> Repo.all()
     |> Enum.each(fn post ->
-      {:ok, post} = Posts.hide_loaded_post(post, %{deletion_reason: @reason}, moderator)
-      {:ok, _post} = Posts.destroy_post(post)
+      {:ok, _post} = Posts.erase_post(post, moderator)
     end)
 
     # Delete all comments
@@ -61,7 +60,7 @@ defmodule Philomena.Users.Eraser do
     |> where(user_id: ^user.id)
     |> Repo.all()
     |> Enum.each(fn topic ->
-      {:ok, _topic} = Topics.hide_topic(topic, @reason, moderator)
+      {:ok, _topic} = Topics.erase_topic(topic, moderator)
     end)
 
     # Revert all source changes

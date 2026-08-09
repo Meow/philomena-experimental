@@ -17,15 +17,15 @@ defmodule PhilomenaWeb.Topic.Poll.VoteController do
 
   def create(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug} = params) do
     case PollVotes.create_votes(conn.assigns.actor, forum_slug, topic_slug, params["poll"]) do
-      {:ok, {forum, topic}} ->
+      {:ok, result} ->
         conn
         |> put_flash(:info, "Your vote has been recorded.")
-        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
+        |> redirect(to: ~p"/forums/#{result.forum}/topics/#{result.topic}")
 
-      {:error, forum, topic} ->
+      {:error, %Philomena.PollVotes.VoteForm{} = form} ->
         conn
         |> put_flash(:error, "Your vote was not recorded.")
-        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
+        |> redirect(to: ~p"/forums/#{form.forum}/topics/#{form.topic}")
 
       {:error, _} = error ->
         error
@@ -34,15 +34,10 @@ defmodule PhilomenaWeb.Topic.Poll.VoteController do
 
   def delete(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug, "id" => vote_id}) do
     case PollVotes.delete_vote(conn.assigns.actor, forum_slug, topic_slug, vote_id) do
-      {:ok, {forum, topic}} ->
+      {:ok, result} ->
         conn
         |> put_flash(:info, "Vote successfully removed.")
-        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
-
-      {:error, forum, topic} ->
-        conn
-        |> put_flash(:error, "Vote was not removed.")
-        |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
+        |> redirect(to: ~p"/forums/#{result.forum}/topics/#{result.topic}")
 
       {:error, _} = error ->
         error

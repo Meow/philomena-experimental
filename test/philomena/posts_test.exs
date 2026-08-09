@@ -64,11 +64,97 @@ defmodule Philomena.PostsTest do
     assert Repo.aggregate(ModerationLog, :count) == 0
   end
 
+  defp route_parent(post_id) do
+    post =
+      case Philomena.IntegerId.parse(post_id) do
+        {:ok, id} -> Repo.get(Post, id)
+        :error -> nil
+      end
+
+    case post && Repo.preload(post, topic: :forum) do
+      %Post{topic: topic} ->
+        {topic.forum.short_name, topic.slug}
+
+      nil ->
+        forum = forum_fixture()
+        topic = topic_fixture(forum)
+        {forum.short_name, topic.slug}
+    end
+  end
+
+  defp approve_post(actor, post_id) do
+    {forum_slug, topic_slug} = route_parent(post_id)
+    Posts.approve_post(actor, forum_slug, topic_slug, post_id)
+  end
+
+  defp hide_post(actor, post_id, attrs) do
+    {forum_slug, topic_slug} = route_parent(post_id)
+    Posts.hide_post(actor, forum_slug, topic_slug, post_id, attrs)
+  end
+
+  defp unhide_post(actor, post_id) do
+    {forum_slug, topic_slug} = route_parent(post_id)
+    Posts.unhide_post(actor, forum_slug, topic_slug, post_id)
+  end
+
+  defp destroy_post(actor, post_id) do
+    {forum_slug, topic_slug} = route_parent(post_id)
+    Posts.destroy_post(actor, forum_slug, topic_slug, post_id)
+  end
+
+  describe "parent scoping" do
+    test "moderation actions cannot address a post through another topic", %{
+      forum: forum,
+      topic: topic
+    } do
+      moderator = moderator_user_fixture()
+      wrong_topic = topic_fixture(forum)
+      {unapproved, _author} = unapproved_post(topic)
+      visible = visible_post(topic)
+      hidden = already_hidden_post(topic)
+
+      assert Posts.approve_post(
+               actor(moderator),
+               forum.short_name,
+               wrong_topic.slug,
+               unapproved.id
+             ) == {:error, :not_found}
+
+      assert Posts.hide_post(
+               actor(moderator),
+               forum.short_name,
+               wrong_topic.slug,
+               visible.id,
+               %{"deletion_reason" => "Spam"}
+             ) == {:error, :not_found}
+
+      assert Posts.unhide_post(
+               actor(moderator),
+               forum.short_name,
+               wrong_topic.slug,
+               hidden.id
+             ) == {:error, :not_found}
+
+      assert Posts.destroy_post(
+               actor(moderator),
+               forum.short_name,
+               wrong_topic.slug,
+               visible.id
+             ) == {:error, :not_found}
+
+      refute Repo.reload!(unapproved).approved
+      refute Repo.reload!(visible).hidden_from_users
+      refute Repo.reload!(visible).destroyed_content
+      assert Repo.reload!(hidden).hidden_from_users
+      no_moderation_logs!()
+    end
+  end
+
   describe "approve_post/2" do
     test "denies an anonymous actor", %{topic: topic} do
       {post, _author} = unapproved_post(topic)
 
-      assert Posts.approve_post(actor(), "#{post.id}") == {:error, :unauthorized}
+      assert approve_post(actor(), "#{post.id}") == {:error, :unauthorized}
       refute Repo.reload!(post).approved
       no_moderation_logs!()
     end
@@ -76,7 +162,7 @@ defmodule Philomena.PostsTest do
     test "denies a regular user", %{topic: topic} do
       {post, _author} = unapproved_post(topic)
 
-      assert Posts.approve_post(actor(confirmed_user_fixture()), "#{post.id}") ==
+      assert approve_post(actor(confirmed_user_fixture()), "#{post.id}") ==
                {:error, :unauthorized}
 
       refute Repo.reload!(post).approved
@@ -88,7 +174,7 @@ defmodule Philomena.PostsTest do
       {post, _author} = unapproved_post(topic)
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Post{} = approved} = Posts.approve_post(actor(moderator), "#{post.id}")
+      assert {:ok, %Post{} = approved} = approve_post(actor(moderator), "#{post.id}")
 
       assert approved.id == post.id
       assert approved.approved
@@ -104,7 +190,7 @@ defmodule Philomena.PostsTest do
       {post, _author} = unapproved_post(topic)
       moderator = moderator_user_fixture()
 
-      assert {:ok, _} = Posts.approve_post(actor(moderator), "#{post.id}")
+      assert {:ok, _} = approve_post(actor(moderator), "#{post.id}")
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -119,23 +205,20 @@ defmodule Philomena.PostsTest do
       {post, author} = unapproved_post(topic)
       before = Repo.get!(User, author.id).posts_count
 
-      assert {:ok, _} = Posts.approve_post(actor(moderator_user_fixture()), "#{post.id}")
+      assert {:ok, _} = approve_post(actor(moderator_user_fixture()), "#{post.id}")
 
       assert Repo.get!(User, author.id).posts_count == before + 1
     end
 
-    # A well-formed id naming no row loads nil, which no :approve rule permits;
-    # the context returns unauthorized rather than not-found, preserving the
-    # behavior of the load-then-authorize plug it replaces.
-    test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Posts.approve_post(actor(moderator_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
+    test "a well-formed id naming no row is not found" do
+      assert approve_post(actor(moderator_user_fixture()), "999999999") ==
+               {:error, :not_found}
 
       no_moderation_logs!()
     end
 
     test "an id that cannot name a row is not found" do
-      assert Posts.approve_post(actor(moderator_user_fixture()), "abc") == {:error, :not_found}
+      assert approve_post(actor(moderator_user_fixture()), "abc") == {:error, :not_found}
       no_moderation_logs!()
     end
   end
@@ -149,7 +232,7 @@ defmodule Philomena.PostsTest do
   # moderation log exists before the restore under test runs.
   defp already_hidden_post(topic) do
     {:ok, hidden} =
-      Posts.hide_loaded_post(
+      Posts.hide_post_for_fixture(
         visible_post(topic),
         %{"deletion_reason" => "Spam"},
         moderator_user_fixture()
@@ -162,7 +245,7 @@ defmodule Philomena.PostsTest do
     test "denies an anonymous actor", %{topic: topic} do
       post = visible_post(topic)
 
-      assert Posts.hide_post(actor(), "#{post.id}", %{"deletion_reason" => "Spam"}) ==
+      assert hide_post(actor(), "#{post.id}", %{"deletion_reason" => "Spam"}) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(post).hidden_from_users
@@ -172,7 +255,7 @@ defmodule Philomena.PostsTest do
     test "denies a regular user, leaving the post unchanged", %{topic: topic} do
       post = visible_post(topic)
 
-      assert Posts.hide_post(actor(confirmed_user_fixture()), "#{post.id}", %{
+      assert hide_post(actor(confirmed_user_fixture()), "#{post.id}", %{
                "deletion_reason" => "Spam"
              }) ==
                {:error, :unauthorized}
@@ -189,7 +272,7 @@ defmodule Philomena.PostsTest do
       moderator = moderator_user_fixture()
 
       assert {:ok, %Post{} = hidden} =
-               Posts.hide_post(actor(moderator), "#{post.id}", %{"deletion_reason" => "Spam"})
+               hide_post(actor(moderator), "#{post.id}", %{"deletion_reason" => "Spam"})
 
       assert hidden.id == post.id
       assert hidden.hidden_from_users
@@ -209,7 +292,7 @@ defmodule Philomena.PostsTest do
       moderator = moderator_user_fixture()
 
       assert {:ok, _} =
-               Posts.hide_post(actor(moderator), "#{post.id}", %{"deletion_reason" => "Spam"})
+               hide_post(actor(moderator), "#{post.id}", %{"deletion_reason" => "Spam"})
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -225,7 +308,7 @@ defmodule Philomena.PostsTest do
       post = visible_post(topic)
 
       assert {:error, %Post{} = returned} =
-               Posts.hide_post(actor(moderator_user_fixture()), "#{post.id}", %{
+               hide_post(actor(moderator_user_fixture()), "#{post.id}", %{
                  "deletion_reason" => ""
                })
 
@@ -234,20 +317,17 @@ defmodule Philomena.PostsTest do
       no_moderation_logs!()
     end
 
-    # A well-formed id naming no row loads nil, which no :hide rule permits; the
-    # context returns unauthorized rather than not-found, preserving the behavior
-    # of the load-then-authorize plug it replaces.
-    test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Posts.hide_post(actor(moderator_user_fixture()), "999999999", %{
+    test "a well-formed id naming no row is not found" do
+      assert hide_post(actor(moderator_user_fixture()), "999999999", %{
                "deletion_reason" => "Spam"
              }) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       no_moderation_logs!()
     end
 
     test "an id that cannot name a row is not found" do
-      assert Posts.hide_post(actor(moderator_user_fixture()), "abc", %{
+      assert hide_post(actor(moderator_user_fixture()), "abc", %{
                "deletion_reason" => "Spam"
              }) ==
                {:error, :not_found}
@@ -260,7 +340,7 @@ defmodule Philomena.PostsTest do
     test "denies an anonymous actor", %{topic: topic} do
       post = already_hidden_post(topic)
 
-      assert Posts.unhide_post(actor(), "#{post.id}") == {:error, :unauthorized}
+      assert unhide_post(actor(), "#{post.id}") == {:error, :unauthorized}
       assert Repo.reload!(post).hidden_from_users
       no_moderation_logs!()
     end
@@ -268,7 +348,7 @@ defmodule Philomena.PostsTest do
     test "denies a regular user, leaving the post hidden", %{topic: topic} do
       post = already_hidden_post(topic)
 
-      assert Posts.unhide_post(actor(confirmed_user_fixture()), "#{post.id}") ==
+      assert unhide_post(actor(confirmed_user_fixture()), "#{post.id}") ==
                {:error, :unauthorized}
 
       reloaded = Repo.reload!(post)
@@ -282,7 +362,7 @@ defmodule Philomena.PostsTest do
       post = already_hidden_post(topic)
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Post{} = restored} = Posts.unhide_post(actor(moderator), "#{post.id}")
+      assert {:ok, %Post{} = restored} = unhide_post(actor(moderator), "#{post.id}")
 
       assert restored.id == post.id
       refute restored.hidden_from_users
@@ -301,7 +381,7 @@ defmodule Philomena.PostsTest do
       post = already_hidden_post(topic)
       moderator = moderator_user_fixture()
 
-      assert {:ok, _} = Posts.unhide_post(actor(moderator), "#{post.id}")
+      assert {:ok, _} = unhide_post(actor(moderator), "#{post.id}")
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -312,17 +392,15 @@ defmodule Philomena.PostsTest do
                "/forums/#{forum.short_name}/topics/#{topic.slug}?post_id=#{post.id}#post_#{post.id}"
     end
 
-    # As with hide_post/3, a well-formed id naming no row loads nil and is
-    # unauthorized rather than not-found.
-    test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Posts.unhide_post(actor(moderator_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
+    test "a well-formed id naming no row is not found" do
+      assert unhide_post(actor(moderator_user_fixture()), "999999999") ==
+               {:error, :not_found}
 
       no_moderation_logs!()
     end
 
     test "an id that cannot name a row is not found" do
-      assert Posts.unhide_post(actor(moderator_user_fixture()), "abc") == {:error, :not_found}
+      assert unhide_post(actor(moderator_user_fixture()), "abc") == {:error, :not_found}
       no_moderation_logs!()
     end
   end
@@ -331,7 +409,7 @@ defmodule Philomena.PostsTest do
     test "denies an anonymous actor, leaving the body intact", %{topic: topic} do
       post = visible_post(topic)
 
-      assert Posts.destroy_post(actor(), "#{post.id}") == {:error, :unauthorized}
+      assert destroy_post(actor(), "#{post.id}") == {:error, :unauthorized}
 
       reloaded = Repo.reload!(post)
       assert reloaded.body == "Rule-breaking post"
@@ -342,7 +420,7 @@ defmodule Philomena.PostsTest do
     test "denies a regular user, leaving the body intact", %{topic: topic} do
       post = visible_post(topic)
 
-      assert Posts.destroy_post(actor(confirmed_user_fixture()), "#{post.id}") ==
+      assert destroy_post(actor(confirmed_user_fixture()), "#{post.id}") ==
                {:error, :unauthorized}
 
       reloaded = Repo.reload!(post)
@@ -356,7 +434,7 @@ defmodule Philomena.PostsTest do
       post = visible_post(topic)
       moderator = moderator_user_fixture()
 
-      assert {:ok, %Post{} = destroyed} = Posts.destroy_post(actor(moderator), "#{post.id}")
+      assert {:ok, %Post{} = destroyed} = destroy_post(actor(moderator), "#{post.id}")
 
       assert destroyed.id == post.id
       assert %{topic: %{forum: %Forum{}}} = destroyed
@@ -382,7 +460,7 @@ defmodule Philomena.PostsTest do
       # Set up through the log-free engine, so no log exists before the destroy.
       no_moderation_logs!()
 
-      assert {:ok, %Post{}} = Posts.destroy_post(actor(moderator_user_fixture()), "#{post.id}")
+      assert {:ok, %Post{}} = destroy_post(actor(moderator_user_fixture()), "#{post.id}")
 
       reloaded = Repo.reload!(post)
       assert reloaded.body == ""
@@ -396,7 +474,7 @@ defmodule Philomena.PostsTest do
       post = visible_post(topic)
       moderator = moderator_user_fixture()
 
-      assert {:ok, _} = Posts.destroy_post(actor(moderator), "#{post.id}")
+      assert {:ok, _} = destroy_post(actor(moderator), "#{post.id}")
 
       log = Repo.one!(ModerationLog)
       assert log.user_id == moderator.id
@@ -407,17 +485,15 @@ defmodule Philomena.PostsTest do
                "/forums/#{forum.short_name}/topics/#{topic.slug}?post_id=#{post.id}#post_#{post.id}"
     end
 
-    # As with the other id-guarded actions, a well-formed id naming no row loads
-    # nil and is unauthorized rather than not-found.
-    test "a well-formed id naming no row is unauthorized, not not-found" do
-      assert Posts.destroy_post(actor(moderator_user_fixture()), "999999999") ==
-               {:error, :unauthorized}
+    test "a well-formed id naming no row is not found" do
+      assert destroy_post(actor(moderator_user_fixture()), "999999999") ==
+               {:error, :not_found}
 
       no_moderation_logs!()
     end
 
     test "an id that cannot name a row is not found" do
-      assert Posts.destroy_post(actor(moderator_user_fixture()), "abc") == {:error, :not_found}
+      assert destroy_post(actor(moderator_user_fixture()), "abc") == {:error, :not_found}
       no_moderation_logs!()
     end
   end
@@ -446,11 +522,11 @@ defmodule Philomena.PostsTest do
       assert versions == []
     end
 
-    test "an unknown forum is unauthorized", %{topic: topic} do
+    test "an unknown forum is not found", %{topic: topic} do
       [post] = topic.posts
 
       assert Posts.post_history(actor(), "nonexistent", topic.slug, "#{post.id}") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown topic in a real forum is not found", %{forum: forum} do
@@ -506,7 +582,7 @@ defmodule Philomena.PostsTest do
       post = post_fixture(topic, author, %{"body" => "Original post body"})
 
       {:ok, _} =
-        Posts.update_post(post, actor(author), %{
+        Posts.update_post_for_fixture(post, actor(author), %{
           "body" => "Original post body plus an edit",
           "edit_reason" => "typo fix"
         })
@@ -530,7 +606,7 @@ defmodule Philomena.PostsTest do
       # ties, so the most recently serialized edit is first.
       Enum.reduce(1..26, post, fn n, current ->
         {:ok, %{post: updated}} =
-          Posts.update_post(current, actor(author), %{"body" => "edit #{n}"})
+          Posts.update_post_for_fixture(current, actor(author), %{"body" => "edit #{n}"})
 
         updated
       end)
@@ -664,7 +740,7 @@ defmodule Philomena.PostsTest do
       # authorize(:create_post, topic) permits no rule on a locked topic, so a
       # regular actor is unauthorized after the load.
       {:ok, _} =
-        Philomena.Topics.lock_topic(
+        Philomena.Topics.lock_topic_for_fixture(
           topic,
           %{"lock_reason" => "Test lock"},
           moderator_user_fixture()

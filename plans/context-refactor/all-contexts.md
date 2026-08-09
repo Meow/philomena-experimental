@@ -205,6 +205,16 @@ reason or invariant is non-obvious; comments that restate code should go.
 
 Wave 2 is complete.
 
+- The requested forum-hierarchy portion of wave 3 is complete for Forums,
+  Topics, Posts, Polls, PollOptions, and PollVotes. Typed hierarchy/page/form
+  results replace tuple and bypass loaders; every request path scopes children
+  through its loaded parents before action-specific authorization. Form and
+  write prerequisites now match, post and vote locators are safely parsed,
+  poll selections commit atomically, and poll configuration that would change
+  recorded vote meaning is immutable after voting begins. Topic/post creation
+  owns notifications, indexing, bookkeeping, and firehose broadcasts. Comments
+  remains the only forum-hierarchy context not included in this requested pass.
+
 ### Wave 0: characterize and establish the contract
 
 - Follow `test/CONVENTIONS.md`: land any missing controller characterization in

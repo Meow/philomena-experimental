@@ -83,14 +83,16 @@ defmodule PhilomenaWeb.Topic.Post.ApproveControllerTest do
     # Failure path: the only reachable failure surface is an unknown post -
     # the context authorizes the nil load, which no moderator rule matches, so
     # it returns unauthorized and redirects with the authorization flash.
-    test "for an unknown post_id redirects with the authorization flash",
+    test "for an unknown post_id redirects with the not-found flash",
          %{conn: conn, forum: forum, topic: topic} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = post(conn, ~p"/forums/#{forum}/topics/#{topic}/posts/999999999/approve")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer post_id short-circuits to NotFoundPlug via the central

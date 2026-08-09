@@ -1,327 +1,267 @@
 defmodule Philomena.PollVotes do
   @moduledoc """
-  The PollVotes context.
+  Parent-scoped poll voting, staff result inspection, and vote removal.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
-
-  alias Ecto.Multi
-  alias Philomena.Repo
+  import Philomena.Authorization, only: [verify_write_access: 1]
 
   alias Philomena.Attribution.Actor
   alias Philomena.IntegerId
-  alias Philomena.Topics
-  alias Philomena.Forums.Forum
-  alias Philomena.Topics.Topic
-  alias Philomena.Polls
-  alias Philomena.Polls.Poll
-  alias Philomena.PollVotes.PollVote
+  alias Philomena.Loader
+  alias Philomena.PollOptions
   alias Philomena.PollOptions.PollOption
+  alias Philomena.Polls
+  alias Philomena.Polls.{Poll, TopicPoll}
+  alias Philomena.PollVotes.{PollVote, VoteForm}
+  alias Philomena.Repo
   alias Philomena.Users.User
 
-  # Creates poll votes. Visible for testing.
-  @doc false
-  def create_poll_votes(user, poll, attrs) do
-    now = DateTime.utc_now(:second)
-    poll_votes = filter_options(user, poll, now, attrs)
-
-    Multi.new()
-    |> Multi.run(:lock, fn repo, _ ->
-      poll =
-        Poll
-        |> where(id: ^poll.id)
-        |> lock("FOR UPDATE")
-        |> repo.one()
-
-      {:ok, poll}
-    end)
-    |> Multi.run(:ended, fn _repo, _changes ->
-      # Bail if poll is no longer active
-      if Polls.active?(poll) do
-        {:ok, []}
-      else
-        {:error, []}
-      end
-    end)
-    |> Multi.run(:existing_votes, fn _repo, _changes ->
-      # Don't proceed if any votes exist
-      if voted?(poll, user) do
-        {:error, []}
-      else
-        {:ok, []}
-      end
-    end)
-    |> Multi.run(:new_votes, fn repo, _changes ->
-      {_count, votes} = repo.insert_all(PollVote, poll_votes, returning: true)
-
-      {:ok, votes}
-    end)
-    |> Multi.run(:update_option_counts, fn repo, %{new_votes: new_votes} ->
-      option_ids = Enum.map(new_votes, & &1.poll_option_id)
-
-      {count, nil} =
-        PollOption
-        |> where([po], po.id in ^option_ids)
-        |> repo.update_all(inc: [vote_count: 1])
-
-      {:ok, count}
-    end)
-    |> Multi.run(:update_poll_votes_count, fn repo, %{new_votes: new_votes} ->
-      length = length(new_votes)
-
-      {count, nil} =
-        Poll
-        |> where(id: ^poll.id)
-        |> repo.update_all(inc: [total_votes: length])
-
-      {:ok, count}
-    end)
-    |> Repo.transaction()
+  defp vote_error(field, message) do
+    %PollVote{}
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.add_error(field, message)
   end
 
-  # Deletes a poll vote.
-  defp delete_poll_vote(%PollVote{} = poll_vote) do
-    Multi.new()
-    |> Multi.delete(:poll_vote, poll_vote)
-    |> Multi.run(:update_option_count, fn repo, _changes ->
-      {_count, [poll_id]} =
-        PollOption
-        |> where(id: ^poll_vote.poll_option_id)
-        |> select([po], po.poll_id)
-        |> repo.update_all(inc: [vote_count: -1])
-
-      {:ok, poll_id}
-    end)
-    |> Multi.run(:update_poll_votes_count, fn repo, %{update_option_count: poll_id} ->
-      {count, nil} =
-        Poll
-        |> where(id: ^poll_id)
-        |> repo.update_all(inc: [total_votes: -1])
-
-      {:ok, count}
-    end)
-    |> Repo.transaction()
+  defp vote_form(%TopicPoll{} = result, changeset) do
+    %VoteForm{
+      forum: result.forum,
+      topic: result.topic,
+      poll: result.poll,
+      changeset: changeset
+    }
   end
 
-  @doc """
-  Lists the poll options carrying at least one vote for the poll attached to the
-  topic named by `topic_slug` within the forum named by `forum_slug`, on behalf
-  of `actor`, with each option's votes and their voters preloaded.
+  defp selected_options(%Poll{} = poll, %{"option_ids" => option_ids}) do
+    with {:ok, options} <- PollOptions.load_selected_options(poll, option_ids),
+         :ok <- validate_selection_count(poll, options) do
+      {:ok, options}
+    else
+      {:error, :duplicate} ->
+        {:error, vote_error(:poll_option_id, "contains duplicate choices")}
 
-  In order: the forum is loaded by short name and authorized for `:show`, the
-  topic is loaded by slug with hidden topics kept invisible unless the actor may
-  `:show` them, the poll is loaded, and then the `:hide` permission on the topic is
-  checked. Options with no votes are dropped, so only options someone voted for
-  are returned.
+      {:error, :not_found} ->
+        {:error, vote_error(:poll_option_id, "contains an invalid choice")}
 
-  Returns `{:ok, options}` (the options someone voted for),
-  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
-  the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
-
-  ## Examples
-
-      iex> list_votes(moderator, "dis", "some-topic")
-      {:ok, [%PollOption{}]}
-
-  """
-  @spec list_votes(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
-          {:ok, [PollOption.t()]} | {:error, :unauthorized | :not_found}
-  def list_votes(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, _forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
-         :ok <- authorize(actor, :hide, topic) do
-      {:ok, voted_options(poll)}
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, changeset}
     end
+  end
+
+  defp selected_options(_poll, _attrs),
+    do: {:error, vote_error(:poll_option_id, "must select a choice")}
+
+  defp validate_selection_count(%Poll{vote_method: "single"}, [_option]), do: :ok
+
+  defp validate_selection_count(%Poll{vote_method: "single"}, _options),
+    do: {:error, vote_error(:poll_option_id, "must select exactly one choice")}
+
+  defp validate_selection_count(%Poll{vote_method: "multiple"}, [_option | _rest]), do: :ok
+
+  defp validate_selection_count(_poll, _options),
+    do: {:error, vote_error(:poll_option_id, "must select at least one choice")}
+
+  defp persist_poll_votes(%User{} = user, %Poll{} = poll, options) do
+    Repo.transact(fn ->
+      with {:ok, locked_poll} <- lock_poll(poll),
+           :ok <- validate_active(locked_poll),
+           :ok <- validate_not_voted(locked_poll, user) do
+        now = DateTime.utc_now(:second)
+
+        rows =
+          Enum.map(options, &%{poll_option_id: &1.id, user_id: user.id, created_at: now})
+
+        {_count, votes} = Repo.insert_all(PollVote, rows, returning: true)
+        option_ids = Enum.map(options, & &1.id)
+
+        PollOption
+        |> where([option], option.id in ^option_ids and option.poll_id == ^locked_poll.id)
+        |> Repo.update_all(inc: [vote_count: 1])
+
+        Poll
+        |> where(id: ^locked_poll.id)
+        |> Repo.update_all(inc: [total_votes: length(votes)])
+
+        {:ok, votes}
+      end
+    end)
+  end
+
+  defp lock_poll(%Poll{id: poll_id}) do
+    Poll
+    |> where(id: ^poll_id)
+    |> lock("FOR UPDATE")
+    |> Loader.one()
+  end
+
+  defp validate_active(poll) do
+    if Polls.active?(poll),
+      do: :ok,
+      else: {:error, vote_error(:poll_option_id, "poll is closed")}
+  end
+
+  defp validate_not_voted(poll, user) do
+    if user_voted?(poll, user),
+      do: {:error, vote_error(:user_id, "has already voted")},
+      else: :ok
+  end
+
+  defp user_voted?(%Poll{id: poll_id}, %User{id: user_id}) do
+    PollVote
+    |> join(:inner, [vote], option in assoc(vote, :poll_option))
+    |> where([vote, option], option.poll_id == ^poll_id and vote.user_id == ^user_id)
+    |> Repo.exists?()
   end
 
   defp voted_options(poll) do
     PollOption
     |> where(poll_id: ^poll.id)
-    |> where([po], po.vote_count > 0)
+    |> where([option], option.vote_count > 0)
     |> preload(poll_votes: :user)
     |> Repo.all()
   end
 
-  @doc """
-  Records `actor`'s votes on the poll attached to the topic named by `topic_slug`
-  within the forum named by `forum_slug` from `poll_params`.
-
-  A a banned actor is `{:error, :ban}` and an actor with no fingerprint is
-  `{:error, :unauthorized}`. Then the forum is loaded by short name and
-  authorized for `:show`, the topic is loaded by slug with hidden topics kept
-  invisible unless the actor may `:show` them, and the poll is loaded. Recording a
-  vote is open to any signed-in actor who passes the ban filter and can view the topic.
-
-  A `nil` (or otherwise non-map) params value records nothing and is reported as a failure.
-  Params are handed to `create_poll_votes/3`, whose own filtering silently drops expired polls,
-  repeated votes, and option ids that do not belong to the poll.
-
-  ## Return values
-
-  - `{:ok, {forum, topic}}` when the votes are recorded
-  - `{:error, forum, topic}` when nothing is recorded (both carry the topic for the caller to reuse)
-  - `{:error, :ban}` or `{:error, :unauthorized}` from the write-access check
-  - `{:error, :unauthorized}` when the forum/topic is not visible
-  - `{:error, :not_found}` when the topic or its poll does not exist
-
-  ## Examples
-
-      iex> create_votes(actor, "dis", "some-topic", %{"option_ids" => ["1"]})
-      {:ok, {%Forum{}, %Topic{}}}
-
-      iex> create_votes(actor, "dis", "some-topic", nil)
-      {:error, %Forum{}, %Topic{}}
-
-  """
-  @spec create_votes(
-          actor :: Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          params :: map() | nil
-        ) ::
-          {:ok, {Forum.t(), Topic.t()}}
-          | {:error, Forum.t(), Topic.t()}
-          | {:error, :ban | :unauthorized | :not_found}
-  def create_votes(%Actor{} = actor, forum_slug, topic_slug, poll_params) do
-    with :ok <- verify_write_access(actor),
-         {:ok, forum, topic, poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug) do
-      record_votes(actor.user, forum, topic, poll, poll_params)
-    end
-  end
-
-  defp record_votes(user, forum, topic, poll, %{} = poll_params) do
-    case create_poll_votes(user, poll, poll_params) do
-      {:ok, _votes} -> {:ok, {forum, topic}}
-      _error -> {:error, forum, topic}
-    end
-  end
-
-  # If no params were submitted, report a failure without recording anything.
-  defp record_votes(_user, forum, topic, _poll, _poll_params), do: {:error, forum, topic}
-
-  @doc """
-  Removes the poll vote named by `vote_id` from the poll attached to the topic
-  named by `topic_slug` within the forum named by `forum_slug`, on behalf of
-  `actor`.
-
-  The topic is loaded by slug and authorized for `:hide`. `vote_id` is
-  then parsed with `Philomena.IntegerId`; a non-integer id, or an integer naming
-  no vote, takes the bespoke failure path `{:error, forum, topic}` with the topic
-  for the caller to reuse, rather than raising. A found vote is deleted (decrementing
-  the cached option and poll tallies).
-
-  Returns `{:ok, {forum, topic}}` when the vote is removed,
-  `{:error, forum, topic}` when no vote matches `vote_id`,
-  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide
-  the topic, or `{:error, :not_found}` when the topic or its poll does not exist.
-
-  ## Examples
-
-      iex> delete_vote(moderator, "dis", "some-topic", "1")
-      {:ok, {%Forum{}, %Topic{}}}
-
-      iex> delete_vote(moderator, "dis", "some-topic", "999")
-      {:error, %Forum{}, %Topic{}}
-
-  """
-  @spec delete_vote(
-          actor :: Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          vote_id :: IntegerId.integer_id()
-        ) ::
-          {:ok, {Forum.t(), Topic.t()}}
-          | {:error, Forum.t(), Topic.t()}
-          | {:error, :unauthorized | :not_found}
-  def delete_vote(%Actor{} = actor, forum_slug, topic_slug, vote_id) do
-    with {:ok, forum, topic, _poll} <- load_forum_topic_poll(actor, forum_slug, topic_slug),
-         :ok <- authorize(actor, :hide, topic) do
-      case load_poll_vote(vote_id) do
-        nil ->
-          {:error, forum, topic}
-
-        poll_vote ->
-          {:ok, _poll_vote} = delete_poll_vote(poll_vote)
-          {:ok, {forum, topic}}
-      end
-    end
-  end
-
-  defp load_poll_vote(vote_id) do
+  defp load_poll_vote(poll, vote_id) do
     case IntegerId.parse(vote_id) do
-      {:ok, id} -> Repo.get(PollVote, id)
-      :error -> nil
+      {:ok, vote_id} ->
+        PollVote
+        |> join(:inner, [vote], option in assoc(vote, :poll_option))
+        |> where([vote, option], vote.id == ^vote_id and option.poll_id == ^poll.id)
+        |> Loader.one()
+
+      :error ->
+        {:error, :not_found}
     end
   end
 
-  # Shared loader for the vote operations: forum `:show`, topic visibility (hidden
-  # topics stay invisible without `:show`), then poll existence. The `:hide`
-  # check is deliberately left to the index/delete callers, since create does
-  # not gate on it.
-  defp load_forum_topic_poll(actor, forum_slug, topic_slug) do
-    with {:ok, forum, topic} <-
-           Topics.load_forum_topic(actor, forum_slug, topic_slug, show_hidden: false),
-         {:ok, poll} <- Polls.load_poll(topic) do
-      {:ok, forum, topic, poll}
+  defp delete_poll_vote(%PollVote{} = poll_vote, %Poll{} = poll) do
+    Repo.transact(fn ->
+      with {:ok, poll_vote} <-
+             PollVote
+             |> where(id: ^poll_vote.id)
+             |> lock("FOR UPDATE")
+             |> Loader.one(),
+           {:ok, option} <- PollOptions.load_option(poll, poll_vote.poll_option_id),
+           {:ok, _vote} <- Repo.delete(poll_vote) do
+        PollOption
+        |> where(id: ^option.id)
+        |> Repo.update_all(inc: [vote_count: -1])
+
+        Poll
+        |> where(id: ^poll.id)
+        |> Repo.update_all(inc: [total_votes: -1])
+
+        {:ok, poll_vote}
+      end
+    end)
+  end
+
+  @doc false
+  @spec create_poll_votes(User.t(), Poll.t(), map()) ::
+          {:ok, [PollVote.t()]} | {:error, Ecto.Changeset.t()}
+  def create_poll_votes(%User{} = user, %Poll{} = poll, attrs) do
+    with {:ok, options} <- selected_options(poll, attrs) do
+      persist_poll_votes(user, poll, options)
     end
   end
-
-  defp filter_options(user, poll, now, %{"option_ids" => options}) when is_list(options) do
-    valid_option_ids = poll_option_ids(poll)
-
-    votes =
-      options
-      |> Enum.map(&parse_option_id/1)
-      |> Enum.filter(&MapSet.member?(valid_option_ids, &1))
-      |> Enum.uniq()
-      |> Enum.map(&%{poll_option_id: &1, user_id: user.id, created_at: now})
-
-    case poll.vote_method do
-      "single" -> Enum.take(votes, 1)
-      _other -> votes
-    end
-  end
-
-  defp filter_options(_user, _poll, _now, _attrs), do: []
-
-  defp poll_option_ids(poll) do
-    PollOption
-    |> where(poll_id: ^poll.id)
-    |> select([po], po.id)
-    |> Repo.all()
-    |> MapSet.new()
-  end
-
-  defp parse_option_id(option_id) when is_binary(option_id) do
-    # TODO: replace this filtering with the loader class?
-    case Integer.parse(option_id) do
-      {id, ""} -> id
-      _ -> nil
-    end
-  end
-
-  defp parse_option_id(option_id) when is_integer(option_id), do: option_id
-  defp parse_option_id(_option_id), do: nil
 
   @doc """
-  Returns whether the user has already voted on the given poll.
+  Lists voter identities for the parent-scoped poll.
+
+  This is a separate staff-only ability from viewing aggregate poll results.
 
   ## Examples
 
-      iex> voted?(poll, user)
+      iex> list_votes(moderator_actor, "dis", "favorite-pony")
+      {:ok, [%PollOption{}]}
+
+  """
+  @spec list_votes(Actor.t(), String.t(), String.t()) ::
+          {:ok, [PollOption.t()]} | {:error, :not_found | :unauthorized}
+  def list_votes(%Actor{} = actor, forum_slug, topic_slug) do
+    with {:ok, result} <-
+           Polls.load_topic_poll(actor, forum_slug, topic_slug, :list_poll_votes) do
+      {:ok, voted_options(result.poll)}
+    end
+  end
+
+  @doc """
+  Records a complete, validated vote selection for the parent-scoped poll.
+
+  Every option must exist under that poll, IDs must be unique, single-choice
+  polls accept exactly one option, and multiple-choice polls accept at least
+  one. The poll is locked before its active and prior-vote invariants are
+  checked. Any failure rejects the entire selection with a changeset.
+
+  ## Examples
+
+      iex> create_votes(actor, "dis", "favorite-pony", %{"option_ids" => ["1"]})
+      {:ok, %TopicPoll{}}
+
+      iex> create_votes(actor, "dis", "favorite-pony", %{"option_ids" => ["bad"]})
+      {:error, %VoteForm{}}
+
+  """
+  @spec create_votes(Actor.t(), String.t(), String.t(), map() | nil) ::
+          {:ok, TopicPoll.t()}
+          | {:error, VoteForm.t()}
+          | {:error, :ban | :not_found | :unauthorized}
+  def create_votes(%Actor{user: %User{}} = actor, forum_slug, topic_slug, params) do
+    with :ok <- verify_write_access(actor),
+         {:ok, result} <- Polls.load_topic_poll(actor, forum_slug, topic_slug, :vote),
+         {:ok, options} <- selected_options(result.poll, params),
+         {:ok, _votes} <- persist_poll_votes(actor.user, result.poll, options) do
+      {:ok, result}
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        with {:ok, result} <- Polls.load_topic_poll(actor, forum_slug, topic_slug, :vote) do
+          {:error, vote_form(result, changeset)}
+        end
+
+      error ->
+        error
+    end
+  end
+
+  def create_votes(%Actor{} = actor, _forum_slug, _topic_slug, _params) do
+    with :ok <- verify_write_access(actor) do
+      {:error, :unauthorized}
+    end
+  end
+
+  @doc """
+  Removes one vote only when it belongs to the parent-scoped poll.
+
+  Cached option and poll totals are decremented in the same transaction.
+
+  ## Examples
+
+      iex> delete_vote(moderator_actor, "dis", "favorite-pony", "1")
+      {:ok, %TopicPoll{}}
+
+  """
+  @spec delete_vote(Actor.t(), String.t(), String.t(), IntegerId.integer_id()) ::
+          {:ok, TopicPoll.t()} | {:error, :ban | :not_found | :unauthorized}
+  def delete_vote(%Actor{} = actor, forum_slug, topic_slug, vote_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, result} <-
+           Polls.load_topic_poll(actor, forum_slug, topic_slug, :delete_poll_vote),
+         {:ok, poll_vote} <- load_poll_vote(result.poll, vote_id),
+         {:ok, _poll_vote} <- delete_poll_vote(poll_vote, result.poll) do
+      {:ok, result}
+    end
+  end
+
+  @doc """
+  Returns whether `actor`'s signed-in user has voted in a loaded poll.
+
+  ## Examples
+
+      iex> voted?(actor, poll)
       false
 
   """
-  @spec voted?(Poll.t() | nil, User.t() | nil) :: boolean()
-  def voted?(poll, user)
-
-  def voted?(nil, _user), do: false
-  def voted?(_poll, nil), do: false
-
-  def voted?(%Poll{id: poll_id}, %User{id: user_id}) do
-    PollVote
-    |> join(:inner, [pv], _ in assoc(pv, :poll_option))
-    |> where([pv, po], po.poll_id == ^poll_id and pv.user_id == ^user_id)
-    |> Repo.exists?()
-  end
+  @spec voted?(Actor.t(), Poll.t() | nil) :: boolean()
+  def voted?(%Actor{user: %User{} = user}, %Poll{} = poll), do: user_voted?(poll, user)
+  def voted?(%Actor{}, _poll), do: false
 end

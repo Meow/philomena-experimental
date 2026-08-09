@@ -60,7 +60,7 @@ defmodule PhilomenaWeb.Topic.StickControllerTest do
 
   describe "DELETE /forums/:forum_id/topics/:topic_id/stick" do
     setup %{topic: topic} do
-      {:ok, topic} = Philomena.Topics.stick_topic(topic)
+      {:ok, topic} = Philomena.Topics.stick_topic_for_fixture(topic)
       %{topic: topic}
     end
 

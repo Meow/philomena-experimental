@@ -5,15 +5,15 @@ defmodule PhilomenaWeb.Api.Json.ForumController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def index(conn, _params) do
-    forums = Forums.list_public_forums(conn.assigns.scrivener)
+    forums = Forums.list_forums(conn.assigns.actor, conn.assigns.scrivener)
 
     render(conn, forums: forums, total: forums.total_entries)
   end
 
   def show(conn, %{"id" => id}) do
-    case Forums.load_public_forum(id) do
+    case Forums.load_forum(conn.assigns.actor, id) do
       {:ok, forum} -> render(conn, forum: forum)
-      {:error, :not_found} -> not_found(conn)
+      {:error, reason} when reason in [:not_found, :unauthorized] -> not_found(conn)
     end
   end
 end
