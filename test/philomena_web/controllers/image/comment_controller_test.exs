@@ -34,7 +34,9 @@ defmodule PhilomenaWeb.Image.CommentControllerTest do
       conn = get(conn, ~p"/images/999999999/comments")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Couldn't find what you were looking for!"
     end
   end
 
@@ -64,6 +66,19 @@ defmodule PhilomenaWeb.Image.CommentControllerTest do
       image = image_fixture()
 
       conn = get(conn, ~p"/images/#{image}/comments/999999999")
+
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Couldn't find what you were looking for!"
+    end
+
+    test "redirects to / when the route image does not own the comment", %{conn: conn} do
+      image = image_fixture()
+      other_image = image_fixture()
+      comment = comment_fixture(image)
+
+      conn = get(conn, ~p"/images/#{other_image}/comments/#{comment}")
 
       assert redirected_to(conn) == "/"
 
@@ -184,6 +199,20 @@ defmodule PhilomenaWeb.Image.CommentControllerTest do
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
     end
+
+    test "the author cannot edit through a different route image", %{conn: conn} do
+      %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
+      image = image_fixture()
+      other_image = image_fixture()
+      comment = comment_fixture(image, user)
+
+      conn = get(conn, ~p"/images/#{other_image}/comments/#{comment}/edit")
+
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Couldn't find what you were looking for!"
+    end
   end
 
   describe "PATCH /images/:image_id/comments/:id" do
@@ -262,6 +291,25 @@ defmodule PhilomenaWeb.Image.CommentControllerTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
                "Couldn't find what you were looking for!"
+    end
+
+    test "does not update a comment through a different route image", %{conn: conn} do
+      %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
+      image = image_fixture()
+      other_image = image_fixture()
+      comment = comment_fixture(image, user, %{"body" => "Original"})
+
+      conn =
+        patch(conn, ~p"/images/#{other_image}/comments/#{comment}", %{
+          "comment" => %{"body" => "Changed"}
+        })
+
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Couldn't find what you were looking for!"
+
+      assert Repo.reload!(comment).body == "Original"
     end
   end
 end

@@ -7,12 +7,12 @@ defmodule PhilomenaWeb.Image.Comment.HistoryController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"image_id" => image_id, "comment_id" => comment_id}) do
-    with {:ok, {image, comment, versions}} <-
+    with {:ok, history} <-
            Comments.comment_history(conn.assigns.actor, image_id, comment_id) do
       render(conn, "index.html",
-        title: "Comment History for comment #{comment.id} on image #{image.id}",
-        comment: comment,
-        versions: MarkdownRenderer.render_version_diffs(versions)
+        title: "Comment History for comment #{history.comment.id} on image #{history.image.id}",
+        comment: history.comment,
+        versions: MarkdownRenderer.render_version_diffs(history.versions)
       )
     end
   end

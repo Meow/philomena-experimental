@@ -71,7 +71,7 @@ defmodule Philomena.Profiles do
 
     recent_comments_def =
       Comments.comment_search_definition(
-        viewer,
+        actor,
         current_filter,
         [
           %{term: %{author_id: user.id}},

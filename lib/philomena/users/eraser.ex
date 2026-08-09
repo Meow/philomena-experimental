@@ -41,10 +41,7 @@ defmodule Philomena.Users.Eraser do
     |> where(user_id: ^user.id)
     |> Repo.all()
     |> Enum.each(fn comment ->
-      {:ok, comment} =
-        Comments.hide_loaded_comment(comment, %{deletion_reason: @reason}, moderator)
-
-      {:ok, _comment} = Comments.destroy_comment(comment)
+      {:ok, _comment} = Comments.erase_user_comment(comment, moderator)
     end)
 
     # Delete all galleries

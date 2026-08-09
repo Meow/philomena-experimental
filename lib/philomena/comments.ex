@@ -1,6 +1,12 @@
 defmodule Philomena.Comments do
   @moduledoc """
-  The Comments context.
+  Image-comment reads, writes, moderation, search, and indexing.
+
+  Request-facing functions accept an attribution actor and constrain comments
+  through their route image before authorizing the requested action. Collection
+  visibility is expressed in PostgreSQL or OpenSearch so counting and pagination
+  do not materialize unauthorized comments. Trusted indexing, duplicate-image,
+  fixture, and account-erasure services are named separately from request APIs.
   """
 
   import Ecto.Query, warn: false
@@ -9,55 +15,47 @@ defmodule Philomena.Comments do
     only: [authorize: 3, verify_write_access: 1]
 
   alias Ecto.Multi
-  alias Philomena.Loader
-  alias Philomena.Repo
-  alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
-
-  @comment_create_window 15
-
-  alias PhilomenaQuery.Search
+  alias Philomena.Comments
+  alias Philomena.Comments.{Comment, CommentForm, CommentHistory, Query}
+  alias Philomena.Filters.Filter
+  alias Philomena.Images
+  alias Philomena.Images.Image
+  alias Philomena.IndexWorker
   alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
+  alias Philomena.Notifications
+  alias Philomena.RateLimiter
+  alias Philomena.Repo
+  alias Philomena.Reports
+  alias Philomena.Tags.Tag
   alias Philomena.UserStatistics
   alias Philomena.Users.User
-  alias Philomena.Filters.Filter
-  alias Philomena.Comments.Comment
-  alias Philomena.Comments.CommentVersion
-  alias Philomena.Comments.Query
-  alias Philomena.Comments
-  alias Philomena.IndexWorker
-  alias Philomena.Images.Image
-  alias Philomena.Images
-  alias Philomena.Tags.Tag
-  alias Philomena.Notifications
-  alias Philomena.Reports
   alias Philomena.Versions
+  alias PhilomenaQuery.Search
 
-  # Inserts a comment built on `image` from `params` by the given `actor`,
-  # incrementing the image's comment count, notifying subscribers, and
-  # subscribing the author on reply.
-  #
-  # This is the internal insertion engine shared with `create_comment/3`; it
-  # performs no authorization and no post-insert reindex or bookkeeping.
-  #
-  # Visible for testing.
-  @doc false
-  def create_loaded_comment(image, %Actor{} = actor, params \\ %{}) do
+  @comment_create_window 15
+  @display_preloads [:deleted_by, user: [awards: :badge]]
+  @search_preloads [:deleted_by, image: [:sources, tags: :aliases], user: [awards: :badge]]
+
+  @typedoc "An actor-aware principal or a legacy user-only search principal."
+  @type principal :: Actor.t() | User.t() | nil
+
+  @typedoc "A normalized request-facing Comments failure."
+  @type request_error :: :ban | :unauthorized | :not_found
+
+  defp persist_comment(%Image{} = image, %Actor{} = actor, attrs) do
     comment =
-      Ecto.build_assoc(image, :comments)
-      |> Comment.creation_changeset(params, actor)
+      image
+      |> Ecto.build_assoc(:comments)
+      |> Comment.creation_changeset(attrs, actor)
 
-    image_query =
-      Image
-      |> where(id: ^image.id)
-
-    image_lock_query =
-      lock(image_query, "FOR UPDATE")
+    image_query = where(Image, id: ^image.id)
 
     Multi.new()
-    |> Multi.one(:image, image_lock_query)
+    |> Multi.one(:image, lock(image_query, "FOR UPDATE"))
     |> Multi.insert(:comment, comment)
     |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
     |> Multi.run(:notification, &notify_comment/2)
@@ -69,9 +67,7 @@ defmodule Philomena.Comments do
     Notifications.broadcast_image_comment(comment.user, image, comment)
   end
 
-  # Updates a comment. Visible for testing.
-  @doc false
-  def update_comment(%Comment{} = comment, %Actor{} = actor, attrs) do
+  defp persist_comment_update(%Comment{} = comment, %Actor{} = actor, attrs) do
     now = DateTime.utc_now(:second)
 
     comment_query =
@@ -89,92 +85,135 @@ defmodule Philomena.Comments do
     |> Repo.transaction()
   end
 
-  # Returns an `%Ecto.Changeset{}` for tracking comment changes.
-  @doc false
-  def change_comment(%Comment{} = comment) do
-    Comment.changeset(comment, %{})
+  defp change_comment(%Comment{} = comment), do: Comment.changeset(comment, %{})
+
+  defp moderation_changeset(:hide, comment, attrs, user),
+    do: Comment.hide_changeset(comment, attrs, user)
+
+  defp moderation_changeset(:unhide, comment, _attrs, _user),
+    do: Comment.unhide_changeset(comment)
+
+  defp moderation_changeset(:destroy, comment, _attrs, _user),
+    do: Comment.destroy_changeset(comment)
+
+  defp moderation_changeset(:approve, comment, _attrs, _user),
+    do: Comment.approve_changeset(comment)
+
+  defp moderation_log(:hide, comment, changeset) do
+    reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
+
+    {
+      "Image.Comment.Hide:create",
+      "Deleted comment on image #{comment.image_id} (#{reason})"
+    }
   end
 
-  # Hides a comment and handles associated reports.
-  #
-  # - comment: The comment to hide
-  # - attrs: Attributes for the hide operation
-  # - user: The user performing the hide action
-  #
-  # Visible for testing.
-  @doc false
-  def hide_loaded_comment(%Comment{} = comment, attrs, user) do
-    # Also used by Users.Eraser (TODO what API should be exposed for that?)
-    comment_id = comment.id
-    comment = Comment.hide_changeset(comment, attrs, user)
+  defp moderation_log(:unhide, comment, _changeset),
+    do: {"Image.Comment.Hide:delete", "Restored comment on image #{comment.image_id}"}
 
-    Multi.new()
-    |> Multi.update(:comment, comment)
-    |> Reports.put_close_reports(:reports, user, comment_id: comment_id)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{comment: comment, reports: {_count, reports}}} ->
-        Reports.reindex_closed_reports(reports)
-        reindex_comment(comment)
+  defp moderation_log(:destroy, comment, _changeset),
+    do: {"Image.Comment.Delete:create", "Destroyed comment on image #{comment.image_id}"}
 
-        {:ok, comment}
+  defp moderation_log(:approve, comment, _changeset),
+    do: {"Image.Comment.Approve:create", "Approved comment on image #{comment.image_id}"}
 
-      error ->
-        error
+  defp put_moderation_effects(multi, :hide, comment, %Actor{user: user}) do
+    Reports.put_close_reports(multi, :reports, user, comment_id: comment.id)
+  end
+
+  defp put_moderation_effects(multi, :unhide, _comment, _actor), do: multi
+
+  defp put_moderation_effects(multi, :destroy, %Comment{destroyed_content: true}, _actor),
+    do: multi
+
+  defp put_moderation_effects(multi, :destroy, comment, _actor) do
+    multi
+    |> Multi.update_all(:image, where(Image, id: ^comment.image_id), inc: [comments_count: -1])
+    |> Multi.run(:statistics, fn _repo, _changes ->
+      UserStatistics.increment(comment.user_id, :comments_count, -1)
+    end)
+  end
+
+  defp put_moderation_effects(multi, :approve, comment, %Actor{user: user}) do
+    multi = Reports.put_close_reports(multi, :reports, user, comment_id: comment.id)
+
+    if comment.approved do
+      multi
+    else
+      Multi.run(multi, :statistics, fn _repo, _changes ->
+        UserStatistics.increment(comment.user_id, :comments_count)
+      end)
     end
   end
 
-  # Unhides a previously hidden comment.
-  defp unhide_comment(%Comment{} = comment) do
-    comment
-    |> Comment.unhide_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  # Marks a comment as destroyed and removes its text (hard deletion).
-  # Visible for testing.
-  @doc false
-  def destroy_comment(%Comment{} = comment) do
-    comment = comment |> Repo.preload(:user)
+  defp persist_moderation(%Actor{} = actor, %Comment{} = comment, operation, attrs \\ %{}) do
+    changeset = moderation_changeset(operation, comment, attrs, actor.user)
+    {log_type, log_body} = moderation_log(operation, comment, changeset)
 
     Multi.new()
-    |> Multi.update(:comment, Comment.destroy_changeset(comment))
-    |> Multi.update_all(
-      :image,
-      Image |> where(id: ^comment.image_id),
-      inc: [comments_count: -1]
+    |> Multi.update(:comment, changeset)
+    |> put_moderation_effects(operation, comment, actor)
+    |> ModerationLogs.put_log(
+      :moderation_log,
+      actor,
+      log_type,
+      Paths.image_comment_path(comment.image_id, comment.id),
+      log_body
     )
     |> Repo.transaction()
+    |> finish_moderation()
+  end
+
+  defp finish_moderation({:ok, %{comment: comment} = changes}) do
+    changes
+    |> Map.get(:reports, {0, []})
+    |> elem(1)
+    |> Reports.reindex_closed_reports()
+
+    reindex_comment(comment)
+    {:ok, comment}
+  end
+
+  defp finish_moderation({:error, _step, %Ecto.Changeset{} = changeset, _changes}),
+    do: {:error, changeset}
+
+  defp finish_moderation({:error, _step, reason, _changes}), do: {:error, reason}
+
+  defp persist_erasure(%Comment{} = comment, %User{} = moderator) do
+    hide_changeset = Comment.hide_changeset(comment, %{deletion_reason: "Site abuse"}, moderator)
+
+    Multi.new()
+    |> Multi.update(:hidden_comment, hide_changeset)
+    |> Multi.update(:comment, fn %{hidden_comment: hidden_comment} ->
+      Comment.destroy_changeset(hidden_comment)
+    end)
+    |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
+    |> maybe_put_erasure_counts(comment)
+    |> Repo.transaction()
     |> case do
-      {:ok, %{comment: comment}} ->
-        UserStatistics.increment(comment.user_id, :comments_count, -1)
-        reindex_comment(comment)
+      {:ok, %{comment: erased_comment, reports: {_count, report_ids}}} ->
+        Reports.reindex_closed_reports(report_ids)
+        reindex_comment(erased_comment)
+        {:ok, erased_comment}
 
-        {:ok, comment}
+      {:error, _step, %Ecto.Changeset{} = changeset, _changes} ->
+        {:error, changeset}
 
-      error ->
-        error
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
     end
   end
 
-  defp reindex_after_update(result) do
-    case result do
-      {:ok, comment} ->
-        reindex_comment(comment)
+  defp maybe_put_erasure_counts(multi, %Comment{destroyed_content: true}), do: multi
 
-        {:ok, comment}
-
-      error ->
-        error
-    end
+  defp maybe_put_erasure_counts(multi, comment) do
+    multi
+    |> Multi.update_all(:image, where(Image, id: ^comment.image_id), inc: [comments_count: -1])
+    |> Multi.run(:statistics, fn _repo, _changes ->
+      UserStatistics.increment(comment.user_id, :comments_count, -1)
+    end)
   end
 
-  # Creates a system report for non-approved comments containing external images.
-  #
-  # Returns:
-  # - `false`: If the comment is already approved
-  # - `{:ok, %Report{}}`: If a system report was created
   defp report_non_approved(%Comment{approved: true}), do: false
 
   defp report_non_approved(comment) do
@@ -185,115 +224,300 @@ defmodule Philomena.Comments do
     )
   end
 
-  @doc """
-  Loads the comment named by `id`, with its image and author preloaded.
+  defp record_comment_creation(%Actor{user: user}, %Comment{approved: true}),
+    do: UserStatistics.increment(user, :comments_count)
 
-  A comment that does not exist, or whose content has been destroyed, is
-  `{:error, :not_found}`. A comment whose image is hidden from users is
-  `{:error, :hidden_image}`. Otherwise the comment is returned, including
-  comments hidden from users.
+  defp record_comment_creation(_actor, comment), do: report_non_approved(comment)
+
+  defp broadcast_comment(event, %Comment{} = comment) do
+    PhilomenaWeb.Endpoint.broadcast!(
+      "firehose",
+      event,
+      PhilomenaWeb.Api.Json.CommentView.render("show.json", %{comment: comment})
+    )
+
+    comment
+  end
+
+  defp load_global_comment(actor, id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         {:ok, comment} <-
+           Comment
+           |> where([comment], comment.id == ^id and comment.destroyed_content == false)
+           |> preload([:image, :user])
+           |> Loader.one(),
+         :ok <- authorize(actor, :show, comment.image),
+         :ok <- authorize(actor, :show, comment) do
+      {:ok, comment}
+    else
+      :error -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  defp load_image(actor, image_id, action, preloads) do
+    Loader.fetch_and_authorize(Image, actor, action, image_id, preloads)
+  end
+
+  defp load_comment_in_image(actor, %Image{} = image, comment_id, action, preloads) do
+    with {:ok, comment_id} <- IntegerId.parse(comment_id),
+         {:ok, comment} <-
+           Comment
+           |> where([comment], comment.image_id == ^image.id and comment.id == ^comment_id)
+           |> preload(^preloads)
+           |> Loader.one_and_authorize(actor, action) do
+      {:ok, %{comment | image: image}}
+    else
+      :error -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  defp load_image_comment(actor, image_id, comment_id, action, image_preloads, comment_preloads) do
+    with {:ok, image} <- load_image(actor, image_id, :show, image_preloads),
+         {:ok, comment} <-
+           load_comment_in_image(actor, image, comment_id, action, comment_preloads) do
+      {:ok, {image, comment}}
+    end
+  end
+
+  defp load_editable_comment(actor, image, comment_id, action) do
+    with :ok <- authorize(actor, :create_comment, image) do
+      load_comment_in_image(actor, image, comment_id, action, @display_preloads)
+    end
+  end
+
+  defp load_commentable_image_for_action(actor, image_id, :index) do
+    load_image(actor, image_id, :index, [:sources, tags: :aliases])
+  end
+
+  defp load_commentable_image_for_action(actor, image_id, :show) do
+    with {:ok, image} <- load_image(actor, image_id, :show, [:sources, tags: :aliases]),
+         {:ok, target} <- resolve_duplicate(actor, image) do
+      {:ok, target}
+    end
+  end
+
+  defp load_commentable_image_for_action(actor, image_id, action)
+       when action in [:create, :edit, :update] do
+    load_image(actor, image_id, :create_comment, [:sources, tags: :aliases])
+  end
+
+  defp resolve_duplicate(_actor, %Image{duplicate_id: nil} = image), do: {:ok, image}
+
+  defp resolve_duplicate(actor, %Image{duplicate_id: duplicate_id}) do
+    load_image(actor, duplicate_id, :show, [:sources, tags: :aliases])
+  end
+
+  defp authorized?(principal, action, subject),
+    do: authorize(principal, action, subject) == :ok
+
+  defp visibility_policy(principal, allow_privileged?) do
+    %{
+      show_hidden_comments?:
+        allow_privileged? and
+          authorized?(principal, :show, %Comment{hidden_from_users: true}),
+      show_hidden_images?:
+        allow_privileged? and authorized?(principal, :show, %Image{hidden_from_users: true}),
+      show_destroyed_comments?: allow_privileged? and authorized?(principal, :delete, %Comment{}),
+      show_unapproved_comments?:
+        allow_privileged? and authorized?(principal, :approve, %Comment{}),
+      show_unapproved_images?: allow_privileged? and authorized?(principal, :approve, %Image{})
+    }
+  end
+
+  defp principal_user(%Actor{user: user}), do: user
+  defp principal_user(%User{} = user), do: user
+  defp principal_user(nil), do: nil
+
+  defp search_exclusions(principal, filter, allow_privileged?) do
+    policy = visibility_policy(principal, allow_privileged?)
+    user = principal_user(principal)
+
+    [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
+    |> exclude_hidden_comments(policy.show_hidden_comments?)
+    |> exclude_hidden_images(policy.show_hidden_images?)
+    |> exclude_destroyed_comments(policy.show_destroyed_comments?)
+    |> exclude_unapproved_comments(user, policy.show_unapproved_comments?)
+    |> exclude_unapproved_images(policy.show_unapproved_images?)
+  end
+
+  defp exclude_hidden_comments(filters, true), do: filters
+
+  defp exclude_hidden_comments(filters, false),
+    do: [%{term: %{hidden_from_users: true}} | filters]
+
+  defp exclude_hidden_images(filters, true), do: filters
+
+  defp exclude_hidden_images(filters, false),
+    do: [%{term: %{"image.hidden_from_users" => true}} | filters]
+
+  defp exclude_destroyed_comments(filters, true), do: filters
+
+  defp exclude_destroyed_comments(filters, false),
+    do: [%{term: %{destroyed_content: true}} | filters]
+
+  defp exclude_unapproved_comments(filters, _user, true), do: filters
+
+  defp exclude_unapproved_comments(filters, %User{id: user_id}, false) do
+    [
+      %{
+        bool: %{
+          must: [%{term: %{approved: false}}],
+          must_not: [%{term: %{user_id: user_id}}]
+        }
+      }
+      | filters
+    ]
+  end
+
+  defp exclude_unapproved_comments(filters, _user, false),
+    do: [%{term: %{approved: false}} | filters]
+
+  defp exclude_unapproved_images(filters, true), do: filters
+
+  defp exclude_unapproved_images(filters, false),
+    do: [%{term: %{"image.approved" => false}} | filters]
+
+  defp visible_image_comments(%Actor{} = actor, %Image{} = image) do
+    policy = visibility_policy(actor, true)
+
+    Comment
+    |> where(image_id: ^image.id)
+    |> filter_hidden_comments(policy.show_hidden_comments?)
+    |> filter_destroyed_comments(policy.show_destroyed_comments?)
+    |> filter_non_approved(actor.user, policy.show_unapproved_comments?)
+  end
+
+  defp filter_hidden_comments(query, true), do: query
+
+  defp filter_hidden_comments(query, false),
+    do: where(query, [comment], not comment.hidden_from_users)
+
+  defp filter_destroyed_comments(query, true), do: query
+
+  defp filter_destroyed_comments(query, false),
+    do: where(query, [comment], not comment.destroyed_content)
+
+  defp filter_non_approved(query, _user, true), do: query
+
+  defp filter_non_approved(query, %User{id: user_id}, false),
+    do: where(query, [comment], comment.approved or comment.user_id == ^user_id)
+
+  defp filter_non_approved(query, _user, false),
+    do: where(query, [comment], comment.approved)
+
+  defp load_direction(%User{settings: %{comments_newest_first: false}}), do: :asc
+  defp load_direction(_user), do: :desc
+
+  defp filter_direction(query, %Comment{} = comment, %User{
+         settings: %{comments_newest_first: false}
+       }) do
+    where(
+      query,
+      [candidate],
+      candidate.created_at < ^comment.created_at or
+        (candidate.created_at == ^comment.created_at and candidate.id < ^comment.id)
+    )
+  end
+
+  defp filter_direction(query, %Comment{} = comment, _user) do
+    where(
+      query,
+      [candidate],
+      candidate.created_at > ^comment.created_at or
+        (candidate.created_at == ^comment.created_at and candidate.id > ^comment.id)
+    )
+  end
+
+  defp pagination_value(pagination, key) when is_list(pagination),
+    do: Keyword.fetch!(pagination, key)
+
+  defp pagination_value(pagination, key) when is_map(pagination),
+    do: Map.fetch!(pagination, key)
+
+  @doc false
+  @spec create_comment_for_fixture(Image.t(), Actor.t(), map()) ::
+          {:ok, map()} | {:error, Multi.name(), term(), map()}
+  def create_comment_for_fixture(%Image{} = image, %Actor{} = actor, attrs \\ %{}),
+    do: persist_comment(image, actor, attrs)
+
+  @doc false
+  @spec hide_comment_for_fixture(Comment.t(), map(), User.t()) ::
+          {:ok, Comment.t()} | {:error, term()}
+  def hide_comment_for_fixture(%Comment{} = comment, attrs, %User{} = user) do
+    comment
+    |> Comment.hide_changeset(attrs, user)
+    |> Repo.update()
+    |> case do
+      {:ok, hidden_comment} -> {:ok, reindex_comment(hidden_comment)}
+      error -> error
+    end
+  end
+
+  @doc false
+  @spec update_comment_for_fixture(Comment.t(), Actor.t(), map()) ::
+          {:ok, map()} | {:error, Multi.name(), term(), map()}
+  def update_comment_for_fixture(%Comment{} = comment, %Actor{} = actor, attrs) do
+    persist_comment_update(comment, actor, attrs)
+  end
+
+  @doc false
+  @spec destroy_comment_for_fixture(Comment.t()) ::
+          {:ok, Comment.t()} | {:error, term()}
+  def destroy_comment_for_fixture(%Comment{} = comment) do
+    Multi.new()
+    |> Multi.update(:comment, Comment.destroy_changeset(comment))
+    |> Multi.update_all(:image, where(Image, id: ^comment.image_id), inc: [comments_count: -1])
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{comment: destroyed_comment}} -> {:ok, reindex_comment(destroyed_comment)}
+      {:error, _step, reason, _changes} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Builds the blank comment changeset used while assembling an image page.
+
+  This is a narrow cross-context form service; authorization of the containing
+  image page remains with `Philomena.Images`.
 
   ## Examples
 
-      iex> load_comment("1")
+      iex> new_comment_changeset()
+      %Ecto.Changeset{}
+
+  """
+  @spec new_comment_changeset() :: Ecto.Changeset.t()
+  def new_comment_changeset, do: change_comment(%Comment{})
+
+  @doc """
+  Loads a globally addressed comment visible to `actor`.
+
+  IDs are parsed safely. Destroyed comments and missing IDs are not-found. The
+  parent image is authorized before the comment, so either forbidden resource
+  returns unauthorized.
+
+  ## Examples
+
+      iex> load_comment(actor, "1")
       {:ok, %Comment{}}
 
-      iex> load_comment("999999999")
+      iex> load_comment(actor, "not-a-number")
       {:error, :not_found}
 
   """
-  @spec load_comment(IntegerId.integer_id()) ::
-          {:ok, Comment.t()} | {:error, :not_found} | {:error, :hidden_image}
-  def load_comment(id) do
-    # The id is interpolated without casting, so a non-integer id raises
-    # Ecto.Query.CastError.
-    # TODO: maybe don't raise an error here?
-    comment =
-      Comment
-      |> where(id: ^id)
-      |> preload([:image, :user])
-      |> Repo.one()
-
-    cond do
-      is_nil(comment) or comment.destroyed_content ->
-        {:error, :not_found}
-
-      comment.image.hidden_from_users ->
-        {:error, :hidden_image}
-
-      true ->
-        {:ok, comment}
-    end
-  end
+  @spec load_comment(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
+  def load_comment(%Actor{} = actor, id), do: load_global_comment(actor, id)
 
   @doc """
-  Loads the edit history of the comment named by `comment_id` on
-  the image named by `image_id`, on behalf of `actor`.
+  Searches comments visible to `actor`, applying `filter`, `query_string`, and
+  `pagination`, newest first.
 
-  The image is loaded by id and authorized for `:show`, so a missing or
-  non-visible image is `{:error, :unauthorized}`. The comment is then loaded by
-  id scoped to that image: a missing comment is `{:error, :not_found}`, and a
-  comment hidden from users is visible only when `actor` may `:show` it,
-  otherwise `{:error, :unauthorized}`.
-
-  Returns `{:ok, {image, comment, versions}}` carrying the last 25 versions,
-  newest first, with diffs and version authors resolved.
-
-  ## Examples
-
-      iex> comment_history(user, "1", "1")
-      {:ok, {%Image{}, %Comment{}, [%Version{}, ...]}}
-
-      iex> comment_history(user, "1", "999999999")
-      {:error, :not_found}
-
-  """
-  @spec comment_history(
-          actor :: Actor.t(),
-          image_id :: IntegerId.integer_id(),
-          comment_id :: IntegerId.integer_id()
-        ) ::
-          {:ok, {Image.t(), Comment.t(), [CommentVersion.t()]}}
-          | {:error, :unauthorized | :not_found}
-  def comment_history(%Actor{} = actor, image_id, comment_id) do
-    with {:ok, image} <- Images.load_visible_image(actor, image_id),
-         {:ok, comment} <- load_image_comment(actor, image, comment_id) do
-      {:ok, {image, comment, Versions.for_comment(comment)}}
-    end
-  end
-
-  # The comment is loaded by id scoped to the image, a missing row is
-  # `{:error, :not_found}`, and a comment hidden from users is authorized
-  # for `:show` - visible to staff, otherwise `{:error, :unauthorized}`.
-  defp load_image_comment(actor, %Image{} = image, comment_id) do
-    Comment
-    |> where(image_id: ^image.id, id: ^to_string(comment_id))
-    |> preload([:image, :deleted_by, user: [awards: :badge]])
-    |> Repo.one()
-    |> authorize_comment_visibility(actor)
-  end
-
-  defp authorize_comment_visibility(nil, _actor),
-    do: {:error, :not_found}
-
-  defp authorize_comment_visibility(%Comment{hidden_from_users: false} = comment, _actor),
-    do: {:ok, comment}
-
-  defp authorize_comment_visibility(%Comment{} = comment, actor) do
-    with :ok <- authorize(actor, :show, comment) do
-      {:ok, comment}
-    end
-  end
-
-  @doc """
-  Searches comments on behalf of `actor`, applying the viewing user's
-  hidden-tag `filter`, the compiled query string `query_string`, and `pagination`,
-  sorted newest first.
-
-  Hidden and non-approved comments are excluded from the results unless the
-  viewing user is staff. Results carry the associations named by
-  `opts[:preload]`, defaulting to the listing-display preloads. Returns
-  `{:ok, results}`, or `{:error, msg}` when `query_string` fails to compile.
+  Hidden images, hidden or destroyed comments, and approval states are filtered
+  independently through the actor's abilities. A signed-in author may see their
+  own unapproved comment. `opts[:preload]` overrides the display associations.
 
   ## Examples
 
@@ -304,20 +528,21 @@ defmodule Philomena.Comments do
       {:error, "Cannot parse date."}
 
   """
-  @spec search_comments(Actor.t(), Filter.t(), String.t(), map(), Keyword.t()) ::
-          {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_comments(%Actor{user: user}, filter, query_string, pagination, opts \\ []) do
-    preloads =
-      Keyword.get(opts, :preload, [
-        :deleted_by,
-        image: [:sources, tags: :aliases],
-        user: [awards: :badge]
-      ])
+  @spec search_comments(
+          Actor.t(),
+          Filter.t(),
+          String.t() | nil,
+          Search.pagination_params(),
+          keyword()
+        ) ::
+          {:ok, Scrivener.Page.t(Comment.t())} | {:error, String.t()}
+  def search_comments(%Actor{} = actor, filter, query_string, pagination, opts \\ []) do
+    preloads = Keyword.get(opts, :preload, @search_preloads)
 
-    case Query.compile(query_string, user: user) do
+    case Query.compile(query_string, actor: actor) do
       {:ok, query} ->
         results =
-          user
+          actor
           |> comment_search_definition(filter, query, pagination: pagination)
           |> Search.search_records(preload(Comment, ^preloads))
 
@@ -328,78 +553,24 @@ defmodule Philomena.Comments do
     end
   end
 
-  # Search-side exclusion filters mirroring the visibility rules a comment
-  # listing enforces: everyone hides comments carrying the viewer's hidden
-  # tags; non-staff additionally hide deleted and non-approved comments (a
-  # signed-in user still sees their own non-approved comments). Staff see the
-  # hidden and non-approved comments the extra filters would exclude.
-  defp comment_filters(user, filter, show_hidden?) do
-    [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
-    |> hide_deleted(show_hidden?)
-    |> hide_non_approved(user, show_hidden?)
-  end
-
-  # TODO: explicit role checks. Use authorization instead?
-  defp staff?(%{role: role}) when role in ~W(assistant moderator admin), do: true
-  defp staff?(_user), do: false
-
-  defp hide_deleted(filters, true), do: filters
-
-  defp hide_deleted(filters, _show_hidden?),
-    do: [
-      %{term: %{hidden_from_users: true}},
-      %{term: %{"image.hidden_from_users" => true}}
-      | filters
-    ]
-
-  defp hide_non_approved(filters, _user, true), do: filters
-
-  defp hide_non_approved(filters, %{id: user_id}, _show_hidden?),
-    do: [
-      %{
-        bool: %{
-          should: [%{term: %{approved: false}}, %{term: %{"image.approved" => false}}],
-          must_not: [%{term: %{user_id: user_id}}]
-        }
-      }
-      | filters
-    ]
-
-  defp hide_non_approved(filters, _user, _show_hidden?),
-    do: [
-      %{term: %{approved: false}},
-      %{term: %{"image.approved" => false}}
-      | filters
-    ]
-
   @doc """
-  Builds an unexecuted comment search definition for `user`, excluding
-  comments the viewer's `filter` hides.
+  Builds an unexecuted comment search definition for `principal`.
 
-  `body` is one or more compiled query clauses.
-
-  ## Options
-  - `pagination` - sets the result window
-  - `show_hidden` (default `true`) - enables staff viewers to see deleted
-    and non-approved comments
-
-  Results sort newest first.
-
-  The definition is meant for batching into
-  `PhilomenaQuery.Search.msearch_records/2` alongside other page content;
-  execute it directly for a standalone listing.
+  This batching service accepts an Actor when the caller has one; `User` or
+  `nil` remain supported for the legacy homepage search scope. `show_hidden:
+  false` forces public visibility even for privileged actors.
 
   ## Examples
 
-      iex> comment_search_definition(user, filter, %{term: %{author_id: 1}})
+      iex> comment_search_definition(actor, filter, %{term: %{author_id: 1}})
       %{module: Comment, ...}
 
   """
-  @spec comment_search_definition(User.t() | nil, Filter.t(), map() | [map()], Keyword.t()) ::
-          PhilomenaQuery.Search.search_definition()
-  def comment_search_definition(user, filter, body, opts \\ []) do
+  @spec comment_search_definition(principal(), Filter.t(), map() | [map()], keyword()) ::
+          Search.search_definition()
+  def comment_search_definition(principal, %Filter{} = filter, body, opts \\ []) do
     pagination = Keyword.get(opts, :pagination, %{})
-    show_hidden? = Keyword.get(opts, :show_hidden, true) and staff?(user)
+    allow_privileged? = Keyword.get(opts, :show_hidden, true)
 
     Search.search_definition(
       Comment,
@@ -407,7 +578,7 @@ defmodule Philomena.Comments do
         query: %{
           bool: %{
             must: body,
-            must_not: comment_filters(user, filter, show_hidden?)
+            must_not: search_exclusions(principal, filter, allow_privileged?)
           }
         },
         sort: %{created_at: :desc}
@@ -417,203 +588,115 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads a page of `image`'s comments for `user`.
+  Returns a database-paginated page of comments visible beneath `image`.
 
-  `pagination` is the `page`/`page_size` keyword list. Comments order by
-  creation time, oldest first for users who read oldest-first and newest
-  first otherwise. Staff see destroyed and non-approved comments; a
-  signed-in user still sees their own non-approved comments.
+  Visibility, approval, and destroyed-content filters run before PostgreSQL
+  counts and paginates. Results use the actor's newest/oldest-first setting.
 
   ## Examples
 
-      iex> paginate_image_comments(user, image, page: 1, page_size: 25)
+      iex> paginate_image_comments(actor, image, page: 1, page_size: 25)
       %Scrivener.Page{}
 
   """
   @spec paginate_image_comments(Actor.t(), Image.t(), Repo.pagination_params()) ::
-          Scrivener.Page.t()
-  def paginate_image_comments(%Actor{user: user}, image, pagination) do
-    direction = load_direction(user)
+          Scrivener.Page.t(Comment.t())
+  def paginate_image_comments(%Actor{} = actor, %Image{} = image, pagination) do
+    direction = load_direction(actor.user)
+    preloads = [:image | @display_preloads]
 
-    visible_image_comments(user, image)
-    |> order_by([{^direction, :created_at}])
-    |> preload([:image, :deleted_by, user: [awards: :badge]])
+    actor
+    |> visible_image_comments(image)
+    |> order_by([{^direction, :created_at}, {^direction, :id}])
+    |> preload(^preloads)
     |> Repo.paginate(pagination)
   end
 
   @doc """
-  Returns the page number on which `comment_id` appears in `image`'s comment
-  listing for `actor`, honoring the viewer's reading direction.
+  Locates the visible page containing `comment_id` beneath `image`.
 
-  Raises `Ecto.NoResultsError` when the comment does not belong to the image.
+  Missing, malformed, mismatched, or collection-invisible comments are
+  not-found; a loaded comment forbidden to the actor is unauthorized.
 
   ## Examples
 
       iex> find_comment_page(actor, image, comment.id, page_size: 25)
-      3
+      {:ok, 3}
 
   """
-  @spec find_comment_page(Actor.t(), Image.t(), integer(), Repo.pagination_params()) ::
-          pos_integer()
-  def find_comment_page(%Actor{user: user}, image, comment_id, pagination) do
-    comment =
-      Comment
-      |> where(image_id: ^image.id)
-      |> where(id: ^comment_id)
-      |> Repo.one!()
+  @spec find_comment_page(Actor.t(), Image.t(), IntegerId.integer_id(), Repo.pagination_params()) ::
+          {:ok, pos_integer()} | {:error, :unauthorized | :not_found}
+  def find_comment_page(%Actor{} = actor, %Image{} = image, comment_id, pagination) do
+    with {:ok, comment_id} <- IntegerId.parse(comment_id),
+         {:ok, comment} <-
+           actor
+           |> visible_image_comments(image)
+           |> where([comment], comment.id == ^comment_id)
+           |> Loader.one_and_authorize(actor, :show) do
+      offset =
+        actor
+        |> visible_image_comments(image)
+        |> filter_direction(comment, actor.user)
+        |> Repo.aggregate(:count, :id)
 
-    offset =
-      visible_image_comments(user, image)
-      |> filter_direction(comment.created_at, user)
-      |> Repo.aggregate(:count, :id)
-
-    page_size = pagination[:page_size]
-
-    # Pagination starts at page 1
-    div(offset, page_size) + 1
+      {:ok, div(offset, pagination_value(pagination, :page_size)) + 1}
+    else
+      :error -> {:error, :not_found}
+      error -> error
+    end
   end
 
   @doc """
-  Returns the number of the last page of `image`'s comment listing for
-  `user`.
+  Returns the final visible comment page beneath `image` for `actor`.
 
   ## Examples
 
-      iex> last_comment_page(user, image, page_size: 25)
+      iex> last_comment_page(actor, image, page_size: 25)
       4
 
   """
-  @spec last_comment_page(User.t() | nil, Image.t(), Repo.pagination_params()) :: pos_integer()
-  def last_comment_page(user, image, pagination) do
-    offset =
-      visible_image_comments(user, image)
-      |> Repo.aggregate(:count, :id)
-
-    page_size = pagination[:page_size]
-
-    # Pagination starts at page 1
-    div(offset, page_size) + 1
+  @spec last_comment_page(Actor.t(), Image.t(), Repo.pagination_params()) :: pos_integer()
+  def last_comment_page(%Actor{} = actor, %Image{} = image, pagination) do
+    count = actor |> visible_image_comments(image) |> Repo.aggregate(:count, :id)
+    max(Integer.ceil_div(count, pagination_value(pagination, :page_size)), 1)
   end
-
-  defp visible_image_comments(user, image) do
-    show_hidden? = staff?(user)
-
-    Comment
-    |> where(image_id: ^image.id)
-    |> filter_destroyed(show_hidden?)
-    |> filter_non_approved(user, show_hidden?)
-  end
-
-  defp load_direction(%{settings: %{comments_newest_first: false}}), do: :asc
-  defp load_direction(_user), do: :desc
-
-  defp filter_destroyed(query, true), do: query
-  defp filter_destroyed(query, _show_hidden?), do: where(query, [c], not c.destroyed_content)
-
-  defp filter_non_approved(query, _user, true), do: query
-
-  defp filter_non_approved(query, %{id: user_id}, _show_hidden?),
-    do: where(query, [c], c.approved or c.user_id == ^user_id)
-
-  defp filter_non_approved(query, _user, _show_hidden?),
-    do: where(query, [c], c.approved)
-
-  # The offset counts only the comments ahead of the target in
-  # the viewer's reading direction; counting the target itself would push
-  # a comment sitting exactly on a page boundary onto the next page.
-  defp filter_direction(query, time, %{settings: %{comments_newest_first: false}}),
-    do: where(query, [c], c.created_at < ^time)
-
-  defp filter_direction(query, time, _user),
-    do: where(query, [c], c.created_at > ^time)
 
   @doc """
-  Loads the image named by `image_id` for the comment `action`
-  (`:index`, `:show`, `:create`, `:edit`, or `:update`), on behalf of `actor`.
+  Loads and authorizes an image for a comment controller action.
 
-  The image is loaded with `:sources` and `tags: :aliases` preloaded, and
-  authorized for the action's semantic ability: `:index` for a listing, `:show`
-  for a single comment (resolving a duplicate image to its target and authorizing
-  `:show` on it), and `:create_comment` for posting, editing, or updating.
+  `:show` resolves duplicate images to their target. Posting and editing use
+  the image's `:create_comment` ability. Missing IDs are always not-found.
 
   ## Examples
 
       iex> load_commentable_image(actor, "1", :index)
       {:ok, %Image{}}
 
-      iex> load_commentable_image(actor, "1", :create)
-      {:error, :unauthorized}
+      iex> load_commentable_image(actor, "not-a-number", :show)
+      {:error, :not_found}
 
   """
   @spec load_commentable_image(Actor.t(), IntegerId.integer_id(), atom()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def load_commentable_image(%Actor{user: user}, image_id, action) do
-    case IntegerId.parse(image_id) do
-      {:ok, id} ->
-        image =
-          Image
-          |> preload([:sources, tags: :aliases])
-          |> Repo.get(id)
-
-        authorize_commentable_image(user, image, action)
-
-      :error ->
-        {:error, :not_found}
-    end
-  end
-
-  defp authorize_commentable_image(user, image, :index) do
-    with :ok <- authorize(user, :index, image), do: {:ok, image}
-  end
-
-  defp authorize_commentable_image(user, image, :show) do
-    with :ok <- authorize(user, :show, image) do
-      target = resolve_duplicate(image)
-
-      with :ok <- authorize(user, :show, target), do: {:ok, target}
-    end
-  end
-
-  defp authorize_commentable_image(user, image, action)
-       when action in [:create, :edit, :update] do
-    with :ok <- authorize(user, :create_comment, image), do: {:ok, image}
-  end
-
-  defp resolve_duplicate(%Image{duplicate_id: nil} = image), do: image
-
-  defp resolve_duplicate(%Image{duplicate_id: duplicate_id}) do
-    Image
-    |> preload([:sources, tags: :aliases])
-    |> Repo.get(duplicate_id)
+  def load_commentable_image(%Actor{} = actor, image_id, action) do
+    load_commentable_image_for_action(actor, image_id, action)
   end
 
   @doc """
-  Creates a comment on `image` from `params`, on behalf of `actor`.
+  Creates a comment beneath an authorized `image` on behalf of `actor`.
 
-  Limit 1 comment per actor per 15 seconds.
-
-  `image` is expected to have been authorized for `:create_comment` by the caller.
-
-  On success, the comment and image are reindexed. An approved comment increments
-  its author's comment count (a no-op for an anonymous author), and an unapproved
-  comment is automatically reported for external links.
+  Write access, image commenting permission, and the 15-second creation limit
+  are checked before insertion. The transaction updates the image count,
+  notification, and subscription state; indexing, statistics/reporting, rate
+  tracking, and the firehose broadcast run after commit.
 
   ## Examples
 
       iex> create_comment(actor, image, %{"body" => "Hi"})
       {:ok, %Comment{}}
 
-      iex> create_comment(actor, image, %{"body" => ""})
-      {:error, :creation_failed}
-
-      iex> create_comment(banned_actor, image, %{"body" => ""})
+      iex> create_comment(banned_actor, image, %{"body" => "Hi"})
       {:error, :ban}
-
-      iex> create_comment(missing_fingerprint_actor, image, %{"body" => ""})
-      {:error, :unauthorized}
-
-      iex> create_comment(limited_actor, image, %{"body" => ""})
-      {:error, :rate_limited}
 
   """
   @spec create_comment(Actor.t(), Image.t(), map()) ::
@@ -621,13 +704,15 @@ defmodule Philomena.Comments do
           | {:error, :creation_failed | :ban | :unauthorized | :rate_limited}
   def create_comment(%Actor{} = actor, %Image{} = image, params) do
     with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create_comment, image),
          :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
-      case create_loaded_comment(image, actor, params) do
+      case persist_comment(image, actor, params) do
         {:ok, %{comment: comment}} ->
           reindex_comment(comment)
           Images.reindex_image(image)
           record_comment_creation(actor, comment)
           RateLimiter.record_action(actor, :comment_create, @comment_create_window)
+          broadcast_comment("comment:create", comment)
           {:ok, comment}
 
         _error ->
@@ -636,138 +721,59 @@ defmodule Philomena.Comments do
     end
   end
 
-  # Post-insert bookkeeping: an approved comment counts toward its author's
-  # comment total (a no-op for an anonymous author, whose user is nil), an
-  # unapproved one is reported for external links.
-  defp record_comment_creation(%Actor{user: user}, %Comment{approved: true}),
-    do: UserStatistics.increment(user, :comments_count)
-
-  defp record_comment_creation(_actor, comment),
-    do: report_non_approved(comment)
-
   @doc """
-  Loads the comment named by `comment_id` on `image`. A missing comment is
-  `{:error, :not_found}`; hidden comments are returned as well, not filtered out.
+  Loads a visible comment beneath an already loaded route image.
+
+  The parent image and scoped comment are independently authorized for `:show`.
 
   ## Examples
 
-      iex> load_comment_for_show(image, "1")
+      iex> load_comment_for_show(actor, image, "1")
       {:ok, %Comment{}}
 
-      iex> load_comment_for_show(image, "999999999")
+      iex> load_comment_for_show(actor, image, "not-a-number")
       {:error, :not_found}
 
   """
-  @spec load_comment_for_show(Image.t(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()} | {:error, :not_found}
-  def load_comment_for_show(%Image{} = image, comment_id) do
-    case load_scoped_comment(image, comment_id, [:image, :deleted_by, user: [awards: :badge]]) do
-      nil -> {:error, :not_found}
-      comment -> {:ok, comment}
+  @spec load_comment_for_show(Actor.t(), Image.t(), IntegerId.integer_id()) ::
+          {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
+  def load_comment_for_show(%Actor{} = actor, %Image{} = image, comment_id) do
+    with :ok <- authorize(actor, :show, image) do
+      load_comment_in_image(actor, image, comment_id, :show, @display_preloads)
     end
   end
 
   @doc """
-  Loads the comment named by `comment_id` on `image` for editing, on behalf of
-  `actor`.
+  Loads an editable comment and changeset beneath `image`.
 
-  The fingerprint requirement that the write itself enforces does not apply here.
+  Write access is checked before image and comment authorization, matching the
+  update path exactly.
 
   ## Examples
 
       iex> load_comment_for_edit(actor, image, "1")
-      {:ok, {%Comment{}, %Ecto.Changeset{}}}
+      {:ok, %CommentForm{}}
 
       iex> load_comment_for_edit(banned_actor, image, "1")
       {:error, :ban}
 
-      iex> load_comment_for_edit(actor, hidden_image, "1")
-      {:error, :unauthorized}
-
-      iex> load_comment_for_edit(actor, image, invalid_id)
-      {:error, :not_found}
-
   """
   @spec load_comment_for_edit(Actor.t(), Image.t(), IntegerId.integer_id()) ::
-          {:ok, {Comment.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
+          {:ok, CommentForm.t()} | {:error, request_error()}
   def load_comment_for_edit(%Actor{} = actor, %Image{} = image, comment_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, comment} <- load_editable_comment(actor.user, image, comment_id) do
-      {:ok, {comment, change_comment(comment)}}
-    end
-  end
-
-  # Load-and-authorize chain shared by the edit and update actions: the comment
-  # is loaded within the image (a missing row is `{:error, :not_found}`) and
-  # authorized for `:edit`.
-  defp load_editable_comment(user, image, comment_id) do
-    case load_scoped_comment(image, comment_id, [:image, user: [awards: :badge]]) do
-      nil ->
-        {:error, :not_found}
-
-      comment ->
-        with :ok <- authorize(user, :edit, comment), do: {:ok, comment}
-    end
-  end
-
-  defp load_scoped_comment(image, comment_id, preloads) do
-    # TODO: raises on non-integer ID?
-    Comment
-    |> where(image_id: ^image.id, id: ^to_string(comment_id))
-    |> preload(^preloads)
-    |> Repo.one()
-  end
-
-  @doc """
-  Loads a comment as a report target within the image named by `image_id`.
-
-  Both the image and the parent-scoped comment must be visible to `actor`.
-  Malformed, missing, and mismatched IDs are always not-found. The Reports
-  context owns the write-access prerequisite and changeset construction.
-
-  ## Examples
-
-      iex> load_report_target(actor, "1", "2")
-      {:ok, %Comment{}}
-  """
-  @spec load_report_target(
-          actor :: Actor.t(),
-          image_id :: IntegerId.integer_id(),
-          comment_id :: IntegerId.integer_id()
-        ) ::
-          {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
-  def load_report_target(%Actor{} = actor, image_id, comment_id) do
-    load_reportable_comment(actor, image_id, comment_id)
-  end
-
-  # Shared image-and-comment load-and-authorize chain for the report actions: the
-  # image is authorized for `:show`, the comment is loaded within it (a missing
-  # row is `{:error, :not_found}`), and a comment hidden from users is visible
-  # only to a user who may `:show` it.
-  defp load_reportable_comment(%Actor{user: user} = actor, image_id, comment_id) do
-    with {:ok, image} <- Images.load_report_target(actor, image_id),
-         {:ok, comment_id} <- IntegerId.parse(comment_id),
-         {:ok, comment} <-
-           Loader.one(
-             from comment in Comment,
-               where: comment.image_id == ^image.id and comment.id == ^comment_id,
-               preload: [:image, :deleted_by, user: [awards: :badge]]
-           ) do
-      authorize_comment_visibility(comment, user)
-    else
-      :error -> {:error, :not_found}
-      error -> error
+         {:ok, comment} <- load_editable_comment(actor, image, comment_id, :edit) do
+      {:ok, %CommentForm{comment: comment, changeset: change_comment(comment)}}
     end
   end
 
   @doc """
-  Updates the comment named by `comment_id` on `image` from `params`, on behalf
-  of `actor`.
+  Updates a parent-scoped comment on behalf of `actor`.
 
-  After applying the edit, a version is attributed to `actor`'s user is created,
-  an unapproved result is reported for containing external links, and the comment
-  is reindexed.
+  The write-access and parent permissions match the edit form. A successful
+  transaction records the prior version; reporting, indexing, and the firehose
+  broadcast run after commit. Validation returns a `CommentForm` preserving the
+  loaded comment.
 
   ## Examples
 
@@ -775,295 +781,193 @@ defmodule Philomena.Comments do
       {:ok, %Comment{}}
 
       iex> update_comment(actor, image, "1", %{"body" => ""})
-      {:error, {%Comment{}, %Ecto.Changeset{}}}
-
-      iex> update_comment(banned_actor, image_id, "1", %{"body" => "Edited"})
-      {:error, :ban}
-
-      iex> update_comment(actor, hidden_image_id, "1", %{"body" => "Edited"})
-      {:error, :unauthorized}
-
-      iex> update_comment(actor, invalid_image_id, "1", %{"body" => "Edited"})
-      {:error, :not_found}
+      {:error, %CommentForm{}}
 
   """
-  @spec update_comment(Actor.t(), Image.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Comment.t()}
-          | {:error, {Comment.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
+  @spec update_comment(Actor.t(), Image.t(), IntegerId.integer_id(), map() | nil) ::
+          {:ok, Comment.t()} | {:error, CommentForm.t() | request_error()}
   def update_comment(%Actor{} = actor, %Image{} = image, comment_id, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, comment} <- load_editable_comment(actor.user, image, comment_id) do
-      case update_comment(comment, actor, params || %{}) do
+         {:ok, comment} <- load_editable_comment(actor, image, comment_id, :update) do
+      case persist_comment_update(comment, actor, params || %{}) do
         {:ok, %{comment: updated_comment}} ->
           report_non_approved(updated_comment)
           reindex_comment(updated_comment)
+          broadcast_comment("comment:update", updated_comment)
           {:ok, updated_comment}
 
         {:error, :comment, changeset, _changes} ->
-          {:error, {comment, changeset}}
+          {:error, %CommentForm{comment: comment, changeset: changeset}}
       end
     end
   end
 
   @doc """
-  Hides the comment named by `comment_id` with `params` on behalf of `actor`.
+  Loads a visible comment's edit history through its route image.
 
-  On success the comment is hidden, its associated reports are closed, it is
-  reindexed, and a moderation log is written attributing the hide to `actor`.
-
-  ## Examples
-
-      iex> hide_comment(moderator, "1", %{"deletion_reason" => "Spam"})
-      {:ok, %Comment{}}
-
-      iex> hide_comment(user, "1", %{"deletion_reason" => "Spam"})
-      {:error, :unauthorized}
-
-      iex> hide_comment(moderator, "not-an-integer", %{})
-      {:error, :not_found}
-
-  """
-  @spec hide_comment(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Comment.t()}
-          | {:error, :unauthorized | :not_found}
-          | {:error, Comment.t()}
-  def hide_comment(%Actor{} = actor, comment_id, params) do
-    case IntegerId.parse(comment_id) do
-      {:ok, id} ->
-        comment = Repo.get(Comment, id)
-
-        with :ok <- authorize(actor, :hide, comment) do
-          hide_authorized_comment(actor, comment, params)
-        end
-
-      :error ->
-        {:error, :not_found}
-    end
-  end
-
-  defp hide_authorized_comment(actor, %Comment{} = comment, params) do
-    case hide_loaded_comment(comment, params, actor.user) do
-      {:ok, hidden_comment} ->
-        log_comment_hide(actor, hidden_comment)
-        {:ok, hidden_comment}
-
-      _error ->
-        {:error, comment}
-    end
-  end
-
-  defp log_comment_hide(actor, %Comment{} = comment) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Image.Comment.Hide:create",
-      Paths.image_comment_path(comment.image_id, comment.id),
-      "Deleted comment on image #{comment.image_id} (#{comment.deletion_reason})"
-    )
-  end
-
-  @doc """
-  Restores the comment named by `comment_id`, on behalf of `actor`.
-
-  On success, the comment is unhidden, reindexed, and a moderation log is
-  written attributing the restore to `actor`.
-
-  Restoring an already-visible comment succeeds and re-logs; the restore is
-  idempotent. A failed restore returns `{:error, %Comment{}}` carrying the
-  loaded comment so the caller can still act on it.
+  Parent and child IDs are parsed and scoped before authorization. The returned
+  `CommentHistory` carries the latest 25 versions with authors and diffs.
 
   ## Examples
 
-      iex> unhide_comment(moderator, "1")
-      {:ok, %Comment{}}
+      iex> comment_history(actor, "1", "2")
+      {:ok, %CommentHistory{}}
 
-      iex> unhide_comment(user, "1")
-      {:error, :unauthorized}
-
-      iex> unhide_comment(moderator, "not-an-integer")
+      iex> comment_history(actor, "1", "not-a-number")
       {:error, :not_found}
 
   """
-  @spec unhide_comment(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()}
-          | {:error, :unauthorized | :not_found}
-          | {:error, Comment.t()}
-  def unhide_comment(%Actor{} = actor, comment_id) do
-    case IntegerId.parse(comment_id) do
-      {:ok, id} ->
-        comment = Repo.get(Comment, id)
-
-        with :ok <- authorize(actor, :hide, comment) do
-          unhide_authorized_comment(actor, comment)
-        end
-
-      :error ->
-        {:error, :not_found}
+  @spec comment_history(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
+          {:ok, CommentHistory.t()} | {:error, :unauthorized | :not_found}
+  def comment_history(%Actor{} = actor, image_id, comment_id) do
+    with {:ok, {image, comment}} <-
+           load_image_comment(actor, image_id, comment_id, :show, [], @display_preloads) do
+      {:ok,
+       %CommentHistory{
+         image: image,
+         comment: comment,
+         versions: Versions.for_comment(comment)
+       }}
     end
-  end
-
-  defp unhide_authorized_comment(actor, %Comment{} = comment) do
-    case unhide_comment(comment) do
-      {:ok, restored_comment} ->
-        log_comment_unhide(actor, restored_comment)
-        {:ok, restored_comment}
-
-      _error ->
-        {:error, comment}
-    end
-  end
-
-  defp log_comment_unhide(actor, %Comment{} = comment) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Image.Comment.Hide:delete",
-      Paths.image_comment_path(comment.image_id, comment.id),
-      "Restored comment on image #{comment.image_id}"
-    )
   end
 
   @doc """
-  Destroys the content of the comment named by `comment_id`, on behalf of `actor`.
+  Loads a comment as a report target through its route image.
 
-  On success, the comment's text is removed, its image's comment count is
-  decremented, the comment is reindexed, and a moderation log is written
-  attributing the destruction to `actor`.
-
-  A failed destruction returns `{:error, %Comment{}}` carrying the loaded comment
-  so the caller can still act on it.
+  Both resources are authorized for `:show`; malformed, missing, and mismatched
+  IDs are not-found. Reports owns the write prerequisite and form changeset.
 
   ## Examples
 
-      iex> destroy_comment(moderator, "1")
+      iex> load_report_target(actor, "1", "2")
       {:ok, %Comment{}}
 
-      iex> destroy_comment(user, "1")
-      {:error, :unauthorized}
-
-      iex> destroy_comment(moderator, "not-an-integer")
-      {:error, :not_found}
-
   """
-  @spec destroy_comment(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()}
-          | {:error, :unauthorized | :not_found}
-          | {:error, Comment.t()}
-  def destroy_comment(%Actor{} = actor, comment_id) do
-    case IntegerId.parse(comment_id) do
-      {:ok, id} ->
-        comment = Repo.get(Comment, id)
-
-        with :ok <- authorize(actor, :hide, comment) do
-          destroy_loaded_comment(actor, comment)
-        end
-
-      :error ->
-        {:error, :not_found}
+  @spec load_report_target(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
+          {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
+  def load_report_target(%Actor{} = actor, image_id, comment_id) do
+    with {:ok, {_image, comment}} <-
+           load_image_comment(
+             actor,
+             image_id,
+             comment_id,
+             :show,
+             [:sources, tags: :aliases],
+             @display_preloads
+           ) do
+      {:ok, comment}
     end
-  end
-
-  defp destroy_loaded_comment(actor, %Comment{} = comment) do
-    case destroy_comment(comment) do
-      {:ok, destroyed_comment} ->
-        log_comment_destruction(actor, destroyed_comment)
-        {:ok, destroyed_comment}
-
-      _error ->
-        # The destroy changeset always succeeds, so this branch is not reachable;
-        # it carries the loaded comment for the caller to reuse.
-        {:error, comment}
-    end
-  end
-
-  defp log_comment_destruction(actor, %Comment{} = comment) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Image.Comment.Delete:create",
-      Paths.image_comment_path(comment.image_id, comment.id),
-      "Destroyed comment on image #{comment.image_id}"
-    )
   end
 
   @doc """
-  Approves the comment named by `comment_id`, on behalf of `actor`.
+  Hides a comment scoped beneath `image_id`.
 
-  On success the comment's associated reports are closed, the author's comment
-  count is incremented, the comment is reindexed, and a moderation log is written
-  attributing the approval to `actor`.
-
-  Approving an already-approved comment succeeds and re-logs; the approval is
-  idempotent. A failed approval changeset returns `{:error, %Comment{}}`
-  carrying the loaded comment.
+  The comment update, report closure, and moderation log commit atomically;
+  report and comment indexing run after commit.
 
   ## Examples
 
-      iex> approve_comment(moderator, "1")
+      iex> hide_comment(moderator, "1", "2", %{"deletion_reason" => "Spam"})
       {:ok, %Comment{}}
 
-      iex> approve_comment(user, "1")
-      {:error, :unauthorized}
-
-      iex> approve_comment(moderator, "not-an-integer")
-      {:error, :not_found}
-
   """
-  @spec approve_comment(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()}
-          | {:error, :unauthorized | :not_found}
-          | {:error, Comment.t()}
-  def approve_comment(%Actor{} = actor, comment_id) do
-    case IntegerId.parse(comment_id) do
-      {:ok, id} ->
-        comment = Repo.get(Comment, id)
-
-        with :ok <- authorize(actor, :approve, comment) do
-          approve_loaded_comment(actor, comment)
-        end
-
-      :error ->
-        {:error, :not_found}
+  @spec hide_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id(), map()) ::
+          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+  def hide_comment(%Actor{} = actor, image_id, comment_id, params) do
+    with {:ok, {_image, comment}} <-
+           load_image_comment(actor, image_id, comment_id, :hide, [], @display_preloads) do
+      persist_moderation(actor, comment, :hide, params)
     end
-  end
-
-  defp approve_loaded_comment(%Actor{user: user} = actor, %Comment{} = comment) do
-    changeset = Comment.approve_changeset(comment)
-
-    Multi.new()
-    |> Multi.update(:comment, changeset)
-    |> Reports.put_close_reports(:reports, user, comment_id: comment.id)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{comment: approved_comment, reports: {_count, reports}}} ->
-        UserStatistics.increment(approved_comment.user_id, :comments_count)
-        Reports.reindex_closed_reports(reports)
-        reindex_comment(approved_comment)
-        log_comment_approval(actor, approved_comment)
-
-        {:ok, approved_comment}
-
-      _error ->
-        # The approval changeset sets a boolean unconditionally, so this branch
-        # is not reachable; it carries the loaded comment for symmetry.
-        {:error, comment}
-    end
-  end
-
-  defp log_comment_approval(actor, %Comment{} = comment) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "Image.Comment.Approve:create",
-      Paths.image_comment_path(comment.image_id, comment.id),
-      "Approved comment on image #{comment.image_id}"
-    )
   end
 
   @doc """
-  Migrates comments from one image to another when handling duplicate images.
-  Returns the duplicate image parameter unchanged, for use in a pipeline.
+  Restores a comment scoped beneath `image_id`.
 
-  ## Parameters
-  - image: The source image whose comments will be moved
-  - duplicate_of_image: The target image that will receive the comments
+  The restore and moderation log commit together; indexing runs after commit.
+
+  ## Examples
+
+      iex> unhide_comment(moderator, "1", "2")
+      {:ok, %Comment{}}
+
+  """
+  @spec unhide_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
+          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+  def unhide_comment(%Actor{} = actor, image_id, comment_id) do
+    with {:ok, {_image, comment}} <-
+           load_image_comment(actor, image_id, comment_id, :hide, [], @display_preloads) do
+      persist_moderation(actor, comment, :unhide)
+    end
+  end
+
+  @doc """
+  Destroys a comment's content beneath `image_id`.
+
+  Authorization uses the distinct `:delete` action. Content removal, image and
+  user counters, and the moderation log commit together; indexing follows the
+  commit.
+
+  ## Examples
+
+      iex> destroy_comment(moderator, "1", "2")
+      {:ok, %Comment{}}
+
+  """
+  @spec destroy_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
+          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+  def destroy_comment(%Actor{} = actor, image_id, comment_id) do
+    with {:ok, {_image, comment}} <-
+           load_image_comment(actor, image_id, comment_id, :delete, [], @display_preloads) do
+      persist_moderation(actor, comment, :destroy)
+    end
+  end
+
+  @doc """
+  Approves a comment scoped beneath `image_id`.
+
+  Approval, report closure, author statistics, and the moderation log commit
+  together. Repeated approval remains idempotent and does not increment author
+  statistics again.
+
+  ## Examples
+
+      iex> approve_comment(moderator, "1", "2")
+      {:ok, %Comment{}}
+
+  """
+  @spec approve_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
+          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+  def approve_comment(%Actor{} = actor, image_id, comment_id) do
+    with {:ok, {_image, comment}} <-
+           load_image_comment(actor, image_id, comment_id, :approve, [], @display_preloads) do
+      persist_moderation(actor, comment, :approve)
+    end
+  end
+
+  @doc """
+  Hides and destroys an already loaded user comment for account erasure.
+
+  This trusted service is intentionally separate from request authorization. It
+  closes reports and updates counters in one transaction, then reindexes after
+  commit.
+
+  ## Examples
+
+      iex> erase_user_comment(comment, moderator)
+      {:ok, %Comment{destroyed_content: true}}
+
+  """
+  @spec erase_user_comment(Comment.t(), User.t()) ::
+          {:ok, Comment.t()} | {:error, Ecto.Changeset.t() | term()}
+  def erase_user_comment(%Comment{} = comment, %User{} = moderator) do
+    persist_erasure(comment, moderator)
+  end
+
+  @doc """
+  Moves all comments from a duplicate image to its target and reindexes them.
+
+  This trusted duplicate-resolution service returns the target image for use in
+  the owning Images pipeline.
 
   ## Examples
 
@@ -1071,7 +975,8 @@ defmodule Philomena.Comments do
       %Image{}
 
   """
-  def migrate_comments(image, duplicate_of_image) do
+  @spec migrate_comments(Image.t(), Image.t()) :: Image.t()
+  def migrate_comments(%Image{} = image, %Image{} = duplicate_of_image) do
     {count, nil} =
       Comment
       |> where(image_id: ^image.id)
@@ -1085,7 +990,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Updates comment search indices when a user's name changes.
+  Updates indexed comment author names after a user rename.
 
   ## Examples
 
@@ -1093,15 +998,14 @@ defmodule Philomena.Comments do
       :ok
 
   """
+  @spec user_name_reindex(String.t(), String.t()) :: term()
   def user_name_reindex(old_name, new_name) do
     data = Comments.SearchIndex.user_name_update_by_query(old_name, new_name)
-
     Search.update_by_query(Comment, data.query, data.set_replacements, data.replacements)
   end
 
   @doc """
-  Queues a single comment for search index updates.
-  Returns the comment struct unchanged, for use in a pipeline.
+  Queues one comment for search indexing and returns it unchanged.
 
   ## Examples
 
@@ -1109,15 +1013,14 @@ defmodule Philomena.Comments do
       %Comment{}
 
   """
+  @spec reindex_comment(Comment.t()) :: Comment.t()
   def reindex_comment(%Comment{} = comment) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Comments", "id", [comment.id]])
-
     comment
   end
 
   @doc """
-  Queues all comments associated with an image for search index updates.
-  Returns the image struct unchanged, for use in a pipeline.
+  Queues every comment on `image` for indexing and returns the image unchanged.
 
   ## Examples
 
@@ -1125,15 +1028,14 @@ defmodule Philomena.Comments do
       %Image{}
 
   """
-  def reindex_comments_on_image(image) do
+  @spec reindex_comments_on_image(Image.t()) :: Image.t()
+  def reindex_comments_on_image(%Image{} = image) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Comments", "image_id", [image.id]])
-
     image
   end
 
   @doc """
-  Queues all comments associated with a list of image IDs for search index updates.
-  Returns the list unchanged, for use in a pipeline.
+  Queues comments on the trusted image IDs and returns the list unchanged.
 
   ## Examples
 
@@ -1141,57 +1043,48 @@ defmodule Philomena.Comments do
       [1, 2, 3]
 
   """
-  def reindex_comments_on_images(image_ids) do
+  @spec reindex_comments_on_images([integer()]) :: [integer()]
+  def reindex_comments_on_images(image_ids) when is_list(image_ids) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Comments", "image_id", image_ids])
-
     image_ids
   end
 
   @doc """
-  Provides preload queries for comment indexing operations.
+  Returns the association queries required to serialize comment search records.
 
   ## Examples
 
       iex> indexing_preloads()
-      [user: user_query, image: image_query]
+      [user: user_query, image: image_query, deleted_by: user_query]
 
   """
+  @spec indexing_preloads() :: keyword(Ecto.Query.t())
   def indexing_preloads do
-    user_query = select(User, [u], map(u, [:id, :name]))
-    tag_query = select(Tag, [t], map(t, [:id, :name]))
+    user_query = select(User, [user], map(user, [:id, :name]))
+    tag_query = select(Tag, [tag], map(tag, [:id, :name]))
 
     image_query =
       Image
-      |> select([i], struct(i, [:approved, :hidden_from_users, :id]))
+      |> select([image], struct(image, [:approved, :hidden_from_users, :id]))
       |> preload(tags: ^tag_query)
 
-    [
-      user: user_query,
-      image: image_query,
-      deleted_by: user_query
-    ]
+    [user: user_query, image: image_query, deleted_by: user_query]
   end
 
   @doc """
-  Performs a search reindex operation on comments matching the given criteria.
-
-  ## Parameters
-  - column: The database column to filter on (e.g., :id, :image_id)
-  - condition: A list of values to match against the column
+  Reindexes comments selected by a trusted worker column and values.
 
   ## Examples
 
       iex> perform_reindex(:id, [1, 2, 3])
       :ok
 
-      iex> perform_reindex(:image_id, [123])
-      :ok
-
   """
-  def perform_reindex(column, condition) do
+  @spec perform_reindex(atom(), [term()]) :: term()
+  def perform_reindex(column, condition) when is_atom(column) and is_list(condition) do
     Comment
     |> preload(^indexing_preloads())
-    |> where([c], field(c, ^column) in ^condition)
+    |> where([comment], field(comment, ^column) in ^condition)
     |> Search.reindex(Comment)
   end
 end

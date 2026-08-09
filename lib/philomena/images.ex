@@ -48,7 +48,6 @@ defmodule Philomena.Images do
   alias Philomena.Interactions
   alias Philomena.Reports
   alias Philomena.Comments
-  alias Philomena.Comments.Comment
   alias Philomena.Galleries
   alias Philomena.Galleries.Gallery
   alias Philomena.Galleries.Interaction
@@ -1146,7 +1145,7 @@ defmodule Philomena.Images do
   def load_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
     clear_image_notification(image, user)
 
-    comment_pagination = maybe_jump_to_last_page(user, image, comment_pagination)
+    comment_pagination = maybe_jump_to_last_page(actor, image, comment_pagination)
 
     %ImagePage{
       image: image,
@@ -1156,20 +1155,24 @@ defmodule Philomena.Images do
       interactions: Interactions.user_interactions([image], user),
       # TODO: this should probably be actor-gated, so actors who can't currently interact
       # with the image don't receive changesets.
-      comment_changeset: Comments.change_comment(%Comment{}),
+      comment_changeset: Comments.new_comment_changeset(),
       image_changeset: change_image(%{image | sources: sources_for_edit(image.sources)})
     }
   end
 
   defp maybe_jump_to_last_page(
-         %{settings: %{comments_newest_first: false, comments_always_jump_to_last: true}} = user,
+         %Actor{
+           user: %{
+             settings: %{comments_newest_first: false, comments_always_jump_to_last: true}
+           }
+         } = actor,
          image,
          scrivener
        ) do
-    Keyword.merge(scrivener, page: Comments.last_comment_page(user, image, scrivener))
+    Keyword.merge(scrivener, page: Comments.last_comment_page(actor, image, scrivener))
   end
 
-  defp maybe_jump_to_last_page(_user, _image, scrivener), do: scrivener
+  defp maybe_jump_to_last_page(_actor, _image, scrivener), do: scrivener
 
   defp sources_for_edit([]), do: [%Source{}]
   defp sources_for_edit(sources), do: sources

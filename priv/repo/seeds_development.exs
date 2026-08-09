@@ -103,7 +103,7 @@ for comment_body <- resources["comments"] do
   )
   |> case do
     {:ok, %Comment{} = comment} ->
-      Comments.approve_comment(admin_actor, comment.id)
+      Comments.approve_comment(admin_actor, image.id, comment.id)
 
     {:error, :comment, changeset, _so_far} ->
       IO.inspect(changeset.errors)

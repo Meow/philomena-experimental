@@ -12,15 +12,15 @@ defmodule PhilomenaWeb.Image.CommentController do
   plug PhilomenaWeb.FilterForcedUsersPlug when action in [:create, :edit, :update]
 
   def index(conn, %{"comment_id" => comment_id}) do
-    page =
-      Comments.find_comment_page(
-        conn.assigns.actor,
-        conn.assigns.image,
-        comment_id,
-        conn.assigns.comment_scrivener
-      )
-
-    redirect(conn, to: ~p"/images/#{conn.assigns.image}/comments?#{[page: page]}")
+    with {:ok, page} <-
+           Comments.find_comment_page(
+             conn.assigns.actor,
+             conn.assigns.image,
+             comment_id,
+             conn.assigns.comment_scrivener
+           ) do
+      redirect(conn, to: ~p"/images/#{conn.assigns.image}/comments?#{[page: page]}")
+    end
   end
 
   def index(conn, _params) do
@@ -39,7 +39,8 @@ defmodule PhilomenaWeb.Image.CommentController do
   end
 
   def show(conn, %{"id" => comment_id}) do
-    with {:ok, comment} <- Comments.load_comment_for_show(conn.assigns.image, comment_id) do
+    with {:ok, comment} <-
+           Comments.load_comment_for_show(conn.assigns.actor, conn.assigns.image, comment_id) do
       rendered = MarkdownRenderer.render_one(comment, conn)
 
       render(conn, "show.html",
@@ -54,12 +55,6 @@ defmodule PhilomenaWeb.Image.CommentController do
   def create(conn, %{"comment" => comment_params}) do
     case Comments.create_comment(conn.assigns.actor, conn.assigns.image, comment_params) do
       {:ok, comment} ->
-        PhilomenaWeb.Endpoint.broadcast!(
-          "firehose",
-          "comment:create",
-          PhilomenaWeb.Api.Json.CommentView.render("show.json", %{comment: comment})
-        )
-
         index(conn, %{"comment_id" => comment.id})
 
       {:error, :creation_failed} ->
@@ -76,12 +71,12 @@ defmodule PhilomenaWeb.Image.CommentController do
   end
 
   def edit(conn, %{"id" => comment_id}) do
-    with {:ok, {comment, changeset}} <-
+    with {:ok, form} <-
            Comments.load_comment_for_edit(conn.assigns.actor, conn.assigns.image, comment_id) do
       render(conn, "edit.html",
         title: "Editing Comment",
-        comment: comment,
-        changeset: changeset
+        comment: form.comment,
+        changeset: form.changeset
       )
     end
   end
@@ -94,18 +89,12 @@ defmodule PhilomenaWeb.Image.CommentController do
            comment_params
          ) do
       {:ok, comment} ->
-        PhilomenaWeb.Endpoint.broadcast!(
-          "firehose",
-          "comment:update",
-          PhilomenaWeb.Api.Json.CommentView.render("show.json", %{comment: comment})
-        )
-
         conn
         |> put_flash(:info, "Comment updated successfully.")
         |> redirect(to: ~p"/images/#{conn.assigns.image}" <> "#comment_#{comment.id}")
 
-      {:error, {comment, changeset}} ->
-        render(conn, "edit.html", comment: comment, changeset: changeset)
+      {:error, %Comments.CommentForm{} = form} ->
+        render(conn, "edit.html", comment: form.comment, changeset: form.changeset)
 
       {:error, _} = error ->
         error

@@ -5,14 +5,14 @@ defmodule PhilomenaWeb.Api.Json.CommentController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def show(conn, %{"id" => id}) do
-    case Comments.load_comment(id) do
+    case Comments.load_comment(conn.assigns.actor, id) do
       {:ok, comment} ->
         render(conn, "show.json", comment: comment)
 
       {:error, :not_found} ->
         not_found(conn)
 
-      {:error, :hidden_image} ->
+      {:error, :unauthorized} ->
         conn
         |> put_status(:forbidden)
         |> text("")

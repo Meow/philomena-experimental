@@ -12,7 +12,7 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
     comment = comment_fixture(image)
 
     {:ok, comment} =
-      Comments.hide_loaded_comment(
+      Comments.hide_comment_for_fixture(
         comment,
         %{"deletion_reason" => "Spam"},
         moderator_user_fixture()
@@ -85,7 +85,7 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
       refute Repo.reload!(comment).hidden_from_users
     end
 
-    test "for an unknown comment_id redirects with the authorization flash", %{conn: conn} do
+    test "for an unknown comment_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
@@ -95,7 +95,9 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
         })
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer comment_id short-circuits to NotFoundPlug via the
@@ -113,6 +115,21 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
                "Couldn't find what you were looking for!"
+    end
+
+    test "does not hide a comment through a different route image", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+      image = image_fixture()
+      other_image = image_fixture()
+      comment = comment_fixture(image)
+
+      conn =
+        post(conn, ~p"/images/#{other_image}/comments/#{comment}/hide", %{
+          "comment" => %{"deletion_reason" => "Spam"}
+        })
+
+      assert redirected_to(conn) == "/"
+      refute Repo.reload!(comment).hidden_from_users
     end
   end
 
@@ -165,6 +182,18 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Comment successfully restored!"
       refute Repo.reload!(comment).hidden_from_users
+    end
+
+    test "does not restore a comment through a different route image", %{conn: conn} do
+      image = image_fixture()
+      other_image = image_fixture()
+      comment = hidden_comment(image)
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+
+      conn = delete(conn, ~p"/images/#{other_image}/comments/#{comment}/hide")
+
+      assert redirected_to(conn) == "/"
+      assert Repo.reload!(comment).hidden_from_users
     end
   end
 end

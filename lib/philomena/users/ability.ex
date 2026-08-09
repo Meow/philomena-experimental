@@ -124,6 +124,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   # View comments
   def can?(%User{role: "moderator"}, :show, %Comment{}), do: true
+  def can?(%User{role: "moderator"}, :search_sensitive, Comment), do: true
 
   # View forums
   def can?(%User{role: "moderator"}, action, %Forum{})

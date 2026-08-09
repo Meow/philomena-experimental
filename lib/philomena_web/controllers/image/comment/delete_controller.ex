@@ -6,14 +6,14 @@ defmodule PhilomenaWeb.Image.Comment.DeleteController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, %{"comment_id" => comment_id}) do
-    case Comments.destroy_comment(conn.assigns.actor, comment_id) do
+  def create(conn, %{"image_id" => image_id, "comment_id" => comment_id}) do
+    case Comments.destroy_comment(conn.assigns.actor, image_id, comment_id) do
       {:ok, comment} ->
         conn
         |> put_flash(:info, "Comment successfully destroyed!")
         |> redirect(to: ~p"/images/#{comment.image_id}" <> "#comment_#{comment.id}")
 
-      {:error, %Comment{} = comment} ->
+      {:error, %Ecto.Changeset{data: %Comment{} = comment}} ->
         conn
         |> put_flash(:error, "Unable to destroy comment!")
         |> redirect(to: ~p"/images/#{comment.image_id}" <> "#comment_#{comment.id}")

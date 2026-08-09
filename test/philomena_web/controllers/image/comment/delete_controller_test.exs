@@ -55,14 +55,16 @@ defmodule PhilomenaWeb.Image.Comment.DeleteControllerTest do
       assert Repo.reload!(comment).destroyed_content
     end
 
-    test "for an unknown comment_id redirects with the authorization flash", %{conn: conn} do
+    test "for an unknown comment_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
       conn = post(conn, ~p"/images/#{image}/comments/999999999/delete")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer comment_id short-circuits to NotFoundPlug via the
@@ -77,6 +79,18 @@ defmodule PhilomenaWeb.Image.Comment.DeleteControllerTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
                "Couldn't find what you were looking for!"
+    end
+
+    test "does not destroy a comment through a different route image", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+      image = image_fixture()
+      other_image = image_fixture()
+      comment = comment_fixture(image, nil, %{"body" => "keep me"})
+
+      conn = post(conn, ~p"/images/#{other_image}/comments/#{comment}/delete")
+
+      assert redirected_to(conn) == "/"
+      refute Repo.reload!(comment).destroyed_content
     end
   end
 end

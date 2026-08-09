@@ -78,14 +78,16 @@ defmodule PhilomenaWeb.Image.Comment.ApproveControllerTest do
       assert Repo.reload!(comment).approved
     end
 
-    test "for an unknown comment_id redirects with the authorization flash", %{conn: conn} do
+    test "for an unknown comment_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
       conn = post(conn, ~p"/images/#{image}/comments/999999999/approve")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer comment_id short-circuits to NotFoundPlug via the
@@ -100,6 +102,18 @@ defmodule PhilomenaWeb.Image.Comment.ApproveControllerTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
                "Couldn't find what you were looking for!"
+    end
+
+    test "does not approve a comment through a different route image", %{conn: conn} do
+      image = image_fixture()
+      other_image = image_fixture()
+      comment = unapproved_comment(image)
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+
+      conn = post(conn, ~p"/images/#{other_image}/comments/#{comment}/approve")
+
+      assert redirected_to(conn) == "/"
+      refute Repo.reload!(comment).approved
     end
   end
 end

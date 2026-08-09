@@ -205,15 +205,14 @@ reason or invariant is non-obvious; comments that restate code should go.
 
 Wave 2 is complete.
 
-- The requested forum-hierarchy portion of wave 3 is complete for Forums,
-  Topics, Posts, Polls, PollOptions, and PollVotes. Typed hierarchy/page/form
+- The forum-hierarchy wave is complete for Forums, Topics, Posts, Comments,
+  Polls, PollOptions, and PollVotes. Typed hierarchy/page/form
   results replace tuple and bypass loaders; every request path scopes children
   through its loaded parents before action-specific authorization. Form and
   write prerequisites now match, post and vote locators are safely parsed,
   poll selections commit atomically, and poll configuration that would change
   recorded vote meaning is immutable after voting begins. Topic/post creation
-  owns notifications, indexing, bookkeeping, and firehose broadcasts. Comments
-  remains the only forum-hierarchy context not included in this requested pass.
+  owns notifications, indexing, bookkeeping, and firehose broadcasts.
 - Forum, topic, and post collection visibility deliberately uses equivalent
   database or search filters before count and pagination. This is the necessary
   collection-level exception to per-record Canada authorization: a forum may
@@ -222,6 +221,14 @@ Wave 2 is complete.
   of retaining a duplicate Topics listing, and post search now applies the same
   actor-aware access policy to HTML and API callers, including restricted-forum
   results for moderators.
+- Comments now uses safe global and image-parent-scoped loaders, typed edit and
+  history results, ability-backed PostgreSQL/OpenSearch visibility, and
+  database-side counting and pagination. Creation and updates own firehose
+  broadcasts; moderation combines the mutation, report closure, counters, and
+  audit log in one transaction with indexing after commit. User erasure has a
+  narrow owned service, and raw loaded-record CRUD is no longer public.
+
+Wave 3 is complete.
 
 ### Wave 0: characterize and establish the contract
 

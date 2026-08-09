@@ -186,7 +186,7 @@ defmodule Philomena.VersionsTest do
       comment = comment_fixture(image, author, %{"body" => "Original comment"})
 
       {:ok, _result} =
-        Comments.update_comment(comment, actor(editor), %{
+        Comments.update_comment_for_fixture(comment, actor(editor), %{
           "body" => "Edited comment",
           "edit_reason" => "clarify"
         })
@@ -206,7 +206,7 @@ defmodule Philomena.VersionsTest do
       comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "same"})
 
       assert {:ok, %{version: nil}} =
-               Comments.update_comment(comment, actor(confirmed_user_fixture()), %{
+               Comments.update_comment_for_fixture(comment, actor(confirmed_user_fixture()), %{
                  "body" => comment.body,
                  "edit_reason" => comment.edit_reason
                })
@@ -245,7 +245,7 @@ defmodule Philomena.VersionsTest do
       editor = confirmed_user_fixture()
 
       {:ok, %{comment: comment}} =
-        Comments.update_comment(comment, actor(editor), %{"body" => "c1"})
+        Comments.update_comment_for_fixture(comment, actor(editor), %{"body" => "c1"})
 
       assert [%CommentVersion{} = version] = Versions.for_comment(comment)
       assert version.body == "c1"
