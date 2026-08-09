@@ -9,7 +9,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostController do
            conn.assigns.actor,
            forum_id,
            topic_id,
-           conn.assigns.pagination
+           conn.assigns.scrivener
          ) do
       {:ok, listing} ->
         render(conn, "index.json",

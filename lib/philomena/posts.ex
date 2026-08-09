@@ -20,6 +20,7 @@ defmodule Philomena.Posts do
   alias Philomena.Topics.{ForumTopic, Topic}
   alias Philomena.Topics
   alias Philomena.Forums
+  alias Philomena.Forums.Visibility
   alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
@@ -209,18 +210,19 @@ defmodule Philomena.Posts do
 
   defp broadcast_post_creation(result), do: result
 
-  defp paginate_posts(posts, pagination) do
-    page_number = Map.get(pagination, :page_number, 1)
-    page_size = Map.get(pagination, :page_size, 25)
-    total_entries = length(posts)
+  defp search_visibility_filters(%Actor{user: %User{role: role}})
+       when role in ["moderator", "admin"],
+       do: []
 
-    %Scrivener.Page{
-      entries: Enum.slice(posts, (page_number - 1) * page_size, page_size),
-      page_number: page_number,
-      page_size: page_size,
-      total_entries: total_entries,
-      total_pages: max(ceil(total_entries / page_size), 1)
-    }
+  defp search_visibility_filters(%Actor{user: %User{role: "assistant"}}) do
+    [%{terms: %{access_level: ["normal", "assistant"]}}]
+  end
+
+  defp search_visibility_filters(%Actor{}) do
+    [
+      %{term: %{access_level: "normal"}},
+      %{term: %{hidden_from_users: false}}
+    ]
   end
 
   defp record_post_creation(%Actor{user: user}, %Post{approved: true}),
@@ -401,19 +403,11 @@ defmodule Philomena.Posts do
   @doc """
   Lists the posts visible to `actor` beneath the route forum and topic.
 
-  The topic is loaded by its `topic_slug` within the forum named by `forum_slug`,
-  requiring the topic to be visible (not hidden from users) and the forum's access
-  level to be `"normal"` - for every requester alike, so restricted forums are never
-  exposed here. When the topic cannot be found under those constraints,
-  `{:error, :not_found}` is returned.
-
-  Otherwise the topic's posts are windowed by `pagination`'s page number and
-  size over their `topic_position`, ordered ascending, with authors preloaded.
-  Posts with destroyed content are excluded; posts merely hidden from users stay
-  in the list. Each returned post carries the loaded topic so callers can read
-  its post count for the response total.
-
-  Returns `{:ok, {topic, posts}}` or `{:error, :not_found}`.
+  The forum and topic are loaded and authorized before a database visibility
+  scope is applied to the post query. Counting and pagination therefore happen
+  in PostgreSQL rather than after materializing every post. Destroyed posts are
+  excluded; hidden posts are included only for actors whose topic-moderation
+  role permits them. Each page entry carries the loaded topic.
 
   ## Examples
 
@@ -437,12 +431,12 @@ defmodule Philomena.Posts do
       posts =
         Post
         |> where(topic_id: ^topic.id, destroyed_content: false)
+        |> Visibility.visible_posts(actor)
         |> order_by(asc: :topic_position)
         |> preload(:user)
-        |> Repo.all()
-        |> Enum.filter(&(authorize(actor, :show, &1) == :ok))
-        |> Enum.map(&%{&1 | topic: topic})
-        |> paginate_posts(pagination)
+        |> Repo.paginate(pagination)
+
+      posts = %{posts | entries: Enum.map(posts.entries, &%{&1 | topic: topic})}
 
       {:ok, %PostListing{forum: forum, topic: topic, posts: posts}}
     end
@@ -514,16 +508,13 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Searches the publicly visible posts on behalf of `actor`, applying the
-  compiled query string `query_string` and `pagination`, sorted newest first.
+  Searches posts visible to `actor`, applying the compiled query string and
+  pagination and sorting newest first.
 
-  The actor's user scopes what the compiled query may match, but the results
-  are further restricted to posts that are not hidden from users and that
-  belong to a forum whose access level is `"normal"` - for every requester
-  alike, so hidden posts and posts in restricted forums are never returned or
-  counted. Results are
-  preloaded. An empty or missing query string compiles to a match on
-  nothing, yielding an empty page rather than an error.
+  Moderators and administrators search every forum and visibility state.
+  Assistants search normal and assistant forums. Other actors search visible
+  posts in normal forums. Results carry the associations needed by both HTML
+  and JSON renderers. An empty query compiles to an empty result.
 
   Returns `{:ok, results}`, or `{:error, msg}` when `query_string` fails to
   compile.
@@ -539,27 +530,27 @@ defmodule Philomena.Posts do
   """
   @spec search_posts(Actor.t(), String.t() | nil, Search.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_posts(%Actor{user: user}, query_string, pagination) do
+  def search_posts(%Actor{user: user} = actor, query_string, pagination) do
     case Posts.Query.compile(query_string, user: user) do
       {:ok, query} ->
+        filters = search_visibility_filters(actor)
+
         results =
           Post
           |> Search.search_definition(
             %{
               query: %{
                 bool: %{
-                  must: [
-                    query,
-                    %{term: %{hidden_from_users: false}},
-                    %{term: %{access_level: "normal"}}
-                  ]
+                  must: [query | filters]
                 }
               },
               sort: %{created_at: :desc}
             },
             pagination
           )
-          |> Search.search_records(preload(Post, [:user, :topic]))
+          |> Search.search_records(
+            preload(Post, [:deleted_by, topic: :forum, user: [awards: :badge]])
+          )
 
         {:ok, results}
 

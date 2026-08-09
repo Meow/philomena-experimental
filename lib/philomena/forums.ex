@@ -11,6 +11,7 @@ defmodule Philomena.Forums do
 
   alias Philomena.Attribution.Actor
   alias Philomena.Forums.{Forum, ForumIndex, ForumPage}
+  alias Philomena.Forums.Visibility
   alias Philomena.Loader
   alias Philomena.Repo
   alias Philomena.Topics.Topic
@@ -37,13 +38,14 @@ defmodule Philomena.Forums do
 
   defp load_authorized_forum(_actor, _action, _short_name), do: {:error, :not_found}
 
-  defp visible_forums(actor) do
+  defp visible_forums_query(actor) do
     Forum
+    |> Visibility.visible_forums(actor)
     |> order_by(asc: :name)
     |> preload(last_post: [:user, topic: :forum])
-    |> Repo.all()
-    |> Enum.filter(&(authorize(actor, :show, &1) == :ok))
   end
+
+  defp visible_forums(actor), do: actor |> visible_forums_query() |> Repo.all()
 
   defp visible_topic_count(_actor, []), do: 0
 
@@ -52,42 +54,18 @@ defmodule Philomena.Forums do
 
     Topic
     |> where([topic], topic.forum_id in ^forum_ids)
-    |> select([topic], %{id: topic.id, hidden_from_users: topic.hidden_from_users})
-    |> Repo.all()
-    |> Enum.count(fn topic -> authorize(actor, :show, struct(Topic, topic)) == :ok end)
+    |> Visibility.visible_topics(actor)
+    |> Repo.aggregate(:count)
   end
 
   defp forum_topics(actor, forum, pagination) do
     Topic
     |> where([topic], topic.forum_id == ^forum.id)
+    |> Visibility.visible_topics(actor)
     |> order_by(desc: :sticky, desc: :last_replied_to_at)
     |> preload([:poll, :forum, :user, last_post: :user])
-    |> Repo.all()
-    |> Enum.filter(&(authorize(actor, :show, &1) == :ok))
-    |> paginate_visible_topics(pagination)
+    |> Repo.paginate(pagination)
   end
-
-  defp paginate_visible_topics(topics, pagination) do
-    page_number =
-      pagination_value(pagination, :page_number, pagination_value(pagination, :page, 1))
-
-    page_size = pagination_value(pagination, :page_size, 25)
-    total_entries = length(topics)
-
-    %Scrivener.Page{
-      entries: Enum.slice(topics, (page_number - 1) * page_size, page_size),
-      page_number: page_number,
-      page_size: page_size,
-      total_entries: total_entries,
-      total_pages: max(ceil(total_entries / page_size), 1)
-    }
-  end
-
-  defp pagination_value(pagination, key, default) when is_list(pagination),
-    do: Keyword.get(pagination, key, default)
-
-  defp pagination_value(pagination, key, default) when is_map(pagination),
-    do: Map.get(pagination, key, default)
 
   @doc false
   @spec create_forum_for_fixture(map()) :: {:ok, Forum.t()} | {:error, Ecto.Changeset.t()}
@@ -123,8 +101,8 @@ defmodule Philomena.Forums do
   @spec list_forums(Actor.t(), Repo.pagination_params()) :: Scrivener.Page.t(Forum.t())
   def list_forums(%Actor{} = actor, pagination) do
     actor
-    |> visible_forums()
-    |> paginate_visible_topics(pagination)
+    |> visible_forums_query()
+    |> Repo.paginate(pagination)
   end
 
   @doc """

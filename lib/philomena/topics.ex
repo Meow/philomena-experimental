@@ -244,20 +244,6 @@ defmodule Philomena.Topics do
     }
   end
 
-  defp paginate_topics(topics, pagination) do
-    page_number = Map.get(pagination, :page_number, 1)
-    page_size = Map.get(pagination, :page_size, 25)
-    total_entries = length(topics)
-
-    %Scrivener.Page{
-      entries: Enum.slice(topics, (page_number - 1) * page_size, page_size),
-      page_number: page_number,
-      page_size: page_size,
-      total_entries: total_entries,
-      total_pages: max(ceil(total_entries / page_size), 1)
-    }
-  end
-
   defp load_target_forum(actor, topic_params) do
     target_id = if is_map(topic_params), do: Map.get(topic_params, "target_forum_id")
     Loader.fetch_and_authorize(Forum, actor, :show, target_id)
@@ -480,34 +466,6 @@ defmodule Philomena.Topics do
          post_changeset: Posts.change_post(%Post{}),
          topic_changeset: change_topic(topic)
        }}
-    end
-  end
-
-  @doc """
-  Loads a forum and paginates the topics visible to `actor` within it.
-
-  The forum is loaded and authorized before its parent-scoped topic query.
-
-  ## Examples
-
-      iex> list_topics(actor, "dis", pagination)
-      {:ok, {%Forum{}, %Scrivener.Page{}}}
-
-  """
-  @spec list_topics(Actor.t(), String.t(), Repo.pagination_params()) ::
-          {:ok, {Forum.t(), Scrivener.Page.t(Topic.t())}}
-          | {:error, :not_found | :unauthorized}
-  def list_topics(%Actor{} = actor, forum_slug, pagination) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug) do
-      topics =
-        Topic
-        |> where([topic], topic.forum_id == ^forum.id)
-        |> order_by(desc: :sticky, desc: :last_replied_to_at)
-        |> preload([:user])
-        |> Repo.all()
-        |> Enum.filter(&(authorize(actor, :show, &1) == :ok))
-
-      {:ok, {forum, paginate_topics(topics, pagination)}}
     end
   end
 

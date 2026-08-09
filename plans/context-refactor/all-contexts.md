@@ -214,6 +214,14 @@ Wave 2 is complete.
   recorded vote meaning is immutable after voting begins. Topic/post creation
   owns notifications, indexing, bookkeeping, and firehose broadcasts. Comments
   remains the only forum-hierarchy context not included in this requested pass.
+- Forum, topic, and post collection visibility deliberately uses equivalent
+  database or search filters before count and pagination. This is the necessary
+  collection-level exception to per-record Canada authorization: a forum may
+  contain tens of thousands of topics and a topic may contain hundreds of
+  thousands of posts. The API topic index reuses the Forums page loader instead
+  of retaining a duplicate Topics listing, and post search now applies the same
+  actor-aware access policy to HTML and API callers, including restricted-forum
+  results for moderators.
 
 ### Wave 0: characterize and establish the contract
 

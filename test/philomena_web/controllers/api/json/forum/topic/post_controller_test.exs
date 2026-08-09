@@ -42,6 +42,24 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       refute first["id"] == reply.id
     end
 
+    test "includes hidden posts for moderators", %{conn: conn} do
+      moderator = moderator_user_fixture()
+      forum = forum_fixture()
+      topic = topic_fixture(forum)
+      reply = post_fixture(topic, nil, %{"body" => "Rule-breaking reply"})
+
+      {:ok, _} = Posts.hide_post_for_fixture(reply, %{"deletion_reason" => "spam"}, moderator)
+
+      conn =
+        get(
+          conn,
+          ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts?key=#{moderator.authentication_token}"
+        )
+
+      assert %{"posts" => posts, "total" => 2} = json_response(conn, 200)
+      assert Enum.any?(posts, &(&1["id"] == reply.id))
+    end
+
     test "paginates in windows of 25 by topic position by default", %{conn: conn} do
       user = confirmed_user_fixture()
       forum = forum_fixture()
@@ -92,16 +110,15 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       assert json_response(conn, 404) == %{"error" => "Not found"}
     end
 
-    test "returns an empty list for a page past the last post", %{conn: conn} do
+    test "clamps a page past the last post to the final page", %{conn: conn} do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
-      # NOTE: a page past the end now returns an empty list with the topic's
-      # post_count as the total, rather than crashing on hd([]).
+      # Scrivener clamps an out-of-range page to the final valid page.
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts?page=2")
 
       total = Repo.reload!(topic).post_count
-      assert json_response(conn, 200) == %{"posts" => [], "total" => total}
+      assert %{"posts" => [_], "total" => ^total} = json_response(conn, 200)
     end
   end
 

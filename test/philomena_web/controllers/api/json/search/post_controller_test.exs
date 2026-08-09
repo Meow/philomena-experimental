@@ -35,7 +35,9 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       assert author == user.name
     end
 
-    test "excludes hidden posts and posts in restricted forums", %{conn: conn} do
+    test "excludes hidden posts and posts in restricted forums for anonymous actors", %{
+      conn: conn
+    } do
       moderator = moderator_user_fixture()
       forum = forum_fixture()
       staff_forum = forum_fixture(access_level: "staff")
@@ -52,6 +54,29 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
 
       assert %{"total" => 1, "posts" => [%{"body" => "chartreuse llama"}]} =
                json_response(conn, 200)
+    end
+
+    test "allows moderators to search posts in restricted forums", %{conn: conn} do
+      moderator = moderator_user_fixture()
+      staff_forum = forum_fixture(access_level: "staff")
+
+      post =
+        staff_forum
+        |> topic_fixture()
+        |> post_fixture(nil, %{"body" => "chartreuse vicuna"})
+
+      SearchHelpers.reindex_all!(Post)
+
+      conn =
+        get(
+          conn,
+          ~p"/api/v1/json/search/posts?q=chartreuse&key=#{moderator.authentication_token}"
+        )
+
+      assert %{"total" => 1, "posts" => [%{"id" => id, "body" => "chartreuse vicuna"}]} =
+               json_response(conn, 200)
+
+      assert id == post.id
     end
 
     test "excludes a matched post whose topic is hidden", %{conn: conn} do

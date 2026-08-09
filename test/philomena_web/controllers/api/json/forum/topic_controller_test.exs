@@ -65,6 +65,22 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       assert json_response(conn, 200) == %{"topics" => [], "total" => 0}
     end
 
+    test "counts hidden topics for moderators while preserving API redaction", %{conn: conn} do
+      moderator = moderator_user_fixture()
+      forum = forum_fixture()
+      topic = topic_fixture(forum)
+
+      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
+
+      conn =
+        get(
+          conn,
+          ~p"/api/v1/json/forums/#{forum}/topics?key=#{moderator.authentication_token}"
+        )
+
+      assert %{"topics" => [%{"slug" => nil}], "total" => 1} = json_response(conn, 200)
+    end
+
     test "returns 404 for an unknown forum", %{conn: conn} do
       # NOTE: unlike the show action, an unknown forum is a 200 with an empty
       # list, not a 404.
