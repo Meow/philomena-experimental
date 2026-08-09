@@ -1,9 +1,6 @@
 defmodule Philomena.Forums do
   @moduledoc """
   Forum discovery, subscription state, and staff-managed forum settings.
-
-  Controller-facing operations load forums by their stable short name before
-  authorization. Unknown or malformed names are therefore always not-found.
   """
 
   import Ecto.Query, warn: false
@@ -42,20 +39,6 @@ defmodule Philomena.Forums do
     Forum
     |> Visibility.visible_forums(actor)
     |> order_by(asc: :name)
-    |> preload(last_post: [:user, topic: :forum])
-  end
-
-  defp visible_forums(actor), do: actor |> visible_forums_query() |> Repo.all()
-
-  defp visible_topic_count(_actor, []), do: 0
-
-  defp visible_topic_count(actor, forums) do
-    forum_ids = Enum.map(forums, & &1.id)
-
-    Topic
-    |> where([topic], topic.forum_id in ^forum_ids)
-    |> Visibility.visible_topics(actor)
-    |> Repo.aggregate(:count)
   end
 
   defp forum_topics(actor, forum, pagination) do
@@ -74,6 +57,23 @@ defmodule Philomena.Forums do
   @doc """
   Lists the forums visible to `actor`, ordered by name.
 
+  ## Examples
+
+      iex> list_forums(actor)
+      [%Forum{}, ...]
+
+  """
+  @spec list_forums(Actor.t()) :: [Forum.t()]
+  def list_forums(%Actor{} = actor) do
+    actor
+    |> visible_forums_query()
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists the forums visible to `actor`, ordered by name, with pagination and
+  aggregate topic count.
+
   The topic count includes only topics whose parent forum and topic are visible
   to the actor.
 
@@ -83,26 +83,17 @@ defmodule Philomena.Forums do
       %ForumIndex{forums: [%Forum{}], topic_count: 42}
 
   """
-  @spec load_forum_index(Actor.t()) :: ForumIndex.t()
-  def load_forum_index(%Actor{} = actor) do
-    forums = visible_forums(actor)
-    %ForumIndex{forums: forums, topic_count: visible_topic_count(actor, forums)}
-  end
+  @spec load_forum_index(Actor.t(), Repo.pagination_params()) :: ForumIndex.t()
+  def load_forum_index(%Actor{} = actor, pagination) do
+    forums = visible_forums_query(actor)
+    topic_count = Repo.aggregate(forums, :sum, :topic_count)
 
-  @doc """
-  Lists the forums visible to `actor` using API pagination.
+    forums =
+      forums
+      |> preload(last_post: [:user, topic: :forum])
+      |> Repo.paginate(pagination)
 
-  ## Examples
-
-      iex> list_forums(actor, pagination)
-      %Scrivener.Page{}
-
-  """
-  @spec list_forums(Actor.t(), Repo.pagination_params()) :: Scrivener.Page.t(Forum.t())
-  def list_forums(%Actor{} = actor, pagination) do
-    actor
-    |> visible_forums_query()
-    |> Repo.paginate(pagination)
+    %ForumIndex{forums: forums, topic_count: topic_count}
   end
 
   @doc """
@@ -117,7 +108,7 @@ defmodule Philomena.Forums do
   @spec load_admin_forums(Actor.t()) :: {:ok, [Forum.t()]} | {:error, :unauthorized}
   def load_admin_forums(%Actor{} = actor) do
     with :ok <- authorize(actor, :manage, Forum) do
-      {:ok, Repo.all(from forum in Forum, order_by: forum.name)}
+      {:ok, list_forums(actor)}
     end
   end
 
@@ -143,7 +134,7 @@ defmodule Philomena.Forums do
   end
 
   @doc """
-  Loads a visible forum and its actor-visible topic page.
+  Loads a visible forum and its topic page.
 
   ## Examples
 
@@ -217,7 +208,7 @@ defmodule Philomena.Forums do
   def new_forum(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Forum) do
-      {:ok, Forum.changeset(%Forum{}, %{})}
+      {:ok, Forum.changeset(%Forum{})}
     end
   end
 

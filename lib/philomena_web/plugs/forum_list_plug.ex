@@ -6,9 +6,8 @@ defmodule PhilomenaWeb.ForumListPlug do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    forums = Forums.load_forum_index(conn.assigns.actor).forums
+    forums = Forums.list_forums(conn.assigns.actor)
 
-    conn
-    |> Conn.assign(:forums, forums)
+    Conn.assign(conn, :forums, forums)
   end
 end

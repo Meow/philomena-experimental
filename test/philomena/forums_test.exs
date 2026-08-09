@@ -21,6 +21,8 @@ defmodule Philomena.ForumsTest do
   alias Philomena.Forums.ForumIndex
   alias Philomena.Forums.Subscription
 
+  @pagination %{page_number: 1, page_size: 25}
+
   defp subscribed?(forum, user) do
     Repo.exists?(
       from s in Subscription,
@@ -36,7 +38,7 @@ defmodule Philomena.ForumsTest do
   end
 
   describe "load_forum_index/1" do
-    test "forums and topic count include only resources visible to the actor" do
+    test "forum and topic counts include hidden topics but not inaccessible forums" do
       user = confirmed_user_fixture()
       moderator = moderator_user_fixture()
       public_forum = forum_fixture()
@@ -49,12 +51,12 @@ defmodule Philomena.ForumsTest do
         Philomena.Topics.hide_topic_for_fixture(hidden_topic, "Spam", moderator)
 
       assert %ForumIndex{forums: user_forums, topic_count: 1} =
-               Forums.load_forum_index(actor(user))
+               Forums.load_forum_index(actor(user), @pagination)
 
       assert Enum.map(user_forums, & &1.id) == [public_forum.id]
 
-      assert %ForumIndex{forums: moderator_forums, topic_count: 3} =
-               Forums.load_forum_index(actor(moderator))
+      assert %ForumIndex{forums: moderator_forums, topic_count: 2} =
+               Forums.load_forum_index(actor(moderator), @pagination)
 
       assert Enum.sort(Enum.map(moderator_forums, & &1.id)) ==
                Enum.sort([public_forum.id, restricted_forum.id])

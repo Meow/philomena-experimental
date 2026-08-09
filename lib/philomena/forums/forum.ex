@@ -25,7 +25,7 @@ defmodule Philomena.Forums.Forum do
   end
 
   @doc false
-  def changeset(forum, attrs) do
+  def changeset(forum, attrs \\ %{}) do
     forum
     |> cast(attrs, [:name, :short_name, :description, :access_level])
     |> validate_required([:name, :short_name, :description, :access_level])
