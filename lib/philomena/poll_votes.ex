@@ -1,6 +1,6 @@
 defmodule Philomena.PollVotes do
   @moduledoc """
-  Parent-scoped poll voting, staff result inspection, and vote removal.
+  Poll voting, staff result inspection, and vote removal.
   """
 
   import Ecto.Query, warn: false
@@ -95,15 +95,19 @@ defmodule Philomena.PollVotes do
   end
 
   defp validate_active(poll) do
-    if Polls.active?(poll),
-      do: :ok,
-      else: {:error, vote_error(:poll_option_id, "poll is closed")}
+    if Polls.active?(poll) do
+      :ok
+    else
+      {:error, vote_error(:poll_option_id, "poll is closed")}
+    end
   end
 
   defp validate_not_voted(poll, user) do
-    if user_voted?(poll, user),
-      do: {:error, vote_error(:user_id, "has already voted")},
-      else: :ok
+    if user_voted?(poll, user) do
+      {:error, vote_error(:user_id, "has already voted")}
+    else
+      :ok
+    end
   end
 
   defp user_voted?(%Poll{id: poll_id}, %User{id: user_id}) do

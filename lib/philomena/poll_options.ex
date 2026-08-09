@@ -1,6 +1,6 @@
 defmodule Philomena.PollOptions do
   @moduledoc """
-  Safe parent-scoped poll-option loading for the PollVotes aggregate.
+  Poll option loading for the PollVotes aggregate.
 
   Poll options are not independent resources. Persistence is owned by the
   poll changeset and vote transactions.
@@ -15,20 +15,23 @@ defmodule Philomena.PollOptions do
   alias Philomena.Repo
 
   defp parse_unique_ids(option_ids) when is_list(option_ids) and option_ids != [] do
-    option_ids
-    |> Enum.reduce_while({:ok, []}, fn option_id, {:ok, ids} ->
-      case IntegerId.parse(option_id) do
-        {:ok, id} -> {:cont, {:ok, [id | ids]}}
-        :error -> {:halt, {:error, :not_found}}
-      end
-    end)
-    |> case do
-      {:ok, ids} ->
-        ids = Enum.reverse(ids)
-        if Enum.uniq(ids) == ids, do: {:ok, ids}, else: {:error, :duplicate}
+    ids =
+      option_ids
+      |> Enum.map(&IntegerId.parse/1)
+      |> Enum.map(fn
+        {:ok, id} -> id
+        _ -> :error
+      end)
 
-      error ->
-        error
+    cond do
+      :error in ids ->
+        {:error, :not_found}
+
+      Enum.uniq(ids) != ids ->
+        {:error, :duplicate}
+
+      true ->
+        {:ok, ids}
     end
   end
 
@@ -57,12 +60,14 @@ defmodule Philomena.PollOptions do
         PollOption
         |> where([option], option.poll_id == ^poll.id and option.id in ^ids)
         |> Repo.all()
+        |> Map.new(&{&1.id, &1})
 
-      options_by_id = Map.new(options, &{&1.id, &1})
-
-      case Enum.map(ids, &Map.fetch(options_by_id, &1)) do
-        results when length(options) == length(ids) ->
-          {:ok, Enum.map(results, fn {:ok, option} -> option end)}
+      ids
+      |> Enum.map(&Map.get(options, &1))
+      |> Enum.reject(&is_nil/1)
+      |> case do
+        results when map_size(options) == length(ids) ->
+          {:ok, results}
 
         _results ->
           {:error, :not_found}
@@ -82,12 +87,14 @@ defmodule Philomena.PollOptions do
   @spec load_option(Poll.t(), IntegerId.integer_id()) ::
           {:ok, PollOption.t()} | {:error, :not_found}
   def load_option(%Poll{} = poll, id) do
-    with {:ok, id} <- IntegerId.parse(id) do
-      PollOption
-      |> where([option], option.poll_id == ^poll.id and option.id == ^id)
-      |> Loader.one()
-    else
-      :error -> {:error, :not_found}
+    case IntegerId.parse(id) do
+      {:ok, id} ->
+        PollOption
+        |> where([option], option.poll_id == ^poll.id and option.id == ^id)
+        |> Loader.one()
+
+      :error ->
+        {:error, :not_found}
     end
   end
 end

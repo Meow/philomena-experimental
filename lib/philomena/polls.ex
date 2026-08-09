@@ -1,6 +1,6 @@
 defmodule Philomena.Polls do
   @moduledoc """
-  Parent-scoped poll forms, updates, and collaboration services for voting.
+  Poll forms, updates, and shared services for voting.
   """
 
   import Ecto.Query, warn: false
@@ -33,7 +33,7 @@ defmodule Philomena.Polls do
       forum: result.forum,
       topic: result.topic,
       poll: result.poll,
-      changeset: changeset || Poll.changeset(result.poll, %{})
+      changeset: changeset || Poll.changeset(result.poll)
     }
   end
 
@@ -41,7 +41,7 @@ defmodule Philomena.Polls do
   Loads a poll through its route forum and topic and authorizes `action` on the
   topic before returning it.
 
-  This narrow service is shared with `Philomena.PollVotes`; callers cannot load
+  This service is shared with `Philomena.PollVotes`; callers cannot load
   a poll independently of an authorized parent chain.
 
   ## Examples
@@ -71,8 +71,7 @@ defmodule Philomena.Polls do
   @doc """
   Loads an authorized poll edit form.
 
-  The same write-access prerequisite used by update is enforced before the
-  parent-scoped lookup. Existing options are included in the form.
+  Existing options are included in the form.
 
   ## Examples
 
@@ -92,8 +91,8 @@ defmodule Philomena.Polls do
   @doc """
   Updates the poll beneath the authorized route topic.
 
-  The poll is row-locked while it and its options update transactionally. Invalid close
-  times, vote methods, titles, or option sets return a form carrying the
+  The poll is row-locked while it and its options update transactionally. Invalid
+  close times, vote methods, titles, or option sets return a form carrying the
   rejected changeset. Once voting has started, the vote method and options are
   immutable so existing votes retain their meaning; the title and end time may
   still be changed.

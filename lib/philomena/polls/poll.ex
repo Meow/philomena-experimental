@@ -20,7 +20,7 @@ defmodule Philomena.Polls.Poll do
   end
 
   @doc false
-  def changeset(poll, attrs) do
+  def changeset(poll, attrs \\ %{}) do
     poll
     |> cast(attrs, [:title, :active_until, :vote_method])
     |> validate_required([:title, :active_until, :vote_method])
