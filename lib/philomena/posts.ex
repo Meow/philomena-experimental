@@ -29,7 +29,7 @@ defmodule Philomena.Posts do
   alias Philomena.Posts.{Post, PostVersion}
   alias Philomena.Posts
   alias Philomena.IndexWorker
-  alias Philomena.Forums.Forum
+  alias Philomena.Forums.{Forum, Visibility}
   alias Philomena.Notifications
   alias Philomena.Reports
   alias Philomena.Versions
@@ -208,21 +208,6 @@ defmodule Philomena.Posts do
   end
 
   defp broadcast_post_creation(result), do: result
-
-  defp search_visibility_filters(%Actor{user: %User{role: role}})
-       when role in ["moderator", "admin"],
-       do: []
-
-  defp search_visibility_filters(%Actor{user: %User{role: "assistant"}}) do
-    [%{terms: %{access_level: ["normal", "assistant"]}}]
-  end
-
-  defp search_visibility_filters(%Actor{}) do
-    [
-      %{term: %{access_level: "normal"}},
-      %{term: %{hidden_from_users: false}}
-    ]
-  end
 
   defp record_post_creation(%Actor{user: user}, %Post{approved: true}),
     do: UserStatistics.increment(user, :posts_count)
@@ -490,7 +475,7 @@ defmodule Philomena.Posts do
   def search_posts(%Actor{user: user} = actor, query_string, pagination) do
     case Posts.Query.compile(query_string, user: user) do
       {:ok, query} ->
-        filters = search_visibility_filters(actor)
+        filters = Visibility.search_visibility_filters(actor)
 
         results =
           Post
@@ -498,7 +483,8 @@ defmodule Philomena.Posts do
             %{
               query: %{
                 bool: %{
-                  must: [query | filters]
+                  must: query,
+                  filter: filters
                 }
               },
               sort: %{created_at: :desc}
