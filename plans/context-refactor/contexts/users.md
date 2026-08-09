@@ -16,6 +16,13 @@ participate in staff transactions, while indexing, jobs, mail, and object
 storage run after database commit. Workers and erasure retain narrow, documented
 collaboration services instead of generic persistence access.
 
+The context module now follows the repository layout contract: configuration
+and types come first, all private query/transaction/modifier mechanics are
+grouped before the public service API, and every public service has a typespec
+and an examples section. The vote/favorite and PII wipe engines live under
+`Philomena.Users.UserDownvoteWipe` and `Philomena.Users.UserWipe`, making their
+Users ownership explicit while retaining worker-only ID entry points.
+
 The `Philomena.Schema.TagList` settings/filter normalization is intentionally
 deferred to the separately coordinated schema work required by the all-context
 plan; this wave does not introduce a partial relation migration.
