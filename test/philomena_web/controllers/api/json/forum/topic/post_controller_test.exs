@@ -27,7 +27,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       assert reply_id == reply.id
     end
 
-    test "excludes hidden posts", %{conn: conn} do
+    test "does not exclude hidden posts", %{conn: conn} do
       user = confirmed_user_fixture()
       moderator = moderator_user_fixture()
       forum = forum_fixture()
@@ -38,8 +38,11 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts")
 
-      assert %{"posts" => [first], "total" => 1} = json_response(conn, 200)
+      assert %{"posts" => [first, second], "total" => 2} = json_response(conn, 200)
       refute first["id"] == reply.id
+      refute first["body"] == nil
+      assert second["id"] == reply.id
+      assert second["body"] == nil
     end
 
     test "includes hidden posts for moderators", %{conn: conn} do
@@ -110,15 +113,16 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       assert json_response(conn, 404) == %{"error" => "Not found"}
     end
 
-    test "clamps a page past the last post to the final page", %{conn: conn} do
+    test "returns no results for a page past the last post", %{conn: conn} do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
       # Scrivener clamps an out-of-range page to the final valid page.
+      # The database-backed pagination used for topics does not.
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts?page=2")
 
       total = Repo.reload!(topic).post_count
-      assert %{"posts" => [_], "total" => ^total} = json_response(conn, 200)
+      assert %{"posts" => [], "total" => ^total} = json_response(conn, 200)
     end
   end
 

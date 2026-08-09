@@ -42,8 +42,8 @@ defmodule Philomena.TopicsTest do
     type: "User"
   }
 
-  # The request pagination map load_topic_page reads: only :page_number is used.
-  @first_page %{page_number: 1}
+  # The request pagination map load_topic_page reads.
+  @first_page %{page_number: 1, page_size: 25}
 
   defp subscribed?(topic, user) do
     Repo.exists?(
@@ -1123,7 +1123,8 @@ defmodule Philomena.TopicsTest do
                  topic.slug,
                  to_string(last.id),
                  %{
-                   page_number: 1
+                   page_number: 1,
+                   page_size: 25
                  }
                )
 

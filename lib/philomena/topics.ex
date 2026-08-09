@@ -217,30 +217,34 @@ defmodule Philomena.Topics do
   defp load_forum_topic_for_read(actor, forum_slug, topic_slug),
     do: load_forum_topic(actor, forum_slug, topic_slug, action: :mark_read)
 
-  defp topic_page_number(topic, post_id_param, pagination) do
-    with {:ok, post_id} <- IntegerId.parse(post_id_param),
-         [post] <- Post |> where(id: ^post_id, topic_id: ^topic.id) |> Repo.all() do
-      div(post.topic_position, 25) + 1
-    else
-      _ -> pagination.page_number
-    end
+  defp topic_pagination(topic, post_id_param, pagination) do
+    page_number =
+      with {:ok, post_id} <- IntegerId.parse(post_id_param),
+           [post] <- Post |> where(id: ^post_id, topic_id: ^topic.id) |> Repo.all() do
+        div(post.topic_position, pagination.page_size) + 1
+      else
+        _ -> pagination.page_number
+      end
+
+    %{pagination | page_number: page_number}
   end
 
-  defp load_topic_posts(topic, page) do
+  defp load_topic_posts(topic, %{page_number: page_number, page_size: page_size}) do
     entries =
       Post
       |> where(topic_id: ^topic.id)
-      |> where([p], p.topic_position >= ^(25 * (page - 1)) and p.topic_position < ^(25 * page))
+      |> where([p], p.topic_position >= ^(page_size * (page_number - 1)))
+      |> where([p], p.topic_position < ^(page_size * page_number))
       |> order_by(asc: :created_at)
       |> preload([:deleted_by, :topic, topic: :forum, user: [awards: :badge]])
       |> Repo.all()
 
     %Scrivener.Page{
       entries: entries,
-      page_number: page,
-      page_size: 25,
+      page_number: page_number,
+      page_size: page_size,
       total_entries: topic.post_count,
-      total_pages: div(topic.post_count + 25 - 1, 25)
+      total_pages: div(topic.post_count + page_size - 1, page_size)
     }
   end
 
@@ -424,9 +428,9 @@ defmodule Philomena.Topics do
   only when the post belongs to the loaded topic. Otherwise `pagination`'s
   `:page_number` is used.
 
-  The `posts` field is a `Scrivener.Page` of raw `Post` structs (25 per page,
-  ordered by creation, with the topic, forum, and author preloaded); their
-  Markdown bodies are left raw for the caller.
+  The `posts` field is a `Scrivener.Page` of raw `Post` structs, ordered by
+  creation, with the topic, forum, and author preloaded); their Markdown bodies
+  are left raw for the caller.
 
   Returns `{:ok, %TopicPage{}}`, `{:error, :unauthorized}` when the forum or the
   topic is not visible to `actor`, or `{:error, :not_found}` when the forum
@@ -450,16 +454,15 @@ defmodule Philomena.Topics do
     with {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug) do
       topic = Repo.preload(topic, [:user, :forum, :deleted_by, :locked_by, poll: :options])
+      pagination = topic_pagination(topic, post_id_param, pagination)
 
       clear_topic_notification(topic, actor.user)
-
-      page = topic_page_number(topic, post_id_param, pagination)
 
       {:ok,
        %TopicPage{
          forum: forum,
          topic: topic,
-         posts: load_topic_posts(topic, page),
+         posts: load_topic_posts(topic, pagination),
          watching: subscribed?(topic, actor.user),
          voted: PollVotes.voted?(actor, topic.poll),
          poll_active: Polls.active?(topic.poll),

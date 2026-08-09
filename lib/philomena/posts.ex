@@ -20,14 +20,13 @@ defmodule Philomena.Posts do
   alias Philomena.Topics.{ForumTopic, Topic}
   alias Philomena.Topics
   alias Philomena.Forums
-  alias Philomena.Forums.Visibility
   alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.UserStatistics
   alias Philomena.Users.User
-  alias Philomena.Posts.{Post, PostListing, PostVersion}
+  alias Philomena.Posts.{Post, PostVersion}
   alias Philomena.Posts
   alias Philomena.IndexWorker
   alias Philomena.Forums.Forum
@@ -398,48 +397,6 @@ defmodule Philomena.Posts do
   @spec change_post(Post.t()) :: Ecto.Changeset.t()
   def change_post(%Post{} = post) do
     Post.changeset(post, %{})
-  end
-
-  @doc """
-  Lists the posts visible to `actor` beneath the route forum and topic.
-
-  The forum and topic are loaded and authorized before a database visibility
-  scope is applied to the post query. Counting and pagination therefore happen
-  in PostgreSQL rather than after materializing every post. Destroyed posts are
-  excluded; hidden posts are included only for actors whose topic-moderation
-  role permits them. Each page entry carries the loaded topic.
-
-  ## Examples
-
-      iex> list_topic_posts(actor, "dis", "some-topic", pagination)
-      {:ok, %PostListing{}}
-
-      iex> list_topic_posts(actor, "dis", "nonexistent", pagination)
-      {:error, :not_found}
-
-  """
-  @spec list_topic_posts(
-          Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          pagination :: Repo.pagination_params()
-        ) ::
-          {:ok, PostListing.t()} | {:error, :not_found | :unauthorized}
-  def list_topic_posts(%Actor{} = actor, forum_slug, topic_slug, pagination) do
-    with {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           Topics.load_forum_topic(actor, forum_slug, topic_slug) do
-      posts =
-        Post
-        |> where(topic_id: ^topic.id, destroyed_content: false)
-        |> Visibility.visible_posts(actor)
-        |> order_by(asc: :topic_position)
-        |> preload(:user)
-        |> Repo.paginate(pagination)
-
-      posts = %{posts | entries: Enum.map(posts.entries, &%{&1 | topic: topic})}
-
-      {:ok, %PostListing{forum: forum, topic: topic, posts: posts}}
-    end
   end
 
   @doc """
