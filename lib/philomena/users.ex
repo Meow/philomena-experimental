@@ -1,12 +1,10 @@
 defmodule Philomena.Users do
   @moduledoc """
-  Owns authentication, registration, profiles, account settings, and staff user
+  Authentication, registration, profiles, account settings, and staff user
   management.
 
-  Request-facing profile and management services accept an `Actor` first, use
-  safe ID or slug locators, and authorize a loaded user with an action-specific
-  ability. Authentication token services deliberately have no actor because the
-  token is the credential. Loaded-record entry points are limited to explicit
+  Authentication token services deliberately have no actor because the
+  token is the credential. Loaded record entry points are limited to explicit
   worker, indexing, filter, and erasure collaboration services.
   """
 
@@ -192,7 +190,7 @@ defmodule Philomena.Users do
     |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["confirm"]))
   end
 
-  # Settings, role assignment, and user-search mechanics.
+  # Settings, role assignment, and user search mechanics.
 
   defp change_user(%User{} = user) do
     User.changeset(user, %{})
@@ -383,7 +381,7 @@ defmodule Philomena.Users do
     end
   end
 
-  # Authentication-role hydration and restricted-forum cleanup.
+  # Authentication role hydration and restricted forum cleanup.
 
   defp load_with_roles(query) do
     query
@@ -584,8 +582,7 @@ defmodule Philomena.Users do
   Loads an active user by exact name for an actor-scoped cross-context lookup.
 
   Conversations use this locator when resolving a recipient. Missing,
-  malformed, and deactivated recipients are always not found; a real active
-  user the actor may not show is unauthorized.
+  malformed, and deactivated recipients are always not found.
 
   ## Examples
 
@@ -609,8 +606,7 @@ defmodule Philomena.Users do
   @doc """
   Loads a visible profile by slug as a report target on behalf of `actor`.
 
-  Deactivated and missing profiles are always not-found. A real profile the
-  actor may not show is unauthorized.
+  Deactivated and missing profiles are always not-found.
 
   ## Examples
 
@@ -855,8 +851,8 @@ defmodule Philomena.Users do
 
   ## Examples
 
-    iex> deliver_user_unlock_instructions(user, &url(~p"/unlocks/#{&1}"))
-    {:ok, %{to: ..., body: ...}}
+      iex> deliver_user_unlock_instructions(user, &url(~p"/unlocks/#{&1}"))
+      {:ok, %{to: ..., body: ...}}
 
   """
   @spec deliver_user_unlock_instructions(User.t(), (String.t() -> String.t())) :: term()
@@ -1017,7 +1013,7 @@ defmodule Philomena.Users do
 
   Accepts the `params` (with the `"user"` / `"twofactor_token"`
   keys), validating the token against the user's TOTP secret or, failing that,
-  its remaining backup codes. A matching TOTP code records the consumed timestep;
+  remaining backup codes. A matching TOTP code records the consumed timestep;
   a matching backup code removes it from the list.
 
   Returns `{:ok, user}` when the token is accepted, or
@@ -1289,13 +1285,13 @@ defmodule Philomena.Users do
   ## Administration
 
   @doc """
-  Runs the staff user search on behalf of `viewer`, from `params` and
+  Runs the staff user search on behalf of `actor`, from `params` and
   `pagination`.
 
-  Reading the user listing requires the user-index permission, so a viewer
-  without it is `{:error, :unauthorized}`. The `"uq"` param supplies the query
-  (blank or missing searches everything), and `"sf"`/`"sd"` select the sort
-  field and direction from the user-domain fields.
+  Reading the user listing requires authorization to index users.
+
+  The `"uq"` param supplies the query (blank or missing searches everything),
+  and `"sf"`/`"sd"` select the sort field and direction from the user-domain fields.
 
   Returns `{:ok, users}` with a `m:Scrivener.Page` of matching users, or
   `{:error, message}` carrying the parser's message string when the query cannot
@@ -1312,8 +1308,8 @@ defmodule Philomena.Users do
   """
   @spec search_users(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized | String.t()}
-  def search_users(%Actor{} = viewer, params, pagination) do
-    with :ok <- authorize(viewer, :index, User) do
+  def search_users(%Actor{} = actor, params, pagination) do
+    with :ok <- authorize(actor, :index, User) do
       query_string =
         case params["uq"] do
           nil -> "*"
@@ -1607,6 +1603,7 @@ defmodule Philomena.Users do
 
       iex> load_user_for_erase(actor, "missing")
       {:error, :not_found}
+
   """
   @spec load_user_for_erase(Actor.t(), String.t()) ::
           {:ok, User.t()}
@@ -1680,10 +1677,10 @@ defmodule Philomena.Users do
   @doc """
   Loads the user named by `slug` for forcing a filter, on behalf of `actor`.
 
-  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability.
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`.
+  Real targets are authorized for `:force_filter`.
 
-  Returns a typed form containing the user and force-filter changeset.
+  Returns a typed form containing the user and force filter changeset.
 
   ## Examples
 
@@ -1707,8 +1704,8 @@ defmodule Philomena.Users do
   Forces a filter on the user named by `slug`, on behalf of `actor`, from
   `params`.
 
-  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability. On success the
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`.
+  Real targets are authorized for `:force_filter`. On success the
   filter is forced, the account reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
@@ -1748,8 +1745,8 @@ defmodule Philomena.Users do
   @doc """
   Removes the forced filter from the user named by `slug`, on behalf of `actor`.
 
-  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability. On success the
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`.
+  Real targets are authorized for `:unforce_filter`. On success the
   forced filter is cleared, the account reindexed, and a moderation log is
   written.
 
@@ -1780,9 +1777,9 @@ defmodule Philomena.Users do
   @doc """
   Unlocks the user named by `slug`, on behalf of `actor`.
 
-  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability. On success the
-  account is unlocked, reindexed, and a moderation log is written.
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`.
+  Real targets are authorized for `:unlock`. On success the account is unlocked,
+  reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
 
@@ -1811,10 +1808,9 @@ defmodule Philomena.Users do
   @doc """
   Grants verification to the user named by `slug`, on behalf of `actor`.
 
-  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability. On success
-  verification is granted, the account reindexed, and a moderation log is
-  written.
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`.
+  Real targets are authorized for `:verify`. On success the account is verified,
+  reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
 
@@ -1844,9 +1840,8 @@ defmodule Philomena.Users do
   Revokes verification from the user named by `slug`, on behalf of `actor`.
 
   Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability. On success
-  verification is revoked, the account reindexed, and a moderation log is
-  written.
+  real targets are authorized for `:unverify`. On success verification is revoked,
+  the account reindexed, and a moderation log is written.
 
   Returns `{:ok, user}`.
 
@@ -1876,10 +1871,9 @@ defmodule Philomena.Users do
   Starts a vote and fave wipe for the user named by `slug`, on behalf of
   `actor`.
 
-  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability. On success a
-  background job removes the user's votes and favorites and a moderation log is
-  written.
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`.
+  Real targets are authorized for `:wipe_votes`. On success a background job removes
+  the user's votes and favorites and a moderation log is written.
 
   Returns `{:ok, user}`.
 
@@ -1911,10 +1905,9 @@ defmodule Philomena.Users do
   @doc """
   Queues a PII wipe for the user named by `slug`, on behalf of `actor`.
 
-  Write access is checked before lookup. Missing targets are `{:error, :not_found}`;
-  real targets are authorized with the action-specific ability. On success a
-  background job wipes the user's personally identifying information and a
-  moderation log is written.
+  Write access is checked before lookup. Missing targets are `{:error, :not_found}`.
+  Real targets are authorized for `:wipe`. On success a background job wipes the
+  user's personally identifying information and a moderation log is written.
 
   Returns `{:ok, user}`.
 
@@ -2007,7 +2000,7 @@ defmodule Philomena.Users do
   behalf of `actor`.
 
   Write access is checked before lookup. Missing targets are
-  `{:error, :not_found}`; real targets are authorized for `:edit_description`.
+  `{:error, :not_found}`. Real targets are authorized for `:edit_description`.
 
   Returns a typed form containing the user and description changeset.
 
@@ -2033,11 +2026,10 @@ defmodule Philomena.Users do
   Updates the description and personal title of the user named by the profile
   `slug`, on behalf of `actor`, from `attrs`.
 
-  This is a write, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. The user is then loaded by slug and authorized for
-  `:edit_description` following `load_profile_for_description_edit/2`. On success
-  the description and personal title are updated and the user reindexed; a
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`. Real targets are authorized for `:edit_description`
+  following `load_profile_for_description_edit/2`. On success
+  the description and personal title are updated and the user reindexed. A
   profile that gains an unapproved external link files a system report.
 
   Returns `{:ok, user}`, or a typed user form when validation rejects the
@@ -2070,10 +2062,10 @@ defmodule Philomena.Users do
   of `actor`: other users who share one of the subject's IP addresses, one of
   its fingerprints, or both.
 
-  Missing targets are `{:error, :not_found}`; real targets are authorized for
+  Missing targets are `{:error, :not_found}`. Real targets are authorized for
   `:show_details`.
 
-  Returns a typed alias-match result with each match list carrying the matched
+  Returns a typed alias page result with each match list carrying the matched
   users and their bans.
 
   ## Examples
@@ -2098,7 +2090,7 @@ defmodule Philomena.Users do
   scratchpad, on behalf of `actor`.
 
   Write access is checked before lookup. Missing targets are
-  `{:error, :not_found}`; real targets are authorized for `:edit_scratchpad`.
+  `{:error, :not_found}`. Real targets are authorized for `:edit_scratchpad`.
 
   Returns a typed form containing the user and scratchpad changeset.
 
@@ -2124,12 +2116,9 @@ defmodule Philomena.Users do
   Updates the moderation scratchpad of the user named by the profile `slug`, on
   behalf of `actor`, from `attrs`.
 
-  This is a write, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. Editing the scratchpad requires the mod-note viewing
-  permission, so an actor without it is `{:error, :unauthorized}`; a permitted
-  actor naming an unknown slug is `{:error, :not_found}`. On success the
-  scratchpad is updated and the user reindexed.
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`. Real targets are authorized for `:edit_scratchpad`.
+  On success the scratchpad is updated and the user reindexed.
 
   Returns `{:ok, user}`, or a typed user form when validation rejects the
   update.
@@ -2159,6 +2148,8 @@ defmodule Philomena.Users do
   @doc """
   Adds a tag to a user's watched tags list.
 
+  Write access is checked first; otherwise returns the user after update.
+
   ## Examples
 
       iex> watch_tag(actor, tag)
@@ -2180,6 +2171,8 @@ defmodule Philomena.Users do
 
   @doc """
   Removes a tag from a user's watched tags list.
+
+  Write access is checked first; otherwise returns the user after update.
 
   ## Examples
 
@@ -2226,9 +2219,8 @@ defmodule Philomena.Users do
   @doc """
   Updates the acting user's own avatar from `attrs`, on behalf of `actor`.
 
-  This is a write, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. On success the uploaded file is analyzed, persisted,
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`. On success the uploaded file is analyzed, persisted,
   and the user reindexed.
 
   Returns `{:ok, user}`, or a typed user form when analysis or validation
@@ -2257,9 +2249,8 @@ defmodule Philomena.Users do
   @doc """
   Removes the acting user's own avatar, on behalf of `actor`.
 
-  This is a write, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`.
+  Write access is checked before lookup. Missing targets are
+  `{:error, :not_found}`.
 
   Returns `{:ok, user}`.
 
@@ -2283,10 +2274,8 @@ defmodule Philomena.Users do
   Loads the rename changeset for the acting user's own account, on behalf of
   `actor`.
 
-  A banned actor is rejected first with `{:error, :ban}`. Renaming is authorized
-  with `:change_username` against the actor's own user, which the ability rules
-  gate on the 90-day rename window, so an actor who renamed within the window
-  gets `{:error, :unauthorized}`.
+  Write access is checked before lookup. Renaming is authorized with `:change_username`
+  against the actor's own user, which the ability rules gate on the 90-day rename window.
 
   Returns a typed user form.
 
@@ -2312,11 +2301,9 @@ defmodule Philomena.Users do
   Updates the acting user's own name from `user_params`, on behalf of `actor`,
   recording the change in history.
 
-  This is a write, so the actor's write access is verified first: a banned
-  actor is `{:error, :ban}` and an actor with no fingerprint
-  `{:error, :unauthorized}`. Renaming is then authorized with
-  `:change_username` against the actor's own user (the ability rules gate it on
-  the 90-day rename window). On success the old name becomes a name-change row,
+  Write access is checked before lookup. Renaming is authorized with
+  `:change_username` against the actor's own user, which the ability rules gate on
+  the 90-day rename window. On success the old name becomes a name-change row,
   the account is reindexed, and a background job rewrites references to the old
   username.
 
@@ -2509,7 +2496,7 @@ defmodule Philomena.Users do
   end
 
   @doc """
-  Loads a user by trusted background-job ID.
+  Loads a user by ID from a trusted background job.
 
   Job arguments originate from already persisted users, so an absent row is an
   invariant violation and intentionally raises.
