@@ -1,10 +1,6 @@
 defmodule Philomena.Topics do
   @moduledoc """
-  Parent-scoped topic reads, creation, subscriptions, and moderation.
-
-  Request-facing functions accept an attribution actor and prove forum/topic
-  membership before authorizing the requested topic action. Cross-context
-  services are limited to notification cleanup and last-post query composition.
+  Topic reads, creation, subscriptions, and moderation.
   """
 
   import Ecto.Query, warn: false
@@ -32,6 +28,7 @@ defmodule Philomena.Topics do
   alias Philomena.Loader
   alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
+  alias Philomena.Users.User
 
   @topic_create_window 300
 
@@ -99,20 +96,20 @@ defmodule Philomena.Topics do
 
   defp broadcast_topic_creation(result), do: result
 
-  defp persist_topic_stick(topic) do
+  defp persist_topic_stick(%Topic{} = topic) do
     topic
     |> Topic.stick_changeset()
     |> Repo.update()
   end
 
   # Removes sticky status from a topic.
-  defp unstick_topic(topic) do
+  defp unstick_topic(%Topic{} = topic) do
     topic
     |> Topic.unstick_changeset()
     |> Repo.update()
   end
 
-  defp persist_topic_lock(%Topic{} = topic, attrs, user) do
+  defp persist_topic_lock(%Topic{} = topic, attrs, %User{} = user) do
     topic
     |> Topic.lock_changeset(attrs, user)
     |> Repo.update()
@@ -126,7 +123,7 @@ defmodule Philomena.Topics do
   end
 
   # Moves a topic to a different forum, updating post counts for both forums.
-  defp move_topic(topic, new_forum_id) do
+  defp move_topic(%Topic{} = topic, new_forum_id) do
     old_forum_id = topic.forum_id
 
     Multi.new()
@@ -145,7 +142,7 @@ defmodule Philomena.Topics do
     |> normalize_multi_error()
   end
 
-  defp hide_loaded_topic(topic, deletion_reason, user) do
+  defp hide_loaded_topic(%Topic{} = topic, deletion_reason, %User{} = user) do
     topic = topic |> Repo.preload(:user)
 
     Multi.new()
@@ -168,7 +165,7 @@ defmodule Philomena.Topics do
     end
   end
 
-  defp unhide_loaded_topic(topic) do
+  defp unhide_loaded_topic(%Topic{} = topic) do
     topic = topic |> Repo.preload(:user)
 
     Multi.new()
@@ -192,7 +189,7 @@ defmodule Philomena.Topics do
   end
 
   # Updates a topic's title.
-  defp update_topic_title(topic, attrs) do
+  defp update_topic_title(%Topic{} = topic, attrs) do
     topic
     |> Topic.title_changeset(attrs)
     |> Repo.update()
@@ -214,10 +211,7 @@ defmodule Philomena.Topics do
   defp load_topic_in_forum(_actor, _action, _forum, _topic_slug, _preloads),
     do: {:error, :not_found}
 
-  defp load_forum_topic_for_read(actor, forum_slug, topic_slug),
-    do: load_forum_topic(actor, forum_slug, topic_slug, action: :mark_read)
-
-  defp topic_pagination(topic, post_id_param, pagination) do
+  defp topic_pagination(%Topic{} = topic, post_id_param, pagination) do
     page_number =
       with {:ok, post_id} <- IntegerId.parse(post_id_param),
            [post] <- Post |> where(id: ^post_id, topic_id: ^topic.id) |> Repo.all() do
@@ -229,7 +223,7 @@ defmodule Philomena.Topics do
     %{pagination | page_number: page_number}
   end
 
-  defp load_topic_posts(topic, %{page_number: page_number, page_size: page_size}) do
+  defp load_topic_posts(%Topic{} = topic, %{page_number: page_number, page_size: page_size}) do
     entries =
       Post
       |> where(topic_id: ^topic.id)
@@ -248,7 +242,7 @@ defmodule Philomena.Topics do
     }
   end
 
-  defp load_target_forum(actor, topic_params) do
+  defp load_target_forum(%Actor{} = actor, topic_params) do
     target_id = if is_map(topic_params), do: Map.get(topic_params, "target_forum_id")
     Loader.fetch_and_authorize(Forum, actor, :show, target_id)
   end
@@ -270,15 +264,15 @@ defmodule Philomena.Topics do
   def stick_topic_for_fixture(topic), do: persist_topic_stick(topic)
 
   @doc false
-  @spec lock_topic_for_fixture(Topic.t(), map(), Philomena.Users.User.t()) ::
+  @spec lock_topic_for_fixture(Topic.t(), map(), User.t()) ::
           {:ok, Topic.t()} | {:error, Ecto.Changeset.t()}
-  def lock_topic_for_fixture(%Topic{} = topic, attrs, user),
+  def lock_topic_for_fixture(%Topic{} = topic, attrs, %User{} = user),
     do: persist_topic_lock(topic, attrs, user)
 
   @doc false
-  @spec hide_topic_for_fixture(Topic.t(), String.t() | nil, Philomena.Users.User.t()) ::
+  @spec hide_topic_for_fixture(Topic.t(), String.t() | nil, User.t()) ::
           {:ok, Topic.t()} | {:error, term()}
-  def hide_topic_for_fixture(topic, deletion_reason, user),
+  def hide_topic_for_fixture(topic, deletion_reason, %User{} = user),
     do: hide_loaded_topic(topic, deletion_reason, user)
 
   @doc false
@@ -408,7 +402,7 @@ defmodule Philomena.Topics do
           {:ok, Topic.t()} | {:error, :not_found | :unauthorized}
   def mark_topic_read(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, %ForumTopic{topic: topic}} <-
-           load_forum_topic_for_read(actor, forum_slug, topic_slug) do
+           load_forum_topic(actor, forum_slug, topic_slug, action: :mark_read) do
       clear_topic_notification(topic, actor.user)
       {:ok, topic}
     end
@@ -424,9 +418,8 @@ defmodule Philomena.Topics do
 
   `post_id_param` is the `post_id` to jump to (or `nil`): when it
   parses to an integer naming an existing post, the returned page is the one
-  containing that post (by its position over the fixed page size of 25), but
-  only when the post belongs to the loaded topic. Otherwise `pagination`'s
-  `:page_number` is used.
+  containing that post (by its position over the page size), but only when the
+  post belongs to the loaded topic. Otherwise `pagination` is used as-is.
 
   The `posts` field is a `Scrivener.Page` of raw `Post` structs, ordered by
   creation, with the topic, forum, and author preloaded); their Markdown bodies
@@ -473,8 +466,7 @@ defmodule Philomena.Topics do
   end
 
   @doc """
-  Loads an actor-visible topic beneath its route forum, with its author
-  preloaded.
+  Loads a visible topic beneath its route forum, with its author preloaded.
 
   ## Examples
 
@@ -497,8 +489,7 @@ defmodule Philomena.Topics do
   `actor`'s write access is verified first. The forum is then loaded by short
   name and authorized for `:show`, and the topic together with its first post
   is inserted from `topic_params`. On success, the returned map carries the
-  topic, forum, and first post the caller needs for the firehose broadcast
-  and to reuse.
+  topic, forum, and first post.
 
   Returns `{:ok, %{topic: topic, forum: forum, post: post}}` on success,
   `{:error, forum, changeset}` when the topic changeset is rejected,
@@ -544,7 +535,7 @@ defmodule Philomena.Topics do
   @doc """
   Returns a new-topic changeset for `actor` in the forum named by `forum_slug`.
 
-  Full write access is verified first; the forum is then loaded by short name
+  Write access is verified first; the forum is then loaded by short name
   and authorized for `:create_topic`. The returned changeset is
   seeded with an empty first post and a two-option poll so those nested fields
   are present.
@@ -578,13 +569,13 @@ defmodule Philomena.Topics do
 
   @doc """
   Sticks the topic named by `topic_slug` within the forum named by
-  `forum_slug`, on behalf of `actor` (the acting user).
+  `forum_slug`, on behalf of `actor`.
 
-  Write access is verified first, then the parent-scoped topic is authorized
-  for `:stick`. On success a moderation log is written attributing the change.
+  Write access is verified first, then the topic is authorized for `:stick`
+   On success a moderation log is written attributing the change.
 
   Returns `{:ok, {forum, topic}}` on success (both are returned for the caller
-  to reuse), `{:error, forum, topic}` when the stick changeset is rejected
+  to reuse), `{:error, forum, topic}` when the stick changeset is rejected,
   `{:error, :unauthorized}` when the actor may not see the forum/topic or
   stick the topic, or `{:error, :not_found}` when the topic does not exist.
 
@@ -603,18 +594,15 @@ defmodule Philomena.Topics do
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug, action: :stick) do
       case persist_topic_stick(topic) do
-        {:ok, stuck_topic} ->
-          # Body reads the title off the post-update topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored,
-          # so keep them exact.
+        {:ok, topic} ->
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Stick:create",
-            Paths.topic_path(forum, stuck_topic),
-            "Stickied topic '#{stuck_topic.title}' in #{forum.name}"
+            Paths.topic_path(forum, topic),
+            "Stickied topic '#{topic.title}' in #{forum.name}"
           )
 
-          {:ok, {forum, stuck_topic}}
+          {:ok, {forum, topic}}
 
         _error ->
           {:error, forum, topic}
@@ -624,14 +612,14 @@ defmodule Philomena.Topics do
 
   @doc """
   Unsticks the topic named by `topic_slug` within the forum named by
-  `forum_slug`, on behalf of `actor` (the acting user).
+  `forum_slug`, on behalf of `actor`.
 
   Loading and authorization mirror `stick_topic/3`, using the distinct
   `:unstick` action. On success a moderation log is written.
 
   Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
-  unstick is rejected (so the caller can act on it),
-  `{:error, :unauthorized}`, or `{:error, :not_found}`.
+  unstick is rejected (so the caller can act on it), `{:error, :unauthorized}`,
+  or `{:error, :not_found}`.
 
   ## Examples
 
@@ -648,18 +636,15 @@ defmodule Philomena.Topics do
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug, action: :unstick) do
       case unstick_topic(topic) do
-        {:ok, unstuck_topic} ->
-          # Body reads the title off the post-unstick topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored,
-          # so keep them exact.
+        {:ok, topic} ->
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Stick:delete",
-            Paths.topic_path(forum, unstuck_topic),
-            "Unstickied topic '#{unstuck_topic.title}' in #{forum.name}"
+            Paths.topic_path(forum, topic),
+            "Unstickied topic '#{topic.title}' in #{forum.name}"
           )
 
-          {:ok, {forum, unstuck_topic}}
+          {:ok, {forum, topic}}
 
         _error ->
           {:error, forum, topic}
@@ -704,22 +689,17 @@ defmodule Philomena.Topics do
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug, action: :lock) do
       case persist_topic_lock(topic, topic_params, actor.user) do
-        {:ok, locked_topic} ->
-          # The body reads the reason and title off the post-update topic, and
-          # the forum name off the separately loaded forum (the loaded topic
-          # carries no preloaded `:forum`). The log type and body strings are
-          # stored, so keep them exact.
+        {:ok, topic} ->
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Lock:create",
-            Paths.topic_path(forum, locked_topic),
-            "Locked topic '#{locked_topic.title}' (#{locked_topic.lock_reason}) in #{forum.name}"
+            Paths.topic_path(forum, topic),
+            "Locked topic '#{topic.title}' (#{topic.lock_reason}) in #{forum.name}"
           )
 
-          {:ok, {forum, locked_topic}}
+          {:ok, {forum, topic}}
 
-        {:error, %Ecto.Changeset{}} ->
-          # The pre-update topic is returned for the caller to reuse.
+        _error ->
           {:error, forum, topic}
       end
     end
@@ -727,7 +707,7 @@ defmodule Philomena.Topics do
 
   @doc """
   Unlocks the topic named by `topic_slug` within the forum named by
-  `forum_slug`, on behalf of `actor` (the acting user).
+  `forum_slug`, on behalf of `actor`.
 
   Loading and authorization mirror `lock_topic/4`, using the distinct
   `:unlock` action. On success a moderation log is written.
@@ -751,18 +731,15 @@ defmodule Philomena.Topics do
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug, action: :unlock) do
       case unlock_topic(topic) do
-        {:ok, unlocked_topic} ->
-          # Body reads the title off the post-unlock topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored,
-          # so keep them exact.
+        {:ok, topic} ->
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Lock:delete",
-            Paths.topic_path(forum, unlocked_topic),
-            "Unlocked topic '#{unlocked_topic.title}' in #{forum.name}"
+            Paths.topic_path(forum, topic),
+            "Unlocked topic '#{topic.title}' in #{forum.name}"
           )
 
-          {:ok, {forum, unlocked_topic}}
+          {:ok, {forum, topic}}
 
         _error ->
           {:error, forum, topic}
@@ -773,21 +750,18 @@ defmodule Philomena.Topics do
   @doc """
   Moves the topic named by `topic_slug` within the forum named by `forum_slug`
   to the forum identified by the `"target_forum_id"` key of `topic_params`, on
-  behalf of `actor` (the acting user).
+  behalf of `actor`.
 
   Write access is verified first and the parent-scoped topic is authorized for
-  `:move`. Only after authorization is the target forum ID parsed and its forum
-  authorized for `:show`, so an
-  unprivileged actor sending a malformed target still gets unauthorized. On
-  success the NEW forum is preloaded (needed for the log body and for the caller
-  to reuse), post/topic counts are updated for both forums, and a
-  moderation log is written attributing the move to the actor.
+  `:move`. On success the target forum is preloaded (needed for the log body
+  and for the caller to reuse), post/topic counts are updated for both forums, and
+  a moderation log is written.
 
-  Returns `{:ok, {new_forum, topic}}` on success (the new forum is returned for
-  the caller to reuse), `{:error, forum, topic}` carrying the SOURCE forum and
-  topic when the move cannot happen, `{:error, :unauthorized}` when the
-  actor may not see the forum/topic or move the topic, or `{:error, :not_found}`
-  when the topic does not exist.
+  Returns `{:ok, {new_forum, topic}}` on success (the target forum is returned
+  for the caller to reuse), `{:error, forum, topic}` carrying the source forum and
+  topic when the move cannot happen, `{:error, :unauthorized}` when the actor may
+  not see the forum/topic or move the topic, or `{:error, :not_found}` when the
+  topic does not exist.
 
   ## Examples
 
@@ -811,26 +785,16 @@ defmodule Philomena.Topics do
     with :ok <- verify_write_access(actor),
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug, action: :move) do
-      # Target id parsing happens only after authorization, so an unprivileged
-      # actor with a malformed target still answers unauthorized rather than the
-      # bespoke failure. A missing or non-integer target and a well-formed id
-      # for a nonexistent forum all funnel to the inner else, which returns
-      # the SOURCE topic - so it carries the source `forum` and `topic`.
       with {:ok, target_forum} <- load_target_forum(actor, topic_params),
            {:ok, %{topic: moved_topic}} <- move_topic(topic, target_forum.id) do
-        # Force-preload the NEW forum off the moved topic for the log body and
-        # for the caller to reuse. The log type and body strings are stored,
-        # so keep them exact.
-        new_forum = Repo.preload(moved_topic, :forum, force: true).forum
-
         ModerationLogs.create_moderation_log(
           actor,
           "Topic.Move:create",
-          Paths.topic_path(new_forum, moved_topic),
-          "Topic '#{moved_topic.title}' moved to #{new_forum.name}"
+          Paths.topic_path(target_forum, moved_topic),
+          "Topic '#{moved_topic.title}' moved to #{target_forum.name}"
         )
 
-        {:ok, {new_forum, moved_topic}}
+        {:ok, {target_forum, moved_topic}}
       else
         _ -> {:error, forum, topic}
       end
@@ -839,12 +803,12 @@ defmodule Philomena.Topics do
 
   @doc """
   Hides the topic named by `topic_slug` within the forum named by `forum_slug`,
-  recording `deletion_reason`, on behalf of `actor` (the acting user).
+  recording `deletion_reason`, on behalf of `actor`.
 
   Write access is verified first, then the parent-scoped topic is authorized
-  for `:hide`. On success
-  the forum post/topic counts are updated, the topic's posts are reindexed, and
-  a moderation log is written attributing the deletion to the actor.
+  for `:hide`. On success the forum post/topic counts are updated, the topic's
+  posts are reindexed, and a moderation log is written attributing the deletion
+  to the actor.
 
   Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` when the hide
   changeset is rejected (e.g. a blank reason, so the caller can still act on it),
@@ -874,22 +838,17 @@ defmodule Philomena.Topics do
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug, action: :hide) do
       case hide_loaded_topic(topic, deletion_reason, actor.user) do
-        {:ok, hidden_topic} ->
-          # The body reads the reason and title off the post-update topic, and
-          # the forum name off the separately loaded forum (the loaded topic
-          # carries no preloaded `:forum`). The log type and body strings are
-          # stored, so keep them exact.
+        {:ok, topic} ->
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Hide:create",
-            Paths.topic_path(forum, hidden_topic),
-            "Deleted topic '#{hidden_topic.title}' (#{hidden_topic.deletion_reason}) in #{forum.name}"
+            Paths.topic_path(forum, topic),
+            "Deleted topic '#{topic.title}' (#{topic.deletion_reason}) in #{forum.name}"
           )
 
-          {:ok, {forum, hidden_topic}}
+          {:ok, {forum, topic}}
 
-        {:error, %Ecto.Changeset{}} ->
-          # The pre-update topic is returned for the caller to reuse.
+        _error ->
           {:error, forum, topic}
       end
     end
@@ -897,7 +856,7 @@ defmodule Philomena.Topics do
 
   @doc """
   Restores the topic named by `topic_slug` within the forum named by
-  `forum_slug`, on behalf of `actor` (the acting user).
+  `forum_slug`, on behalf of `actor`.
 
   Loading and authorization mirror `hide_topic/4` (`:show` on the forum,
   visibility on the topic, then `:hide` on the topic - a moderator can still
@@ -923,18 +882,15 @@ defmodule Philomena.Topics do
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
            load_forum_topic(actor, forum_slug, topic_slug, action: :unhide) do
       case unhide_loaded_topic(topic) do
-        {:ok, restored_topic} ->
-          # Body reads the title off the post-restore topic; forum name off the
-          # separately loaded forum. The log type and body strings are stored,
-          # so keep them exact.
+        {:ok, topic} ->
           ModerationLogs.create_moderation_log(
             actor,
             "Topic.Hide:delete",
-            Paths.topic_path(forum, restored_topic),
-            "Restored topic '#{restored_topic.title}' in #{forum.name}"
+            Paths.topic_path(forum, topic),
+            "Restored topic '#{topic.title}' in #{forum.name}"
           )
 
-          {:ok, {forum, restored_topic}}
+          {:ok, {forum, topic}}
 
         _error ->
           {:error, forum, topic}
@@ -980,7 +936,7 @@ defmodule Philomena.Topics do
         {:ok, updated_topic} ->
           {:ok, {forum, updated_topic}}
 
-        {:error, %Ecto.Changeset{}} ->
+        _error ->
           {:error, forum, topic}
       end
     end
@@ -989,7 +945,7 @@ defmodule Philomena.Topics do
   @doc """
   Hides one loaded topic for permanent user erasure.
 
-  This narrow collaboration service owns the counter, indexing, and visibility
+  This collaboration service owns the counter, indexing, and visibility
   side effects required by `Philomena.Users.Eraser`. It is not a request
   authorization boundary; the erasure workflow has already selected the topic
   and staff user.
@@ -1000,9 +956,9 @@ defmodule Philomena.Topics do
       {:ok, %Topic{hidden_from_users: true}}
 
   """
-  @spec erase_topic(Topic.t(), Philomena.Users.User.t()) ::
+  @spec erase_topic(Topic.t(), User.t()) ::
           {:ok, Topic.t()} | {:error, term()}
-  def erase_topic(%Topic{} = topic, %Philomena.Users.User{} = moderator) do
+  def erase_topic(%Topic{} = topic, %User{} = moderator) do
     hide_loaded_topic(topic, "Site abuse", moderator)
   end
 
@@ -1015,7 +971,7 @@ defmodule Philomena.Topics do
       :ok
 
   """
-  @spec clear_topic_notification(Topic.t(), Philomena.Users.User.t() | nil) :: :ok
+  @spec clear_topic_notification(Topic.t(), User.t() | nil) :: :ok
   def clear_topic_notification(%Topic{} = topic, user) do
     Notifications.clear_forum_post(topic, user)
     Notifications.clear_forum_topic(topic, user)
