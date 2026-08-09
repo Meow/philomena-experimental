@@ -89,9 +89,6 @@ defmodule Philomena.Comments do
   defp moderation_changeset(:destroy, comment, _attrs, _user),
     do: Comment.destroy_changeset(comment)
 
-  defp moderation_changeset(:approve, comment, _attrs, _user),
-    do: Comment.approve_changeset(comment)
-
   defp moderation_log(:hide, comment, changeset) do
     reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
 
@@ -106,9 +103,6 @@ defmodule Philomena.Comments do
 
   defp moderation_log(:destroy, comment, _changeset),
     do: {"Image.Comment.Delete:create", "Destroyed comment on image #{comment.image_id}"}
-
-  defp moderation_log(:approve, comment, _changeset),
-    do: {"Image.Comment.Approve:create", "Approved comment on image #{comment.image_id}"}
 
   defp put_moderation_effects(multi, :hide, comment, %Actor{user: user}) do
     Reports.put_close_reports(multi, :reports, user, comment_id: comment.id)
@@ -125,18 +119,6 @@ defmodule Philomena.Comments do
     |> Multi.run(:statistics, fn _repo, _changes ->
       UserStatistics.increment(comment.user_id, :comments_count, -1)
     end)
-  end
-
-  defp put_moderation_effects(multi, :approve, comment, %Actor{user: user}) do
-    multi = Reports.put_close_reports(multi, :reports, user, comment_id: comment.id)
-
-    if comment.approved do
-      multi
-    else
-      Multi.run(multi, :statistics, fn _repo, _changes ->
-        UserStatistics.increment(comment.user_id, :comments_count)
-      end)
-    end
   end
 
   defp persist_moderation(%Actor{} = actor, %Comment{} = comment, operation, attrs \\ %{}) do
@@ -911,8 +893,7 @@ defmodule Philomena.Comments do
   Approves a comment scoped beneath `image_id`.
 
   Approval, report closure, author statistics, and the moderation log commit
-  together. Repeated approval remains idempotent and does not increment author
-  statistics again.
+  together.
 
   ## Examples
 
@@ -922,10 +903,31 @@ defmodule Philomena.Comments do
   """
   @spec approve_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
-  def approve_comment(%Actor{} = actor, image_id, comment_id) do
+  def approve_comment(%Actor{user: user} = actor, image_id, comment_id) do
     with {:ok, {_image, comment}} <-
            load_image_comment(actor, image_id, comment_id, :approve, [], @display_preloads) do
-      persist_moderation(actor, comment, :approve)
+      changeset = Comment.approve_changeset(comment)
+
+      Multi.new()
+      |> Multi.update(:comment, changeset)
+      |> Reports.put_close_reports(:reports, user, comment_id: comment.id)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Image.Comment.Approve:create",
+        Paths.image_comment_path(comment.image_id, comment.id),
+        "Approved comment on image #{comment.image_id}"
+      )
+      |> Repo.transact()
+      |> case do
+        {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
+          UserStatistics.increment(comment.user_id, :comments_count)
+          Reports.reindex_closed_reports(report_ids)
+          {:ok, comment}
+
+        {:error, _step, reason, _changes} ->
+          {:error, reason}
+      end
     end
   end
 

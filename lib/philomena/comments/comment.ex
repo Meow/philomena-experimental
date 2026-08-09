@@ -72,7 +72,17 @@ defmodule Philomena.Comments.Comment do
   end
 
   def approve_changeset(comment) do
-    change(comment)
+    comment
+    |> change()
+    |> validate_unapproved()
     |> put_change(:approved, true)
+  end
+
+  defp validate_unapproved(changeset) do
+    if get_field(changeset, :approved) do
+      add_error(changeset, :approved, "is already approved")
+    else
+      changeset
+    end
   end
 end

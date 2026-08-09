@@ -74,7 +74,7 @@ defmodule PhilomenaWeb.Image.Comment.ApproveControllerTest do
 
       conn = post(conn, ~p"/images/#{image}/comments/#{comment}/approve")
 
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Comment has been approved."
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Comment has already been approved."
       assert Repo.reload!(comment).approved
     end
 

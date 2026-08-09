@@ -358,28 +358,23 @@ defmodule Philomena.CommentsTest do
       assert closed.state == "closed"
     end
 
-    # Repeated approval remains idempotent and is still audited, but does not
-    # increment the author's count a second time.
-    test "approving an already-approved comment succeeds and logs again", %{image: image} do
+    # Repeated approval fails and does not increment the author's count a second time.
+    test "approving an already-approved comment fails", %{image: image} do
       author = confirmed_user_fixture()
       comment = comment_fixture(image, author, %{"body" => "A perfectly ordinary comment"})
       assert comment.approved
 
       before = Repo.get!(User, author.id).comments_count
 
-      assert {:ok, %Comment{} = approved} =
+      assert {:error, _changeset} =
                Comments.approve_comment(
                  actor(moderator_user_fixture()),
                  "#{image.id}",
                  "#{comment.id}"
                )
 
-      assert approved.approved
       assert Repo.get!(User, author.id).comments_count == before
-
-      log = Repo.one!(ModerationLog)
-      assert log.type == "Image.Comment.Approve:create"
-      assert log.body == "Approved comment on image #{image.id}"
+      refute Repo.exists?(ModerationLog)
     end
 
     test "a well-formed id naming no row is not found", %{image: image} do
