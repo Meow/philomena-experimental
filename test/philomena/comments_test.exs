@@ -16,6 +16,7 @@ defmodule Philomena.CommentsTest do
 
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
+  import Philomena.FiltersFixtures
   import Philomena.ImagesFixtures
   import Philomena.ReportsFixtures
   import Philomena.UsersFixtures
@@ -267,6 +268,14 @@ defmodule Philomena.CommentsTest do
 
   defp no_moderation_logs! do
     assert Repo.aggregate(ModerationLog, :count) == 0
+  end
+
+  defp force_filter_for_image(user, image) do
+    filter = system_filter_fixture(hidden_complex_str: "id:#{image.id}")
+
+    user
+    |> Ecto.Changeset.change(forced_filter_id: filter.id)
+    |> Repo.update!()
   end
 
   describe "approve_comment/3" do
@@ -918,6 +927,15 @@ defmodule Philomena.CommentsTest do
       assert Comments.create_comment(actor, image, %{"body" => "Hi"}) == {:error, :ban}
     end
 
+    test "a forced-filter match is rejected before inserting", %{image: image} do
+      user = force_filter_for_image(confirmed_user_fixture(), image)
+
+      assert Comments.create_comment(actor(user), image, %{"body" => "Blocked"}) ==
+               {:error, :forced_filter}
+
+      assert Repo.aggregate(Comment, :count) == 0
+    end
+
     test "an actor with no fingerprint is unauthorized, signed in or not", %{image: image} do
       signed_in = actor(confirmed_user_fixture(), fingerprint: nil)
       anonymous = actor(nil, fingerprint: nil)
@@ -1062,6 +1080,15 @@ defmodule Philomena.CommentsTest do
       assert form.changeset.data.id == comment.id
     end
 
+    test "the edit form rejects an image matching the author's forced filter", %{image: image} do
+      user = confirmed_user_fixture()
+      comment = comment_fixture(image, user)
+      user = force_filter_for_image(user, image)
+
+      assert Comments.load_comment_for_edit(actor(user), image, comment.id) ==
+               {:error, :forced_filter}
+    end
+
     test "another regular user cannot load the form", %{image: image} do
       comment = comment_fixture(image, confirmed_user_fixture())
 
@@ -1130,6 +1157,17 @@ defmodule Philomena.CommentsTest do
       assert reloaded.body == "Original comment body plus an edit"
       assert reloaded.edited_at != nil
       no_moderation_logs!()
+    end
+
+    test "a forced-filter match prevents an update", %{image: image} do
+      user = confirmed_user_fixture()
+      comment = comment_fixture(image, user, %{"body" => "Original"})
+      user = force_filter_for_image(user, image)
+
+      assert Comments.update_comment(actor(user), image, comment.id, %{"body" => "Changed"}) ==
+               {:error, :forced_filter}
+
+      assert Repo.reload!(comment).body == "Original"
     end
 
     test "another regular user cannot edit, leaving the body unchanged", %{image: image} do

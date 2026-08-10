@@ -29,6 +29,7 @@ defmodule Philomena.ImagesTest do
   alias PhilomenaQuery.SearchHelpers
 
   import Philomena.GalleriesFixtures
+  import Philomena.FiltersFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
@@ -130,6 +131,20 @@ defmodule Philomena.ImagesTest do
 
   defp vote_row(image, user) do
     Repo.get_by(ImageVote, image_id: image.id, user_id: user.id)
+  end
+
+  defp force_filter(user, attrs) do
+    filter =
+      system_filter_fixture()
+      |> Ecto.Changeset.change(attrs)
+      |> Repo.update!()
+
+    user =
+      user
+      |> Ecto.Changeset.change(forced_filter_id: filter.id)
+      |> Repo.update!()
+
+    {user, filter}
   end
 
   defp source_change_row_count(image) do
@@ -3038,66 +3053,58 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "load_image_for_interaction/2" do
-    test "a signed-in actor loads a visible image with sources and tags preloaded" do
-      user = confirmed_user_fixture()
-      image = image_fixture()
+  describe "image interaction prerequisites" do
+    test "normalizes write-access and image-loading failures in the owning actions" do
+      assert Images.create_fave(
+               actor(confirmed_user_fixture(), ban: @ban),
+               "not-a-number"
+             ) == {:error, :ban}
 
-      assert {:ok, loaded} = Images.load_image_for_interaction(actor(user), to_string(image.id))
-      assert loaded.id == image.id
-      assert Ecto.assoc_loaded?(loaded.sources)
-      assert Ecto.assoc_loaded?(loaded.tags)
-    end
+      assert Images.create_fave(
+               actor(confirmed_user_fixture(), fingerprint: nil),
+               "not-a-number"
+             ) == {:error, :unauthorized}
 
-    test "accepts an integer id" do
-      user = confirmed_user_fixture()
-      image = image_fixture()
+      assert Images.create_fave(actor(confirmed_user_fixture()), "not-a-number") ==
+               {:error, :not_found}
 
-      assert {:ok, loaded} = Images.load_image_for_interaction(actor(user), image.id)
-      assert loaded.id == image.id
-    end
+      assert Images.create_fave(actor(confirmed_user_fixture()), "2147483647") ==
+               {:error, :unauthorized}
 
-    test "a banned actor is rejected before any loading, even with a garbage id" do
-      actor = actor(confirmed_user_fixture(), ban: @ban)
-
-      assert Images.load_image_for_interaction(actor, "not-a-number") == {:error, :ban}
-    end
-
-    test "an actor with no fingerprint is unauthorized before any loading" do
-      actor = actor(confirmed_user_fixture(), fingerprint: nil)
-
-      assert Images.load_image_for_interaction(actor, "not-a-number") == {:error, :unauthorized}
-    end
-
-    test "a non-castable id is not found" do
-      assert Images.load_image_for_interaction(actor(confirmed_user_fixture()), "not-a-number") ==
+      assert Images.create_fave(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
-    test "an out-of-range id is not found" do
-      assert Images.load_image_for_interaction(
-               actor(confirmed_user_fixture()),
-               "99999999999999999999"
-             ) == {:error, :not_found}
+    test "the Images-owned service enforces complex forced filters" do
+      image = image_fixture()
+      other_image = image_fixture()
+
+      {user, _filter} =
+        force_filter(confirmed_user_fixture(), hidden_complex_str: "id:#{image.id}")
+
+      assert Images.verify_forced_filter_access(actor(user), image) ==
+               {:error, :forced_filter}
+
+      assert Images.verify_forced_filter_access(actor(user), other_image) == :ok
     end
 
-    test "an unknown well-formed id is unauthorized for a regular actor" do
-      # The image loads as nil and a regular actor fails :vote on the nil load, so
-      # the missing image surfaces as unauthorized.
-      assert Images.load_image_for_interaction(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
-    end
+    test "fave and vote creates and deletes all enforce forced hidden tags" do
+      image = image_fixture(tags: "safe")
+      [tag] = image.tags
+      user = confirmed_user_fixture()
 
-    test "an unknown well-formed id is unauthorized for a moderator" do
-      assert Images.load_image_for_interaction(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
-    end
+      fave!(image, user)
+      vote!(image, user, true)
+      {user, _filter} = force_filter(user, hidden_tag_ids: [tag.id])
+      actor = actor(user)
 
-    test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :vote on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
-      assert Images.load_image_for_interaction(actor(admin_user_fixture()), "2147483647") ==
-               {:error, :not_found}
+      assert Images.create_fave(actor, image.id) == {:error, :forced_filter}
+      assert Images.delete_fave(actor, image.id) == {:error, :forced_filter}
+      assert Images.create_vote(actor, image.id, false) == {:error, :forced_filter}
+      assert Images.delete_vote(actor, image.id) == {:error, :forced_filter}
+
+      assert fave_count(image, user) == 1
+      assert %ImageVote{up: true} = vote_row(image, user)
     end
   end
 
@@ -3108,7 +3115,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_faves = Repo.reload!(image).faves_count
 
-      assert {:ok, faved} = Images.create_fave(image, actor(user))
+      assert {:ok, faved} = Images.create_fave(actor(user), image.id)
       assert faved.id == image.id
       assert faved.faves_count == base_faves + 1
       assert faved.score == base_score + 1
@@ -3125,7 +3132,7 @@ defmodule Philomena.ImagesTest do
       vote!(image, user, false)
       assert %ImageVote{up: false} = vote_row(image, user)
 
-      assert {:ok, faved} = Images.create_fave(image, actor(user))
+      assert {:ok, faved} = Images.create_fave(actor(user), image.id)
       assert %ImageVote{up: true} = vote_row(image, user)
       assert faved.score == base_score + 1
     end
@@ -3135,8 +3142,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       base_faves = Repo.reload!(image).faves_count
 
-      assert {:ok, _} = Images.create_fave(image, actor(user))
-      assert {:ok, again} = Images.create_fave(image, actor(user))
+      assert {:ok, _} = Images.create_fave(actor(user), image.id)
+      assert {:ok, again} = Images.create_fave(actor(user), image.id)
 
       assert fave_count(image, user) == 1
       assert again.faves_count == base_faves + 1
@@ -3150,10 +3157,10 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_faves = Repo.reload!(image).faves_count
 
-      {:ok, faved} = Images.create_fave(image, actor(user))
+      {:ok, faved} = Images.create_fave(actor(user), image.id)
       assert fave_count(image, user) == 1
 
-      assert {:ok, unfaved} = Images.delete_fave(image, actor(user))
+      assert {:ok, unfaved} = Images.delete_fave(actor(user), image.id)
       assert unfaved.id == image.id
       assert fave_count(image, user) == 0
       assert unfaved.faves_count == base_faves
@@ -3169,7 +3176,7 @@ defmodule Philomena.ImagesTest do
       base_faves = Repo.reload!(image).faves_count
       assert fave_count(image, user) == 0
 
-      assert {:ok, unfaved} = Images.delete_fave(image, actor(user))
+      assert {:ok, unfaved} = Images.delete_fave(actor(user), image.id)
       assert unfaved.id == image.id
       assert fave_count(image, user) == 0
       assert unfaved.faves_count == base_faves
@@ -3183,7 +3190,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_upvotes = Repo.reload!(image).upvotes_count
 
-      assert {:ok, voted} = Images.create_vote(image, actor(user), true)
+      assert {:ok, voted} = Images.create_vote(actor(user), image.id, true)
       assert voted.id == image.id
       assert voted.score == base_score + 1
       assert voted.upvotes_count == base_upvotes + 1
@@ -3196,7 +3203,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_downvotes = Repo.reload!(image).downvotes_count
 
-      assert {:ok, voted} = Images.create_vote(image, actor(user), false)
+      assert {:ok, voted} = Images.create_vote(actor(user), image.id, false)
       assert voted.score == base_score - 1
       assert voted.downvotes_count == base_downvotes + 1
       assert %ImageVote{up: false} = vote_row(image, user)
@@ -3213,7 +3220,7 @@ defmodule Philomena.ImagesTest do
       assert %ImageVote{up: false} = vote_row(image, user)
       assert Repo.reload!(image).score == base_score - 1
 
-      assert {:ok, voted} = Images.create_vote(image, actor(user), true)
+      assert {:ok, voted} = Images.create_vote(actor(user), image.id, true)
       # get_by raises on more than one row, so a returned struct confirms a
       # single vote row survived the flip.
       assert %ImageVote{up: true} = vote_row(image, user)
@@ -3226,9 +3233,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
       base_score = Repo.reload!(image).score
-      {:ok, _} = Images.create_vote(image, actor(user), true)
+      {:ok, _} = Images.create_vote(actor(user), image.id, true)
 
-      assert {:ok, unvoted} = Images.delete_vote(image, actor(user))
+      assert {:ok, unvoted} = Images.delete_vote(actor(user), image.id)
       assert unvoted.id == image.id
       assert vote_row(image, user) == nil
       assert unvoted.score == base_score
@@ -3240,7 +3247,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       vote!(image, user, false)
 
-      assert {:ok, unvoted} = Images.delete_vote(image, actor(user))
+      assert {:ok, unvoted} = Images.delete_vote(actor(user), image.id)
       assert vote_row(image, user) == nil
       assert unvoted.score == base_score
     end
@@ -3251,7 +3258,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       refute has_vote?(image, user)
 
-      assert {:ok, unvoted} = Images.delete_vote(image, actor(user))
+      assert {:ok, unvoted} = Images.delete_vote(actor(user), image.id)
       assert unvoted.id == image.id
       assert unvoted.score == base_score
       refute has_vote?(image, user)

@@ -9,8 +9,6 @@ defmodule PhilomenaWeb.Image.CommentController do
 
   plug :load_commentable_image when action in [:index, :show, :create, :edit, :update]
 
-  plug PhilomenaWeb.FilterForcedUsersPlug when action in [:create, :edit, :update]
-
   def index(conn, %{"comment_id" => comment_id}) do
     with {:ok, page} <-
            Comments.find_comment_page(
@@ -101,9 +99,8 @@ defmodule PhilomenaWeb.Image.CommentController do
     end
   end
 
-  # Loads and authorizes the commented-on image into `:image` for the action's
-  # ability, so the forced-filter check and the comment pages have it available.
-  # A load or authorization failure renders the global error and halts.
+  # Loads and authorizes the commented-on image for rendering. Write actions
+  # enforce the Images-owned forced-filter prerequisite inside Comments.
   defp load_commentable_image(conn, _opts) do
     case Comments.load_commentable_image(
            conn.assigns.actor,

@@ -267,25 +267,7 @@ defmodule PhilomenaWeb.ImageView do
   defp thumb_format(format, _name, _download), do: format
 
   def image_filter_data(image) do
-    %{
-      id: image.id,
-      tags: image.tags |> Enum.flat_map(&([&1] ++ &1.aliases)) |> Enum.map_join(", ", & &1.name),
-      tag_count: length(image.tags),
-      score: image.score,
-      faves: image.faves_count,
-      upvotes: image.upvotes_count,
-      downvotes: image.downvotes_count,
-      comment_count: image.comments_count,
-      created_at: image.created_at,
-      first_seen_at: image.first_seen_at,
-      source_url: image.source_url,
-      width: image.image_width,
-      height: image.image_height,
-      aspect_ratio: image.image_aspect_ratio,
-      sha512_hash: image.image_sha512_hash,
-      orig_sha512_hash: image.image_orig_sha512_hash,
-      description: image.description
-    }
+    Philomena.Images.Filtering.document(image)
   end
 
   def filter_or_spoiler_hits?(conn, image) do

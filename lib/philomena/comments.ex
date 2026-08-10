@@ -36,7 +36,7 @@ defmodule Philomena.Comments do
   @search_preloads [:deleted_by, image: @image_preloads, user: [awards: :badge]]
 
   @typedoc "A normalized request-facing failure."
-  @type request_error :: :ban | :unauthorized | :not_found
+  @type request_error :: :ban | :unauthorized | :not_found | :forced_filter
 
   defp persist_comment(%Image{} = image, %Actor{} = actor, attrs) do
     comment =
@@ -156,7 +156,8 @@ defmodule Philomena.Comments do
   end
 
   defp load_editable_comment(%Actor{} = actor, image, comment_id, action) do
-    with :ok <- authorize(actor, :create_comment, image) do
+    with :ok <- authorize(actor, :create_comment, image),
+         :ok <- Images.verify_forced_filter_access(actor, image) do
       load_comment_in_image(actor, image, comment_id, action, @display_preloads)
     end
   end
@@ -546,10 +547,11 @@ defmodule Philomena.Comments do
   @doc """
   Creates a comment beneath an authorized `image` on behalf of `actor`.
 
-  Write access, image commenting permission, and the 15-second creation limit
-  are checked before insertion. The transaction updates the image count,
-  notification, and subscription state. Indexing, statistics/reporting, rate
-  tracking, and the firehose broadcast run after commit.
+  Write access, image commenting permission, the Images-owned forced-filter
+  prerequisite, and the 15-second creation limit are checked before insertion.
+  The transaction updates the image count, notification, and subscription state.
+  Indexing, statistics/reporting, rate tracking, and the firehose broadcast run
+  after commit.
 
   ## Examples
 
@@ -562,10 +564,11 @@ defmodule Philomena.Comments do
   """
   @spec create_comment(Actor.t(), Image.t(), map()) ::
           {:ok, Comment.t()}
-          | {:error, :creation_failed | :ban | :unauthorized | :rate_limited}
+          | {:error, :creation_failed | :ban | :unauthorized | :forced_filter | :rate_limited}
   def create_comment(%Actor{} = actor, %Image{} = image, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create_comment, image),
+         :ok <- Images.verify_forced_filter_access(actor, image),
          :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
       case persist_comment(image, actor, params) do
         {:ok, %{comment: comment}} ->
@@ -607,8 +610,8 @@ defmodule Philomena.Comments do
   @doc """
   Loads an editable comment and changeset beneath `image`.
 
-  Write access is checked before image and comment authorization, matching the
-  update path exactly.
+  Write access is checked before image authorization, forced-filter enforcement,
+  and comment authorization, matching the update path exactly.
 
   ## Examples
 
@@ -631,10 +634,10 @@ defmodule Philomena.Comments do
   @doc """
   Updates a parent-scoped comment on behalf of `actor`.
 
-  The write-access and parent permissions match the edit form. A successful
-  transaction records the prior version. Reporting, indexing, and the firehose
-  broadcast run after commit. Validation returns a `CommentForm` preserving the
-  loaded comment.
+  The write-access, parent permission, and forced-filter prerequisites match the
+  edit form. A successful transaction records the prior version. Reporting,
+  indexing, and the firehose broadcast run after commit. Validation returns a
+  `CommentForm` preserving the loaded comment.
 
   ## Examples
 

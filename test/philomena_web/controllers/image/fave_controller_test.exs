@@ -3,6 +3,7 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
   use PhilomenaWeb.SingletonToggleTests
 
   import Ecto.Query
+  import Philomena.FiltersFixtures
   import Philomena.ImagesFixtures
 
   alias Philomena.ImageFaves
@@ -63,6 +64,25 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
              }
 
       assert %ImageVote{up: true} = vote(image, user)
+    end
+
+    test "a forced-filter match redirects without recording a fave", %{conn: conn, user: user} do
+      image = image_fixture()
+      filter = system_filter_fixture(hidden_complex_str: "id:#{image.id}")
+
+      user
+      |> Ecto.Changeset.change(forced_filter_id: filter.id)
+      |> Repo.update!()
+
+      conn = post(conn, ~p"/images/#{image}/fave")
+
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "You have been blocked from performing this action on this image."
+
+      refute fave(image, user)
+      refute vote(image, user)
     end
   end
 

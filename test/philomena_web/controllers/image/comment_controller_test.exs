@@ -3,6 +3,7 @@ defmodule PhilomenaWeb.Image.CommentControllerTest do
 
   import Ecto.Query
   import Philomena.CommentsFixtures
+  import Philomena.FiltersFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
 
@@ -162,6 +163,28 @@ defmodule PhilomenaWeb.Image.CommentControllerTest do
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You are currently banned"
+    end
+
+    test "a forced-filter match redirects without creating a comment", %{conn: conn} do
+      %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
+      image = image_fixture()
+      filter = system_filter_fixture(hidden_complex_str: "id:#{image.id}")
+
+      user
+      |> Ecto.Changeset.change(forced_filter_id: filter.id)
+      |> Repo.update!()
+
+      conn =
+        post(conn, ~p"/images/#{image}/comments", %{
+          "comment" => %{"body" => "Should not appear"}
+        })
+
+      assert redirected_to(conn) == "/"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "You have been blocked from performing this action on this image."
+
+      assert Repo.aggregate(Comment, :count) == 0
     end
   end
 

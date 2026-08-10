@@ -226,7 +226,10 @@ Wave 2 is complete.
   database-side counting and pagination. Creation and updates own firehose
   broadcasts; moderation combines the mutation, report closure, counters, and
   audit log in one transaction with indexing after commit. User erasure has a
-  narrow owned service, and raw loaded-record CRUD is no longer public.
+  narrow owned service, and raw loaded-record CRUD is no longer public. As a
+  wave 4 prerequisite, comment create/edit/update and image fave/vote actions
+  now enforce forced filters through Images-owned filtering; the controller
+  plug and its required `conn.assigns.image` convention are gone.
 
 Wave 3 is complete.
 

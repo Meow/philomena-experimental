@@ -4,31 +4,30 @@ defmodule PhilomenaWeb.Image.VoteController do
   alias Philomena.Images.Image
   alias Philomena.Images
 
-  plug :load_interaction_image
-  plug PhilomenaWeb.FilterForcedUsersPlug
+  action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, params) do
-    case parse_up(params["up"]) do
-      {:ok, up} ->
-        case Images.create_vote(conn.assigns.image, conn.assigns.actor, up) do
-          {:ok, image} ->
-            json(conn, Image.interaction_data(image))
+  def create(conn, %{"image_id" => image_id} = params) do
+    case Images.create_vote(conn.assigns.actor, image_id, params["up"]) do
+      {:ok, image} ->
+        json(conn, Image.interaction_data(image))
 
-          {:error, :interaction_failed} ->
-            conn
-            |> put_status(409)
-            |> json(%{})
-        end
-
-      :error ->
+      {:error, :invalid_vote} ->
         conn
         |> put_status(400)
         |> json(%{})
+
+      {:error, :interaction_failed} ->
+        conn
+        |> put_status(409)
+        |> json(%{})
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  def delete(conn, _params) do
-    case Images.delete_vote(conn.assigns.image, conn.assigns.actor) do
+  def delete(conn, %{"image_id" => image_id}) do
+    case Images.delete_vote(conn.assigns.actor, image_id) do
       {:ok, image} ->
         json(conn, Image.interaction_data(image))
 
@@ -36,24 +35,9 @@ defmodule PhilomenaWeb.Image.VoteController do
         conn
         |> put_status(409)
         |> json(%{})
+
+      {:error, _reason} = error ->
+        error
     end
   end
-
-  # Loads and authorizes the image (and rejects banned actors) before the
-  # forced-filter check, which needs the image with its tags preloaded.
-  defp load_interaction_image(conn, _opts) do
-    case Images.load_image_for_interaction(conn.assigns.actor, conn.params["image_id"]) do
-      {:ok, image} ->
-        assign(conn, :image, image)
-
-      error ->
-        conn
-        |> PhilomenaWeb.FallbackController.call(error)
-        |> halt()
-    end
-  end
-
-  defp parse_up(up) when up in [true, "true"], do: {:ok, true}
-  defp parse_up(up) when up in [false, "false"], do: {:ok, false}
-  defp parse_up(_up), do: :error
 end

@@ -18,6 +18,7 @@ defmodule Philomena.Images do
   alias Philomena.ImagePurgeWorker
   alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.Images.Image
+  alias Philomena.Images.Filtering
   alias Philomena.Images.Uploader
   alias Philomena.Images.Tagging
   alias Philomena.Images.Thumbnailer
@@ -3384,133 +3385,157 @@ defmodule Philomena.Images do
     end
   end
 
+  defp parse_vote(up) when up in [true, "true"], do: {:ok, true}
+  defp parse_vote(up) when up in [false, "false"], do: {:ok, false}
+  defp parse_vote(_up), do: {:error, :invalid_vote}
+
   defp hide_result({:ok, _changes}, image), do: {:ok, get_image!(image.id) |> reindex_image()}
   defp hide_result(_error, _image), do: {:error, :hide_failed}
 
-  @doc """
-  Loads the image named by `image_id` for a fave or vote interaction by `actor`,
-  with the sources and tags preloaded that the forced-filter check needs.
-
-  Banned actors are rejected first with `{:error, :ban}` (a write with no
-  fingerprint is `{:error, :unauthorized}`), before the image is loaded. The
-  image is then loaded by id and authorized for `:vote`. A non-castable or
-  out-of-range id is `{:error, :not_found}`; a well-formed but unknown id is
-  authorized as a `nil` load, normally `{:error, :unauthorized}`.
-
-  Returns `{:ok, image}`. Shared by the fave and vote paths, which run the
-  forced-filter check on the result.
-
-  ## Examples
-
-      iex> load_image_for_interaction(actor, "42")
-      {:ok, %Image{}}
-
-  """
-  @spec load_image_for_interaction(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_image_for_interaction(actor, image_id) do
+  defp load_image_for_interaction(actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, id} <- IntegerId.parse(image_id),
          image = Repo.get(preload(Image, [:sources, tags: :aliases]), id),
          :ok <- authorize(actor, :vote, image),
-         %Image{} <- image do
+         %Image{} <- image,
+         :ok <- Filtering.verify_not_forced(actor, image) do
       {:ok, image}
     else
       {:error, :ban} -> {:error, :ban}
       {:error, :unauthorized} -> {:error, :unauthorized}
+      {:error, :forced_filter} -> {:error, :forced_filter}
       # Non-castable id, or a `nil` load the actor was permitted to act on.
       shape when shape in [:error, nil] -> {:error, :not_found}
     end
   end
 
   @doc """
-  Records `actor`'s fave of the already-loaded `image`, which also casts an
-  implicit upvote (replacing an existing downvote). Faving is idempotent.
+  Verifies the Images-owned forced-filter prerequisite for a loaded image.
 
-  The image must already be loaded and authorized, with the forced-filter check
-  already run. Returns `{:ok, image}` with the image
-  reloaded and reindexed, or `{:error, :interaction_failed}` if the transaction
-  is rolled back.
+  This narrow cross-context service is used by comment actions after image
+  authorization succeeds. Controllers must call their owning action instead.
 
   ## Examples
 
-      iex> create_fave(image, actor)
-      {:ok, %Image{}}
+      iex> verify_forced_filter_access(actor, image)
+      :ok
 
   """
-  @spec create_fave(Image.t(), Actor.t()) :: {:ok, Image.t()} | {:error, :interaction_failed}
-  def create_fave(%Image{} = image, %Actor{user: user}) do
-    ImageFaves.delete_fave_transaction(image, user)
-    |> Multi.append(ImageFaves.create_fave_transaction(image, user))
-    |> Multi.append(ImageVotes.delete_vote_transaction(image, user))
-    |> Multi.append(ImageVotes.create_vote_transaction(image, user, true))
-    |> Repo.transaction()
-    |> interaction_result(image)
+  @spec verify_forced_filter_access(Actor.t(), Image.t()) ::
+          :ok | {:error, :forced_filter}
+  def verify_forced_filter_access(%Actor{} = actor, %Image{} = image) do
+    Filtering.verify_not_forced(actor, image)
   end
 
   @doc """
-  Removes `actor`'s fave of the already-loaded `image`, leaving any upvote in
-  place. Unfaving is idempotent.
+  Records `actor`'s fave of `image_id`, which also casts an implicit upvote
+  (replacing an existing downvote). Faving is idempotent.
+
+  Write access, image authorization, and forced-filter enforcement happen before
+  the transaction.
+
+  ## Examples
+
+      iex> create_fave(actor, "42")
+      {:ok, %Image{}}
+
+  """
+  @spec create_fave(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Image.t()}
+          | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
+  def create_fave(%Actor{user: user} = actor, image_id) do
+    with {:ok, image} <- load_image_for_interaction(actor, image_id) do
+      ImageFaves.delete_fave_transaction(image, user)
+      |> Multi.append(ImageFaves.create_fave_transaction(image, user))
+      |> Multi.append(ImageVotes.delete_vote_transaction(image, user))
+      |> Multi.append(ImageVotes.create_vote_transaction(image, user, true))
+      |> Repo.transaction()
+      |> interaction_result(image)
+    end
+  end
+
+  @doc """
+  Removes `actor`'s fave of `image_id`, leaving any upvote in place. Unfaving is
+  idempotent and enforces the same prerequisites as `create_fave/2`.
 
   Returns `{:ok, image}` with the image reloaded and reindexed, or
   `{:error, :interaction_failed}` if the transaction is rolled back.
 
   ## Examples
 
-      iex> delete_fave(image, actor)
+      iex> delete_fave(actor, "42")
       {:ok, %Image{}}
 
   """
-  @spec delete_fave(Image.t(), Actor.t()) :: {:ok, Image.t()} | {:error, :interaction_failed}
-  def delete_fave(%Image{} = image, %Actor{user: user}) do
-    image
-    |> ImageFaves.delete_fave_transaction(user)
-    |> Repo.transaction()
-    |> interaction_result(image)
+  @spec delete_fave(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Image.t()}
+          | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
+  def delete_fave(%Actor{user: user} = actor, image_id) do
+    with {:ok, image} <- load_image_for_interaction(actor, image_id) do
+      image
+      |> ImageFaves.delete_fave_transaction(user)
+      |> Repo.transaction()
+      |> interaction_result(image)
+    end
   end
 
   @doc """
-  Records `actor`'s vote on the already-loaded `image` - an upvote when `up` is
-  true, a downvote when false - replacing any existing vote. Voting is idempotent.
+  Records `actor`'s vote on `image_id`—an upvote when `up` is `true` or
+  `"true"`, and a downvote when it is `false` or `"false"`—replacing any
+  existing vote. Other values return `{:error, :invalid_vote}`. Voting is
+  idempotent.
 
-  The image must already be loaded and authorized, with the forced-filter check
-  already run. Returns `{:ok, image}` with the image
-  reloaded and reindexed, or `{:error, :interaction_failed}` if the transaction
-  is rolled back.
+  Write access, image authorization, and forced-filter enforcement happen before
+  the transaction.
 
   ## Examples
 
-      iex> create_vote(image, actor, true)
+      iex> create_vote(actor, "42", true)
       {:ok, %Image{}}
 
   """
-  @spec create_vote(Image.t(), Actor.t(), boolean()) ::
-          {:ok, Image.t()} | {:error, :interaction_failed}
-  def create_vote(%Image{} = image, %Actor{user: user}, up) do
-    ImageVotes.delete_vote_transaction(image, user)
-    |> Multi.append(ImageVotes.create_vote_transaction(image, user, up))
-    |> Repo.transaction()
-    |> interaction_result(image)
+  @spec create_vote(Actor.t(), IntegerId.integer_id(), term()) ::
+          {:ok, Image.t()}
+          | {:error,
+             :ban
+             | :unauthorized
+             | :not_found
+             | :forced_filter
+             | :invalid_vote
+             | :interaction_failed}
+  def create_vote(%Actor{user: user} = actor, image_id, up) do
+    with {:ok, image} <- load_image_for_interaction(actor, image_id),
+         {:ok, up} <- parse_vote(up) do
+      ImageVotes.delete_vote_transaction(image, user)
+      |> Multi.append(ImageVotes.create_vote_transaction(image, user, up))
+      |> Repo.transaction()
+      |> interaction_result(image)
+    end
   end
 
   @doc """
-  Removes `actor`'s vote on the already-loaded `image`. Unvoting is idempotent.
+  Removes `actor`'s vote on `image_id`. Unvoting is idempotent and enforces the
+  same prerequisites as `create_vote/3`.
 
   Returns `{:ok, image}` with the image reloaded and reindexed, or
   `{:error, :interaction_failed}` if the transaction is rolled back.
 
   ## Examples
 
-      iex> delete_vote(image, actor)
+      iex> delete_vote(actor, "42")
       {:ok, %Image{}}
 
   """
-  @spec delete_vote(Image.t(), Actor.t()) :: {:ok, Image.t()} | {:error, :interaction_failed}
-  def delete_vote(%Image{} = image, %Actor{user: user}) do
-    image
-    |> ImageVotes.delete_vote_transaction(user)
-    |> Repo.transaction()
-    |> interaction_result(image)
+  @spec delete_vote(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Image.t()}
+          | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
+  def delete_vote(%Actor{user: user} = actor, image_id) do
+    with {:ok, image} <- load_image_for_interaction(actor, image_id) do
+      image
+      |> ImageVotes.delete_vote_transaction(user)
+      |> Repo.transaction()
+      |> interaction_result(image)
+    end
   end
 
   defp interaction_result({:ok, _changes}, image),
