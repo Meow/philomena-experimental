@@ -4,8 +4,7 @@ defmodule Philomena.Forums.Visibility do
 
   These scopes intentionally mirror the `:show` rules in
   `Philomena.Users.Ability`. Collection endpoints use them before counting and
-  pagination so authorization cost is bounded by the requested page. Member
-  endpoints continue to authorize loaded records through Canada.
+  pagination so authorization cost is bounded by the requested page.
   """
 
   import Ecto.Query, warn: false

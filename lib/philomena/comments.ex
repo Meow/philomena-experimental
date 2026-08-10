@@ -34,7 +34,7 @@ defmodule Philomena.Comments do
   @display_preloads [:deleted_by, user: [awards: :badge]]
   @search_preloads [:deleted_by, image: [:sources, tags: :aliases], user: [awards: :badge]]
 
-  @typedoc "A normalized request-facing Comments failure."
+  @typedoc "A normalized request-facing failure."
   @type request_error :: :ban | :unauthorized | :not_found
 
   defp persist_comment(%Image{} = image, %Actor{} = actor, attrs) do
@@ -339,7 +339,7 @@ defmodule Philomena.Comments do
   @doc """
   Builds the blank comment changeset used while assembling an image page.
 
-  This is a narrow cross-context form service; authorization of the containing
+  This is a cross-context form builder. Authorization of the containing
   image page remains with `Philomena.Images`.
 
   ## Examples
@@ -377,7 +377,7 @@ defmodule Philomena.Comments do
 
   Hidden images, hidden or destroyed comments, and approval states are filtered
   independently through the actor's abilities. A signed-in author may see their
-  own unapproved comment. `opts[:preload]` overrides the display associations.
+  own unapproved comments. `opts[:preload]` overrides the display associations.
 
   ## Examples
 
@@ -396,7 +396,7 @@ defmodule Philomena.Comments do
           keyword()
         ) ::
           {:ok, Scrivener.Page.t(Comment.t())} | {:error, String.t()}
-  def search_comments(%Actor{} = actor, filter, query_string, pagination, opts \\ []) do
+  def search_comments(%Actor{} = actor, %Filter{} = filter, query_string, pagination, opts \\ []) do
     preloads = Keyword.get(opts, :preload, @search_preloads)
 
     case Query.compile(query_string, actor: actor) do
@@ -448,8 +448,8 @@ defmodule Philomena.Comments do
   @doc """
   Returns a database-paginated page of comments visible beneath `image`.
 
-  Visibility, approval, and destroyed-content filters run before PostgreSQL
-  counts and paginates. Results use the actor's newest/oldest-first setting.
+  Visibility, approval, and destroyed-content filters run before pagination.
+  Results use the actor's newest/oldest-first setting.
 
   ## Examples
 
@@ -474,7 +474,7 @@ defmodule Philomena.Comments do
   Locates the visible page containing `comment_id` beneath `image`.
 
   Missing, malformed, mismatched, or collection-invisible comments are
-  not-found; a loaded comment forbidden to the actor is unauthorized.
+  not-found. A loaded comment forbidden to the actor is unauthorized.
 
   ## Examples
 
@@ -515,7 +515,11 @@ defmodule Philomena.Comments do
   """
   @spec last_comment_page(Actor.t(), Image.t(), Repo.pagination_params()) :: pos_integer()
   def last_comment_page(%Actor{} = actor, %Image{} = image, pagination) do
-    count = actor |> visible_image_comments(image) |> Repo.aggregate(:count, :id)
+    count =
+      actor
+      |> visible_image_comments(image)
+      |> Repo.aggregate(:count)
+
     max(Integer.ceil_div(count, pagination[:page_size]), 1)
   end
 
@@ -545,7 +549,7 @@ defmodule Philomena.Comments do
 
   Write access, image commenting permission, and the 15-second creation limit
   are checked before insertion. The transaction updates the image count,
-  notification, and subscription state; indexing, statistics/reporting, rate
+  notification, and subscription state. Indexing, statistics/reporting, rate
   tracking, and the firehose broadcast run after commit.
 
   ## Examples
@@ -629,7 +633,7 @@ defmodule Philomena.Comments do
   Updates a parent-scoped comment on behalf of `actor`.
 
   The write-access and parent permissions match the edit form. A successful
-  transaction records the prior version; reporting, indexing, and the firehose
+  transaction records the prior version. Reporting, indexing, and the firehose
   broadcast run after commit. Validation returns a `CommentForm` preserving the
   loaded comment.
 
@@ -692,7 +696,7 @@ defmodule Philomena.Comments do
   @doc """
   Loads a comment as a report target through its route image.
 
-  Both resources are authorized for `:show`; malformed, missing, and mismatched
+  Both resources are authorized for `:show`. Malformed, missing, and mismatched
   IDs are not-found. Reports owns the write prerequisite and form changeset.
 
   ## Examples
@@ -720,8 +724,8 @@ defmodule Philomena.Comments do
   @doc """
   Hides a comment scoped beneath `image_id`.
 
-  The comment update, report closure, and moderation log commit atomically;
-  report and comment indexing run after commit.
+  The comment update, report closure, and moderation log commit atomically.
+  Report and comment indexing run after commit.
 
   ## Examples
 
@@ -764,7 +768,7 @@ defmodule Philomena.Comments do
   @doc """
   Restores a comment scoped beneath `image_id`.
 
-  The restore and moderation log commit together; indexing runs after commit.
+  The restore and moderation log commit together. Indexing runs after commit.
 
   ## Examples
 
@@ -804,9 +808,8 @@ defmodule Philomena.Comments do
   @doc """
   Destroys a comment's content beneath `image_id`.
 
-  Authorization uses the distinct `:delete` action. Content removal, image and
-  counters, and the moderation log commit together; indexing follows the
-  commit.
+  Authorization uses the distinct `:delete` action. Content removal, image
+  counters, and the moderation log commit together. Indexing runs after commit.
 
   ## Examples
 
@@ -899,9 +902,9 @@ defmodule Philomena.Comments do
   @doc """
   Hides and destroys an already loaded user comment for account erasure.
 
-  This trusted service is intentionally separate from request authorization. It
-  closes reports and updates counters in one transaction, then reindexes after
-  commit.
+  This internal function does not perform any request authorization. It
+  closes reports and updates counters in one transaction, then reindexes
+  after commit.
 
   ## Examples
 
@@ -947,8 +950,8 @@ defmodule Philomena.Comments do
   @doc """
   Moves all comments from a duplicate image to its target and reindexes them.
 
-  This trusted duplicate-resolution service returns the target image for use in
-  the owning Images pipeline.
+  This internal function returns the target image for use in the owning Images
+  pipeline.
 
   ## Examples
 
@@ -1016,7 +1019,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Queues comments on the trusted image IDs and returns the list unchanged.
+  Queues comments on the given image IDs for reindexing and returns the list unchanged.
 
   ## Examples
 
@@ -1039,7 +1042,7 @@ defmodule Philomena.Comments do
       [user: user_query, image: image_query, deleted_by: user_query]
 
   """
-  @spec indexing_preloads() :: keyword(Ecto.Query.t())
+  @spec indexing_preloads() :: list()
   def indexing_preloads do
     user_query = select(User, [user], map(user, [:id, :name]))
     tag_query = select(Tag, [tag], map(tag, [:id, :name]))
