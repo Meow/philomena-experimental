@@ -485,7 +485,7 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.load_gallery_page(scope(user), "#{gallery.id}")
+               Galleries.load_gallery_page(actor(user), scope(user), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
       # The images page carries {image, hit} tuples, not bare image structs.
@@ -501,18 +501,19 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.load_gallery_page(scope(nil), "#{gallery.id}")
+               Galleries.load_gallery_page(actor(), scope(nil), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
       assert Enum.empty?(page.images)
     end
 
     test "an unknown id is unauthorized for an anonymous viewer" do
-      assert Galleries.load_gallery_page(scope(nil), "999999999") == {:error, :unauthorized}
+      assert Galleries.load_gallery_page(actor(), scope(nil), "999999999") ==
+               {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.load_gallery_page(scope(nil), "abc") == {:error, :not_found}
+      assert Galleries.load_gallery_page(actor(), scope(nil), "abc") == {:error, :not_found}
     end
   end
 

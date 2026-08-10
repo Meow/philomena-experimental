@@ -579,19 +579,19 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> load_tag_page(scope, "safe")
+      iex> load_tag_page(actor, scope, "safe")
       {:ok, %TagPage{}}
 
-      iex> load_tag_page(scope, "artist-colon-somebody")
+      iex> load_tag_page(actor, scope, "artist-colon-somebody")
       {:aliased_to, %Tag{}}
 
   """
-  @spec load_tag_page(Scope.t(), String.t()) ::
+  @spec load_tag_page(Actor.t(), Scope.t(), String.t()) ::
           {:ok, TagPage.t()} | {:aliased_to, Tag.t()} | {:error, :not_found | :unauthorized}
-  def load_tag_page(%Scope{} = scope, slug) do
+  def load_tag_page(%Actor{} = actor, %Scope{} = scope, slug) do
     tag = tag_by_slug(slug, @show_preloads)
 
-    with :ok <- authorize(scope.user, :show, tag),
+    with :ok <- authorize(actor, :show, tag),
          %Tag{} <- tag do
       case tag do
         %{aliased_tag: %Tag{}} ->
@@ -605,7 +605,7 @@ defmodule Philomena.Tags do
            %TagPage{
              tag: tag,
              images: images,
-             interactions: Interactions.user_interactions(images, scope.user),
+             interactions: Interactions.user_interactions(actor, images),
              search_query: maybe_escape_name(tag)
            }}
       end

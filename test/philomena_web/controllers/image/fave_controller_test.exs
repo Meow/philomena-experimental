@@ -25,7 +25,10 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
   end
 
   defp fave!(image, user) do
-    {:ok, _} = Repo.transaction(ImageFaves.create_fave_transaction(image, user))
+    {:ok, _} =
+      Ecto.Multi.new()
+      |> ImageFaves.put_fave_for_loaded_image(image, user)
+      |> Repo.transaction()
   end
 
   describe "POST /images/:image_id/fave" do
@@ -52,7 +55,11 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
     test "when the user had downvoted, replaces the downvote with an upvote",
          %{conn: conn, user: user} do
       image = image_fixture()
-      {:ok, _} = Repo.transaction(ImageVotes.create_vote_transaction(image, user, false))
+
+      {:ok, _} =
+        Ecto.Multi.new()
+        |> ImageVotes.put_vote_for_loaded_image(image, user, false)
+        |> Repo.transaction()
 
       conn = post(conn, ~p"/images/#{image}/fave")
 
@@ -92,7 +99,11 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
     test "removes the fave but keeps the implicit upvote", %{conn: conn, user: user} do
       image = image_fixture()
       fave!(image, user)
-      {:ok, _} = Repo.transaction(ImageVotes.create_vote_transaction(image, user, true))
+
+      {:ok, _} =
+        Ecto.Multi.new()
+        |> ImageVotes.put_vote_for_loaded_image(image, user, true)
+        |> Repo.transaction()
 
       conn = delete(conn, ~p"/images/#{image}/fave")
 

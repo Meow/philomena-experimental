@@ -108,7 +108,7 @@ defmodule Philomena.Images.Thumbnailer do
   end
 
   defp apply_change(image, {:intensities, intensities}),
-    do: ImageIntensities.create_image_intensity(image, intensities)
+    do: ImageIntensities.put_for_loaded_image(image, intensities)
 
   defp apply_change(image, {:replace_original, new_file}) do
     full = "full.#{image.image_format}"

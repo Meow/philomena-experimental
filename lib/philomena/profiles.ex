@@ -48,8 +48,6 @@ defmodule Philomena.Profiles do
   ]
 
   defp assemble_profile_page(actor, scope, current_filter, user) do
-    viewer = actor.user
-
     {:ok, {recent_uploads_def, _tags}} =
       ImageSearch.search_string(scope, "uploader_id:#{user.id}",
         pagination: %{page_number: 1, page_size: 4}
@@ -132,7 +130,7 @@ defmodule Philomena.Profiles do
       |> Repo.all()
 
     interactions =
-      Interactions.user_interactions([recent_uploads, recent_faves, recent_artwork], viewer)
+      Interactions.user_interactions(actor, [recent_uploads, recent_faves, recent_artwork])
 
     %ProfilePage{
       user: user,

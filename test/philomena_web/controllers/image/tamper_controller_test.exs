@@ -12,7 +12,8 @@ defmodule PhilomenaWeb.Image.TamperControllerTest do
   # Records `voter`'s (up/down) vote on `image` through the vote context.
   defp cast_vote(image, voter, up) do
     {:ok, _} =
-      ImageVotes.create_vote_transaction(image, voter, up)
+      Ecto.Multi.new()
+      |> ImageVotes.put_vote_for_loaded_image(image, voter, up)
       |> Repo.transaction()
 
     :ok

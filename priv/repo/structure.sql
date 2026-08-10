@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict bfCKUczSL1dW79YgIFhveSDVo6iUVEeguYlWhb9scgGUT42ZS1OfaJPGfKp4Vhs
+\restrict meqEsa9dlLWwL1L5BNFhedkygWZ7Ko14TPZJ9w0ZplOfcGNsPicK93gYaDwXPgT
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -5413,7 +5413,7 @@ ALTER TABLE ONLY public.tags_implied_tags
 --
 
 ALTER TABLE ONLY public.image_intensities
-    ADD CONSTRAINT fk_rails_b861f027a7 FOREIGN KEY (image_id) REFERENCES public.images(id);
+    ADD CONSTRAINT fk_rails_b861f027a7 FOREIGN KEY (image_id) REFERENCES public.images(id) ON DELETE CASCADE;
 
 
 --
@@ -5924,7 +5924,7 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict bfCKUczSL1dW79YgIFhveSDVo6iUVEeguYlWhb9scgGUT42ZS1OfaJPGfKp4Vhs
+\unrestrict meqEsa9dlLWwL1L5BNFhedkygWZ7Ko14TPZJ9w0ZplOfcGNsPicK93gYaDwXPgT
 
 INSERT INTO public."schema_migrations" (version) VALUES (20200503002523);
 INSERT INTO public."schema_migrations" (version) VALUES (20200607000511);
@@ -5968,3 +5968,4 @@ INSERT INTO public."schema_migrations" (version) VALUES (20260719123609);
 INSERT INTO public."schema_migrations" (version) VALUES (20260719123610);
 INSERT INTO public."schema_migrations" (version) VALUES (20260719123611);
 INSERT INTO public."schema_migrations" (version) VALUES (20260806180557);
+INSERT INTO public."schema_migrations" (version) VALUES (20260810212302);

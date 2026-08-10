@@ -12,8 +12,9 @@ defmodule PhilomenaWeb.ActivityControllerTest do
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
   alias Philomena.Comments.Comment
-  alias Philomena.Images
+  alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.Images.Image
+  alias Philomena.Repo
 
   setup do
     Search.clear_index!(Image)
@@ -48,7 +49,10 @@ defmodule PhilomenaWeb.ActivityControllerTest do
     test "shows the featured image", %{conn: conn} do
       user = confirmed_user_fixture()
       image = image_fixture(created_at: hours_ago(1))
-      {:ok, _feature} = Images.feature_loaded_image(user, image)
+
+      %ImageFeature{user_id: user.id, image_id: image.id}
+      |> ImageFeature.changeset(%{})
+      |> Repo.insert!()
 
       SearchHelpers.reindex_all!(Image)
 

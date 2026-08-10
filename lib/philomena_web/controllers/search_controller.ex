@@ -9,7 +9,7 @@ defmodule PhilomenaWeb.SearchController do
   def index(conn, params) do
     case Images.search_images(ImageScope.search_scope(conn)) do
       {:ok, %{images: images, tags: tags}} ->
-        interactions = Interactions.user_interactions(images, conn.assigns.actor)
+        interactions = Interactions.user_interactions(conn.assigns.actor, images)
 
         render(conn, "index.html",
           title: "Searching for #{params["q"]}",

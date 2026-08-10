@@ -100,15 +100,24 @@ defmodule Philomena.ImagesTest do
   end
 
   defp fave!(image, user) do
-    {:ok, _} = Repo.transaction(ImageFaves.create_fave_transaction(image, user))
+    {:ok, _} =
+      Ecto.Multi.new()
+      |> ImageFaves.put_fave_for_loaded_image(image, user)
+      |> Repo.transaction()
   end
 
   defp vote!(image, user, up) do
-    {:ok, _} = Repo.transaction(ImageVotes.create_vote_transaction(image, user, up))
+    {:ok, _} =
+      Ecto.Multi.new()
+      |> ImageVotes.put_vote_for_loaded_image(image, user, up)
+      |> Repo.transaction()
   end
 
   defp hide!(image, user) do
-    {:ok, _} = Repo.transaction(ImageHides.create_hide_transaction(image, user))
+    {:ok, _} =
+      Ecto.Multi.new()
+      |> ImageHides.put_hide_for_loaded_image(image, user)
+      |> Repo.transaction()
   end
 
   defp has_vote?(image, user) do

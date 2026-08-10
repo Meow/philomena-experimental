@@ -21,7 +21,7 @@ defmodule PhilomenaWeb.Api.Json.Search.ReverseController do
           {[], 0}
       end
 
-    interactions = Interactions.user_interactions(images, conn.assigns.actor)
+    interactions = Interactions.user_interactions(conn.assigns.actor, images)
 
     conn
     |> put_view(PhilomenaWeb.Api.Json.ImageView)

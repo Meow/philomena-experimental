@@ -113,7 +113,7 @@ defmodule Philomena.Activities do
       |> Repo.all()
 
     interactions =
-      Interactions.user_interactions([images, top_scoring, watched, featured_image], user)
+      Interactions.user_interactions(actor, [images, top_scoring, watched, featured_image])
 
     %FrontPage{
       images: images,

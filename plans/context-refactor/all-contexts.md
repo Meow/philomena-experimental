@@ -233,6 +233,24 @@ Wave 2 is complete.
 
 Wave 3 is complete.
 
+Wave 4 is underway.
+
+- ImageFaves, ImageHides, and ImageVotes now expose only loaded-image
+  `Ecto.Multi` composition steps beneath the Images authorization boundary.
+  Replacement and deletion are idempotent, and image counters, score, and user
+  statistics follow the exact inserted/deleted row deltas.
+- The unused generated ImageFeatures context is gone; Images privately owns
+  append-only feature creation while the `ImageFeature` schema remains the
+  persisted feature history.
+- ImageIntensities now exposes one derived-data upsert for the media pipeline.
+  Reprocessing atomically replaces the one intensity row per image, and the
+  database removes that row when its image is deleted.
+- Interactions now has one Actor-first personalization API and a loaded-image
+  merge composition service. Image merges copy interactions and update target
+  and user counters in the owning transaction, with existing target rows taking
+  precedence on collisions. All callers, including the Gallery and Tag page
+  loaders, now carry Actor separately from image search scope.
+
 ### Wave 0: characterize and establish the contract
 
 - Follow `test/CONVENTIONS.md`: land any missing controller characterization in

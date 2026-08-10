@@ -70,7 +70,12 @@ defmodule PhilomenaWeb.Api.Json.Search.ImageControllerTest do
     test "returns the user's interactions for an API key", %{conn: conn} do
       user = confirmed_user_fixture()
       image = image_fixture()
-      {:ok, _} = Repo.transaction(ImageFaves.create_fave_transaction(image, user))
+
+      {:ok, _} =
+        Ecto.Multi.new()
+        |> ImageFaves.put_fave_for_loaded_image(image, user)
+        |> Repo.transaction()
+
       SearchHelpers.reindex_all!(Image)
 
       conn =

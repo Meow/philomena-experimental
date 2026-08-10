@@ -118,7 +118,7 @@ defmodule Philomena.ActivitiesTest do
 
     test "the featured image is set when an image feature exists" do
       image = image_fixture(created_at: hours_ago(1))
-      {:ok, _feature} = Images.feature_loaded_image(confirmed_user_fixture(), image)
+      {:ok, _feature} = Images.feature_image(actor(moderator_user_fixture()), image.id)
 
       SearchHelpers.reindex_all!(Image)
 

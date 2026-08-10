@@ -14,7 +14,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
   def show(conn, %{"id" => id}) do
     case Images.load_image(id) do
       {:ok, image} ->
-        interactions = Interactions.user_interactions([image], conn.assigns.actor)
+        interactions = Interactions.user_interactions(conn.assigns.actor, [image])
 
         render(conn, "show.json", image: image, interactions: interactions)
 

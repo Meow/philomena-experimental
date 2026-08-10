@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.ImageController do
   def index(conn, _params) do
     images = Images.load_image_index(ImageScope.search_scope(conn))
 
-    interactions = Interactions.user_interactions(images, conn.assigns.actor)
+    interactions = Interactions.user_interactions(conn.assigns.actor, images)
 
     render(conn, "index.html",
       title: "Images",

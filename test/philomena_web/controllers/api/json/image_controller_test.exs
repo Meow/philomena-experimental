@@ -146,7 +146,10 @@ defmodule PhilomenaWeb.Api.Json.ImageControllerTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      {:ok, _} = Repo.transaction(ImageFaves.create_fave_transaction(image, user))
+      {:ok, _} =
+        Ecto.Multi.new()
+        |> ImageFaves.put_fave_for_loaded_image(image, user)
+        |> Repo.transaction()
 
       conn = get(conn, ~p"/api/v1/json/images/#{image.id}?key=#{user.authentication_token}")
 

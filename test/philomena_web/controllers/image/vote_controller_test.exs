@@ -19,7 +19,10 @@ defmodule PhilomenaWeb.Image.VoteControllerTest do
   end
 
   defp upvote!(image, user) do
-    {:ok, _} = Repo.transaction(ImageVotes.create_vote_transaction(image, user, true))
+    {:ok, _} =
+      Ecto.Multi.new()
+      |> ImageVotes.put_vote_for_loaded_image(image, user, true)
+      |> Repo.transaction()
   end
 
   describe "POST /images/:image_id/vote" do

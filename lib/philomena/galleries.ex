@@ -413,25 +413,25 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> load_gallery_page(user_scope, "1")
+      iex> load_gallery_page(actor, user_scope, "1")
       {:ok, %GalleryPage{}}
 
-      iex> load_gallery_page(user_scope, "999999999")
+      iex> load_gallery_page(actor, user_scope, "999999999")
       {:error, :unauthorized}
 
-      iex> load_gallery_page(admin_scope, "999999999")
+      iex> load_gallery_page(admin, admin_scope, "999999999")
       {:error, :not_found}
 
   """
-  @spec load_gallery_page(Scope.t(), Loader.integer_id()) ::
+  @spec load_gallery_page(Actor.t(), Scope.t(), Loader.integer_id()) ::
           {:ok, GalleryPage.t()} | {:error, :unauthorized | :not_found}
-  def load_gallery_page(%Scope{} = scope, gallery_id) do
-    with {:ok, gallery} <- load_authorized_gallery(scope.user, gallery_id, :show) do
-      {:ok, build_gallery_page(scope, gallery)}
+  def load_gallery_page(%Actor{} = actor, %Scope{} = scope, gallery_id) do
+    with {:ok, gallery} <- load_authorized_gallery(actor, gallery_id, :show) do
+      {:ok, build_gallery_page(actor, scope, gallery)}
     end
   end
 
-  defp build_gallery_page(scope, gallery) do
+  defp build_gallery_page(actor, scope, gallery) do
     query = "gallery_id:#{gallery.id}"
 
     scope = %{
@@ -464,8 +464,7 @@ defmodule Philomena.Galleries do
         ]
       )
 
-    interactions =
-      Interactions.user_interactions([images, gallery_prev, gallery_next], scope.user)
+    interactions = Interactions.user_interactions(actor, [images, gallery_prev, gallery_next])
 
     watching = subscribed?(gallery, scope.user)
 

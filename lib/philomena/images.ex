@@ -364,9 +364,7 @@ defmodule Philomena.Images do
     |> Multi.run(:migrate_subscriptions, fn _, %{} ->
       {:ok, migrate_subscriptions(image, duplicate_of_image)}
     end)
-    |> Multi.run(:migrate_interactions, fn _, %{} ->
-      {:ok, Interactions.migrate_interactions(image, duplicate_of_image)}
-    end)
+    |> Interactions.migrate_loaded_images(image, duplicate_of_image)
     |> Multi.run(:notification, &notify_merge(&1, &2, image, duplicate_of_image))
     |> Repo.transaction()
     |> process_after_hide()
@@ -1153,7 +1151,7 @@ defmodule Philomena.Images do
       comments: Comments.paginate_image_comments(actor, image, comment_pagination),
       watching: subscribed?(image, user),
       user_galleries: Galleries.user_image_galleries(user, image),
-      interactions: Interactions.user_interactions([image], user),
+      interactions: Interactions.user_interactions(actor, [image]),
       # TODO: this should probably be actor-gated, so actors who can't currently interact
       # with the image don't receive changesets.
       comment_changeset: Comments.new_comment_changeset(),
@@ -1642,10 +1640,9 @@ defmodule Philomena.Images do
     end
   end
 
-  # Marks the given already-loaded image as the current featured image.
-  # Visible for testing.
-  @doc false
-  def feature_loaded_image(featurer, %Image{} = image) do
+  # Feature rows form an append-only history; the latest non-hidden image is
+  # selected by `featured_image/0`.
+  defp feature_loaded_image(featurer, %Image{} = image) do
     %ImageFeature{user_id: featurer.id, image_id: image.id}
     |> ImageFeature.changeset(%{})
     |> Repo.insert()
@@ -3002,7 +2999,10 @@ defmodule Philomena.Images do
          :ok <- authorize(actor, :tamper, image),
          %Image{} <- image,
          {:ok, user} <- load_vote_user(user_id) do
-      {:ok, result} = Repo.transaction(ImageVotes.delete_vote_transaction(image, user))
+      {:ok, result} =
+        Multi.new()
+        |> ImageVotes.delete_vote_for_loaded_image(image, user)
+        |> Repo.transaction()
 
       reindex_image(image)
 
@@ -3332,10 +3332,8 @@ defmodule Philomena.Images do
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
   def create_image_hide(actor, image_id) do
     with {:ok, image} <- load_image_for_hide(actor, image_id) do
-      Multi.append(
-        ImageHides.delete_hide_transaction(image, actor.user),
-        ImageHides.create_hide_transaction(image, actor.user)
-      )
+      Multi.new()
+      |> ImageHides.put_hide_for_loaded_image(image, actor.user)
       |> Repo.transaction()
       |> hide_result(image)
     end
@@ -3361,8 +3359,8 @@ defmodule Philomena.Images do
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
   def delete_image_hide(actor, image_id) do
     with {:ok, image} <- load_image_for_hide(actor, image_id) do
-      image
-      |> ImageHides.delete_hide_transaction(actor.user)
+      Multi.new()
+      |> ImageHides.delete_hide_for_loaded_image(image, actor.user)
       |> Repo.transaction()
       |> hide_result(image)
     end
@@ -3445,10 +3443,9 @@ defmodule Philomena.Images do
           | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
   def create_fave(%Actor{user: user} = actor, image_id) do
     with {:ok, image} <- load_image_for_interaction(actor, image_id) do
-      ImageFaves.delete_fave_transaction(image, user)
-      |> Multi.append(ImageFaves.create_fave_transaction(image, user))
-      |> Multi.append(ImageVotes.delete_vote_transaction(image, user))
-      |> Multi.append(ImageVotes.create_vote_transaction(image, user, true))
+      Multi.new()
+      |> ImageFaves.put_fave_for_loaded_image(image, user)
+      |> ImageVotes.put_vote_for_loaded_image(image, user, true)
       |> Repo.transaction()
       |> interaction_result(image)
     end
@@ -3472,8 +3469,8 @@ defmodule Philomena.Images do
           | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
   def delete_fave(%Actor{user: user} = actor, image_id) do
     with {:ok, image} <- load_image_for_interaction(actor, image_id) do
-      image
-      |> ImageFaves.delete_fave_transaction(user)
+      Multi.new()
+      |> ImageFaves.delete_fave_for_loaded_image(image, user)
       |> Repo.transaction()
       |> interaction_result(image)
     end
@@ -3506,8 +3503,8 @@ defmodule Philomena.Images do
   def create_vote(%Actor{user: user} = actor, image_id, up) do
     with {:ok, image} <- load_image_for_interaction(actor, image_id),
          {:ok, up} <- parse_vote(up) do
-      ImageVotes.delete_vote_transaction(image, user)
-      |> Multi.append(ImageVotes.create_vote_transaction(image, user, up))
+      Multi.new()
+      |> ImageVotes.put_vote_for_loaded_image(image, user, up)
       |> Repo.transaction()
       |> interaction_result(image)
     end
@@ -3531,8 +3528,8 @@ defmodule Philomena.Images do
           | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
   def delete_vote(%Actor{user: user} = actor, image_id) do
     with {:ok, image} <- load_image_for_interaction(actor, image_id) do
-      image
-      |> ImageVotes.delete_vote_transaction(user)
+      Multi.new()
+      |> ImageVotes.delete_vote_for_loaded_image(image, user)
       |> Repo.transaction()
       |> interaction_result(image)
     end

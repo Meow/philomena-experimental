@@ -1,29 +1,66 @@
 defmodule Philomena.ImageFaves do
   @moduledoc """
-  The ImageFaves context.
+  Transaction steps for the favorite rows owned by `Philomena.Images`.
+
+  This module is not an authorization boundary. Its functions require an
+  already-loaded image and user after the owning context has enforced request
+  prerequisites and authorization.
   """
 
   import Ecto.Query, warn: false
-  alias Ecto.Multi
 
+  alias Ecto.Multi
   alias Philomena.ImageFaves.ImageFave
-  alias Philomena.UserStatistics
   alias Philomena.Images.Image
+  alias Philomena.UserStatistics
+  alias Philomena.Users.User
+
+  defp delete_fave_steps(multi, image, user) do
+    fave_query =
+      ImageFave
+      |> where(image_id: ^image.id)
+      |> where(user_id: ^user.id)
+
+    image_query = where(Image, id: ^image.id)
+
+    multi
+    |> Multi.delete_all(:unfave, fave_query)
+    |> Multi.run(:dec_faves_count, fn repo, %{unfave: {faves, nil}} ->
+      {count, nil} = repo.update_all(image_query, inc: [faves_count: -faves])
+
+      with {:ok, _statistic} <- UserStatistics.increment(user, :image_faves_count, -faves) do
+        {:ok, count}
+      end
+    end)
+  end
 
   @doc """
-  Creates a image_hide.
+  Adds replacement-favorite steps for a loaded image and user to `multi`.
+
+  The caller must have authorized the loaded image. The steps first remove any
+  existing favorite, adjusting `faves_count` and the user's image-fave
+  statistic by the number of rows removed, and then insert one row and add one
+  to both counters. Repeated execution is therefore idempotent. The changes are
+  named `:unfave`, `:dec_faves_count`, `:fave`, `:inc_faves_count`, and
+  `:inc_fave_stat`; a uniqueness conflict rolls the surrounding transaction
+  back.
+
+  ## Examples
+
+      iex> Multi.new() |> put_fave_for_loaded_image(image, user) |> Repo.transaction()
+      {:ok, %{fave: %ImageFave{}}}
 
   """
-  def create_fave_transaction(image, user) do
+  @spec put_fave_for_loaded_image(Multi.t(), Image.t(), User.t()) :: Multi.t()
+  def put_fave_for_loaded_image(%Multi{} = multi, %Image{} = image, %User{} = user) do
     fave =
       %ImageFave{image_id: image.id, user_id: user.id}
       |> ImageFave.changeset(%{})
 
-    image_query =
-      Image
-      |> where(id: ^image.id)
+    image_query = where(Image, id: ^image.id)
 
-    Multi.new()
+    multi
+    |> delete_fave_steps(image, user)
     |> Multi.insert(:fave, fave)
     |> Multi.update_all(:inc_faves_count, image_query, inc: [faves_count: 1])
     |> Multi.run(:inc_fave_stat, fn _repo, _changes ->
@@ -32,29 +69,20 @@ defmodule Philomena.ImageFaves do
   end
 
   @doc """
-  Deletes a ImageFave.
+  Adds idempotent favorite-deletion steps for a loaded image and user to `multi`.
+
+  The caller must have authorized the loaded image. `:unfave` reports the
+  number of deleted rows; `:dec_faves_count` adjusts the image and user counters
+  by that exact number, so deleting an absent favorite changes nothing.
+
+  ## Examples
+
+      iex> Multi.new() |> delete_fave_for_loaded_image(image, user) |> Repo.transaction()
+      {:ok, %{unfave: {0, nil}}}
 
   """
-  def delete_fave_transaction(image, user) do
-    fave_query =
-      ImageFave
-      |> where(image_id: ^image.id)
-      |> where(user_id: ^user.id)
-
-    image_query =
-      Image
-      |> where(id: ^image.id)
-
-    Multi.new()
-    |> Multi.delete_all(:unfave, fave_query)
-    |> Multi.run(:dec_faves_count, fn repo, %{unfave: {faves, nil}} ->
-      {count, nil} =
-        image_query
-        |> repo.update_all(inc: [faves_count: -faves])
-
-      UserStatistics.increment(user, :image_faves_count, -faves)
-
-      {:ok, count}
-    end)
+  @spec delete_fave_for_loaded_image(Multi.t(), Image.t(), User.t()) :: Multi.t()
+  def delete_fave_for_loaded_image(%Multi{} = multi, %Image{} = image, %User{} = user) do
+    delete_fave_steps(multi, image, user)
   end
 end

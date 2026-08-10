@@ -22,7 +22,10 @@ defmodule PhilomenaWeb.Image.HideControllerTest do
   end
 
   defp hide!(image, user) do
-    {:ok, _} = Repo.transaction(ImageHides.create_hide_transaction(image, user))
+    {:ok, _} =
+      Ecto.Multi.new()
+      |> ImageHides.put_hide_for_loaded_image(image, user)
+      |> Repo.transaction()
   end
 
   describe "POST /images/:image_id/hide" do

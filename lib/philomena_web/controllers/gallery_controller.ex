@@ -20,7 +20,11 @@ defmodule PhilomenaWeb.GalleryController do
   end
 
   def show(conn, params) do
-    case Galleries.load_gallery_page(ImageScope.search_scope(conn), params["id"]) do
+    case Galleries.load_gallery_page(
+           conn.assigns.actor,
+           ImageScope.search_scope(conn),
+           params["id"]
+         ) do
       {:ok, page} ->
         gallery_json = JSON.encode!(Enum.map(page.gallery_images, &elem(&1, 0).id))
 

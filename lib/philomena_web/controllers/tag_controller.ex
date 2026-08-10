@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.TagController do
   end
 
   def show(conn, params) do
-    case Tags.load_tag_page(ImageScope.search_scope(conn), params["id"]) do
+    case Tags.load_tag_page(conn.assigns.actor, ImageScope.search_scope(conn), params["id"]) do
       {:ok, page} ->
         tag = page.tag
         body = MarkdownRenderer.render_one(%{body: tag.description || ""}, conn)
