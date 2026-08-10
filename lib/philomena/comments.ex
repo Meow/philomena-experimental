@@ -31,8 +31,9 @@ defmodule Philomena.Comments do
   alias PhilomenaQuery.Search
 
   @comment_create_window 15
+  @image_preloads [:sources, tags: :aliases]
   @display_preloads [:deleted_by, user: [awards: :badge]]
-  @search_preloads [:deleted_by, image: [:sources, tags: :aliases], user: [awards: :badge]]
+  @search_preloads [:deleted_by, image: @image_preloads, user: [awards: :badge]]
 
   @typedoc "A normalized request-facing failure."
   @type request_error :: :ban | :unauthorized | :not_found
@@ -160,25 +161,23 @@ defmodule Philomena.Comments do
     end
   end
 
-  defp load_commentable_image_for_action(%Actor{} = actor, image_id, :index) do
-    load_image(actor, image_id, :index, [:sources, tags: :aliases])
-  end
+  defp load_commentable_image_for_action(%Actor{} = actor, image_id, action) do
+    action =
+      case action do
+        action when action in [:create, :edit, :update] -> :create_comment
+        action -> action
+      end
 
-  defp load_commentable_image_for_action(%Actor{} = actor, image_id, :show) do
-    with {:ok, image} <- load_image(actor, image_id, :show, [:sources, tags: :aliases]) do
-      resolve_duplicate(actor, image)
+    case load_image(actor, image_id, action, @image_preloads) do
+      {:ok, %Image{duplicate_id: nil} = image} ->
+        {:ok, image}
+
+      {:ok, %Image{duplicate_id: duplicate_id}} ->
+        load_image(actor, duplicate_id, action, @image_preloads)
+
+      error ->
+        error
     end
-  end
-
-  defp load_commentable_image_for_action(%Actor{} = actor, image_id, action)
-       when action in [:create, :edit, :update] do
-    load_image(actor, image_id, :create_comment, [:sources, tags: :aliases])
-  end
-
-  defp resolve_duplicate(_actor, %Image{duplicate_id: nil} = image), do: {:ok, image}
-
-  defp resolve_duplicate(%Actor{} = actor, %Image{duplicate_id: duplicate_id}) do
-    load_image(actor, duplicate_id, :show, [:sources, tags: :aliases])
   end
 
   defp authorized?(%Actor{} = actor, action, subject),
@@ -526,8 +525,8 @@ defmodule Philomena.Comments do
   @doc """
   Loads and authorizes an image for a comment controller action.
 
-  `:show` resolves duplicate images to their target. Posting and editing use
-  the image's `:create_comment` ability. Missing IDs are always not-found.
+  Duplicate images are resolved to their target. Missing IDs are
+  always not-found.
 
   ## Examples
 
