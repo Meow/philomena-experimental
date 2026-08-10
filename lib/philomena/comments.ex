@@ -77,10 +77,6 @@ defmodule Philomena.Comments do
     |> Repo.transaction()
   end
 
-  defp change_comment(%Comment{} = comment) do
-    Comment.changeset(comment)
-  end
-
   defp report_non_approved(%Comment{approved: true}), do: false
 
   defp report_non_approved(comment) do
@@ -106,27 +102,7 @@ defmodule Philomena.Comments do
     comment
   end
 
-  defp load_global_comment(%Actor{} = actor, id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         {:ok, comment} <-
-           Comment
-           |> where([comment], comment.id == ^id and comment.destroyed_content == false)
-           |> preload([:image, :user])
-           |> Loader.one(),
-         :ok <- authorize(actor, :show, comment.image),
-         :ok <- authorize(actor, :show, comment) do
-      {:ok, comment}
-    else
-      :error -> {:error, :not_found}
-      error -> error
-    end
-  end
-
-  defp load_image(%Actor{} = actor, image_id, action, preloads) do
-    Loader.fetch_and_authorize(Image, actor, action, image_id, preloads)
-  end
-
-  defp load_comment_in_image(%Actor{} = actor, %Image{} = image, comment_id, action, preloads) do
+  defp load_image_comment(%Actor{} = actor, %Image{} = image, comment_id, action, preloads) do
     with {:ok, comment_id} <- IntegerId.parse(comment_id),
          {:ok, comment} <-
            Comment
@@ -135,30 +111,11 @@ defmodule Philomena.Comments do
            |> Loader.one_and_authorize(actor, action) do
       {:ok, %{comment | image: image}}
     else
-      :error -> {:error, :not_found}
-      error -> error
-    end
-  end
+      :error ->
+        {:error, :not_found}
 
-  defp load_image_comment(
-         %Actor{} = actor,
-         image_id,
-         comment_id,
-         action,
-         image_preloads,
-         comment_preloads
-       ) do
-    with {:ok, image} <- load_image(actor, image_id, :show, image_preloads),
-         {:ok, comment} <-
-           load_comment_in_image(actor, image, comment_id, action, comment_preloads) do
-      {:ok, {image, comment}}
-    end
-  end
-
-  defp load_editable_comment(%Actor{} = actor, image, comment_id, action) do
-    with :ok <- authorize(actor, :create_comment, image),
-         :ok <- Images.verify_forced_filter_access(actor, image) do
-      load_comment_in_image(actor, image, comment_id, action, @display_preloads)
+      error ->
+        error
     end
   end
 
@@ -238,7 +195,7 @@ defmodule Philomena.Comments do
 
   """
   @spec new_comment_changeset() :: Ecto.Changeset.t()
-  def new_comment_changeset, do: change_comment(%Comment{})
+  def new_comment_changeset, do: Comment.changeset(%Comment{})
 
   @doc """
   Loads a globally addressed comment visible to `actor`.
@@ -258,7 +215,24 @@ defmodule Philomena.Comments do
   """
   @spec load_comment(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
-  def load_comment(%Actor{} = actor, id), do: load_global_comment(actor, id)
+  def load_comment(%Actor{} = actor, id) do
+    with {:ok, id} <- IntegerId.parse(id),
+         {:ok, comment} <-
+           Comment
+           |> where([comment], comment.id == ^id and comment.destroyed_content == false)
+           |> preload([:image, :user])
+           |> Loader.one(),
+         :ok <- authorize(actor, :show, comment.image),
+         :ok <- authorize(actor, :show, comment) do
+      {:ok, comment}
+    else
+      :error ->
+        {:error, :not_found}
+
+      error ->
+        error
+    end
+  end
 
   @doc """
   Searches comments visible to `actor`, applying `filter`, `query_string`, and
@@ -361,7 +335,8 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Locates the comment page containing `comment_id`, belonging to `image_id`.
+  Locates the comment page containing `comment_id` through its parent image,
+  on behalf of `actor`.
 
   Missing, malformed, mismatched, or collection-invisible comments are
   not-found. A loaded comment forbidden to the actor is unauthorized.
@@ -444,12 +419,12 @@ defmodule Philomena.Comments do
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def load_commentable_image(%Actor{} = actor, image_id, action)
       when action in [:index, :show, :create_comment] do
-    case load_image(actor, image_id, action, @image_preloads) do
+    case Loader.fetch_and_authorize(Image, actor, action, image_id, @image_preloads) do
       {:ok, %Image{duplicate_id: nil} = image} ->
         {:ok, image}
 
       {:ok, %Image{duplicate_id: duplicate_id}} ->
-        load_image(actor, duplicate_id, action, @image_preloads)
+        Loader.fetch_and_authorize(Image, actor, action, duplicate_id, @image_preloads)
 
       error ->
         error
@@ -457,7 +432,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Creates a comment beneath an authorized `image_id` on behalf of `actor`.
+  Creates a comment through its parent image, on behalf of `actor`.
 
   Write access, image commenting permission, the Images-owned forced-filter
   prerequisite, and the 15-second creation limit are checked before insertion.
@@ -502,7 +477,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads a visible comment belonging to `image_id`.
+  Loads a visible comment through its parent image.
 
   The parent image and scoped comment are independently authorized for `:show`.
   The loaded image is returned for the caller to reuse.
@@ -525,13 +500,13 @@ defmodule Philomena.Comments do
   def load_comment_for_show(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- load_commentable_image(actor, image_id, :show),
          {:ok, comment} <-
-           load_comment_in_image(actor, image, comment_id, :show, @display_preloads) do
+           load_image_comment(actor, image, comment_id, :show, @display_preloads) do
       {:ok, {image, comment}}
     end
   end
 
   @doc """
-  Loads an editable comment and changeset beneath `image`.
+  Loads an editable comment and changeset through its parent image.
 
   Write access is checked before image authorization, forced-filter enforcement,
   and comment authorization, matching the update path exactly.
@@ -554,8 +529,9 @@ defmodule Philomena.Comments do
   def load_comment_for_edit(%Actor{} = actor, image_id, comment_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_commentable_image(actor, image_id, :create_comment),
-         {:ok, comment} <- load_editable_comment(actor, image, comment_id, :edit) do
-      {:ok, %CommentForm{image: image, comment: comment, changeset: change_comment(comment)}}
+         :ok <- Images.verify_forced_filter_access(actor, image),
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :edit, @display_preloads) do
+      {:ok, %CommentForm{image: image, comment: comment, changeset: Comment.changeset(comment)}}
     end
   end
 
@@ -587,7 +563,9 @@ defmodule Philomena.Comments do
   def update_comment(%Actor{} = actor, image_id, comment_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_commentable_image(actor, image_id, :create_comment),
-         {:ok, comment} <- load_editable_comment(actor, image, comment_id, :update) do
+         :ok <- Images.verify_forced_filter_access(actor, image),
+         {:ok, comment} <-
+           load_image_comment(actor, image, comment_id, :update, @display_preloads) do
       case persist_comment_update(comment, actor, params || %{}) do
         {:ok, %{comment: comment}} ->
           report_non_approved(comment)
@@ -603,7 +581,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads a visible comment's edit history through its route image.
+  Loads a visible comment's edit history through its parent image.
 
   Parent and child IDs are parsed and scoped before authorization. The returned
   `CommentHistory` carries the latest 25 versions with authors and diffs.
@@ -620,8 +598,9 @@ defmodule Philomena.Comments do
   @spec comment_history(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
           {:ok, CommentHistory.t()} | {:error, :unauthorized | :not_found}
   def comment_history(%Actor{} = actor, image_id, comment_id) do
-    with {:ok, {image, comment}} <-
-           load_image_comment(actor, image_id, comment_id, :show, [], @display_preloads) do
+    with {:ok, image} <- load_commentable_image(actor, image_id, :show),
+         {:ok, comment} <-
+           load_image_comment(actor, image, comment_id, :show, @display_preloads) do
       {:ok,
        %CommentHistory{
          image: image,
@@ -632,7 +611,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads a comment as a report target through its route image.
+  Loads a comment as a report target through its parent image.
 
   Both resources are authorized for `:show`. Malformed, missing, and mismatched
   IDs are not-found. Reports owns the write prerequisite and form changeset.
@@ -646,21 +625,13 @@ defmodule Philomena.Comments do
   @spec load_report_target(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, image_id, comment_id) do
-    with {:ok, {_image, comment}} <-
-           load_image_comment(
-             actor,
-             image_id,
-             comment_id,
-             :show,
-             [:sources, tags: :aliases],
-             @display_preloads
-           ) do
-      {:ok, comment}
+    with {:ok, image} <- load_commentable_image(actor, image_id, :show) do
+      load_image_comment(actor, image, comment_id, :show, @display_preloads)
     end
   end
 
   @doc """
-  Hides a comment scoped beneath `image_id`.
+  Hides a comment scoped through its parent image.
 
   The comment update, report closure, and moderation log commit atomically.
   Report and comment indexing run after commit.
@@ -674,8 +645,8 @@ defmodule Philomena.Comments do
   @spec hide_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id(), map()) ::
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def hide_comment(%Actor{user: user} = actor, image_id, comment_id, params) do
-    with {:ok, {_image, comment}} <-
-           load_image_comment(actor, image_id, comment_id, :hide, [], @display_preloads) do
+    with {:ok, image} <- load_commentable_image(actor, image_id, :show),
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @display_preloads) do
       changeset = Comment.hide_changeset(comment, params, user)
       reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
 
@@ -704,7 +675,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Restores a comment scoped beneath `image_id`.
+  Restores a comment through its parent image.
 
   The restore and moderation log commit together. Indexing runs after commit.
 
@@ -717,8 +688,8 @@ defmodule Philomena.Comments do
   @spec unhide_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def unhide_comment(%Actor{} = actor, image_id, comment_id) do
-    with {:ok, {_image, comment}} <-
-           load_image_comment(actor, image_id, comment_id, :hide, [], @display_preloads) do
+    with {:ok, image} <- load_commentable_image(actor, image_id, :show),
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @display_preloads) do
       changeset = Comment.unhide_changeset(comment)
 
       Multi.new()
@@ -744,7 +715,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Destroys a comment's content beneath `image_id`.
+  Destroys a comment's content through its parent image.
 
   Authorization uses the distinct `:delete` action. Content removal, image
   counters, and the moderation log commit together. Indexing runs after commit.
@@ -758,8 +729,9 @@ defmodule Philomena.Comments do
   @spec destroy_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def destroy_comment(%Actor{} = actor, image_id, comment_id) do
-    with {:ok, {_image, comment}} <-
-           load_image_comment(actor, image_id, comment_id, :delete, [], @display_preloads) do
+    with {:ok, image} <- load_commentable_image(actor, image_id, :show),
+         {:ok, comment} <-
+           load_image_comment(actor, image, comment_id, :delete, @display_preloads) do
       comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
       image_query = from(i in Image, where: i.id == ^comment.image_id)
 
@@ -791,7 +763,7 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Approves a comment scoped beneath `image_id`.
+  Approves a comment through its parent image.
 
   Approval, report closure, author statistics, and the moderation log commit
   together.
@@ -805,8 +777,9 @@ defmodule Philomena.Comments do
   @spec approve_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def approve_comment(%Actor{user: user} = actor, image_id, comment_id) do
-    with {:ok, {_image, comment}} <-
-           load_image_comment(actor, image_id, comment_id, :approve, [], @display_preloads) do
+    with {:ok, image} <- load_commentable_image(actor, image_id, :show),
+         {:ok, comment} <-
+           load_image_comment(actor, image, comment_id, :approve, @display_preloads) do
       comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
 
       Multi.new()
