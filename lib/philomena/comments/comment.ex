@@ -67,6 +67,7 @@ defmodule Philomena.Comments.Comment do
 
   def destroy_changeset(comment) do
     change(comment)
+    |> validate_undestroyed()
     |> put_change(:destroyed_content, true)
     |> put_change(:body, "")
   end
@@ -81,6 +82,14 @@ defmodule Philomena.Comments.Comment do
   defp validate_unapproved(changeset) do
     if get_field(changeset, :approved) do
       add_error(changeset, :approved, "is already approved")
+    else
+      changeset
+    end
+  end
+
+  defp validate_undestroyed(changeset) do
+    if get_field(changeset, :destroyed_content) do
+      add_error(changeset, :destroyed_content, "has already been destroyed")
     else
       changeset
     end

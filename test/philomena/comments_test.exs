@@ -478,6 +478,16 @@ defmodule Philomena.CommentsTest do
       assert reloaded.destroyed_content
       assert reloaded.hidden_from_users
       assert reloaded.deletion_reason == "Spam"
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Comments.destroy_comment(actor(moderator_user_fixture()), image.id, comment.id)
+
+      reloaded = Repo.reload!(comment)
+      assert %{destroyed_content: ["has already been destroyed"]} = errors_on(changeset)
+      assert reloaded.body == ""
+      assert reloaded.destroyed_content
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Spam"
     end
 
     test "the moderation log names the image and comment exactly", %{image: image} do

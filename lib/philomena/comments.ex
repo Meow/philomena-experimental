@@ -80,80 +80,6 @@ defmodule Philomena.Comments do
     Comment.changeset(comment)
   end
 
-  defp moderation_changeset(:hide, comment, attrs, user),
-    do: Comment.hide_changeset(comment, attrs, user)
-
-  defp moderation_changeset(:unhide, comment, _attrs, _user),
-    do: Comment.unhide_changeset(comment)
-
-  defp moderation_changeset(:destroy, comment, _attrs, _user),
-    do: Comment.destroy_changeset(comment)
-
-  defp moderation_log(:hide, comment, changeset) do
-    reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
-
-    {
-      "Image.Comment.Hide:create",
-      "Deleted comment on image #{comment.image_id} (#{reason})"
-    }
-  end
-
-  defp moderation_log(:unhide, comment, _changeset),
-    do: {"Image.Comment.Hide:delete", "Restored comment on image #{comment.image_id}"}
-
-  defp moderation_log(:destroy, comment, _changeset),
-    do: {"Image.Comment.Delete:create", "Destroyed comment on image #{comment.image_id}"}
-
-  defp put_moderation_effects(multi, :hide, comment, %Actor{user: user}) do
-    Reports.put_close_reports(multi, :reports, user, comment_id: comment.id)
-  end
-
-  defp put_moderation_effects(multi, :unhide, _comment, _actor), do: multi
-
-  defp put_moderation_effects(multi, :destroy, %Comment{destroyed_content: true}, _actor),
-    do: multi
-
-  defp put_moderation_effects(multi, :destroy, comment, _actor) do
-    multi
-    |> Multi.update_all(:image, where(Image, id: ^comment.image_id), inc: [comments_count: -1])
-    |> Multi.run(:statistics, fn _repo, _changes ->
-      UserStatistics.increment(comment.user_id, :comments_count, -1)
-    end)
-  end
-
-  defp persist_moderation(%Actor{} = actor, %Comment{} = comment, operation, attrs \\ %{}) do
-    changeset = moderation_changeset(operation, comment, attrs, actor.user)
-    {log_type, log_body} = moderation_log(operation, comment, changeset)
-
-    Multi.new()
-    |> Multi.update(:comment, changeset)
-    |> put_moderation_effects(operation, comment, actor)
-    |> ModerationLogs.put_log(
-      :moderation_log,
-      actor,
-      log_type,
-      Paths.image_comment_path(comment.image_id, comment.id),
-      log_body
-    )
-    |> Repo.transaction()
-    |> finish_moderation()
-  end
-
-  defp finish_moderation({:ok, %{comment: comment} = changes}) do
-    changes
-    |> Map.get(:reports, {0, []})
-    |> elem(1)
-    |> Reports.reindex_closed_reports()
-
-    reindex_comment(comment)
-    {:ok, comment}
-  end
-
-  defp finish_moderation({:error, _step, %Ecto.Changeset{} = changeset, _changes}),
-    do: {:error, changeset}
-
-  defp finish_moderation({:error, _step, reason, _changes}), do: {:error, reason}
-
   defp persist_erasure(%Comment{} = comment, %User{} = moderator) do
     hide_changeset = Comment.hide_changeset(comment, %{deletion_reason: "Site abuse"}, moderator)
 
@@ -840,10 +766,33 @@ defmodule Philomena.Comments do
   """
   @spec hide_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id(), map()) ::
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
-  def hide_comment(%Actor{} = actor, image_id, comment_id, params) do
+  def hide_comment(%Actor{user: user} = actor, image_id, comment_id, params) do
     with {:ok, {_image, comment}} <-
            load_image_comment(actor, image_id, comment_id, :hide, [], @display_preloads) do
-      persist_moderation(actor, comment, :hide, params)
+      changeset = Comment.hide_changeset(comment, params, user)
+      reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
+
+      Multi.new()
+      |> Multi.update(:comment, changeset)
+      |> Reports.put_close_reports(:reports, user, comment_id: comment.id)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Image.Comment.Hide:create",
+        Paths.image_comment_path(comment.image_id, comment.id),
+        "Deleted comment on image #{comment.image_id} (#{reason})"
+      )
+      |> Repo.transact()
+      |> case do
+        {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
+          Reports.reindex_closed_reports(report_ids)
+          reindex_comment(comment)
+
+          {:ok, comment}
+
+        {:error, _step, reason, _changes} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -863,7 +812,27 @@ defmodule Philomena.Comments do
   def unhide_comment(%Actor{} = actor, image_id, comment_id) do
     with {:ok, {_image, comment}} <-
            load_image_comment(actor, image_id, comment_id, :hide, [], @display_preloads) do
-      persist_moderation(actor, comment, :unhide)
+      changeset = Comment.unhide_changeset(comment)
+
+      Multi.new()
+      |> Multi.update(:comment, changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Image.Comment.Hide:delete",
+        Paths.image_comment_path(comment.image_id, comment.id),
+        "Restored comment on image #{comment.image_id}"
+      )
+      |> Repo.transact()
+      |> case do
+        {:ok, %{comment: comment}} ->
+          reindex_comment(comment)
+
+          {:ok, comment}
+
+        {:error, _step, reason, _changes} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -871,7 +840,7 @@ defmodule Philomena.Comments do
   Destroys a comment's content beneath `image_id`.
 
   Authorization uses the distinct `:delete` action. Content removal, image and
-  user counters, and the moderation log commit together; indexing follows the
+  counters, and the moderation log commit together; indexing follows the
   commit.
 
   ## Examples
@@ -885,7 +854,30 @@ defmodule Philomena.Comments do
   def destroy_comment(%Actor{} = actor, image_id, comment_id) do
     with {:ok, {_image, comment}} <-
            load_image_comment(actor, image_id, comment_id, :delete, [], @display_preloads) do
-      persist_moderation(actor, comment, :destroy)
+      changeset = Comment.destroy_changeset(comment)
+      image_query = from(image in Image, where: image.id == ^comment.image_id)
+
+      Multi.new()
+      |> Multi.update(:comment, changeset)
+      |> Multi.update_all(:image, image_query, inc: [comments_count: -1])
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Image.Comment.Delete:create",
+        Paths.image_comment_path(comment.image_id, comment.id),
+        "Destroyed comment on image #{comment.image_id}"
+      )
+      |> Repo.transact()
+      |> case do
+        {:ok, %{comment: comment}} ->
+          UserStatistics.increment(comment.user_id, :comments_count, -1)
+          reindex_comment(comment)
+
+          {:ok, comment}
+
+        {:error, _step, reason, _changes} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -923,6 +915,8 @@ defmodule Philomena.Comments do
         {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
           UserStatistics.increment(comment.user_id, :comments_count)
           Reports.reindex_closed_reports(report_ids)
+          reindex_comment(comment)
+
           {:ok, comment}
 
         {:error, _step, reason, _changes} ->
