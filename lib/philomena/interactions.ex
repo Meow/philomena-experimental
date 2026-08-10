@@ -104,13 +104,12 @@ defmodule Philomena.Interactions do
     Enum.map(voters, &%{image_id: target.id, user_id: &1.id, created_at: created_at, up: up})
   end
 
-  defp increment_user_statistics(rows, statistic) do
-    Enum.reduce_while(rows, {:ok, nil}, fn %{user_id: user_id}, {:ok, nil} ->
-      case UserStatistics.increment(user_id, statistic, 1) do
-        {:ok, nil} -> {:cont, {:ok, nil}}
-        error -> {:halt, error}
-      end
-    end)
+  defp increment_user_statistics([], _statistic), do: {:ok, nil}
+
+  defp increment_user_statistics([%{user_id: user_id} | rest], statistic) do
+    with {:ok, nil} <- UserStatistics.increment(user_id, statistic, 1) do
+      increment_user_statistics(rest, statistic)
+    end
   end
 
   @doc """
@@ -142,7 +141,7 @@ defmodule Philomena.Interactions do
   end
 
   @doc """
-  Adds image-interaction migration steps for loaded source and target images.
+  Adds interaction migration steps for loaded source and target images.
 
   The caller must authorize the merge in `Philomena.Images` and execute the
   returned `Ecto.Multi`. Hides, faves, and votes absent from the target are
