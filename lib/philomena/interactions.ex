@@ -1,10 +1,6 @@
 defmodule Philomena.Interactions do
   @moduledoc """
-  Read-only personalization across image interactions and transaction steps
-  used by authorized image merges.
-
-  Request-facing reads take an `Actor`. Merge composition accepts loaded images
-  and remains subordinate to the authorization boundary in `Philomena.Images`.
+  Image interaction loads and transaction steps used by authorized image merges.
   """
 
   import Ecto.Query
@@ -24,6 +20,12 @@ defmodule Philomena.Interactions do
           interaction_type: String.t(),
           value: String.t()
         }
+
+  defp flatten_images(nil), do: []
+  defp flatten_images(id) when is_integer(id), do: [id]
+  defp flatten_images(%{id: id}), do: [id]
+  defp flatten_images({%{id: id}, _hit}), do: [id]
+  defp flatten_images(enum), do: Enum.flat_map(enum, &flatten_images/1)
 
   defp interaction_ids(images) do
     images
@@ -79,20 +81,9 @@ defmodule Philomena.Interactions do
       |> where(user_id: ^user.id, up: false)
 
     [hide_interactions, fave_interactions, upvote_interactions, downvote_interactions]
-    |> union_all_queries()
+    |> Enum.reduce(&union_all(&2, ^&1))
     |> Repo.all()
   end
-
-  defp union_all_queries([query]), do: query
-
-  defp union_all_queries([query | rest]),
-    do: query |> union_all(^union_all_queries(rest))
-
-  defp flatten_images(nil), do: []
-  defp flatten_images(id) when is_integer(id), do: [id]
-  defp flatten_images(%{id: id}), do: [id]
-  defp flatten_images({%{id: id}, _hit}), do: [id]
-  defp flatten_images(enum), do: Enum.flat_map(enum, &flatten_images/1)
 
   defp source_interactions(repo, source) do
     source = repo.preload(source, [:hiders, :favers, :upvoters, :downvoters], force: true)
@@ -126,11 +117,11 @@ defmodule Philomena.Interactions do
   Lists `actor`'s interactions with all supplied images.
 
   `images` may be a page or another enumerable containing loaded images,
-  integer IDs, `{image, hit}` search results, nested enumerables, duplicates,
-  and `nil`; duplicates and `nil` are ignored. Anonymous actors return `[]`
-  without querying. The result omits images with no interaction and uses the
-  wire-format strings expected by the web client: `"hidden"`, `"faved"`, or
-  `"voted"`, with `"up"`/`"down"` only for votes.
+  integer IDs, `{image, hit}` search results, nested lists, duplicates,
+  and `nil`. Duplicates and `nil` are ignored. Anonymous actors return `[]`
+  without querying. The result omits images with no interaction and uses
+  specific strings: `"hidden"`, `"faved"`, or `"voted"`, with
+  values `"up"`/`"down"` only given for votes.
 
   ## Examples
 
@@ -155,10 +146,9 @@ defmodule Philomena.Interactions do
 
   The caller must authorize the merge in `Philomena.Images` and execute the
   returned `Ecto.Multi`. Hides, faves, and votes absent from the target are
-  copied; when both images have the same user's interaction, the target row
+  copied. When both images have the same user's interaction, the target row
   wins. Target counters, score, and user fave/vote statistics increase only for
-  rows actually inserted. Source rows are unchanged because the image merge
-  owns the source lifecycle.
+  rows actually inserted. Source rows are unchanged.
 
   The added changes are named `:interaction_source`, `:interaction_hides`,
   `:interaction_faves`, `:interaction_upvotes`, `:interaction_downvotes`, and
@@ -167,7 +157,9 @@ defmodule Philomena.Interactions do
 
   ## Examples
 
-      iex> Multi.new() |> migrate_loaded_images(source, target) |> Repo.transaction()
+      iex> (Multi.new()
+      ...> |> migrate_loaded_images(source, target)
+      ...> |> Repo.transaction())
       {:ok, %{interaction_image: 1}}
 
   """

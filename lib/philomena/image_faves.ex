@@ -1,10 +1,10 @@
 defmodule Philomena.ImageFaves do
   @moduledoc """
-  Transaction steps for the favorite rows owned by `Philomena.Images`.
+  Transaction steps for favorite rows owned by `Philomena.Images`.
 
-  This module is not an authorization boundary. Its functions require an
-  already-loaded image and user after the owning context has enforced request
-  prerequisites and authorization.
+  This module performs no authorization. Its functions require an
+  already-loaded image and user after the owning context has enforced
+  prerequisites.
   """
 
   import Ecto.Query, warn: false
@@ -35,19 +35,20 @@ defmodule Philomena.ImageFaves do
   end
 
   @doc """
-  Adds replacement-favorite steps for a loaded image and user to `multi`.
+  Adds favorite steps for a loaded image and user to `multi`.
 
   The caller must have authorized the loaded image. The steps first remove any
   existing favorite, adjusting `faves_count` and the user's image-fave
   statistic by the number of rows removed, and then insert one row and add one
   to both counters. Repeated execution is therefore idempotent. The changes are
   named `:unfave`, `:dec_faves_count`, `:fave`, `:inc_faves_count`, and
-  `:inc_fave_stat`; a uniqueness conflict rolls the surrounding transaction
-  back.
+  `:inc_fave_stat`.
 
   ## Examples
 
-      iex> Multi.new() |> put_fave_for_loaded_image(image, user) |> Repo.transaction()
+      iex> (Multi.new()
+      ...> |> put_fave_for_loaded_image(image, user)
+      ...> |> Repo.transaction())
       {:ok, %{fave: %ImageFave{}}}
 
   """
@@ -69,15 +70,17 @@ defmodule Philomena.ImageFaves do
   end
 
   @doc """
-  Adds idempotent favorite-deletion steps for a loaded image and user to `multi`.
+  Adds favorite deletion steps for a loaded image and user to `multi`.
 
-  The caller must have authorized the loaded image. `:unfave` reports the
-  number of deleted rows; `:dec_faves_count` adjusts the image and user counters
-  by that exact number, so deleting an absent favorite changes nothing.
+  The caller must have authorized the loaded image.`:dec_faves_count` adjusts
+  the image and user counters by that exact number, so deleting an absent
+  favorite changes nothing.
 
   ## Examples
 
-      iex> Multi.new() |> delete_fave_for_loaded_image(image, user) |> Repo.transaction()
+      iex> (Multi.new()
+      ...> |> delete_fave_for_loaded_image(image, user)
+      ...> |> Repo.transaction())
       {:ok, %{unfave: {0, nil}}}
 
   """

@@ -1,10 +1,10 @@
 defmodule Philomena.ImageHides do
   @moduledoc """
-  Transaction steps for the personal-hide rows owned by `Philomena.Images`.
+  Transaction steps for hide rows owned by `Philomena.Images`.
 
-  This module is not an authorization boundary. Its functions require an
-  already-loaded image and user after the owning context has enforced request
-  prerequisites and authorization.
+  This module performs no authorization. Its functions require an
+  already-loaded image and user after the owning context has enforced
+  prerequisites.
   """
 
   import Ecto.Query, warn: false
@@ -31,17 +31,19 @@ defmodule Philomena.ImageHides do
   end
 
   @doc """
-  Adds replacement-hide steps for a loaded image and user to `multi`.
+  Adds hide steps for a loaded image and user to `multi`.
 
-  The caller must have authorized the loaded image. Any existing row is removed
-  before one row is inserted, with `hides_count` adjusted by the exact row
-  deltas. Repeated execution is therefore idempotent. The changes are named
-  `:unhide`, `:dec_hides_count`, `:hide`, and `:inc_hides_count`; a uniqueness
-  conflict rolls the surrounding transaction back.
+  The caller must have authorized the loaded image. The steps first remove any
+  existing favorite, adjusting `hides_count` by the number of rows removed, and
+  then insert one row and add one to both counters. Repeated execution is
+  therefore idempotent. The changes are named `:unhide`, `:dec_hides_count`,
+  `:hide`, and `:inc_hides_count`
 
   ## Examples
 
-      iex> Multi.new() |> put_hide_for_loaded_image(image, user) |> Repo.transaction()
+      iex> (Multi.new()
+      ...> |> put_hide_for_loaded_image(image, user)
+      ...> |> Repo.transaction())
       {:ok, %{hide: %ImageHide{}}}
 
   """
@@ -60,15 +62,17 @@ defmodule Philomena.ImageHides do
   end
 
   @doc """
-  Adds idempotent hide-deletion steps for a loaded image and user to `multi`.
+  Adds hide deletion steps for a loaded image and user to `multi`.
 
-  The caller must have authorized the loaded image. `:unhide` reports the
-  number of deleted rows and `:dec_hides_count` adjusts the image counter by
-  that exact number, so deleting an absent hide changes nothing.
+  The caller must have authorized the loaded image. `:dec_hides_count` adjusts
+  the image counter by that exact number, so deleting an absent hide changes
+  nothing.
 
   ## Examples
 
-      iex> Multi.new() |> delete_hide_for_loaded_image(image, user) |> Repo.transaction()
+      iex> (Multi.new()
+      ...> |> delete_hide_for_loaded_image(image, user)
+      ...> |> Repo.transaction())
       {:ok, %{unhide: {0, nil}}}
 
   """

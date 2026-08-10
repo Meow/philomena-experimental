@@ -1,10 +1,10 @@
 defmodule Philomena.ImageVotes do
   @moduledoc """
-  Transaction steps for the vote rows owned by `Philomena.Images`.
+  Transaction steps for vote rows owned by `Philomena.Images`.
 
-  This module is not an authorization or input-validation boundary. Its
-  functions require an already-loaded image and user plus a validated boolean
-  direction after the owning context has enforced request prerequisites.
+  This module performs no authorization. Its functions require an
+  already-loaded image and user after the owning context has enforced
+  prerequisites.
   """
 
   import Ecto.Query, warn: false
@@ -45,19 +45,19 @@ defmodule Philomena.ImageVotes do
   end
 
   @doc """
-  Adds replacement-vote steps for a loaded image and user to `multi`.
+  Adds vote steps for a loaded image and user to `multi`.
 
-  The caller must have authorized the image and validated `up`. Any existing
-  direction is removed before the requested direction is inserted, with score,
-  image direction counters, and the user's vote statistic adjusted by the
-  actual row deltas. Repeated votes and direction changes are idempotent. The
-  changes are named `:unupvote`, `:undownvote`, `:dec_votes_count`, `:vote`,
-  `:inc_vote_count`, and `:inc_vote_stat`; a uniqueness conflict rolls the
-  surrounding transaction back.
+  The caller must have authorized the image. Any existing direction is removed
+  before the requested direction is inserted, with score, image direction counters,
+  and the user's vote statistic adjusted by the actual row deltas. Repeated votes
+  and direction changes are idempotent. The changes are named `:unupvote`,
+  `:undownvote`, `:dec_votes_count`, `:vote`, `:inc_vote_count`, and `:inc_vote_stat`.
 
   ## Examples
 
-      iex> Multi.new() |> put_vote_for_loaded_image(image, user, true) |> Repo.transaction()
+      iex> (Multi.new()
+      ...> |> put_vote_for_loaded_image(image, user, true)
+      ...> |> Repo.transaction())
       {:ok, %{vote: %ImageVote{up: true}}}
 
   """
@@ -84,7 +84,7 @@ defmodule Philomena.ImageVotes do
   end
 
   @doc """
-  Adds idempotent vote-deletion steps for a loaded image and user to `multi`.
+  Adds vote deletion steps for a loaded image and user to `multi`.
 
   The caller must have authorized the loaded image. The two delete changes
   report the removed direction, and `:dec_votes_count` adjusts score, image
@@ -93,7 +93,9 @@ defmodule Philomena.ImageVotes do
 
   ## Examples
 
-      iex> Multi.new() |> delete_vote_for_loaded_image(image, user) |> Repo.transaction()
+      iex> (Multi.new()
+      ...> |> delete_vote_for_loaded_image(image, user)
+      ...> |> Repo.transaction())
       {:ok, %{unupvote: {0, nil}, undownvote: {0, nil}}}
 
   """
