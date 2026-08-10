@@ -229,7 +229,7 @@ defmodule Philomena.Topics do
       |> where(topic_id: ^topic.id)
       |> where([p], p.topic_position >= ^(page_size * (page_number - 1)))
       |> where([p], p.topic_position < ^(page_size * page_number))
-      |> order_by(asc: :created_at)
+      |> order_by(asc: :created_at, asc: :id)
       |> preload([:deleted_by, :topic, topic: :forum, user: [awards: :badge]])
       |> Repo.all()
 
