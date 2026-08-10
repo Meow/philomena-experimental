@@ -80,41 +80,6 @@ defmodule Philomena.Comments do
     Comment.changeset(comment)
   end
 
-  defp persist_erasure(%Comment{} = comment, %User{} = moderator) do
-    hide_changeset = Comment.hide_changeset(comment, %{deletion_reason: "Site abuse"}, moderator)
-
-    Multi.new()
-    |> Multi.update(:hidden_comment, hide_changeset)
-    |> Multi.update(:comment, fn %{hidden_comment: hidden_comment} ->
-      Comment.destroy_changeset(hidden_comment)
-    end)
-    |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
-    |> maybe_put_erasure_counts(comment)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
-        Reports.reindex_closed_reports(report_ids)
-        reindex_comment(comment)
-        {:ok, comment}
-
-      {:error, _step, %Ecto.Changeset{} = changeset, _changes} ->
-        {:error, changeset}
-
-      {:error, _step, reason, _changes} ->
-        {:error, reason}
-    end
-  end
-
-  defp maybe_put_erasure_counts(multi, %Comment{destroyed_content: true}), do: multi
-
-  defp maybe_put_erasure_counts(multi, comment) do
-    multi
-    |> Multi.update_all(:image, where(Image, id: ^comment.image_id), inc: [comments_count: -1])
-    |> Multi.run(:statistics, fn _repo, _changes ->
-      UserStatistics.increment(comment.user_id, :comments_count, -1)
-    end)
-  end
-
   defp report_non_approved(%Comment{approved: true}), do: false
 
   defp report_non_approved(comment) do
@@ -854,11 +819,14 @@ defmodule Philomena.Comments do
   def destroy_comment(%Actor{} = actor, image_id, comment_id) do
     with {:ok, {_image, comment}} <-
            load_image_comment(actor, image_id, comment_id, :delete, [], @display_preloads) do
-      changeset = Comment.destroy_changeset(comment)
-      image_query = from(image in Image, where: image.id == ^comment.image_id)
+      comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
+      image_query = from(i in Image, where: i.id == ^comment.image_id)
 
       Multi.new()
-      |> Multi.update(:comment, changeset)
+      |> Multi.one(:locked_comment, comment_query)
+      |> Multi.update(:comment, fn %{locked_comment: comment} ->
+        Comment.destroy_changeset(comment)
+      end)
       |> Multi.update_all(:image, image_query, inc: [comments_count: -1])
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -898,10 +866,13 @@ defmodule Philomena.Comments do
   def approve_comment(%Actor{user: user} = actor, image_id, comment_id) do
     with {:ok, {_image, comment}} <-
            load_image_comment(actor, image_id, comment_id, :approve, [], @display_preloads) do
-      changeset = Comment.approve_changeset(comment)
+      comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
 
       Multi.new()
-      |> Multi.update(:comment, changeset)
+      |> Multi.one(:locked_comment, comment_query)
+      |> Multi.update(:comment, fn %{locked_comment: comment} ->
+        Comment.approve_changeset(comment)
+      end)
       |> Reports.put_close_reports(:reports, user, comment_id: comment.id)
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -941,7 +912,36 @@ defmodule Philomena.Comments do
   @spec erase_user_comment(Comment.t(), User.t()) ::
           {:ok, Comment.t()} | {:error, Ecto.Changeset.t() | term()}
   def erase_user_comment(%Comment{} = comment, %User{} = moderator) do
-    persist_erasure(comment, moderator)
+    comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
+    image_query = from(i in Image, where: i.id == ^comment.image_id)
+
+    Multi.new()
+    |> Multi.one(:locked_comment, comment_query)
+    |> Multi.update(:comment, fn %{locked_comment: comment} ->
+      comment
+      |> Comment.hide_changeset(%{deletion_reason: "Site abuse"}, moderator)
+      |> Comment.destroy_changeset()
+    end)
+    |> Multi.update_all(:image, image_query, inc: [comments_count: -1])
+    |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
+    |> Repo.transact()
+    |> case do
+      {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
+        UserStatistics.increment(comment.user_id, :comments_count, -1)
+        Reports.reindex_closed_reports(report_ids)
+        reindex_comment(comment)
+
+        {:ok, comment}
+
+      {:error, :comment, %{errors: [destroyed_content: {"has already been destroyed", []}]},
+       _changes} ->
+        # Skips all of the above if the comment was already destroyed.
+        # This is the only expected error.
+        {:ok, comment}
+
+      error ->
+        error
+    end
   end
 
   @doc """

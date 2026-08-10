@@ -1288,6 +1288,10 @@ defmodule Philomena.CommentsTest do
       refute closed_report.open
       assert closed_report.state == "closed"
       assert Repo.aggregate(ModerationLog, :count) == 0
+
+      assert {:ok, _erased} = Comments.erase_user_comment(comment, moderator)
+      assert Repo.reload!(image).comments_count == 0
+      assert Repo.reload!(author).comments_count == 0
     end
   end
 
