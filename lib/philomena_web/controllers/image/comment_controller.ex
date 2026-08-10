@@ -7,58 +7,58 @@ defmodule PhilomenaWeb.Image.CommentController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug :load_commentable_image when action in [:index, :show, :create, :edit, :update]
-
-  def index(conn, %{"comment_id" => comment_id}) do
-    with {:ok, page} <-
+  def index(conn, %{"comment_id" => comment_id, "image_id" => image_id}) do
+    with {:ok, {image, page}} <-
            Comments.find_comment_page(
              conn.assigns.actor,
-             conn.assigns.image,
+             image_id,
              comment_id,
              conn.assigns.comment_scrivener
            ) do
-      redirect(conn, to: ~p"/images/#{conn.assigns.image}/comments?#{[page: page]}")
+      redirect(conn, to: ~p"/images/#{image}/comments?#{[page: page]}")
     end
   end
 
-  def index(conn, _params) do
-    comments =
-      Comments.paginate_image_comments(
-        conn.assigns.actor,
-        conn.assigns.image,
-        conn.assigns.comment_scrivener
-      )
+  def index(conn, %{"image_id" => image_id}) do
+    with {:ok, image} <- Comments.load_commentable_image(conn.assigns.actor, image_id, :index) do
+      comments =
+        Comments.paginate_image_comments(
+          conn.assigns.actor,
+          image,
+          conn.assigns.comment_scrivener
+        )
 
-    rendered = MarkdownRenderer.render_collection(comments.entries, conn)
+      rendered = MarkdownRenderer.render_collection(comments.entries, conn)
 
-    comments = %{comments | entries: Enum.zip(comments.entries, rendered)}
+      comments = %{comments | entries: Enum.zip(comments.entries, rendered)}
 
-    render(conn, "index.html", layout: false, image: conn.assigns.image, comments: comments)
+      render(conn, "index.html", layout: false, image: image, comments: comments)
+    end
   end
 
-  def show(conn, %{"id" => comment_id}) do
-    with {:ok, comment} <-
-           Comments.load_comment_for_show(conn.assigns.actor, conn.assigns.image, comment_id) do
+  def show(conn, %{"id" => comment_id, "image_id" => image_id}) do
+    with {:ok, {image, comment}} <-
+           Comments.load_comment_for_show(conn.assigns.actor, image_id, comment_id) do
       rendered = MarkdownRenderer.render_one(comment, conn)
 
       render(conn, "show.html",
         layout: false,
-        image: conn.assigns.image,
+        image: image,
         comment: comment,
         body: rendered
       )
     end
   end
 
-  def create(conn, %{"comment" => comment_params}) do
-    case Comments.create_comment(conn.assigns.actor, conn.assigns.image, comment_params) do
+  def create(conn, %{"comment" => comment_params, "image_id" => image_id}) do
+    case Comments.create_comment(conn.assigns.actor, image_id, comment_params) do
       {:ok, comment} ->
-        index(conn, %{"comment_id" => comment.id})
+        index(conn, %{"comment_id" => comment.id, "image_id" => comment.image_id})
 
-      {:error, :creation_failed} ->
+      {:error, {:creation_failed, image}} ->
         conn
         |> put_flash(:error, "There was an error posting your comment")
-        |> redirect(to: ~p"/images/#{conn.assigns.image}")
+        |> redirect(to: ~p"/images/#{image}")
 
       {:error, :rate_limited} ->
         RateLimitedResponse.call(conn, "You may only create a comment once every 15 seconds.")
@@ -68,52 +68,39 @@ defmodule PhilomenaWeb.Image.CommentController do
     end
   end
 
-  def edit(conn, %{"id" => comment_id}) do
+  def edit(conn, %{"id" => comment_id, "image_id" => image_id}) do
     with {:ok, form} <-
-           Comments.load_comment_for_edit(conn.assigns.actor, conn.assigns.image, comment_id) do
+           Comments.load_comment_for_edit(conn.assigns.actor, image_id, comment_id) do
       render(conn, "edit.html",
         title: "Editing Comment",
+        image: form.image,
         comment: form.comment,
         changeset: form.changeset
       )
     end
   end
 
-  def update(conn, %{"id" => comment_id, "comment" => comment_params}) do
+  def update(conn, %{"id" => comment_id, "comment" => comment_params, "image_id" => image_id}) do
     case Comments.update_comment(
            conn.assigns.actor,
-           conn.assigns.image,
+           image_id,
            comment_id,
            comment_params
          ) do
-      {:ok, comment} ->
+      {:ok, {image, comment}} ->
         conn
         |> put_flash(:info, "Comment updated successfully.")
-        |> redirect(to: ~p"/images/#{conn.assigns.image}" <> "#comment_#{comment.id}")
+        |> redirect(to: ~p"/images/#{image}" <> "#comment_#{comment.id}")
 
       {:error, %Comments.CommentForm{} = form} ->
-        render(conn, "edit.html", comment: form.comment, changeset: form.changeset)
+        render(conn, "edit.html",
+          image: form.image,
+          comment: form.comment,
+          changeset: form.changeset
+        )
 
       {:error, _} = error ->
         error
-    end
-  end
-
-  # Loads and authorizes the commented-on image for rendering. Write actions
-  # enforce the Images-owned forced-filter prerequisite inside Comments.
-  defp load_commentable_image(conn, _opts) do
-    case Comments.load_commentable_image(
-           conn.assigns.actor,
-           conn.params["image_id"],
-           action_name(conn)
-         ) do
-      {:ok, image} ->
-        assign(conn, :image, image)
-
-      error ->
-        conn
-        |> PhilomenaWeb.FallbackController.call(error)
-        |> halt()
     end
   end
 end

@@ -471,21 +471,28 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Locates the visible page containing `comment_id` beneath `image`.
+  Locates the comment page containing `comment_id`, belonging to `image_id`.
 
   Missing, malformed, mismatched, or collection-invisible comments are
   not-found. A loaded comment forbidden to the actor is unauthorized.
+  Returns the loaded image for the caller to reuse.
 
   ## Examples
 
-      iex> find_comment_page(actor, image, comment.id, page_size: 25)
-      {:ok, 3}
+      iex> find_comment_page(actor, image_id, comment.id, page_size: 25)
+      {:ok, {%Image{}, 3}}
 
   """
-  @spec find_comment_page(Actor.t(), Image.t(), IntegerId.integer_id(), Repo.pagination_params()) ::
-          {:ok, pos_integer()} | {:error, :unauthorized | :not_found}
-  def find_comment_page(%Actor{} = actor, %Image{} = image, comment_id, pagination) do
-    with {:ok, comment_id} <- IntegerId.parse(comment_id),
+  @spec find_comment_page(
+          actor :: Actor.t(),
+          image_id :: IntegerId.integer_id(),
+          comment_id :: IntegerId.integer_id(),
+          pagination :: Repo.pagination_params()
+        ) ::
+          {:ok, {Image.t(), pos_integer()}} | {:error, :unauthorized | :not_found}
+  def find_comment_page(%Actor{} = actor, image_id, comment_id, pagination) do
+    with {:ok, image} <- load_commentable_image(actor, image_id, :index),
+         {:ok, comment_id} <- IntegerId.parse(comment_id),
          {:ok, comment} <-
            actor
            |> visible_image_comments(image)
@@ -497,7 +504,7 @@ defmodule Philomena.Comments do
         |> filter_direction(comment, actor.user)
         |> Repo.aggregate(:count, :id)
 
-      {:ok, div(offset, pagination[:page_size]) + 1}
+      {:ok, {image, div(offset, pagination[:page_size]) + 1}}
     else
       :error -> {:error, :not_found}
       error -> error
@@ -545,29 +552,33 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Creates a comment beneath an authorized `image` on behalf of `actor`.
+  Creates a comment beneath an authorized `image_id` on behalf of `actor`.
 
   Write access, image commenting permission, the Images-owned forced-filter
   prerequisite, and the 15-second creation limit are checked before insertion.
   The transaction updates the image count, notification, and subscription state.
   Indexing, statistics/reporting, rate tracking, and the firehose broadcast run
-  after commit.
+  after commit. The image is returned for the caller to reuse.
 
   ## Examples
 
-      iex> create_comment(actor, image, %{"body" => "Hi"})
-      {:ok, %Comment{}}
+      iex> create_comment(actor, image_id, %{"body" => "Hi"})
+      {:ok, {%Image{}, %Comment{}}}
 
-      iex> create_comment(banned_actor, image, %{"body" => "Hi"})
+      iex> create_comment(actor, image_id, %{"body" => ""})
+      {:error, {:creation_failed, %Image{}}}
+
+      iex> create_comment(banned_actor, image_id, %{"body" => "Hi"})
       {:error, :ban}
 
   """
-  @spec create_comment(Actor.t(), Image.t(), map()) ::
+  @spec create_comment(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Comment.t()}
-          | {:error, :creation_failed | :ban | :unauthorized | :forced_filter | :rate_limited}
-  def create_comment(%Actor{} = actor, %Image{} = image, params) do
+          | {:error, {:creation_failed, Image.t()}}
+          | {:error, :ban | :unauthorized | :forced_filter | :rate_limited}
+  def create_comment(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, :create_comment, image),
+         {:ok, image} <- load_commentable_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
          :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
       case persist_comment(image, actor, params) do
@@ -580,30 +591,37 @@ defmodule Philomena.Comments do
           {:ok, comment}
 
         _error ->
-          {:error, :creation_failed}
+          {:error, {:creation_failed, image}}
       end
     end
   end
 
   @doc """
-  Loads a visible comment beneath an already loaded route image.
+  Loads a visible comment belonging to `image_id`.
 
   The parent image and scoped comment are independently authorized for `:show`.
+  The loaded image is returned for the caller to reuse.
 
   ## Examples
 
-      iex> load_comment_for_show(actor, image, "1")
-      {:ok, %Comment{}}
+      iex> load_comment_for_show(actor, "1", "2")
+      {:ok, {%Image{}, %Comment{}}}
 
-      iex> load_comment_for_show(actor, image, "not-a-number")
+      iex> load_comment_for_show(actor, "1", "not-a-number")
       {:error, :not_found}
 
   """
-  @spec load_comment_for_show(Actor.t(), Image.t(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
-  def load_comment_for_show(%Actor{} = actor, %Image{} = image, comment_id) do
-    with :ok <- authorize(actor, :show, image) do
-      load_comment_in_image(actor, image, comment_id, :show, @display_preloads)
+  @spec load_comment_for_show(
+          actor :: Actor.t(),
+          image_id :: IntegerId.integer_id(),
+          comment_id :: IntegerId.integer_id()
+        ) ::
+          {:ok, {Image.t(), Comment.t()}} | {:error, :unauthorized | :not_found}
+  def load_comment_for_show(%Actor{} = actor, image_id, comment_id) do
+    with {:ok, image} <- load_commentable_image(actor, image_id, :show),
+         {:ok, comment} <-
+           load_comment_in_image(actor, image, comment_id, :show, @display_preloads) do
+      {:ok, {image, comment}}
     end
   end
 
@@ -615,19 +633,24 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> load_comment_for_edit(actor, image, "1")
+      iex> load_comment_for_edit(actor, "1", "2")
       {:ok, %CommentForm{}}
 
-      iex> load_comment_for_edit(banned_actor, image, "1")
+      iex> load_comment_for_edit(banned_actor, "1", "2")
       {:error, :ban}
 
   """
-  @spec load_comment_for_edit(Actor.t(), Image.t(), IntegerId.integer_id()) ::
+  @spec load_comment_for_edit(
+          actor :: Actor.t(),
+          image_id :: IntegerId.integer_id(),
+          comment_id :: IntegerId.integer_id()
+        ) ::
           {:ok, CommentForm.t()} | {:error, request_error()}
-  def load_comment_for_edit(%Actor{} = actor, %Image{} = image, comment_id) do
+  def load_comment_for_edit(%Actor{} = actor, image_id, comment_id) do
     with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_commentable_image(actor, image_id, :create_comment),
          {:ok, comment} <- load_editable_comment(actor, image, comment_id, :edit) do
-      {:ok, %CommentForm{comment: comment, changeset: change_comment(comment)}}
+      {:ok, %CommentForm{image: image, comment: comment, changeset: change_comment(comment)}}
     end
   end
 
@@ -637,31 +660,39 @@ defmodule Philomena.Comments do
   The write-access, parent permission, and forced-filter prerequisites match the
   edit form. A successful transaction records the prior version. Reporting,
   indexing, and the firehose broadcast run after commit. Validation returns a
-  `CommentForm` preserving the loaded comment.
+  `CommentForm` preserving the loaded comment. On success, the image is returned
+  for the caller to reuse.
 
   ## Examples
 
       iex> update_comment(actor, image, "1", %{"body" => "Edited"})
-      {:ok, %Comment{}}
+      {:ok, {%Image{}, %Comment{}}}
 
       iex> update_comment(actor, image, "1", %{"body" => ""})
       {:error, %CommentForm{}}
 
   """
-  @spec update_comment(Actor.t(), Image.t(), IntegerId.integer_id(), map() | nil) ::
-          {:ok, Comment.t()} | {:error, CommentForm.t() | request_error()}
-  def update_comment(%Actor{} = actor, %Image{} = image, comment_id, params) do
+  @spec update_comment(
+          actor :: Actor.t(),
+          image_id :: IntegerId.integer_id(),
+          comment_id :: IntegerId.integer_id(),
+          params :: map() | nil
+        ) ::
+          {:ok, {Image.t(), Comment.t()}} | {:error, CommentForm.t() | request_error()}
+  def update_comment(%Actor{} = actor, image_id, comment_id, params) do
     with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_commentable_image(actor, image_id, :create_comment),
          {:ok, comment} <- load_editable_comment(actor, image, comment_id, :update) do
       case persist_comment_update(comment, actor, params || %{}) do
-        {:ok, %{comment: updated_comment}} ->
-          report_non_approved(updated_comment)
-          reindex_comment(updated_comment)
-          broadcast_comment("comment:update", updated_comment)
-          {:ok, updated_comment}
+        {:ok, %{comment: comment}} ->
+          report_non_approved(comment)
+          reindex_comment(comment)
+          broadcast_comment("comment:update", comment)
+
+          {:ok, {image, comment}}
 
         {:error, :comment, changeset, _changes} ->
-          {:error, %CommentForm{comment: comment, changeset: changeset}}
+          {:error, %CommentForm{image: image, comment: comment, changeset: changeset}}
       end
     end
   end

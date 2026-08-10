@@ -98,7 +98,7 @@ for comment_body <- resources["comments"] do
 
   Comments.create_comment(
     pleb_actor,
-    image,
+    image.id,
     %{"body" => comment_body}
   )
   |> case do
