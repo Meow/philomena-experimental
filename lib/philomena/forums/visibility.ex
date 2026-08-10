@@ -1,6 +1,6 @@
 defmodule Philomena.Forums.Visibility do
   @moduledoc """
-  Database query scopes for forum-hierarchy collection reads.
+  Database query scopes for forum hierarchy collection reads.
 
   These scopes intentionally mirror the `:show` rules in
   `Philomena.Users.Ability`. Collection endpoints use them before counting and
@@ -82,30 +82,30 @@ defmodule Philomena.Forums.Visibility do
   @doc """
   Generates an OpenSearch boolean `filter` clause to select posts visible to `actor`.
 
-  Moderators, administrators, and topic-moderator assistants may see hidden
+  Moderators, administrators, and topic moderator assistants may see hidden
   posts.
 
   ## Examples
 
-      iex> search_visibility_filters(admin_actor)
+      iex> search_filters(admin_actor)
       []
 
-      iex> search_visibility_filters(actor)
+      iex> search_filters(actor)
       [%{term: %{access_level: "normal"}}, ...]
 
   """
-  @spec search_visibility_filters(Actor.t()) :: list()
-  def search_visibility_filters(actor)
+  @spec search_filters(Actor.t()) :: list()
+  def search_filters(actor)
 
-  def search_visibility_filters(%Actor{user: %User{role: role}})
+  def search_filters(%Actor{user: %User{role: role}})
       when role in ["moderator", "admin"],
       do: []
 
-  def search_visibility_filters(%Actor{user: %User{role: "assistant"}}) do
+  def search_filters(%Actor{user: %User{role: "assistant"}}) do
     [%{terms: %{access_level: ["normal", "assistant"]}}]
   end
 
-  def search_visibility_filters(%Actor{}) do
+  def search_filters(%Actor{}) do
     [
       %{term: %{access_level: "normal"}},
       %{term: %{hidden_from_users: false}}

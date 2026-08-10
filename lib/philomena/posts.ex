@@ -400,8 +400,6 @@ defmodule Philomena.Posts do
   def search_posts(%Actor{user: user} = actor, query_string, pagination) do
     case Posts.Query.compile(query_string, user: user) do
       {:ok, query} ->
-        filters = Visibility.search_visibility_filters(actor)
-
         results =
           Post
           |> Search.search_definition(
@@ -409,7 +407,7 @@ defmodule Philomena.Posts do
               query: %{
                 bool: %{
                   must: query,
-                  filter: filters
+                  filter: Visibility.search_filters(actor)
                 }
               },
               sort: %{created_at: :desc}

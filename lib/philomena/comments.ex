@@ -11,7 +11,7 @@ defmodule Philomena.Comments do
   alias Ecto.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Comments
-  alias Philomena.Comments.{Comment, CommentForm, CommentHistory, Query}
+  alias Philomena.Comments.{Comment, CommentForm, CommentHistory, Query, Visibility}
   alias Philomena.Filters.Filter
   alias Philomena.Images
   alias Philomena.Images.Image
@@ -161,98 +161,6 @@ defmodule Philomena.Comments do
       load_comment_in_image(actor, image, comment_id, action, @display_preloads)
     end
   end
-
-  defp authorized?(%Actor{} = actor, action, subject),
-    do: authorize(actor, action, subject) == :ok
-
-  defp visibility_policy(%Actor{} = actor, allow_privileged?) do
-    %{
-      show_hidden_comments?:
-        allow_privileged? and
-          authorized?(actor, :show, %Comment{hidden_from_users: true}),
-      show_hidden_images?:
-        allow_privileged? and authorized?(actor, :show, %Image{hidden_from_users: true}),
-      show_destroyed_comments?: allow_privileged? and authorized?(actor, :delete, %Comment{}),
-      show_unapproved_comments?: allow_privileged? and authorized?(actor, :approve, %Comment{}),
-      show_unapproved_images?: allow_privileged? and authorized?(actor, :approve, %Image{})
-    }
-  end
-
-  defp search_exclusions(%Actor{user: user} = actor, filter, allow_privileged?) do
-    policy = visibility_policy(actor, allow_privileged?)
-
-    [%{terms: %{"image.tag_ids" => filter.hidden_tag_ids}}]
-    |> exclude_hidden_comments(policy.show_hidden_comments?)
-    |> exclude_hidden_images(policy.show_hidden_images?)
-    |> exclude_destroyed_comments(policy.show_destroyed_comments?)
-    |> exclude_unapproved_comments(user, policy.show_unapproved_comments?)
-    |> exclude_unapproved_images(policy.show_unapproved_images?)
-  end
-
-  defp exclude_hidden_comments(filters, true), do: filters
-
-  defp exclude_hidden_comments(filters, false),
-    do: [%{term: %{hidden_from_users: true}} | filters]
-
-  defp exclude_hidden_images(filters, true), do: filters
-
-  defp exclude_hidden_images(filters, false),
-    do: [%{term: %{"image.hidden_from_users" => true}} | filters]
-
-  defp exclude_destroyed_comments(filters, true), do: filters
-
-  defp exclude_destroyed_comments(filters, false),
-    do: [%{term: %{destroyed_content: true}} | filters]
-
-  defp exclude_unapproved_comments(filters, _user, true), do: filters
-
-  defp exclude_unapproved_comments(filters, %User{id: user_id}, false) do
-    [
-      %{
-        bool: %{
-          must: [%{term: %{approved: false}}],
-          must_not: [%{term: %{user_id: user_id}}]
-        }
-      }
-      | filters
-    ]
-  end
-
-  defp exclude_unapproved_comments(filters, _user, false),
-    do: [%{term: %{approved: false}} | filters]
-
-  defp exclude_unapproved_images(filters, true), do: filters
-
-  defp exclude_unapproved_images(filters, false),
-    do: [%{term: %{"image.approved" => false}} | filters]
-
-  defp visible_image_comments(%Actor{} = actor, %Image{} = image) do
-    policy = visibility_policy(actor, true)
-
-    Comment
-    |> where(image_id: ^image.id)
-    |> filter_hidden_comments(policy.show_hidden_comments?)
-    |> filter_destroyed_comments(policy.show_destroyed_comments?)
-    |> filter_non_approved(actor.user, policy.show_unapproved_comments?)
-  end
-
-  defp filter_hidden_comments(query, true), do: query
-
-  defp filter_hidden_comments(query, false),
-    do: where(query, [comment], not comment.hidden_from_users)
-
-  defp filter_destroyed_comments(query, true), do: query
-
-  defp filter_destroyed_comments(query, false),
-    do: where(query, [comment], not comment.destroyed_content)
-
-  defp filter_non_approved(query, _user, true), do: query
-
-  defp filter_non_approved(query, %User{id: user_id}, false),
-    do: where(query, [comment], comment.approved or comment.user_id == ^user_id)
-
-  defp filter_non_approved(query, _user, false),
-    do: where(query, [comment], comment.approved)
 
   defp load_direction(%User{settings: %{comments_newest_first: false}}), do: :asc
   defp load_direction(_user), do: :desc
@@ -417,7 +325,7 @@ defmodule Philomena.Comments do
         query: %{
           bool: %{
             must: body,
-            must_not: search_exclusions(actor, filter, allow_privileged?)
+            must_not: Visibility.search_exclusions(actor, filter, allow_privileged?)
           }
         },
         sort: %{created_at: :desc}
@@ -444,8 +352,9 @@ defmodule Philomena.Comments do
     direction = load_direction(actor.user)
     preloads = [:image | @display_preloads]
 
-    actor
-    |> visible_image_comments(image)
+    Comment
+    |> where(image_id: ^image.id)
+    |> Visibility.visible_comments(actor)
     |> order_by([{^direction, :created_at}, {^direction, :id}])
     |> preload(^preloads)
     |> Repo.paginate(pagination)
@@ -475,13 +384,15 @@ defmodule Philomena.Comments do
     with {:ok, image} <- load_commentable_image(actor, image_id, :index),
          {:ok, comment_id} <- IntegerId.parse(comment_id),
          {:ok, comment} <-
-           actor
-           |> visible_image_comments(image)
+           Comment
+           |> where(image_id: ^image.id)
+           |> Visibility.visible_comments(actor)
            |> where([comment], comment.id == ^comment_id)
            |> Loader.one_and_authorize(actor, :show) do
       offset =
-        actor
-        |> visible_image_comments(image)
+        Comment
+        |> where(image_id: ^image.id)
+        |> Visibility.visible_comments(actor)
         |> filter_direction(comment, actor.user)
         |> Repo.aggregate(:count, :id)
 
@@ -504,8 +415,9 @@ defmodule Philomena.Comments do
   @spec last_comment_page(Actor.t(), Image.t(), Repo.pagination_params()) :: pos_integer()
   def last_comment_page(%Actor{} = actor, %Image{} = image, pagination) do
     count =
-      actor
-      |> visible_image_comments(image)
+      Comment
+      |> where(image_id: ^image.id)
+      |> Visibility.visible_comments(actor)
       |> Repo.aggregate(:count)
 
     max(Integer.ceil_div(count, pagination[:page_size]), 1)
