@@ -162,25 +162,6 @@ defmodule Philomena.Comments do
     end
   end
 
-  defp load_commentable_image_for_action(%Actor{} = actor, image_id, action) do
-    action =
-      case action do
-        action when action in [:create, :edit, :update] -> :create_comment
-        action -> action
-      end
-
-    case load_image(actor, image_id, action, @image_preloads) do
-      {:ok, %Image{duplicate_id: nil} = image} ->
-        {:ok, image}
-
-      {:ok, %Image{duplicate_id: duplicate_id}} ->
-        load_image(actor, duplicate_id, action, @image_preloads)
-
-      error ->
-        error
-    end
-  end
-
   defp authorized?(%Actor{} = actor, action, subject),
     do: authorize(actor, action, subject) == :ok
 
@@ -531,7 +512,9 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Loads and authorizes an image for a comment controller action.
+  Loads and authorizes an image.
+
+  `action` must be one of `:index`, `:show`, or `:create_comment`.
 
   Duplicate images are resolved to their target. Missing IDs are
   always not-found.
@@ -547,8 +530,18 @@ defmodule Philomena.Comments do
   """
   @spec load_commentable_image(Actor.t(), IntegerId.integer_id(), atom()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def load_commentable_image(%Actor{} = actor, image_id, action) do
-    load_commentable_image_for_action(actor, image_id, action)
+  def load_commentable_image(%Actor{} = actor, image_id, action)
+      when action in [:index, :show, :create_comment] do
+    case load_image(actor, image_id, action, @image_preloads) do
+      {:ok, %Image{duplicate_id: nil} = image} ->
+        {:ok, image}
+
+      {:ok, %Image{duplicate_id: duplicate_id}} ->
+        load_image(actor, duplicate_id, action, @image_preloads)
+
+      error ->
+        error
+    end
   end
 
   @doc """

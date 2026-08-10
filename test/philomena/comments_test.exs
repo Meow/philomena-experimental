@@ -883,20 +883,18 @@ defmodule Philomena.CommentsTest do
       image = image_fixture(%{commenting_allowed: false})
       user = confirmed_user_fixture()
 
-      for action <- [:create, :edit, :update] do
-        assert Comments.load_commentable_image(actor(user), "#{image.id}", action) ==
-                 {:error, :unauthorized}
-      end
+      assert Comments.load_commentable_image(actor(user), "#{image.id}", :create_comment) ==
+               {:error, :unauthorized}
     end
 
-    test ":create on a comment-enabled image succeeds for a regular user" do
+    test ":create_comment on a comment-enabled image succeeds for a regular user" do
       image = image_fixture()
 
       assert {:ok, %Image{} = loaded} =
                Comments.load_commentable_image(
                  actor(confirmed_user_fixture()),
                  "#{image.id}",
-                 :create
+                 :create_comment
                )
 
       assert loaded.id == image.id
