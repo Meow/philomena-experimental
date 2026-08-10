@@ -842,7 +842,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "load_commentable_image/3" do
+  describe "load_image/3" do
     # Loads and per-action authorizes the image a comment listing or write hangs
     # off. It accepts an Actor and runs no ban check.
 
@@ -850,7 +850,7 @@ defmodule Philomena.CommentsTest do
       image = image_fixture()
 
       assert {:ok, %Image{} = loaded} =
-               Comments.load_commentable_image(actor(), "#{image.id}", :index)
+               Comments.load_image(actor(), "#{image.id}", :index)
 
       assert loaded.id == image.id
 
@@ -863,7 +863,7 @@ defmodule Philomena.CommentsTest do
       image = image_fixture()
 
       assert {:ok, %Image{} = loaded} =
-               Comments.load_commentable_image(actor(), "#{image.id}", :show)
+               Comments.load_image(actor(), "#{image.id}", :show)
 
       assert loaded.id == image.id
     end
@@ -871,7 +871,7 @@ defmodule Philomena.CommentsTest do
     test ":show on a hidden image is unauthorized for a regular user" do
       image = image_fixture(%{hidden_from_users: true})
 
-      assert Comments.load_commentable_image(
+      assert Comments.load_image(
                actor(confirmed_user_fixture()),
                "#{image.id}",
                :show
@@ -883,7 +883,7 @@ defmodule Philomena.CommentsTest do
       image = image_fixture(%{commenting_allowed: false})
       user = confirmed_user_fixture()
 
-      assert Comments.load_commentable_image(actor(user), "#{image.id}", :create_comment) ==
+      assert Comments.load_image(actor(user), "#{image.id}", :create_comment) ==
                {:error, :unauthorized}
     end
 
@@ -891,7 +891,7 @@ defmodule Philomena.CommentsTest do
       image = image_fixture()
 
       assert {:ok, %Image{} = loaded} =
-               Comments.load_commentable_image(
+               Comments.load_image(
                  actor(confirmed_user_fixture()),
                  "#{image.id}",
                  :create_comment
@@ -901,12 +901,12 @@ defmodule Philomena.CommentsTest do
     end
 
     test "a well-formed id naming no row is not found" do
-      assert Comments.load_commentable_image(actor(confirmed_user_fixture()), "999999999", :index) ==
+      assert Comments.load_image(actor(confirmed_user_fixture()), "999999999", :index) ==
                {:error, :not_found}
     end
 
     test "an id that cannot name a row is not found" do
-      assert Comments.load_commentable_image(actor(confirmed_user_fixture()), "abc", :index) ==
+      assert Comments.load_image(actor(confirmed_user_fixture()), "abc", :index) ==
                {:error, :not_found}
     end
   end

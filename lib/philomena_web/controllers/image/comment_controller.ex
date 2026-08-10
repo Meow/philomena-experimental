@@ -20,7 +20,7 @@ defmodule PhilomenaWeb.Image.CommentController do
   end
 
   def index(conn, %{"image_id" => image_id}) do
-    with {:ok, image} <- Comments.load_commentable_image(conn.assigns.actor, image_id, :index) do
+    with {:ok, image} <- Comments.load_image(conn.assigns.actor, image_id, :index) do
       comments =
         Comments.paginate_image_comments(
           conn.assigns.actor,
