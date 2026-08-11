@@ -1,10 +1,6 @@
 defmodule Philomena.Filters do
   @moduledoc """
-  Saved image-search filters, viewer filter selection, and personal tag
-  hide/spoiler settings.
-
-  Controller-facing operations take an `Actor`; search indexing and rename
-  propagation remain explicit worker services.
+  Image filters, viewer filter selection, and personal tag hide/spoiler settings.
   """
 
   import Ecto.Query, warn: false
@@ -202,7 +198,7 @@ defmodule Philomena.Filters do
     end
   end
 
-  defp recent_and_user_filter_choices(user) do
+  defp recent_and_user_filter_choices(%User{} = user) do
     recent_filter_ids =
       [user.current_filter_id | user.recent_filter_ids]
       |> Enum.reject(&is_nil/1)
@@ -260,7 +256,7 @@ defmodule Philomena.Filters do
   @doc """
   Returns the default filter.
 
-  The canonical system row is a deployment invariant and its absence raises.
+  This canonical system row is required in every deployment.
 
   ## Examples
 
@@ -278,13 +274,11 @@ defmodule Philomena.Filters do
   @doc """
   Loads the effective current and forced filters for `actor`.
 
-  Signed-in actors use their account associations; when no current filter has
+  Signed-in actors use their account associations. When no current filter has
   been selected, the canonical default is persisted first. Anonymous actors may
   select a visible filter through `cookie_filter_id`; malformed, missing, or
-  forbidden cookie IDs fall back to the default. Anonymous actors never have a
-  forced filter.
-
-  The canonical default row is a deployment invariant and its absence raises.
+  forbidden cookie IDs fall back to the `default_filter/0`. Anonymous actors
+  cannot have a forced filter.
 
   ## Examples
 
@@ -407,7 +401,7 @@ defmodule Philomena.Filters do
   """
   @spec user_filters(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Filter.t())} | {:error, :unauthorized}
-  def user_filters(%Actor{user: %User{} = user} = actor, pagination) do
+  def user_filters(%Actor{user: user} = actor, pagination) do
     with :ok <- authorize(actor, :index_own, Filter) do
       {:ok,
        user_filters_query(user)
@@ -416,17 +410,14 @@ defmodule Philomena.Filters do
     end
   end
 
-  def user_filters(%Actor{} = actor, _pagination), do: authorize(actor, :index_own, Filter)
-
   @doc """
   Runs the filter search that `query_string` describes on behalf of `actor`.
 
-  Compiles `query_string` against the filter search index (the `my` field is
-  available only to a signed-in `user`) and restricts results to filters the
-  viewer may see. Anonymous visitors see public and system filters, members also
-  see their own private filters, and moderators/admins see all filters. Results
-  are sorted by name then descending id, paginated by `pagination`, and loaded
-  with `user` preloaded.
+  Compiles `query_string` against the filter search index and restricts results
+  to filters the viewer may see. Anonymous visitors see public and system
+  filters, members may also see their own private filters, and moderators/admins
+  see all filters. Results are sorted by name then descending id, paginated by
+  `pagination`, and loaded with `user` preloaded.
 
   ## Examples
 
@@ -561,13 +552,13 @@ defmodule Philomena.Filters do
   Switches `actor`'s current filter to the one named by `id`.
 
   Verifies write access and authorizes `:switch` before loading. `nil` explicitly
-  selects the canonical default filter. A visible filter is selected directly;
-  a private filter the actor may not see also resolves to the default. Malformed
+  selects the canonical default filter. A visible filter is selected directly.
+  A private filter the actor may not see also resolves to the default. Malformed
   and missing non-nil IDs are not-found.
 
   For a signed-in actor, the selection is persisted to their account and added
-  to recent filters. Anonymous actors persist it in the response cookie. The
-  user's forced filter is independent and remains unchanged.
+  to recent filters. Anonymous actors must persist the filter through the returned
+  Filter struct. Any applicable forced filter is independent and remains unchanged.
 
   ## Examples
 
@@ -622,7 +613,7 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Updates the filter named by `id` on behalf of `actor`.
+  Updates the filter named by `id`, on behalf of `actor`.
 
   Verifies write access, loads the filter, authorizes `:update`, then applies
   `attrs`.
@@ -654,7 +645,7 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Makes the filter named by `id` public on behalf of `actor`.
+  Makes the filter named by `id` public, on behalf of `actor`.
 
   Verifies write access, loads the filter, authorizes the distinct `:publish`
   action, then makes it public. Publishing an already-public filter is
@@ -684,11 +675,11 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Deletes the filter named by `id` on behalf of `actor`.
+  Deletes the filter named by `id`, on behalf of `actor`.
 
   Verifies write access, loads the filter, authorizes `:delete`, then deletes it.
   A filter referenced as a user's current or forced filter returns a rejected
-  changeset and is not deleted.
+  changeset and cannot be deleted.
 
   ## Examples
 
@@ -731,13 +722,11 @@ defmodule Philomena.Filters do
   @spec recent_and_user_filters(Actor.t()) ::
           {:ok, [{String.t(), [[key: String.t(), value: integer()]]}]}
           | {:error, :unauthorized}
-  def recent_and_user_filters(%Actor{user: %User{} = user} = actor) do
+  def recent_and_user_filters(%Actor{user: user} = actor) do
     with :ok <- authorize(actor, :index_own, Filter) do
       {:ok, recent_and_user_filter_choices(user)}
     end
   end
-
-  def recent_and_user_filters(%Actor{} = actor), do: authorize(actor, :index_own, Filter)
 
   @doc """
   Adds the tag named by `tag_slug` to `current_filter`'s hidden tags on behalf
@@ -858,7 +847,7 @@ defmodule Philomena.Filters do
       [:user]
 
   """
-  @spec indexing_preloads() :: [:user]
+  @spec indexing_preloads() :: list()
   def indexing_preloads do
     [:user]
   end

@@ -1,17 +1,15 @@
 defmodule PhilomenaWeb.CurrentFilterPlug do
   @moduledoc """
   Resolves the actor's effective current and forced filters through the Filters
-  context and assigns them to the connection.
+  context, and assigns them to `conn`.
   """
 
   import Plug.Conn
 
   alias Philomena.Filters
 
-  # No options
   def init([]), do: false
 
-  # Assign current filter
   def call(conn, _opts) do
     conn = fetch_cookies(conn)
     cookie_filter_id = conn.cookies["filter_id"]
