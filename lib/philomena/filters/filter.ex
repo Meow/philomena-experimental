@@ -25,6 +25,7 @@ defmodule Philomena.Filters.Filter do
 
     field :spoilered_tag_list, :string, virtual: true
     field :hidden_tag_list, :string, virtual: true
+    field :recent, :boolean, virtual: true
 
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end

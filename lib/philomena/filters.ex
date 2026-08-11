@@ -10,6 +10,7 @@ defmodule Philomena.Filters do
 
   alias Philomena.Filters.Filter
   alias Philomena.Filters.FilterPage
+  alias Philomena.Filters.FilterSelection
   alias Philomena.Filters.Query
   alias Philomena.Filters
   alias Philomena.Attribution.Actor
@@ -33,13 +34,6 @@ defmodule Philomena.Filters do
 
   defp visibility_shoulds(user),
     do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
-
-  defp tags_by_ids(ids) do
-    Tag
-    |> where([t], t.id in ^ids)
-    |> order_by(asc: :name)
-    |> Repo.all()
-  end
 
   defp base_filter(_actor, nil), do: %Filter{}
 
@@ -80,6 +74,13 @@ defmodule Philomena.Filters do
     end
   end
 
+  defp tags_by_ids(ids) do
+    Tag
+    |> where([t], t.id in ^ids)
+    |> order_by(asc: :name)
+    |> Repo.all()
+  end
+
   defp ensure_current_filter(%User{current_filter: %Filter{} = filter}), do: {:ok, filter}
 
   defp ensure_current_filter(%User{} = user) do
@@ -115,39 +116,36 @@ defmodule Philomena.Filters do
   end
 
   defp recent_and_user_filter_choices(%User{} = user) do
-    recent_filter_ids =
-      [user.current_filter_id | user.recent_filter_ids]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.take(10)
+    recent_filter_ids = Enum.reject([user.current_filter_id | user.recent_filter_ids], &is_nil/1)
 
-    user_filters =
+    positions =
+      recent_filter_ids
+      |> Enum.with_index()
+      |> Map.new()
+
+    user_filter_query =
       Filter
-      |> select([f], %{id: f.id, name: f.name, recent: ^"f"})
+      |> select([f], %{struct(f, [:id, :name]) | recent: false})
       |> where(user_id: ^user.id)
+      |> order_by(desc: :updated_at)
       |> limit(10)
 
-    recent_filters =
+    recent_filter_query =
       Filter
-      |> select([f], %{id: f.id, name: f.name, recent: ^"t"})
+      |> select([f], %{struct(f, [:id, :name]) | recent: true})
       |> where([f], f.id in ^recent_filter_ids)
+      |> limit(10)
 
-    union_all(recent_filters, ^user_filters)
-    |> Repo.all()
-    |> Enum.sort_by(fn filter ->
-      case Enum.find_index(recent_filter_ids, &(&1 == filter.id)) do
-        nil -> length(recent_filter_ids)
-        index -> index
-      end
-    end)
-    |> Enum.group_by(
-      fn
-        %{recent: "t"} -> "Recent Filters"
-        _user -> "Your Filters"
-      end,
-      fn %{id: id, name: name} -> [key: name, value: id] end
-    )
-    |> Enum.to_list()
-    |> Enum.reverse()
+    {recent_filters, user_filters} =
+      recent_filter_query
+      |> union_all(^user_filter_query)
+      |> Repo.all()
+      |> Enum.split_with(& &1.recent)
+
+    %FilterSelection{
+      user_filters: user_filters,
+      recent_filters: Enum.sort_by(recent_filters, &Map.fetch!(positions, &1.id))
+    }
   end
 
   # Parses the id, loads the filter, and authorizes `action` on it. A
@@ -656,15 +654,13 @@ defmodule Philomena.Filters do
 
       iex> recent_and_user_filters(actor)
       {:ok,
-       [
-         {"Recent Filters", [[key: "Filter 1", value: 1], ...]},
-         {"Your Filters", [[key: "Filter 2", value: 2], ...]}
-       ]}
+       %FilterSelection{
+         recent_filters: [%Filter{}, ...],
+         user_filters: [%Filter{}, ...]
+       }}
 
   """
-  @spec recent_and_user_filters(Actor.t()) ::
-          {:ok, [{String.t(), [[key: String.t(), value: integer()]]}]}
-          | {:error, :unauthorized}
+  @spec recent_and_user_filters(Actor.t()) :: {:ok, FilterSelection.t()} | {:error, :unauthorized}
   def recent_and_user_filters(%Actor{user: user} = actor) do
     with :ok <- authorize(actor, :index_own, Filter) do
       {:ok, recent_and_user_filter_choices(user)}
