@@ -148,8 +148,8 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Returns the filters listed for `actor`: the viewer's own filters
-  (empty for an anonymous visitor) and the system filters, each with `:user`
+  Returns the filters listed for `actor`: the viewer's own paginated filters
+  (`nil` for an anonymous visitor) and all system filters, each with `:user`
   preloaded. Authorizes the filter `:index` action before either query.
 
   ## Examples

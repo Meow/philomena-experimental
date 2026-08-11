@@ -2,12 +2,6 @@ defmodule Philomena.Galleries do
   @moduledoc """
   Gallery creation, presentation, image membership, subscriptions, account
   erasure, and search-index coordination.
-
-  Request-facing operations accept an attribution `Actor`, apply named
-  authorization at this boundary, and use one canonical member loader so a
-  malformed or missing ID is always not-found. Raw persistence stays private;
-  the explicitly documented worker, indexing, notification callback, and
-  erasure functions are the cross-context service surface.
   """
 
   import Ecto.Query, warn: false
@@ -60,24 +54,6 @@ defmodule Philomena.Galleries do
     |> where(id: ^gallery_id)
     |> lock("FOR UPDATE")
     |> Repo.one!()
-  end
-
-  defp insert_gallery(%User{} = user, attrs) do
-    %Gallery{}
-    |> Gallery.creation_changeset(attrs, user)
-    |> Repo.insert()
-    |> reindex_after_update()
-  end
-
-  defp change_gallery(%Gallery{} = gallery) do
-    Gallery.changeset(gallery, %{})
-  end
-
-  defp persist_gallery_update(%Gallery{} = gallery, attrs) do
-    gallery
-    |> Gallery.changeset(attrs)
-    |> Repo.update()
-    |> reindex_after_update()
   end
 
   defp persist_gallery_deletion(%Gallery{} = gallery, %User{} = closing_user) do
@@ -294,56 +270,6 @@ defmodule Philomena.Galleries do
     :ok
   end
 
-  defp build_gallery_page(actor, scope, gallery) do
-    query = "gallery_id:#{gallery.id}"
-
-    scope = %{
-      scope
-      | params:
-          Map.merge(scope.params, %{
-            "q" => query,
-            "sf" => "gallery_id:#{gallery.id}",
-            "sd" => image_sort_direction(gallery)
-          })
-    }
-
-    {:ok, {images, _tags}} = ImageSearch.search_string(scope, query)
-
-    limit = scope.pagination.page_size
-    offset = (scope.pagination.page_number - 1) * limit
-
-    gallery_prev = gallery_image_definition(scope, query, offset - 1)
-    gallery_next = gallery_image_definition(scope, query, offset + limit)
-
-    [images, gallery_prev, gallery_next] =
-      Search.msearch_records_with_hits(
-        [images, gallery_prev, gallery_next],
-        [
-          preload(Image, [:sources, tags: :aliases]),
-          preload(Image, [:sources, tags: :aliases]),
-          preload(Image, [:sources, tags: :aliases])
-        ]
-      )
-
-    interactions = Interactions.user_interactions(actor, [images, gallery_prev, gallery_next])
-    watching = subscribed?(gallery, scope.user)
-
-    gallery_images =
-      Enum.to_list(gallery_prev) ++ Enum.to_list(images) ++ Enum.to_list(gallery_next)
-
-    clear_gallery_notification(gallery, scope.user)
-
-    %GalleryPage{
-      gallery: gallery,
-      images: images,
-      gallery_images: gallery_images,
-      gallery_prev: Enum.any?(gallery_prev),
-      gallery_next: Enum.any?(gallery_next),
-      interactions: interactions,
-      watching: watching
-    }
-  end
-
   defp gallery_image_definition(_scope, _query, offset) when offset < 0 do
     Search.search_definition(Image, %{query: %{match_none: %{}}})
   end
@@ -441,7 +367,7 @@ defmodule Philomena.Galleries do
   def new_gallery(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Gallery) do
-      {:ok, change_gallery(%Gallery{})}
+      {:ok, Gallery.changeset(%Gallery{})}
     end
   end
 
@@ -465,7 +391,10 @@ defmodule Philomena.Galleries do
   def create_gallery(%Actor{user: user} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Gallery) do
-      insert_gallery(user, attrs)
+      %Gallery{}
+      |> Gallery.creation_changeset(attrs, user)
+      |> Repo.insert()
+      |> reindex_after_update()
     end
   end
 
@@ -497,7 +426,10 @@ defmodule Philomena.Galleries do
   def update_gallery(%Actor{} = actor, gallery_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_gallery(actor, gallery_id, :update) do
-      persist_gallery_update(gallery, attrs)
+      gallery
+      |> Gallery.changeset(attrs)
+      |> Repo.update()
+      |> reindex_after_update()
     end
   end
 
@@ -579,7 +511,7 @@ defmodule Philomena.Galleries do
   def load_gallery_for_edit(%Actor{} = actor, gallery_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_gallery(actor, gallery_id, :edit) do
-      {:ok, {gallery, change_gallery(gallery)}}
+      {:ok, {gallery, Gallery.changeset(gallery)}}
     end
   end
 
@@ -702,7 +634,54 @@ defmodule Philomena.Galleries do
   def load_gallery_page(%Actor{} = actor, %Scope{} = scope, gallery_id) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :show) do
       scope = %{scope | user: actor.user}
-      {:ok, build_gallery_page(actor, scope, gallery)}
+      query = "gallery_id:#{gallery.id}"
+
+      scope = %{
+        scope
+        | params:
+            Map.merge(scope.params, %{
+              "q" => query,
+              "sf" => "gallery_id:#{gallery.id}",
+              "sd" => image_sort_direction(gallery)
+            })
+      }
+
+      {:ok, {images, _tags}} = ImageSearch.search_string(scope, query)
+
+      limit = scope.pagination.page_size
+      offset = (scope.pagination.page_number - 1) * limit
+
+      gallery_prev = gallery_image_definition(scope, query, offset - 1)
+      gallery_next = gallery_image_definition(scope, query, offset + limit)
+
+      [images, gallery_prev, gallery_next] =
+        Search.msearch_records_with_hits(
+          [images, gallery_prev, gallery_next],
+          [
+            preload(Image, [:sources, tags: :aliases]),
+            preload(Image, [:sources, tags: :aliases]),
+            preload(Image, [:sources, tags: :aliases])
+          ]
+        )
+
+      interactions = Interactions.user_interactions(actor, [images, gallery_prev, gallery_next])
+      watching = subscribed?(gallery, scope.user)
+
+      gallery_images =
+        Enum.to_list(gallery_prev) ++ Enum.to_list(images) ++ Enum.to_list(gallery_next)
+
+      clear_gallery_notification(gallery, scope.user)
+
+      {:ok,
+       %GalleryPage{
+         gallery: gallery,
+         images: images,
+         gallery_images: gallery_images,
+         gallery_prev: Enum.any?(gallery_prev),
+         gallery_next: Enum.any?(gallery_next),
+         interactions: interactions,
+         watching: watching
+       }}
     end
   end
 

@@ -29,7 +29,7 @@ defmodule Philomena.Galleries.Gallery do
   end
 
   @doc false
-  def changeset(gallery, attrs) do
+  def changeset(gallery, attrs \\ %{}) do
     gallery
     |> cast(attrs, [
       :thumbnail_id,
