@@ -34,7 +34,7 @@ defmodule PhilomenaWeb.FilterSelectPlug do
   defp maybe_assign_filters(conn, nil), do: conn
 
   defp maybe_assign_filters(conn, user) do
-    filters = Filters.recent_and_user_filters(user)
+    {:ok, filters} = Filters.recent_and_user_filters(conn.assigns.actor)
 
     conn
     |> Conn.assign(:user_changeset, Users.filter_selection_changeset(user))

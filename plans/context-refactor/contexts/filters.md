@@ -3,6 +3,29 @@
 Source: `lib/philomena/filters.ex`; consumers: HTML/API filter listing/search,
 current/public filter actions, and tag hide/spoiler toggles.
 
+## Implementation status
+
+Complete for wave 4.
+
+- Controller-facing collection, member, form, selection, and tag operations are
+  Actor-first and action-specific. The new/edit loaders and every mutation use
+  the same write-access prerequisite.
+- `nil` now explicitly selects the canonical default filter. Malformed or
+  missing non-null IDs return not-found, while a forbidden private selection
+  resolves to the default. Forced-filter selection remains independent.
+- Current/forced filter resolution moved out of plugs and into the context.
+  System, personal, HTML, API, and search listings now share named abilities;
+  moderator search visibility matches the existing member `:show` grant.
+- Loaded-record persistence and tag modifiers are private. The four public tag
+  toggles authorize the filter and safely load/authorize the tag. `TagList`
+  storage remains unchanged as required.
+- Filter deletion now translates both current-filter and forced-filter foreign
+  key restrictions into rejected changesets. Mutation indexing remains queued,
+  while worker reindex and user-rename services stay explicit public APIs.
+- Context and controller tests cover default/nil selection, malformed, missing,
+  foreign, system, current, and forced filters; write-access parity; all four tag
+  toggles; invalid searches; indexed visibility; and HTML/JSON callers.
+
 ## Findings
 
 - Early raw tag modifiers and changeset/query APIs duplicate later actor-scoped

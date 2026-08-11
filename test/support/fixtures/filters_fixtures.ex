@@ -33,7 +33,7 @@ defmodule Philomena.FiltersFixtures do
   def system_filter_fixture(attrs \\ %{}) do
     %Filter{system: true}
     |> struct!(Enum.into(attrs, %{name: unique_filter_name()}))
-    |> Filters.change_filter()
+    |> Filter.changeset(%{})
     |> Repo.insert!()
   end
 end

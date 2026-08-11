@@ -11,11 +11,12 @@ defmodule PhilomenaWeb.Api.Json.Filter.UserFilterController do
         |> text("")
 
       _user ->
-        user_filters = Filters.user_filters(conn.assigns.actor, conn.assigns.scrivener)
-
-        conn
-        |> put_view(PhilomenaWeb.Api.Json.FilterView)
-        |> render("index.json", filters: user_filters, total: user_filters.total_entries)
+        with {:ok, user_filters} <-
+               Filters.user_filters(conn.assigns.actor, conn.assigns.scrivener) do
+          conn
+          |> put_view(PhilomenaWeb.Api.Json.FilterView)
+          |> render("index.json", filters: user_filters, total: user_filters.total_entries)
+        end
     end
   end
 end

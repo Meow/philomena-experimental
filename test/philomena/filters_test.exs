@@ -5,9 +5,8 @@ defmodule Philomena.FiltersTest do
   These pin the index/search viewer-visibility scoping, the `FilterPage` struct
   shape, the per-role authorization matrices on the form loaders and write
   paths (owner vs unrelated user vs admin, uniform malformed/absent ID handling,
-  banned and missing-fingerprint actors on the tag toggles), and the preserved
-  oddities: a missing switch id raising `ArgumentError`, and make-public being
-  an idempotent success.
+  and banned and missing-fingerprint actors), explicit default selection, and
+  idempotent publication.
   """
 
   use Philomena.DataCase, async: false
@@ -50,7 +49,7 @@ defmodule Philomena.FiltersTest do
     test "an anonymous visitor gets no personal filters, only system filters" do
       system = system_filter_fixture()
 
-      assert {[], system_filters} = Filters.index_filters(actor())
+      assert {:ok, {[], system_filters}} = Filters.index_filters(actor())
       assert system.id in Enum.map(system_filters, & &1.id)
     end
 
@@ -60,7 +59,7 @@ defmodule Philomena.FiltersTest do
       _theirs = filter_fixture(confirmed_user_fixture())
       system = system_filter_fixture()
 
-      assert {my_filters, system_filters} = Filters.index_filters(actor(user))
+      assert {:ok, {my_filters, system_filters}} = Filters.index_filters(actor(user))
 
       my_ids = Enum.map(my_filters, & &1.id)
       assert mine.id in my_ids
@@ -74,7 +73,7 @@ defmodule Philomena.FiltersTest do
       user = confirmed_user_fixture()
       filter_fixture(user)
 
-      {[mine | _], _system} = Filters.index_filters(actor(user))
+      {:ok, {[mine | _], _system}} = Filters.index_filters(actor(user))
       refute match?(%Ecto.Association.NotLoaded{}, mine.user)
     end
   end
@@ -105,15 +104,13 @@ defmodule Philomena.FiltersTest do
       refute theirs.id in ids
     end
 
-    test "a moderator is scoped exactly like any other user, not to everything" do
-      # search_filters has no staff-wide grant: a moderator sees only public,
-      # system, and their own filters, so another user's private one is excluded.
+    test "a moderator finds private filters consistently with their show grant" do
       moderator = moderator_user_fixture()
       theirs = filter_fixture(confirmed_user_fixture())
       SearchHelpers.reindex_all!(Filter)
 
       assert {:ok, page} = Filters.search_filters(actor(moderator), "*", @pagination)
-      refute theirs.id in Enum.map(page.entries, & &1.id)
+      assert theirs.id in Enum.map(page.entries, & &1.id)
     end
 
     test "restricting the query to a name finds that filter" do
@@ -128,6 +125,25 @@ defmodule Philomena.FiltersTest do
     test "a malformed query returns the compiler error" do
       assert {:error, msg} = Filters.search_filters(actor(), "name:(", @pagination)
       assert is_binary(msg)
+    end
+  end
+
+  describe "indexing services" do
+    test "perform_reindex/2 makes the matching filter searchable" do
+      filter = filter_fixture(confirmed_user_fixture(), %{public: true})
+
+      assert :ok = Filters.perform_reindex(:id, [filter.id])
+      :ok = Search.refresh_index!(Filter)
+      assert {:ok, page} = Filters.search_filters(actor(), "name:#{filter.name}", @pagination)
+      assert filter.id in Enum.map(page.entries, & &1.id)
+    end
+
+    test "indexing_preloads/0 includes the filter owner" do
+      filter = filter_fixture(confirmed_user_fixture())
+
+      loaded = Repo.preload(filter, Filters.indexing_preloads())
+
+      refute match?(%Ecto.Association.NotLoaded{}, loaded.user)
     end
   end
 
@@ -201,6 +217,11 @@ defmodule Philomena.FiltersTest do
     test "basing a new filter on an unknown id yields a blank form" do
       assert {:ok, %Ecto.Changeset{data: %Filter{hidden_tag_ids: []}}} =
                Filters.new_filter(actor(confirmed_user_fixture()), "999999999")
+    end
+
+    test "basing a new filter on a malformed id yields a blank form" do
+      assert {:ok, %Ecto.Changeset{data: %Filter{hidden_tag_ids: []}}} =
+               Filters.new_filter(actor(confirmed_user_fixture()), "not-an-id")
     end
 
     test "an anonymous actor is unauthorized" do
@@ -306,6 +327,20 @@ defmodule Philomena.FiltersTest do
       assert {:ok, %Filter{} = deleted} = Filters.delete_filter(actor(user), "#{filter.id}")
       assert deleted.id == filter.id
       assert Repo.reload(filter) == nil
+    end
+
+    test "a filter used as a forced filter returns a rejected changeset" do
+      user = confirmed_user_fixture()
+      filter = filter_fixture(user)
+
+      user
+      |> User.force_filter_changeset(%{"forced_filter_id" => filter.id})
+      |> Repo.update!()
+
+      assert {:error, %Ecto.Changeset{valid?: false}} =
+               Filters.delete_filter(actor(user), "#{filter.id}")
+
+      assert Repo.reload!(filter).id == filter.id
     end
 
     test "an unrelated user is unauthorized and leaves the row" do
@@ -420,12 +455,59 @@ defmodule Philomena.FiltersTest do
                {:error, :not_found}
     end
 
-    test "a nil id raises, as the query layer rejects a nil comparison" do
-      # Preserved oddity: with no id the switch reaches Repo.get_by(id: nil),
-      # which refuses to compare against nil.
-      assert_raise ArgumentError, ~r/nil given for :id\. Comparison with nil is forbidden/, fn ->
-        Filters.switch_current_filter(actor(confirmed_user_fixture()), nil)
-      end
+    test "a nil id explicitly switches to the default filter" do
+      default = system_filter_fixture(%{name: "Default"})
+      user = confirmed_user_fixture()
+
+      assert {:ok, %Filter{} = switched} = Filters.switch_current_filter(actor(user), nil)
+      assert switched.id == default.id
+      assert Repo.get!(User, user.id).current_filter_id == default.id
+    end
+
+    test "switching the current filter leaves the forced filter unchanged" do
+      user = confirmed_user_fixture()
+      forced = filter_fixture(user)
+      selected = filter_fixture(user)
+
+      user =
+        user
+        |> User.force_filter_changeset(%{"forced_filter_id" => forced.id})
+        |> Repo.update!()
+
+      assert {:ok, %Filter{id: selected_id}} =
+               Filters.switch_current_filter(actor(user), selected.id)
+
+      assert selected_id == selected.id
+      assert Repo.get!(User, user.id).forced_filter_id == forced.id
+    end
+  end
+
+  describe "load_selected_filters/2" do
+    test "an anonymous malformed cookie selection falls back to the default" do
+      default = system_filter_fixture(%{name: "Default"})
+
+      assert {:ok, %{current_filter: current, forced_filter: nil}} =
+               Filters.load_selected_filters(actor(), "not-an-id")
+
+      assert current.id == default.id
+    end
+
+    test "a signed-in user gets a persisted default and their forced filter" do
+      default = system_filter_fixture(%{name: "Default"})
+      user = confirmed_user_fixture()
+      forced = filter_fixture(user)
+
+      user =
+        user
+        |> User.force_filter_changeset(%{"forced_filter_id" => forced.id})
+        |> Repo.update!()
+
+      assert {:ok, %{current_filter: current, forced_filter: loaded_forced}} =
+               Filters.load_selected_filters(actor(user), nil)
+
+      assert current.id == default.id
+      assert loaded_forced.id == forced.id
+      assert Repo.get!(User, user.id).current_filter_id == default.id
     end
   end
 
@@ -544,6 +626,43 @@ defmodule Philomena.FiltersTest do
       tag = tag_fixture()
 
       assert Filters.spoiler_tag(actor(user, ban: @ban), filter, tag.slug) == {:error, :ban}
+    end
+  end
+
+  describe "write access" do
+    setup do
+      user = confirmed_user_fixture()
+      filter = filter_fixture(user)
+
+      operations = [
+        new: fn actor -> Filters.new_filter(actor, nil) end,
+        edit: fn actor -> Filters.load_filter_for_edit(actor, filter.id) end,
+        switch: fn actor -> Filters.switch_current_filter(actor, filter.id) end,
+        create: fn actor -> Filters.create_filter(actor, %{"name" => "Created"}) end,
+        update: fn actor -> Filters.update_filter(actor, filter.id, %{"name" => "Updated"}) end,
+        publish: fn actor -> Filters.make_filter_public(actor, filter.id) end,
+        delete: fn actor -> Filters.delete_filter(actor, filter.id) end
+      ]
+
+      %{user: user, operations: operations}
+    end
+
+    test "all form and mutation entry points reject a banned actor first", context do
+      banned_actor = actor(context.user, ban: @ban)
+
+      for {operation, invoke} <- context.operations do
+        assert invoke.(banned_actor) == {:error, :ban},
+               "expected #{operation} to reject a banned actor"
+      end
+    end
+
+    test "all form and mutation entry points reject a missing fingerprint", context do
+      unidentified_actor = actor(context.user, fingerprint: nil)
+
+      for {operation, invoke} <- context.operations do
+        assert invoke.(unidentified_actor) == {:error, :unauthorized},
+               "expected #{operation} to reject an actor without a fingerprint"
+      end
     end
   end
 end

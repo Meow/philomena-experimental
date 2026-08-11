@@ -59,7 +59,7 @@ defmodule PhilomenaWeb.Filter.SpoilerControllerTest do
     filter = filter_fixture(user)
     {:ok, _} = Users.set_current_filter(user, filter)
     tag = tag_fixture()
-    {:ok, _} = Filters.spoiler_tag(filter, tag)
+    {:ok, _} = Filters.spoiler_tag(Philomena.AttributionFixtures.actor(user), filter, tag.slug)
 
     path = ~p"/filters/spoiler?#{[tag: tag.slug]}"
     conn = delete(conn, path)
@@ -69,9 +69,8 @@ defmodule PhilomenaWeb.Filter.SpoilerControllerTest do
   end
 
   test "POST for an unknown tag redirects with the not-found flash", %{conn: conn} do
-    # NOTE: the context authorizes the loaded record on :create; an unknown slug
-    # loads nil, authorization passes on the nil load, so it returns not_found
-    # and redirects instead of passing nil into Filters.spoiler_tag/2.
+    # The context authorizes the current filter before safely loading the tag,
+    # so an unknown slug returns the normalized not-found result.
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     {:ok, _} = Users.set_current_filter(user, filter_fixture(user))
 

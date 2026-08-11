@@ -18,13 +18,13 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def index(conn, _params) do
-    {my_filters, system_filters} = Filters.index_filters(conn.assigns.actor)
-
-    render(conn, "index.html",
-      title: "Filters",
-      my_filters: my_filters,
-      system_filters: system_filters
-    )
+    with {:ok, {my_filters, system_filters}} <- Filters.index_filters(conn.assigns.actor) do
+      render(conn, "index.html",
+        title: "Filters",
+        my_filters: my_filters,
+        system_filters: system_filters
+      )
+    end
   end
 
   def show(conn, %{"id" => id}) do

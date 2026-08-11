@@ -12,13 +12,13 @@ defmodule PhilomenaWeb.Router do
     plug :put_secure_browser_headers
     plug :fetch_fingerprint
     plug :fetch_current_user
+    plug PhilomenaWeb.EnsureUserEnabledPlug
+    plug PhilomenaWeb.CurrentBanPlug
+    plug PhilomenaWeb.UserAttributionPlug
     plug PhilomenaWeb.ContentSecurityPolicyPlug
     plug PhilomenaWeb.CurrentFilterPlug
     plug PhilomenaWeb.ImageFilterPlug
     plug PhilomenaWeb.PaginationPlug
-    plug PhilomenaWeb.EnsureUserEnabledPlug
-    plug PhilomenaWeb.CurrentBanPlug
-    plug PhilomenaWeb.UserAttributionPlug
     plug PhilomenaWeb.NotificationCountPlug
     plug PhilomenaWeb.SiteNoticePlug
     plug PhilomenaWeb.ForumListPlug
@@ -30,11 +30,11 @@ defmodule PhilomenaWeb.Router do
   pipeline :api do
     plug PhilomenaWeb.ApiTokenPlug
     plug PhilomenaWeb.EnsureUserEnabledPlug
+    plug PhilomenaWeb.UserAttributionPlug
     plug PhilomenaWeb.CurrentFilterPlug
     plug PhilomenaWeb.FilterIdPlug
     plug PhilomenaWeb.ImageFilterPlug
     plug PhilomenaWeb.PaginationPlug
-    plug PhilomenaWeb.UserAttributionPlug
   end
 
   pipeline :accepts_rss do

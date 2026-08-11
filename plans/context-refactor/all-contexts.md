@@ -250,6 +250,12 @@ Wave 4 is underway.
   and user counters in the owning transaction, with existing target rows taking
   precedence on collisions. All callers, including the Gallery and Tag page
   loaders, now carry Actor separately from image search scope.
+- Filters is complete. Actor-first, action-specific APIs now own listing, form,
+  selection, and tag-toggle authorization; form/write prerequisites match; and
+  raw persistence helpers are private. A nil selection explicitly resolves to
+  the canonical default, current/forced selection moved out of plugs, forced
+  filter deletion constraints return changesets, and search visibility matches
+  the member ability rules. `TagList` storage remains deliberately unchanged.
 
 ### Wave 0: characterize and establish the contract
 

@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.ConnCase do
     end
 
     %Philomena.Filters.Filter{name: "Default", system: true}
-    |> Philomena.Filters.change_filter()
+    |> Philomena.Filters.Filter.changeset(%{})
     |> Philomena.Repo.insert!()
 
     fingerprint = to_string(:io_lib.format(~c"d~14.16.0b", [:rand.uniform(2 ** 53)]))

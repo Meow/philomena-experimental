@@ -70,6 +70,7 @@ defmodule Philomena.Filters.Filter do
     filter
     |> change()
     |> foreign_key_constraint(:id, name: :fk_rails_d2b4c2768f)
+    |> foreign_key_constraint(:id, name: :users_forced_filter_id_fkey)
   end
 
   def public_changeset(filter) do

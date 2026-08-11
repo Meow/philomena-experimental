@@ -106,6 +106,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   # View filters
   def can?(%User{role: "moderator"}, :show, %Filter{}), do: true
+  def can?(%User{role: "moderator"}, :search_all, Filter), do: true
 
   # Privileged mods can hard-delete images
   def can?(%User{role: "moderator", role_map: %{"Image" => %{"admin" => _}}}, :destroy, %Image{}),
@@ -598,14 +599,24 @@ defimpl Canada.Can, for: Philomena.Users.User do
   # View filters they own and public/system filters
   def can?(%User{}, :show, %Filter{system: true}), do: true
   def can?(%User{}, :show, %Filter{public: true}), do: true
-  def can?(%User{}, action, Filter) when action in [:index, :new, :create], do: true
 
-  def can?(%User{id: id}, action, %Filter{user_id: id}) when action in [:show, :edit, :update],
-    do: true
+  def can?(%User{}, action, Filter)
+      when action in [:index, :index_system, :index_own, :search, :switch, :new, :create],
+      do: true
 
-  # Edit filters they own
-  def can?(%User{id: id}, action, %Filter{user_id: id}) when action in [:edit, :update, :delete],
-    do: true
+  def can?(%User{id: id}, action, %Filter{user_id: id})
+      when action in [
+             :show,
+             :edit,
+             :update,
+             :publish,
+             :delete,
+             :hide_tag,
+             :unhide_tag,
+             :spoiler_tag,
+             :unspoiler_tag
+           ],
+      do: true
 
   # View artist links they've created
   def can?(%User{id: id}, :create_links, %User{id: id}), do: true
@@ -738,6 +749,9 @@ defimpl Canada.Can, for: Atom do
   #
 
   # View filters they own and public/system filters
+  def can?(_user, action, Filter) when action in [:index, :index_system, :search, :switch],
+    do: true
+
   def can?(_user, :show, %Filter{system: true}), do: true
   def can?(_user, :show, %Filter{public: true}), do: true
 
