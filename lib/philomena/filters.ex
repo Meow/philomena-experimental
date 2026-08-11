@@ -613,7 +613,7 @@ defmodule Philomena.Filters do
         Filter
         |> select([f], %{struct(f, [:id, :name]) | recent: false})
         |> where(user_id: ^user.id)
-        |> order_by(desc: :updated_at)
+        |> order_by(asc: :id)
         |> limit(10)
 
       recent_filter_query =
