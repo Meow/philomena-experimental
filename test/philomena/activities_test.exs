@@ -86,8 +86,8 @@ defmodule Philomena.ActivitiesTest do
       assert front.comments.entries == []
       assert front.watched == nil
       assert front.featured_image == nil
-      assert front.streams == []
-      assert front.topics == []
+      assert Enum.count(front.streams) == 0
+      assert Enum.count(front.topics) == 0
       assert front.interactions == []
     end
 
@@ -116,7 +116,7 @@ defmodule Philomena.ActivitiesTest do
 
       # No feature and no channels on a fresh site.
       assert front.featured_image == nil
-      assert front.streams == []
+      assert Enum.count(front.streams) == 0
 
       assert Enum.any?(front.topics, &(&1.id == topic.id))
       assert is_list(front.interactions)

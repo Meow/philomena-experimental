@@ -21,8 +21,7 @@ defmodule Philomena.Activities do
   alias Philomena.Topics
   alias PhilomenaQuery.Search
 
-  @strip_count 6
-  @strip_pagination %{page_number: 1, page_size: @strip_count}
+  @strip_pagination %{page_number: 1, page_size: 6}
   @image_preloads [:sources, tags: :aliases]
   @comment_preloads [:user, image: @image_preloads]
 
@@ -105,18 +104,13 @@ defmodule Philomena.Activities do
     end
   end
 
-  defp load_streams(actor, show_nsfw_channels?) do
-    {page, _subscriptions} =
-      Channels.load_channels(actor, show_nsfw_channels?, %{}, @strip_pagination)
-
-    page.entries
-  end
-
   defp assemble_front_page(actor, scope, definitions, show_nsfw_channels?) do
     sections = load_search_sections(definitions)
     featured_image = load_featured_image(actor, scope)
-    streams = load_streams(actor, show_nsfw_channels?)
-    topics = Topics.list_front_page_topics(actor, @strip_count)
+    topics = Topics.list_front_page_topics(actor, @strip_pagination)
+
+    {streams, _subscriptions} =
+      Channels.load_channels(actor, show_nsfw_channels?, %{}, @strip_pagination)
 
     interactions =
       Interactions.user_interactions(actor, [

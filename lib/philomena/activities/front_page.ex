@@ -6,6 +6,8 @@ defmodule Philomena.Activities.FrontPage do
   strips, and the viewer's interactions across the image collections.
   """
 
+  alias Philomena.Channels.Channel
+  alias Philomena.Comments.Comment
   alias Philomena.Images.Image
   alias Philomena.Topics.Topic
 
@@ -29,13 +31,13 @@ defmodule Philomena.Activities.FrontPage do
             interactions: []
 
   @type t :: %__MODULE__{
-          images: Scrivener.Page.t(),
-          top_scoring: Scrivener.Page.t(),
-          comments: Scrivener.Page.t(),
-          watched: Scrivener.Page.t() | nil,
+          images: Scrivener.Page.t(Image.t()),
+          top_scoring: Scrivener.Page.t(Image.t()),
+          comments: Scrivener.Page.t(Comment.t()),
+          watched: Scrivener.Page.t(Image.t()) | nil,
           featured_image: Image.t() | nil,
-          streams: [struct()],
-          topics: [Topic.t()],
+          streams: Scrivener.Page.t(Channel.t()),
+          topics: Scrivener.Page.t(Topic.t()),
           interactions: list()
         }
 end

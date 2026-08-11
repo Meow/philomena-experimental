@@ -281,7 +281,7 @@ defmodule Philomena.Topics do
   def unhide_topic_for_fixture(topic), do: unhide_loaded_topic(topic)
 
   @doc """
-  Lists the latest `count` homepage topics visible to `actor`.
+  Paginates homepage topics visible to `actor`.
 
   Forum access uses the shared forum hierarchy scopes. Topics with titles
   containing `"NSFW"` are omitted. Forums and last post users are preloaded.
@@ -292,8 +292,8 @@ defmodule Philomena.Topics do
       [%Topic{}, ...]
 
   """
-  @spec list_front_page_topics(Actor.t(), pos_integer()) :: [Topic.t()]
-  def list_front_page_topics(%Actor{} = actor, count) when is_integer(count) do
+  @spec list_front_page_topics(Actor.t(), Repo.pagination_params()) :: Scrivener.Page.t(Topic.t())
+  def list_front_page_topics(%Actor{} = actor, pagination) do
     visible_forums = Visibility.visible_forums(Forum, actor)
 
     Topic
@@ -302,8 +302,7 @@ defmodule Philomena.Topics do
     |> where([topic], fragment("? !~ ?", topic.title, "NSFW"))
     |> order_by(desc: :last_replied_to_at)
     |> preload([:forum, last_post: :user])
-    |> limit(^count)
-    |> Repo.all()
+    |> Repo.paginate(pagination)
   end
 
   @doc """
