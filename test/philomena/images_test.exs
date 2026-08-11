@@ -8,7 +8,6 @@ defmodule Philomena.ImagesTest do
   alias Philomena.ImageFeatures.ImageFeature
   alias Philomena.ImageHides
   alias Philomena.ImageHides.ImageHide
-  alias Philomena.Galleries
   alias Philomena.Galleries.Interaction
   alias Philomena.Images
   alias Philomena.ImageVotes
@@ -24,7 +23,6 @@ defmodule Philomena.ImagesTest do
   alias Philomena.Images.ImagePage
   alias Philomena.Images.Search.Scope
   alias Philomena.Tags.Tag
-  alias Philomena.Galleries
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 
@@ -34,7 +32,6 @@ defmodule Philomena.ImagesTest do
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
-  import Philomena.GalleriesFixtures
   import Philomena.TagsFixtures
 
   # A truthy ban value in the shape production passes (the result of
@@ -240,7 +237,7 @@ defmodule Philomena.ImagesTest do
       moderator = user_fixture()
       image = image_fixture()
       gallery = gallery_fixture(user_fixture())
-      {:ok, _} = Galleries.add_image_to_gallery(gallery, image)
+      gallery_image_fixture(gallery, image)
 
       assert {:ok, %{galleries: {1, [gallery_id]}}} =
                Images.hide_loaded_image(image, moderator, %{"deletion_reason" => "Rule violation"})
@@ -266,8 +263,8 @@ defmodule Philomena.ImagesTest do
       target = image_fixture()
       filler = image_fixture()
       gallery = gallery_fixture(user_fixture())
-      {:ok, _} = Galleries.add_image_to_gallery(gallery, filler)
-      {:ok, _} = Galleries.add_image_to_gallery(gallery, source)
+      gallery_image_fixture(gallery, filler)
+      gallery_image_fixture(gallery, source)
 
       assert {:ok, _result} = Images.merge_image(nil, source, target, moderator)
 
@@ -284,8 +281,8 @@ defmodule Philomena.ImagesTest do
       source = image_fixture()
       target = image_fixture()
       gallery = gallery_fixture(user_fixture())
-      {:ok, _} = Galleries.add_image_to_gallery(gallery, source)
-      {:ok, _} = Galleries.add_image_to_gallery(gallery, target)
+      gallery_image_fixture(gallery, source)
+      gallery_image_fixture(gallery, target)
 
       assert {:ok, _result} = Images.merge_image(nil, source, target, moderator)
 
@@ -4200,7 +4197,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       containing = gallery_fixture(user)
       empty = gallery_fixture(user)
-      {:ok, _} = Galleries.add_image_to_gallery(containing, image)
+      gallery_image_fixture(containing, image)
 
       page = Images.load_image_page(actor(user), image, page: 1, page_size: 25)
 

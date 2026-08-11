@@ -1190,12 +1190,13 @@ defmodule Philomena.Images do
     clear_image_notification(image, user)
 
     comment_pagination = maybe_jump_to_last_page(actor, image, comment_pagination)
+    {:ok, gallery_choices} = Galleries.gallery_choices_for_image(actor, image)
 
     %ImagePage{
       image: image,
       comments: Comments.paginate_image_comments(actor, image, comment_pagination),
       watching: subscribed?(image, user),
-      user_galleries: Galleries.user_image_galleries(user, image),
+      user_galleries: gallery_choices,
       interactions: Interactions.user_interactions(actor, [image]),
       # TODO: this should probably be actor-gated, so actors who can't currently interact
       # with the image don't receive changesets.

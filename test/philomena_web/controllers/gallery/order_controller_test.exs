@@ -5,8 +5,6 @@ defmodule PhilomenaWeb.Gallery.OrderControllerTest do
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
 
-  alias Philomena.Galleries
-
   test "anonymous requests redirect to the login page", %{conn: conn} do
     conn = patch(conn, ~p"/galleries/1/order", %{"image_ids" => []})
 
@@ -22,8 +20,8 @@ defmodule PhilomenaWeb.Gallery.OrderControllerTest do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     gallery = gallery_fixture(user)
     [image_a, image_b] = [image_fixture(), image_fixture()]
-    {:ok, _} = Galleries.add_image_to_gallery(gallery, image_a)
-    {:ok, _} = Galleries.add_image_to_gallery(gallery, image_b)
+    gallery_image_fixture(gallery, image_a)
+    gallery_image_fixture(gallery, image_b)
 
     conn =
       patch(conn, ~p"/galleries/#{gallery}/order", %{"image_ids" => [image_b.id, image_a.id]})
@@ -38,6 +36,19 @@ defmodule PhilomenaWeb.Gallery.OrderControllerTest do
     conn = put(conn, ~p"/galleries/#{gallery}/order", %{"image_ids" => []})
 
     assert json_response(conn, 200) == %{}
+  end
+
+  test "responds 400 when image_ids is not the gallery's exact membership", %{conn: conn} do
+    %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
+    gallery = gallery_fixture(user)
+    image = image_fixture()
+    gallery_image_fixture(gallery, image)
+
+    conn = patch(conn, ~p"/galleries/#{gallery}/order", %{"image_ids" => []})
+
+    assert json_response(conn, 400) == %{
+             "error" => "image_ids must exactly match the gallery's images"
+           }
   end
 
   test "crashes when image_ids is missing", %{conn: conn} do

@@ -261,6 +261,12 @@ Wave 4 is underway.
   returns a typed `FrontPage` result. Search strips remain one all-or-fail
   multi-search, while comment, channel, featured-image, and topic visibility
   delegate to their owning contexts and shared hierarchy scopes.
+- Galleries is complete. Actor-first, action-specific APIs now own collection,
+  form, member, membership, reorder, read, and subscription authorization; one
+  canonical loader makes missing results actor-independent. Membership changes
+  are explicitly idempotent, exact reorder sets are validated again by a
+  row-locked worker, the image-page selector is capped at 100 actor-owned rows,
+  and account erasure uses a narrow service instead of public raw deletion.
 
 ### Wave 0: characterize and establish the contract
 

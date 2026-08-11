@@ -706,10 +706,16 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   # Create and edit galleries
   def can?(%User{}, :show, %Gallery{}), do: true
-  def can?(%User{}, action, Gallery) when action in [:new, :create], do: true
+
+  def can?(%User{}, action, Gallery)
+      when action in [:index, :search, :new, :create, :select_for_image],
+      do: true
+
+  def can?(%User{}, action, %Gallery{}) when action in [:subscribe, :unsubscribe, :mark_read],
+    do: true
 
   def can?(%User{id: id}, action, %Gallery{user_id: id})
-      when action in [:edit, :update, :delete],
+      when action in [:edit, :update, :delete, :add_image, :remove_image, :reorder],
       do: true
 
   # Index and show public rules
@@ -806,6 +812,7 @@ defimpl Canada.Can, for: Atom do
   def can?(_user, :show_reason, %DnpEntry{aasm_state: "listed", hide_reason: false}), do: true
 
   # Create and edit galleries
+  def can?(_user, action, Gallery) when action in [:index, :search], do: true
   def can?(_user, :show, %Gallery{}), do: true
 
   # Index and show public rules

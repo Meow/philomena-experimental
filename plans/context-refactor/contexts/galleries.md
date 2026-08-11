@@ -3,6 +3,38 @@
 Source: `lib/philomena/galleries.ex`; consumers: gallery HTML/API search/show,
 image/order/read/subscription/report controllers, indexing, and user erasure.
 
+## Implementation status
+
+Complete for wave 4.
+
+- Request-facing collection, search, member, form, membership, reorder, read,
+  and subscription operations are Actor-first and authorize named actions.
+  New/edit and content/subscription mutations share the write-access
+  prerequisite; notification clearing remains an explicit read-state
+  exemption. One Loader path now makes malformed and missing gallery IDs
+  consistently not-found, independent of actor grants.
+- Actor is authoritative for gallery page viewer state. Gallery/image
+  membership mutations independently authorize the visible image and owning
+  gallery. Duplicate adds and absent removals are explicit idempotent successes;
+  hidden, malformed, and missing images are rejected before persistence.
+- Reorders accept integer or decimal-string IDs only when they are a unique,
+  exact permutation of current database membership. Invalid requests are not
+  queued, and the worker revalidates membership so stale jobs cannot partially
+  reorder a gallery.
+- The image-page gallery selector was replaced with the Actor-first
+  `gallery_choices_for_image/2` and capped at 100 most-recently-updated rows.
+  The caller now receives only the authenticated actor's choices; anonymous
+  actors receive none.
+- Loaded-record CRUD, membership persistence, reorder scheduling, queries, and
+  notification steps are private and precede the public API. User erasure uses
+  the narrow `erase_user_galleries/2` service. Worker, user-rename, index queue,
+  and subscription notification callbacks remain explicit documented service
+  APIs.
+- Context/controller coverage now includes malformed, missing, and forbidden
+  galleries/images; hidden images; idempotent membership; invalid and stale
+  reorder sets; actor-over-Scope state; read/subscription state; bounded
+  selectors; erasure/report closure; and search-backed listing/page behavior.
+
 ## Findings
 
 - Early loaded-record CRUD/image membership functions remain public, including

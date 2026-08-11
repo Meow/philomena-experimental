@@ -10,13 +10,14 @@ defmodule PhilomenaWeb.GalleryController do
   plug PhilomenaWeb.MapParameterPlug, [param: "gallery"] when action in [:index]
 
   def index(conn, params) do
-    galleries = Galleries.load_gallery_index(params, conn.assigns.pagination)
-
-    render(conn, "index.html",
-      title: "Galleries",
-      galleries: galleries,
-      layout_class: "layout--wide"
-    )
+    with {:ok, galleries} <-
+           Galleries.load_gallery_index(conn.assigns.actor, params, conn.assigns.pagination) do
+      render(conn, "index.html",
+        title: "Galleries",
+        galleries: galleries,
+        layout_class: "layout--wide"
+      )
+    end
   end
 
   def show(conn, params) do

@@ -6,7 +6,6 @@ defmodule Philomena.Users.Eraser do
   alias Philomena.Bans
   alias Philomena.Comments.Comment
   alias Philomena.Comments
-  alias Philomena.Galleries.Gallery
   alias Philomena.Galleries
   alias Philomena.Posts.Post
   alias Philomena.Posts
@@ -45,12 +44,7 @@ defmodule Philomena.Users.Eraser do
     end)
 
     # Delete all galleries
-    Gallery
-    |> where(user_id: ^user.id)
-    |> Repo.all()
-    |> Enum.each(fn gallery ->
-      {:ok, _gallery} = Galleries.delete_gallery(gallery, moderator, nil)
-    end)
+    {:ok, _gallery_count} = Galleries.erase_user_galleries(user, moderator)
 
     # Delete all posted topics
     Topic
