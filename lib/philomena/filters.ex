@@ -21,90 +21,6 @@ defmodule Philomena.Filters do
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
 
-  # Creates a filter.
-  defp create_loaded_filter(user, attrs) do
-    %Filter{user_id: user.id}
-    |> Filter.creation_changeset(attrs)
-    |> Repo.insert()
-    |> reindex_after_update()
-  end
-
-  # Updates a filter.
-  defp persist_filter_update(%Filter{} = filter, attrs) do
-    filter
-    |> Filter.update_changeset(attrs)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  # Makes a filter public.
-  defp persist_filter_publication(%Filter{} = filter) do
-    filter
-    |> Filter.public_changeset()
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  defp persist_hidden_tag(%Filter{} = filter, %Tag{} = tag) do
-    hidden_tag_ids = Enum.uniq([tag.id | filter.hidden_tag_ids])
-
-    filter
-    |> Filter.hidden_tags_changeset(hidden_tag_ids)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  defp persist_unhidden_tag(%Filter{} = filter, %Tag{} = tag) do
-    hidden_tag_ids = filter.hidden_tag_ids -- [tag.id]
-
-    filter
-    |> Filter.hidden_tags_changeset(hidden_tag_ids)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  defp persist_spoilered_tag(%Filter{} = filter, %Tag{} = tag) do
-    spoilered_tag_ids = Enum.uniq([tag.id | filter.spoilered_tag_ids])
-
-    filter
-    |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  defp persist_unspoilered_tag(%Filter{} = filter, %Tag{} = tag) do
-    spoilered_tag_ids = filter.spoilered_tag_ids -- [tag.id]
-
-    filter
-    |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  # Deletes a filter.
-  defp persist_filter_deletion(%Filter{} = filter) do
-    filter
-    |> Filter.deletion_changeset()
-    |> Repo.delete()
-    |> case do
-      {:ok, filter} ->
-        Search.delete_document(filter.id, Filter)
-
-        {:ok, filter}
-
-      error ->
-        error
-    end
-  end
-
-  defp change_filter(%Filter{} = filter) do
-    Filter.changeset(filter, %{})
-  end
-
-  defp system_filters_query, do: where(Filter, system: true)
-
-  defp user_filters_query(user), do: where(Filter, user_id: ^user.id)
-
   defp visibility_filters(actor) do
     case authorize(actor, :search_all, Filter) do
       :ok -> [%{match_all: %{}}]
@@ -324,7 +240,8 @@ defmodule Philomena.Filters do
     with :ok <- authorize(actor, :index, Filter) do
       my_filters =
         if user do
-          user_filters_query(user)
+          Filter
+          |> where(user_id: ^user.id)
           |> preload(:user)
           |> Repo.all()
         else
@@ -332,11 +249,60 @@ defmodule Philomena.Filters do
         end
 
       system_filters =
-        system_filters_query()
+        Filter
+        |> where(system: true)
         |> preload(:user)
         |> Repo.all()
 
       {:ok, {my_filters, system_filters}}
+    end
+  end
+
+  @doc """
+  Returns the page of system filters for `actor`.
+
+  Authorizes `:index_system` before selecting filters flagged `system: true`,
+  ordered by ascending id and paginated by `pagination`.
+
+  ## Examples
+
+      iex> system_filters(actor, pagination)
+      {:ok, %Scrivener.Page{}}
+
+  """
+  @spec system_filters(Actor.t(), Repo.pagination_params()) ::
+          {:ok, Scrivener.Page.t(Filter.t())} | {:error, :unauthorized}
+  def system_filters(%Actor{} = actor, pagination) do
+    with :ok <- authorize(actor, :index_system, Filter) do
+      {:ok,
+       Filter
+       |> where(system: true)
+       |> order_by(asc: :id)
+       |> Repo.paginate(pagination)}
+    end
+  end
+
+  @doc """
+  Returns the page of `actor`'s own filters after authorizing `:index_own`.
+
+  Anonymous actors are unauthorized. Results are ordered by ascending id and
+  paginated by `pagination`.
+
+  ## Examples
+
+      iex> user_filters(actor, pagination)
+      {:ok, %Scrivener.Page{}}
+
+  """
+  @spec user_filters(Actor.t(), Repo.pagination_params()) ::
+          {:ok, Scrivener.Page.t(Filter.t())} | {:error, :unauthorized}
+  def user_filters(%Actor{user: user} = actor, pagination) do
+    with :ok <- authorize(actor, :index_own, Filter) do
+      {:ok,
+       Filter
+       |> where(user_id: ^user.id)
+       |> order_by(asc: :id)
+       |> Repo.paginate(pagination)}
     end
   end
 
@@ -362,52 +328,6 @@ defmodule Philomena.Filters do
           {:ok, Filter.t()} | {:error, :not_found | :unauthorized}
   def load_filter(%Actor{} = actor, id) do
     load_and_authorize_filter(actor, id, :show, [:user])
-  end
-
-  @doc """
-  Returns the page of system filters for `actor`.
-
-  Authorizes `:index_system` before selecting filters flagged `system: true`,
-  ordered by ascending id and paginated by `pagination`.
-
-  ## Examples
-
-      iex> system_filters(actor, pagination)
-      {:ok, %Scrivener.Page{}}
-
-  """
-  @spec system_filters(Actor.t(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(Filter.t())} | {:error, :unauthorized}
-  def system_filters(%Actor{} = actor, pagination) do
-    with :ok <- authorize(actor, :index_system, Filter) do
-      {:ok,
-       system_filters_query()
-       |> order_by(asc: :id)
-       |> Repo.paginate(pagination)}
-    end
-  end
-
-  @doc """
-  Returns the page of `actor`'s own filters after authorizing `:index_own`.
-
-  Anonymous actors are unauthorized. Results are ordered by ascending id and
-  paginated by `pagination`.
-
-  ## Examples
-
-      iex> user_filters(actor, pagination)
-      {:ok, %Scrivener.Page{}}
-
-  """
-  @spec user_filters(Actor.t(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(Filter.t())} | {:error, :unauthorized}
-  def user_filters(%Actor{user: user} = actor, pagination) do
-    with :ok <- authorize(actor, :index_own, Filter) do
-      {:ok,
-       user_filters_query(user)
-       |> order_by(asc: :id)
-       |> Repo.paginate(pagination)}
-    end
   end
 
   @doc """
@@ -511,7 +431,10 @@ defmodule Philomena.Filters do
   def new_filter(%Actor{} = actor, based_on) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Filter) do
-      {:ok, change_filter(base_filter(actor, based_on))}
+      {:ok,
+       actor
+       |> base_filter(based_on)
+       |> Filter.changeset()}
     end
   end
 
@@ -544,7 +467,7 @@ defmodule Philomena.Filters do
         |> TagList.assign_tag_list(:spoilered_tag_ids, :spoilered_tag_list)
         |> TagList.assign_tag_list(:hidden_tag_ids, :hidden_tag_list)
 
-      {:ok, {filter, change_filter(filter)}}
+      {:ok, {filter, Filter.changeset(filter)}}
     end
   end
 
@@ -608,7 +531,10 @@ defmodule Philomena.Filters do
   def create_filter(%Actor{user: user} = actor, attrs \\ %{}) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Filter) do
-      create_loaded_filter(user, attrs)
+      %Filter{user_id: user.id}
+      |> Filter.creation_changeset(attrs)
+      |> Repo.insert()
+      |> reindex_after_update()
     end
   end
 
@@ -640,7 +566,10 @@ defmodule Philomena.Filters do
   def update_filter(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :update) do
-      persist_filter_update(filter, attrs)
+      filter
+      |> Filter.update_changeset(attrs)
+      |> Repo.update()
+      |> reindex_after_update()
     end
   end
 
@@ -670,7 +599,10 @@ defmodule Philomena.Filters do
   def make_filter_public(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :publish) do
-      persist_filter_publication(filter)
+      filter
+      |> Filter.public_changeset()
+      |> Repo.update()
+      |> reindex_after_update()
     end
   end
 
@@ -700,7 +632,18 @@ defmodule Philomena.Filters do
   def delete_filter(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :delete) do
-      persist_filter_deletion(filter)
+      filter
+      |> Filter.deletion_changeset()
+      |> Repo.delete()
+      |> case do
+        {:ok, filter} ->
+          Search.delete_document(filter.id, Filter)
+
+          {:ok, filter}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -729,11 +672,11 @@ defmodule Philomena.Filters do
   end
 
   @doc """
-  Adds the tag named by `tag_slug` to `current_filter`'s hidden tags on behalf
+  Adds the tag named by `tag_slug` to `filter`'s hidden tags on behalf
   of `actor`.
 
   Rejects a banned actor or one without a fingerprint, authorizes `:hide_tag`
-  on the loaded current filter, safely loads the tag, and authorizes the tag for
+  on the loaded filter, safely loads the tag, and authorizes the tag for
   `:show`. System filters and filters owned by someone else cannot be changed.
 
   ## Examples
@@ -755,58 +698,133 @@ defmodule Philomena.Filters do
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def hide_tag(%Actor{} = actor, %Filter{} = current_filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :hide_tag, current_filter, tag_slug) do
-      persist_hidden_tag(current_filter, tag)
+  def hide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, :hide_tag, filter, tag_slug) do
+      hidden_tag_ids = Enum.uniq([tag.id | filter.hidden_tag_ids])
+
+      filter
+      |> Filter.hidden_tags_changeset(hidden_tag_ids)
+      |> Repo.update()
+      |> reindex_after_update()
     end
   end
 
   @doc """
-  Removes the tag named by `tag_slug` from `current_filter`'s hidden tags on
-  behalf of `actor`. Same authorization and return shapes as `hide_tag/3`.
+  Removes the tag named by `tag_slug` from `filter`'s hidden tags on behalf
+  of `actor`.
+
+  Rejects a banned actor or one without a fingerprint, authorizes `:unhide_tag`
+  on the loaded filter, safely loads the tag, and authorizes the tag for
+  `:show`. System filters and filters owned by someone else cannot be changed.
+
+  ## Examples
+
+      iex> unhide_tag(actor, filter, tag_slug)
+      {:ok, %Filter{}}
+
+      iex> unhide_tag(banned_actor, filter, tag_slug)
+      {:error, :ban}
+
+      iex> unhide_tag(actor, filter, unknown_tag_slug)
+      {:error, :not_found}
+
+      iex> unhide_tag(actor, unowned_filter, tag_slug)
+      {:error, :unauthorized}
+
   """
   @spec unhide_tag(Actor.t(), Filter.t(), String.t()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def unhide_tag(%Actor{} = actor, %Filter{} = current_filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :unhide_tag, current_filter, tag_slug) do
-      persist_unhidden_tag(current_filter, tag)
+  def unhide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, :unhide_tag, filter, tag_slug) do
+      hidden_tag_ids = filter.hidden_tag_ids -- [tag.id]
+
+      filter
+      |> Filter.hidden_tags_changeset(hidden_tag_ids)
+      |> Repo.update()
+      |> reindex_after_update()
     end
   end
 
   @doc """
-  Adds the tag named by `tag_slug` to `current_filter`'s spoilered tags on
-  behalf of `actor`. Same authorization and return shapes as `hide_tag/3`.
+  Adds the tag named by `tag_slug` to `filter`'s spoilered tags on behalf
+  of `actor`.
+
+  Rejects a banned actor or one without a fingerprint, authorizes `:spoiler_tag`
+  on the loaded filter, safely loads the tag, and authorizes the tag for
+  `:show`. System filters and filters owned by someone else cannot be changed.
+
+  ## Examples
+
+      iex> spoiler_tag(actor, filter, tag_slug)
+      {:ok, %Filter{}}
+
+      iex> spoiler_tag(banned_actor, filter, tag_slug)
+      {:error, :ban}
+
+      iex> spoiler_tag(actor, filter, unknown_tag_slug)
+      {:error, :not_found}
+
+      iex> spoiler_tag(actor, unowned_filter, tag_slug)
+      {:error, :unauthorized}
+
   """
   @spec spoiler_tag(Actor.t(), Filter.t(), String.t()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def spoiler_tag(%Actor{} = actor, %Filter{} = current_filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :spoiler_tag, current_filter, tag_slug) do
-      persist_spoilered_tag(current_filter, tag)
+  def spoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, :spoiler_tag, filter, tag_slug) do
+      spoilered_tag_ids = Enum.uniq([tag.id | filter.spoilered_tag_ids])
+
+      filter
+      |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
+      |> Repo.update()
+      |> reindex_after_update()
     end
   end
 
   @doc """
-  Removes the tag named by `tag_slug` from `current_filter`'s spoilered tags on
-  behalf of `actor`. Same authorization and return shapes as `hide_tag/3`.
+  Removes the tag named by `tag_slug` from `filter`'s spoilered tags on behalf
+  of `actor`.
+
+  Rejects a banned actor or one without a fingerprint, authorizes `:unspoiler_tag`
+  on the loaded filter, safely loads the tag, and authorizes the tag for
+  `:show`. System filters and filters owned by someone else cannot be changed.
+
+  ## Examples
+
+      iex> unspoiler_tag(actor, filter, tag_slug)
+      {:ok, %Filter{}}
+
+      iex> unspoiler_tag(banned_actor, filter, tag_slug)
+      {:error, :ban}
+
+      iex> unspoiler_tag(actor, filter, unknown_tag_slug)
+      {:error, :not_found}
+
+      iex> unspoiler_tag(actor, unowned_filter, tag_slug)
+      {:error, :unauthorized}
+
   """
   @spec unspoiler_tag(Actor.t(), Filter.t(), String.t()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def unspoiler_tag(%Actor{} = actor, %Filter{} = current_filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :unspoiler_tag, current_filter, tag_slug) do
-      persist_unspoilered_tag(current_filter, tag)
+  def unspoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+    with {:ok, tag} <- authorize_filter_tag(actor, :unspoiler_tag, filter, tag_slug) do
+      spoilered_tag_ids = filter.spoilered_tag_ids -- [tag.id]
+
+      filter
+      |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
+      |> Repo.update()
+      |> reindex_after_update()
     end
   end
 
   @doc """
   Updates filter indexes when a user's name changes.
-
-  Issues asynchronous update-by-query requests for every physical filter index.
 
   ## Examples
 

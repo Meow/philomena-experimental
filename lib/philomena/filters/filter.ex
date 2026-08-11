@@ -30,7 +30,7 @@ defmodule Philomena.Filters.Filter do
   end
 
   @doc false
-  def changeset(filter, attrs) do
+  def changeset(filter, attrs \\ %{}) do
     user =
       change(filter).data
       |> Repo.preload(user: :settings)
