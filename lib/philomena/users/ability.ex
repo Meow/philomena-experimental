@@ -1,5 +1,6 @@
 # Permissions for logged-in users.
 defimpl Canada.Can, for: Philomena.Users.User do
+  alias Philomena.Activities.FrontPage
   alias Philomena.Adverts.Advert
   alias Philomena.ArtistLinks.ArtistLink
   alias Philomena.Badges.Award
@@ -604,6 +605,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
       when action in [:index, :index_system, :index_own, :search, :switch, :new, :create],
       do: true
 
+  # View the assembled homepage
+  def can?(%User{}, :index, FrontPage), do: true
+
   def can?(%User{id: id}, action, %Filter{user_id: id})
       when action in [
              :show,
@@ -729,6 +733,7 @@ end
 
 # Permissions for non-logged-in users.
 defimpl Canada.Can, for: Atom do
+  alias Philomena.Activities.FrontPage
   alias Philomena.Channels.Channel
   alias Philomena.Comments.Comment
   alias Philomena.Commissions.Commission
@@ -747,6 +752,9 @@ defimpl Canada.Can, for: Atom do
   #
   # Anonymous / non-logged-in users can...
   #
+
+  # View the assembled homepage
+  def can?(_user, :index, FrontPage), do: true
 
   # View filters they own and public/system filters
   def can?(_user, action, Filter) when action in [:index, :index_system, :search, :switch],

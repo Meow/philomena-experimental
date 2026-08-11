@@ -4,47 +4,28 @@ defmodule Philomena.Activities do
   stream, and topic strips it assembles for a viewer.
   """
 
-  import Ecto.Query
+  import Ecto.Query, only: [preload: 2]
+  import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Activities.FrontPage
   alias Philomena.Attribution.Actor
-  alias Philomena.Channels.Channel
+  alias Philomena.Channels
   alias Philomena.Comments
   alias Philomena.Comments.Comment
   alias Philomena.Filters.Filter
-  alias Philomena.Forums.Forum
-  alias Philomena.ImageFeatures.ImageFeature
+  alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
   alias Philomena.Interactions
-  alias Philomena.Repo
-  alias Philomena.Topics.Topic
+  alias Philomena.Topics
   alias PhilomenaQuery.Search
 
-  @doc """
-  Assembles the homepage for the viewer described by `scope`.
+  @strip_pagination %{page_number: 1, page_size: 6}
 
-  `filter` is the viewer's active `Filter` (its hidden tags exclude comments);
-  `show_nsfw_channels?` reflects whether the viewer wants NSFW channels shown.
-  The recent, top-scoring, comment, and watched strips are batched into a single
-  multi-search; the featured image, streams, and topics are loaded from
-  Postgres. Anonymous viewers have no watched strip (`nil`). The featured
-  image and the recent listing honour the scope's `hidden` setting.
+  @type load_result :: {:ok, FrontPage.t()} | {:error, :unauthorized | String.t()}
 
-  Returns a `FrontPage` struct carrying the viewer's interactions across the
-  image collections.
-
-  ## Examples
-
-      iex> load_front_page(scope, filter, false)
-      %FrontPage{}
-
-  """
-  @spec load_front_page(Actor.t(), Scope.t(), Filter.t(), boolean()) :: FrontPage.t()
-  def load_front_page(%Actor{} = actor, %Scope{} = scope, %Filter{} = filter, show_nsfw_channels?) do
-    user = actor.user
-
+  defp search_definitions(%Actor{} = actor, %Scope{} = scope, %Filter{} = filter) do
     {images_definition, _tags} =
       ImageSearch.default_query(scope, pagination: %{scope.pagination | page_number: 1})
 
@@ -65,90 +46,70 @@ defmodule Philomena.Activities do
         show_hidden: false
       )
 
-    watched_definition =
-      if user do
-        {:ok, {definition, _tags}} =
-          ImageSearch.search_string(scope, "my:watched",
-            pagination: %{scope.pagination | page_number: 1}
-          )
+    with {:ok, watched_definition} <- watched_definition(actor, scope) do
+      {:ok, {images_definition, top_scoring_definition, comments_definition, watched_definition}}
+    end
+  end
 
-        definition
-      end
+  defp watched_definition(%Actor{user: nil}, _scope), do: {:ok, nil}
 
+  defp watched_definition(%Actor{}, scope) do
+    with {:ok, {definition, _tags}} <-
+           ImageSearch.search_string(scope, "my:watched",
+             pagination: %{scope.pagination | page_number: 1}
+           ) do
+      {:ok, definition}
+    end
+  end
+
+  defp load_search_sections({images, top_scoring, comments, watched}) do
     [images, top_scoring, comments, watched] =
-      multi_search(
-        images_definition,
-        top_scoring_definition,
-        comments_definition,
-        watched_definition
-      )
+      multi_search(images, top_scoring, comments, watched)
 
-    featured_image =
-      Image
-      |> join(:inner, [i], f in ImageFeature, on: [image_id: i.id])
-      |> where([i], i.hidden_from_users == false)
-      |> filter_hidden(user, scope.params["hidden"])
-      |> order_by([i, f], desc: f.created_at)
-      |> limit(1)
-      |> preload([:sources, tags: :aliases])
-      |> Repo.one()
+    %{images: images, top_scoring: top_scoring, comments: comments, watched: watched}
+  end
 
-    streams =
-      Channel
-      |> where([c], not is_nil(c.last_fetched_at))
-      |> maybe_show_nsfw_channels(show_nsfw_channels?)
-      |> order_by(desc: :is_live, asc: :title)
-      |> limit(6)
-      |> Repo.all()
+  defp load_featured_image(actor, scope) do
+    include_hidden? = scope.params["hidden"] == "1"
 
-    topics =
-      Topic
-      |> join(:inner, [t], f in Forum, on: [id: t.forum_id])
-      |> where([t, _f], t.hidden_from_users == false)
-      |> where([t, _f], fragment("? !~ ?", t.title, "NSFW"))
-      |> where([_t, f], f.access_level == "normal")
-      |> order_by(desc: :last_replied_to_at)
-      |> preload([:forum, last_post: :user])
-      |> limit(6)
-      |> Repo.all()
+    case Images.featured_image(actor, include_hidden?) do
+      {:ok, image} -> image
+      {:error, :not_found} -> nil
+    end
+  end
+
+  defp load_streams(actor, show_nsfw_channels?) do
+    {page, _subscriptions} =
+      Channels.load_channels(actor, show_nsfw_channels?, %{}, @strip_pagination)
+
+    page.entries
+  end
+
+  defp assemble_front_page(actor, scope, definitions, show_nsfw_channels?) do
+    sections = load_search_sections(definitions)
+    featured_image = load_featured_image(actor, scope)
+    streams = load_streams(actor, show_nsfw_channels?)
+    topics = Topics.list_front_page_topics(actor)
 
     interactions =
-      Interactions.user_interactions(actor, [images, top_scoring, watched, featured_image])
+      Interactions.user_interactions(actor, [
+        sections.images,
+        sections.top_scoring,
+        sections.watched,
+        featured_image
+      ])
 
     %FrontPage{
-      images: images,
-      top_scoring: top_scoring,
-      comments: comments,
-      watched: watched,
+      images: sections.images,
+      top_scoring: sections.top_scoring,
+      comments: sections.comments,
+      watched: sections.watched,
       featured_image: featured_image,
       streams: streams,
       topics: topics,
       interactions: interactions
     }
   end
-
-  defp filter_hidden(featured_image, nil, _hidden) do
-    featured_image
-  end
-
-  defp filter_hidden(featured_image, _user, "1") do
-    featured_image
-  end
-
-  defp filter_hidden(featured_image, user, _hidden) do
-    featured_image
-    |> where(
-      [i],
-      fragment(
-        "NOT EXISTS(SELECT 1 FROM image_hides WHERE image_id = ? AND user_id = ?)",
-        i.id,
-        ^user.id
-      )
-    )
-  end
-
-  defp maybe_show_nsfw_channels(query, true), do: query
-  defp maybe_show_nsfw_channels(query, _false), do: where(query, [c], c.nsfw == false)
 
   defp multi_search(images, top_scoring, comments, nil) do
     responses =
@@ -174,5 +135,45 @@ defmodule Philomena.Activities do
         preload(Image, [:sources, tags: :aliases])
       ]
     )
+  end
+
+  @doc """
+  Assembles the homepage for `actor` using the image-search state in `scope`.
+
+  Actor is the sole authority source: any `scope.user` supplied by the caller is
+  replaced with `actor.user`; the scope otherwise retains compiled filter,
+  pagination, and display parameters. `filter` supplies hidden tags for the
+  recent-comment strip, and `show_nsfw_channels?` controls the channel strip.
+
+  The four OpenSearch strips execute as one multi-search. Anonymous actors have
+  no watched strip (`nil`); authenticated actors receive a page, including an
+  empty page when no watched tags match. Featured-image, channel, and topic
+  visibility delegate to their owning contexts. No section failure is converted
+  into an empty section: compiler errors are returned and OpenSearch failures
+  fail the whole request.
+
+  ## Examples
+
+      iex> load_front_page(anonymous_actor, scope, filter, false)
+      {:ok, %FrontPage{watched: nil}}
+
+      iex> load_front_page(actor, scope, filter, true)
+      {:ok, %FrontPage{watched: %Scrivener.Page{}}}
+
+  """
+  @spec load_front_page(Actor.t(), Scope.t(), Filter.t(), boolean()) :: load_result()
+  def load_front_page(
+        %Actor{} = actor,
+        %Scope{} = scope,
+        %Filter{} = filter,
+        show_nsfw_channels?
+      )
+      when is_boolean(show_nsfw_channels?) do
+    scope = %{scope | user: actor.user}
+
+    with :ok <- authorize(actor, :index, FrontPage),
+         {:ok, definitions} <- search_definitions(actor, scope, filter) do
+      {:ok, assemble_front_page(actor, scope, definitions, show_nsfw_channels?)}
+    end
   end
 end

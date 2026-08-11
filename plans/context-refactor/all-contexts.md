@@ -256,6 +256,11 @@ Wave 4 is underway.
   the canonical default, current/forced selection moved out of plugs, forced
   filter deletion constraints return changesets, and search visibility matches
   the member ability rules. `TagList` storage remains deliberately unchanged.
+- Activities is complete. Its sole public loader authorizes a named homepage
+  action, treats Actor rather than image Scope as the authority source, and
+  returns a typed `FrontPage` result. Search strips remain one all-or-fail
+  multi-search, while comment, channel, featured-image, and topic visibility
+  delegate to their owning contexts and shared hierarchy scopes.
 
 ### Wave 0: characterize and establish the contract
 

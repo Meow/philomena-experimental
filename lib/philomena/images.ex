@@ -111,6 +111,37 @@ defmodule Philomena.Images do
     end
   end
 
+  defp featured_image_query do
+    Image
+    |> join(:inner, [i], f in ImageFeature, on: [image_id: i.id])
+    |> where([i], i.hidden_from_users == false)
+    |> order_by([_i, f], desc: f.created_at)
+    |> limit(1)
+    |> preload([:user, :intensity, :sources, tags: :aliases])
+  end
+
+  defp maybe_exclude_viewer_hides(query, %Actor{user: nil}, _include_hidden?), do: query
+  defp maybe_exclude_viewer_hides(query, %Actor{}, true), do: query
+
+  defp maybe_exclude_viewer_hides(query, %Actor{user: user}, false) do
+    where(
+      query,
+      [image],
+      fragment(
+        "NOT EXISTS(SELECT 1 FROM image_hides WHERE image_id = ? AND user_id = ?)",
+        image.id,
+        ^user.id
+      )
+    )
+  end
+
+  defp load_featured_image(query) do
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      image -> {:ok, image}
+    end
+  end
+
   @doc """
   Loads the most recently featured non-hidden image, with its uploader,
   intensities, sources, and tags preloaded.
@@ -129,17 +160,33 @@ defmodule Philomena.Images do
   """
   @spec featured_image() :: {:ok, Image.t()} | {:error, :not_found}
   def featured_image do
-    Image
-    |> join(:inner, [i], f in ImageFeature, on: [image_id: i.id])
-    |> where([i], i.hidden_from_users == false)
-    |> order_by([_i, f], desc: f.created_at)
-    |> limit(1)
-    |> preload([:user, :intensity, :sources, tags: :aliases])
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      image -> {:ok, image}
-    end
+    featured_image_query()
+    |> load_featured_image()
+  end
+
+  @doc """
+  Loads the most recent featured image visible under `actor`'s personal hide
+  preference.
+
+  Site-hidden images are always excluded. When `include_hidden?` is false, an
+  authenticated actor's personally hidden images are also excluded; anonymous
+  actors have no personal hide state. The next eligible historical feature is
+  returned when the newest one is excluded.
+
+  ## Examples
+
+      iex> featured_image(actor, false)
+      {:ok, %Image{}}
+
+      iex> featured_image(actor, false)
+      {:error, :not_found}
+
+  """
+  @spec featured_image(Actor.t(), boolean()) :: {:ok, Image.t()} | {:error, :not_found}
+  def featured_image(%Actor{} = actor, include_hidden?) when is_boolean(include_hidden?) do
+    featured_image_query()
+    |> maybe_exclude_viewer_hides(actor, include_hidden?)
+    |> load_featured_image()
   end
 
   # Creates an image. Visible for testing.
