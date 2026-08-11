@@ -21,18 +21,29 @@ defmodule Philomena.Filters do
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
 
-  defp visibility_filters(actor) do
+  defp visibility_filters(%Actor{user: user} = actor) do
     case authorize(actor, :search_all, Filter) do
-      :ok -> [%{match_all: %{}}]
-      {:error, :unauthorized} -> [%{bool: %{should: visibility_shoulds(actor.user)}}]
+      :ok ->
+        []
+
+      {:error, :unauthorized} ->
+        %{
+          bool: %{
+            should: [
+              %{term: %{public: true}},
+              %{term: %{system: true}}
+              | user_visibility_filters(user)
+            ]
+          }
+        }
     end
   end
 
-  defp visibility_shoulds(nil),
-    do: [%{term: %{public: true}}, %{term: %{system: true}}]
+  defp user_visibility_filters(nil),
+    do: []
 
-  defp visibility_shoulds(user),
-    do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
+  defp user_visibility_filters(user),
+    do: [%{term: %{user_id: user.id}}]
 
   defp ensure_current_filter(%User{current_filter: %Filter{} = filter}), do: {:ok, filter}
 
@@ -272,7 +283,8 @@ defmodule Philomena.Filters do
           %{
             query: %{
               bool: %{
-                must: [query | visibility_filters(actor)]
+                must: query,
+                filter: visibility_filters(actor)
               }
             },
             sort: [
