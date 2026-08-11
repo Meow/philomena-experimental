@@ -33,17 +33,14 @@ defmodule PhilomenaWeb.Filter.CurrentControllerTest do
       assert conn.resp_cookies["filter_id"].value == Integer.to_string(filter.id)
     end
 
-    test "anonymous users are switched to the default filter for a private filter",
+    test "anonymous users are not authorized to switch to unowned private filters",
          %{conn: conn} do
       filter = filter_fixture(confirmed_user_fixture())
-      default = Filters.default_filter()
 
       conn = patch(conn, ~p"/filters/current?#{[id: filter.id]}")
 
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
-               "Switched to filter #{default.name}"
-
-      assert conn.resp_cookies["filter_id"].value == Integer.to_string(default.id)
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "You can't access that page."
     end
 
     test "logged-in users switch their account filter", %{conn: conn} do
@@ -63,7 +60,7 @@ defmodule PhilomenaWeb.Filter.CurrentControllerTest do
       refute Map.has_key?(conn.resp_cookies, "filter_id")
     end
 
-    test "logged-in users are switched to the default filter for a private filter",
+    test "logged-in users are not authorized to switch to an unowned private filter",
          %{conn: conn} do
       %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
       filter = filter_fixture(confirmed_user_fixture())
@@ -71,8 +68,8 @@ defmodule PhilomenaWeb.Filter.CurrentControllerTest do
 
       conn = patch(conn, ~p"/filters/current?#{[id: filter.id]}")
 
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
-               "Switched to filter #{default.name}"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "You can't access that page."
 
       assert Repo.get!(User, user.id).current_filter_id == default.id
     end

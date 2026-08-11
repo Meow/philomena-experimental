@@ -14,7 +14,6 @@ defmodule Philomena.Filters do
   alias Philomena.Filters.Query
   alias Philomena.Filters
   alias Philomena.Attribution.Actor
-  alias Philomena.IntegerId
   alias Philomena.Schema.TagList
   alias Philomena.Tags.Tag
   alias Philomena.Users
@@ -69,28 +68,11 @@ defmodule Philomena.Filters do
     end
   end
 
-  defp resolve_filter_for_switch(_actor, nil), do: {:ok, default_filter()}
+  defp filter_for_switch(_actor, nil), do: {:ok, default_filter()}
+  defp filter_for_switch(actor, id), do: load_and_authorize_filter(actor, id, :show)
 
-  defp resolve_filter_for_switch(actor, id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         %Filter{} = filter <- Repo.get(Filter, id) do
-      case authorize(actor, :show, filter) do
-        :ok -> {:ok, filter}
-        {:error, :unauthorized} -> {:ok, default_filter()}
-      end
-    else
-      _malformed_or_missing -> {:error, :not_found}
-    end
-  end
-
-  defp persist_current_filter(nil, filter), do: {:ok, filter}
-
-  defp persist_current_filter(%User{} = user, filter) do
-    case Users.set_current_filter(user, filter) do
-      {:ok, _user} -> {:ok, filter}
-      {:error, changeset} -> {:error, changeset}
-    end
-  end
+  defp persist_current_filter(nil, _filter), do: {:ok, nil}
+  defp persist_current_filter(%User{} = user, filter), do: Users.set_current_filter(user, filter)
 
   defp recent_and_user_filter_choices(%User{} = user) do
     recent_filter_ids = Enum.reject([user.current_filter_id | user.recent_filter_ids], &is_nil/1)
@@ -167,7 +149,7 @@ defmodule Philomena.Filters do
 
   Signed-in actors use their account associations. When no current filter has
   been selected, the canonical default is persisted first. Anonymous actors may
-  select a visible filter through `cookie_filter_id`; malformed, missing, or
+  select a visible filter through `cookie_filter_id`. Malformed, missing, or
   forbidden cookie IDs fall back to the `default_filter/0`. Anonymous actors
   cannot have a forced filter.
 
@@ -484,8 +466,9 @@ defmodule Philomena.Filters do
   def switch_current_filter(%Actor{user: user} = actor, id) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :switch, Filter),
-         {:ok, filter} <- resolve_filter_for_switch(actor, id) do
-      persist_current_filter(user, filter)
+         {:ok, filter} <- filter_for_switch(actor, id),
+         {:ok, _user} <- persist_current_filter(user, filter) do
+      {:ok, filter}
     end
   end
 

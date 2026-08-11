@@ -418,16 +418,12 @@ defmodule Philomena.FiltersTest do
       assert Repo.get!(User, user.id).current_filter_id == filter.id
     end
 
-    test "a signed-in user is switched to the default filter for a private filter" do
-      default = system_filter_fixture(%{name: "Default"})
+    test "a signed-in user is not authorized to switch to an unowned private filter" do
       user = confirmed_user_fixture()
       others = filter_fixture(confirmed_user_fixture())
 
-      assert {:ok, %Filter{} = switched} =
+      assert {:error, :unauthorized} =
                Filters.switch_current_filter(actor(user), "#{others.id}")
-
-      assert switched.id == default.id
-      assert Repo.get!(User, user.id).current_filter_id == default.id
     end
 
     test "an anonymous visitor gets the resolved filter back without persistence" do
@@ -437,12 +433,10 @@ defmodule Philomena.FiltersTest do
       assert switched.id == public.id
     end
 
-    test "an anonymous visitor is switched to the default for a private filter" do
-      default = system_filter_fixture(%{name: "Default"})
+    test "an anonymous visitor is not authorized to switch to a private filter" do
       private = filter_fixture(confirmed_user_fixture())
 
-      assert {:ok, %Filter{} = switched} = Filters.switch_current_filter(actor(), "#{private.id}")
-      assert switched.id == default.id
+      assert {:error, :unauthorized} = Filters.switch_current_filter(actor(), "#{private.id}")
     end
 
     test "a well-formed id naming no row is not-found" do
