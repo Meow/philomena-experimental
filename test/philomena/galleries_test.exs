@@ -652,10 +652,10 @@ defmodule Philomena.GalleriesTest do
       other = gallery_fixture(user, title: "Test Unrelated Gallery")
       SearchHelpers.reindex_all!(Gallery)
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Galleries.load_gallery_index(
                  actor(),
-                 %{"gallery" => %{"title" => "wanted"}},
+                 %{"title" => "wanted"},
                  @pagination
                )
 
@@ -669,7 +669,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
       SearchHelpers.reindex_all!(Gallery)
 
-      assert {:ok, page} = Galleries.load_gallery_index(actor(), %{}, @pagination)
+      assert {:ok, page, _changeset} = Galleries.load_gallery_index(actor(), %{}, @pagination)
 
       assert [%Gallery{} = loaded] = Enum.filter(page.entries, &(&1.id == gallery.id))
       # The thumbnail association is loaded, not left as a lazy placeholder.
@@ -685,8 +685,8 @@ defmodule Philomena.GalleriesTest do
       assert :ok = Galleries.perform_reindex(:id, [gallery.id])
       :ok = Search.refresh_index!(Gallery)
 
-      params = %{"gallery" => %{"include_image" => to_string(image.id)}}
-      assert {:ok, page} = Galleries.load_gallery_index(actor(), params, @pagination)
+      params = %{"include_image" => to_string(image.id)}
+      assert {:ok, page, _changeset} = Galleries.load_gallery_index(actor(), params, @pagination)
       assert Enum.any?(page.entries, &(&1.id == gallery.id))
 
       assert {:ok, %{membership_changed?: true}} =
@@ -694,7 +694,7 @@ defmodule Philomena.GalleriesTest do
 
       assert :ok = Galleries.perform_reindex(:id, [gallery.id])
       :ok = Search.refresh_index!(Gallery)
-      assert {:ok, page} = Galleries.load_gallery_index(actor(), params, @pagination)
+      assert {:ok, page, _changeset} = Galleries.load_gallery_index(actor(), params, @pagination)
       refute Enum.any?(page.entries, &(&1.id == gallery.id))
     end
   end

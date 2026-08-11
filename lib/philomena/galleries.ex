@@ -18,6 +18,8 @@ defmodule Philomena.Galleries do
   alias Philomena.Galleries.Gallery
   alias Philomena.Galleries.GalleryPage
   alias Philomena.Galleries.Interaction
+  alias Philomena.Galleries.QueryBuilder
+  alias Philomena.Galleries.QueryForm
   alias Philomena.Galleries
   alias Philomena.IndexWorker
   alias Philomena.GalleryReorderWorker
@@ -47,13 +49,6 @@ defmodule Philomena.Galleries do
 
   defp load_gallery(actor, gallery_id, action) do
     Loader.fetch_and_authorize(Gallery, actor, action, gallery_id, @gallery_preloads)
-  end
-
-  defp lock_gallery!(gallery_id) do
-    Gallery
-    |> where(id: ^gallery_id)
-    |> lock("FOR UPDATE")
-    |> Repo.one!()
   end
 
   defp persist_gallery_deletion(%Gallery{} = gallery, %User{} = closing_user) do
@@ -283,54 +278,6 @@ defmodule Philomena.Galleries do
     definition
   end
 
-  defp parse_search(%{"gallery" => gallery_params}) do
-    parse_title(gallery_params) ++
-      parse_creator(gallery_params) ++
-      parse_included_image(gallery_params) ++
-      parse_description(gallery_params)
-  end
-
-  defp parse_search(_params), do: [%{match_all: %{}}]
-
-  defp parse_title(%{"title" => title}) when is_binary(title) and title not in [nil, ""],
-    do: [%{wildcard: %{title: "*" <> String.downcase(title) <> "*"}}]
-
-  defp parse_title(_params), do: []
-
-  defp parse_creator(%{"creator" => creator})
-       when is_binary(creator) and creator not in [nil, ""],
-       do: [%{term: %{creator: String.downcase(creator)}}]
-
-  defp parse_creator(_params), do: []
-
-  defp parse_included_image(%{"include_image" => image_id})
-       when is_binary(image_id) and image_id not in [nil, ""] do
-    case Integer.parse(image_id) do
-      {image_id, _rest} -> [%{term: %{image_ids: image_id}}]
-      _ -> []
-    end
-  end
-
-  defp parse_included_image(_params), do: []
-
-  defp parse_description(%{"description" => description})
-       when is_binary(description) and description not in [nil, ""],
-       do: [%{match_phrase: %{description: description}}]
-
-  defp parse_description(_params), do: []
-
-  defp parse_sort(%{"gallery" => %{"sf" => "created_at", "sd" => sd}}) when sd in ~w(desc asc) do
-    [%{created_at: sd}, %{id: sd}]
-  end
-
-  defp parse_sort(%{"gallery" => %{"sf" => sf, "sd" => sd}})
-       when sf in ~w(updated_at image_count subscriber_count _score) and
-              sd in ~w(desc asc) do
-    [%{sf => sd}, %{created_at: sd}, %{id: sd}]
-  end
-
-  defp parse_sort(_params), do: [%{created_at: :desc}, %{id: :desc}]
-
   defp image_sort_direction(%{order_position_asc: true}), do: "asc"
   defp image_sort_direction(_gallery), do: "desc"
 
@@ -533,38 +480,31 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Runs the gallery listing search `params` describes, returning the
-  record page with its thumbnail preloads.
-
-  The title, creator, included-image, and description filters are read from
-  `params["gallery"]`; the sort field and direction from its "sf"/"sd" keys.
+  Runs the gallery listing search `params` describes, returning the record page
+  with its thumbnail preloads and a fresh changeset for a new search.
 
   ## Examples
 
-      iex> load_gallery_index(actor, %{"gallery" => %{"title" => "sunset"}}, pagination)
-      {:ok, %Scrivener.Page{}}
+      iex> load_gallery_index(actor, %{"title" => "sunset"}, pagination)
+      {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
+
+      iex> load_gallery_index(actor, %{"include_image" => "abcd"}, pagination)
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec load_gallery_index(Actor.t(), map(), Search.pagination_params()) ::
-          {:ok, Scrivener.Page.t(Gallery.t())} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(Gallery.t()), Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :unauthorized}
   def load_gallery_index(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, Gallery) do
+    with :ok <- authorize(actor, :index, Gallery),
+         {:ok, query} <- QueryBuilder.build_query(params) do
       galleries =
         Gallery
-        |> Search.search_definition(
-          %{
-            query: %{
-              bool: %{
-                must: parse_search(params)
-              }
-            },
-            sort: parse_sort(params)
-          },
-          pagination
-        )
+        |> Search.search_definition(query, pagination)
         |> Search.search_records(preload(Gallery, thumbnail: [:sources, tags: :aliases]))
 
-      {:ok, galleries}
+      {:ok, galleries, QueryForm.changeset(%QueryForm{})}
     end
   end
 
@@ -951,7 +891,11 @@ defmodule Philomena.Galleries do
   @spec perform_reorder(integer(), [Loader.integer_id()]) :: :ok | {:error, :invalid_order}
   def perform_reorder(gallery_id, image_ids) do
     Repo.transaction(fn ->
-      gallery = lock_gallery!(gallery_id)
+      gallery =
+        Gallery
+        |> where(id: ^gallery_id)
+        |> lock("FOR UPDATE")
+        |> Repo.one!()
 
       case validate_reorder(gallery, image_ids) do
         {:ok, image_ids} ->

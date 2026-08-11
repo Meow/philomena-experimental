@@ -7,16 +7,34 @@ defmodule PhilomenaWeb.GalleryController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  plug PhilomenaWeb.MapParameterPlug, [param: "gallery"] when action in [:index]
-
   def index(conn, params) do
-    with {:ok, galleries} <-
-           Galleries.load_gallery_index(conn.assigns.actor, params, conn.assigns.pagination) do
-      render(conn, "index.html",
-        title: "Galleries",
-        galleries: galleries,
-        layout_class: "layout--wide"
-      )
+    case Galleries.load_gallery_index(
+           conn.assigns.actor,
+           params["gallery"] || %{},
+           conn.assigns.pagination
+         ) do
+      {:ok, galleries, changeset} ->
+        render(
+          conn,
+          "index.html",
+          title: "Galleries",
+          galleries: galleries,
+          changeset: changeset,
+          layout_class: "layout--wide"
+        )
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(
+          conn,
+          "index.html",
+          title: "Galleries",
+          galleries: nil,
+          changeset: changeset,
+          layout_class: "layout--wide"
+        )
+
+      error ->
+        error
     end
   end
 
