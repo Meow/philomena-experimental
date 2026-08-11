@@ -34,21 +34,6 @@ defmodule Philomena.Filters do
   defp visibility_shoulds(user),
     do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
 
-  defp authorize_filter_tag(actor, action, current_filter, tag_slug) do
-    with :ok <- authorize(actor, action, current_filter) do
-      Tag
-      |> where(slug: ^tag_slug)
-      |> Loader.one_and_authorize(actor, :show)
-    end
-  end
-
-  defp tags_by_ids(ids) do
-    Tag
-    |> where([t], t.id in ^ids)
-    |> order_by(asc: :name)
-    |> Repo.all()
-  end
-
   defp ensure_current_filter(%User{current_filter: %Filter{} = filter}), do: {:ok, filter}
 
   defp ensure_current_filter(%User{} = user) do
@@ -66,11 +51,23 @@ defmodule Philomena.Filters do
   defp persist_current_filter(nil, _filter), do: {:ok, nil}
   defp persist_current_filter(%User{} = user, filter), do: Users.set_current_filter(user, filter)
 
-  # Parses the id, loads the filter, and authorizes `action` on it. A
-  # non-castable or missing id is not-found for every actor; an existing but
-  # forbidden filter is unauthorized.
   defp load_and_authorize_filter(actor, id, action, preloads \\ []) do
     Loader.fetch_and_authorize(Filter, actor, action, id, preloads)
+  end
+
+  defp authorize_filter_tag(actor, action, current_filter, tag_slug) do
+    with :ok <- authorize(actor, action, current_filter) do
+      Tag
+      |> where(slug: ^tag_slug)
+      |> Loader.one_and_authorize(actor, :show)
+    end
+  end
+
+  defp tags_by_ids(ids) do
+    Tag
+    |> where([t], t.id in ^ids)
+    |> order_by(asc: :name)
+    |> Repo.all()
   end
 
   defp reindex_after_update(result) do
