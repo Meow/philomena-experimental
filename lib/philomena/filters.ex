@@ -35,8 +35,7 @@ defmodule Philomena.Filters do
     do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
 
   defp authorize_filter_tag(actor, action, current_filter, tag_slug) do
-    with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, action, current_filter),
+    with :ok <- authorize(actor, action, current_filter),
          {:ok, tag} <- fetch_tag_by_slug(tag_slug),
          :ok <- authorize(actor, :show, tag) do
       {:ok, tag}
@@ -663,7 +662,8 @@ defmodule Philomena.Filters do
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
   def hide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :hide_tag, filter, tag_slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- authorize_filter_tag(actor, :hide_tag, filter, tag_slug) do
       hidden_tag_ids = Enum.uniq([tag.id | filter.hidden_tag_ids])
 
       filter
@@ -701,7 +701,8 @@ defmodule Philomena.Filters do
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
   def unhide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :unhide_tag, filter, tag_slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- authorize_filter_tag(actor, :unhide_tag, filter, tag_slug) do
       hidden_tag_ids = filter.hidden_tag_ids -- [tag.id]
 
       filter
@@ -739,7 +740,8 @@ defmodule Philomena.Filters do
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
   def spoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :spoiler_tag, filter, tag_slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- authorize_filter_tag(actor, :spoiler_tag, filter, tag_slug) do
       spoilered_tag_ids = Enum.uniq([tag.id | filter.spoilered_tag_ids])
 
       filter
@@ -777,7 +779,8 @@ defmodule Philomena.Filters do
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
   def unspoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
-    with {:ok, tag} <- authorize_filter_tag(actor, :unspoiler_tag, filter, tag_slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- authorize_filter_tag(actor, :unspoiler_tag, filter, tag_slug) do
       spoilered_tag_ids = filter.spoilered_tag_ids -- [tag.id]
 
       filter
