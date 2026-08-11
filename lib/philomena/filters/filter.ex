@@ -31,6 +31,24 @@ defmodule Philomena.Filters.Filter do
   end
 
   @doc false
+  @spec based_on(t() | nil) :: t()
+  def based_on(filter) do
+    filter = filter || %__MODULE__{}
+
+    %__MODULE__{
+      name: filter.name,
+      description: filter.description,
+      public: filter.public,
+      hidden_complex_str: filter.hidden_complex_str,
+      spoilered_complex_str: filter.spoilered_complex_str,
+      hidden_tag_ids: filter.hidden_tag_ids,
+      spoilered_tag_ids: filter.spoilered_tag_ids
+    }
+    |> TagList.assign_tag_list(:spoilered_tag_ids, :spoilered_tag_list)
+    |> TagList.assign_tag_list(:hidden_tag_ids, :hidden_tag_list)
+  end
+
+  @doc false
   def changeset(filter, attrs \\ %{}) do
     user =
       change(filter).data

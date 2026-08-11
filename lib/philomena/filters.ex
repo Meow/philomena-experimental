@@ -35,29 +35,6 @@ defmodule Philomena.Filters do
   defp visibility_shoulds(user),
     do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
 
-  defp base_filter(_actor, nil), do: %Filter{}
-
-  defp base_filter(actor, based_on) do
-    visible_source_filter(actor, based_on)
-    |> Kernel.||(%Filter{})
-    |> TagList.assign_tag_list(:spoilered_tag_ids, :spoilered_tag_list)
-    |> TagList.assign_tag_list(:hidden_tag_ids, :hidden_tag_list)
-    |> Map.put(:__meta__, %Ecto.Schema.Metadata{
-      state: :built,
-      source: "filters",
-      schema: Filter
-    })
-  end
-
-  defp visible_source_filter(actor, based_on) do
-    case load_and_authorize_filter(actor, based_on, :show) do
-      {:ok, filter} -> filter
-      {:error, _reason} -> nil
-    end
-  end
-
-  # Ban check, then filter-edit authorization, then tag load - the order the
-  # filter tag toggles are guarded in.
   defp authorize_filter_tag(actor, action, current_filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, action, current_filter),
@@ -408,9 +385,8 @@ defmodule Philomena.Filters do
   Builds the changeset for a new filter on behalf of `actor`.
 
   Verifies write access, then authorizes `:new` (permitted for any signed-in
-  user). When `based_on` names a filter the viewer may see, the new filter is
-  prefilled from it as an unpersisted record; an unknown, malformed, forbidden,
-  or omitted `based_on` yields a blank changeset.
+  user). When `based_on_id` names a filter the actor may view, the new filter is
+  prefilled from it.
 
   ## Examples
 
@@ -426,12 +402,21 @@ defmodule Philomena.Filters do
   """
   @spec new_filter(Actor.t(), Loader.integer_id() | nil) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
-  def new_filter(%Actor{} = actor, based_on) do
+  def new_filter(%Actor{} = actor, based_on_id) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Filter) do
+      base_filter =
+        case load_and_authorize_filter(actor, based_on_id, :show) do
+          {:ok, filter} ->
+            filter
+
+          {:error, _reason} ->
+            nil
+        end
+
       {:ok,
-       actor
-       |> base_filter(based_on)
+       base_filter
+       |> Filter.based_on()
        |> Filter.changeset()}
     end
   end
