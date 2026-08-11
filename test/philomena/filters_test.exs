@@ -49,7 +49,7 @@ defmodule Philomena.FiltersTest do
     test "an anonymous visitor gets no personal filters, only system filters" do
       system = system_filter_fixture()
 
-      assert {:ok, {[], system_filters}} = Filters.index_filters(actor())
+      assert {:ok, {nil, system_filters}} = Filters.index_filters(actor(), @pagination)
       assert system.id in Enum.map(system_filters, & &1.id)
     end
 
@@ -59,7 +59,7 @@ defmodule Philomena.FiltersTest do
       _theirs = filter_fixture(confirmed_user_fixture())
       system = system_filter_fixture()
 
-      assert {:ok, {my_filters, system_filters}} = Filters.index_filters(actor(user))
+      assert {:ok, {my_filters, system_filters}} = Filters.index_filters(actor(user), @pagination)
 
       my_ids = Enum.map(my_filters, & &1.id)
       assert mine.id in my_ids
@@ -73,8 +73,8 @@ defmodule Philomena.FiltersTest do
       user = confirmed_user_fixture()
       filter_fixture(user)
 
-      {:ok, {[mine | _], _system}} = Filters.index_filters(actor(user))
-      refute match?(%Ecto.Association.NotLoaded{}, mine.user)
+      {:ok, {mine, _system}} = Filters.index_filters(actor(user), @pagination)
+      refute match?(%Ecto.Association.NotLoaded{}, Enum.at(mine, 0).user)
     end
   end
 

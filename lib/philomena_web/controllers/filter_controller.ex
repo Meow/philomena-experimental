@@ -18,7 +18,8 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def index(conn, _params) do
-    with {:ok, {my_filters, system_filters}} <- Filters.index_filters(conn.assigns.actor) do
+    with {:ok, {my_filters, system_filters}} <-
+           Filters.index_filters(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "Filters",
         my_filters: my_filters,

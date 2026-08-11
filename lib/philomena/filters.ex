@@ -154,31 +154,58 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> index_filters(actor)
-      {:ok, {[%Filter{}, ...], [%Filter{}, ...]}}
+      iex> index_filters(actor, pagination)
+      {:ok, {%Scrivener.Page{}, [%Filter{}, ...]}}
 
   """
-  @spec index_filters(Actor.t()) ::
-          {:ok, {[Filter.t()], [Filter.t()]}} | {:error, :unauthorized}
-  def index_filters(%Actor{user: user} = actor) do
+  @spec index_filters(Actor.t(), Repo.pagination_params()) ::
+          {:ok, {Scrivener.Page.t(Filter.t()) | nil, [Filter.t()]}} | {:error, :unauthorized}
+  def index_filters(%Actor{user: user} = actor, pagination) do
     with :ok <- authorize(actor, :index, Filter) do
       my_filters =
         if user do
           Filter
           |> where(user_id: ^user.id)
+          |> order_by(asc: :id)
           |> preload(:user)
-          |> Repo.all()
+          |> Repo.paginate(pagination)
         else
-          []
+          nil
         end
 
       system_filters =
         Filter
         |> where(system: true)
+        |> order_by(asc: :id)
         |> preload(:user)
         |> Repo.all()
 
       {:ok, {my_filters, system_filters}}
+    end
+  end
+
+  @doc """
+  Returns the page of `actor`'s own filters after authorizing `:index_own`.
+
+  Anonymous actors are unauthorized. Results are ordered by descending `:updated_at` and
+  paginated by `pagination`.
+
+  ## Examples
+
+      iex> user_filters(actor, pagination)
+      {:ok, %Scrivener.Page{}}
+
+  """
+  @spec user_filters(Actor.t(), Repo.pagination_params()) ::
+          {:ok, Scrivener.Page.t(Filter.t())} | {:error, :unauthorized}
+  def user_filters(%Actor{user: user} = actor, pagination) do
+    with :ok <- authorize(actor, :index_own, Filter) do
+      {:ok,
+       Filter
+       |> where(user_id: ^user.id)
+       |> order_by(asc: :id)
+       |> preload(:user)
+       |> Repo.paginate(pagination)}
     end
   end
 
@@ -201,30 +228,6 @@ defmodule Philomena.Filters do
       {:ok,
        Filter
        |> where(system: true)
-       |> order_by(asc: :id)
-       |> Repo.paginate(pagination)}
-    end
-  end
-
-  @doc """
-  Returns the page of `actor`'s own filters after authorizing `:index_own`.
-
-  Anonymous actors are unauthorized. Results are ordered by ascending id and
-  paginated by `pagination`.
-
-  ## Examples
-
-      iex> user_filters(actor, pagination)
-      {:ok, %Scrivener.Page{}}
-
-  """
-  @spec user_filters(Actor.t(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(Filter.t())} | {:error, :unauthorized}
-  def user_filters(%Actor{user: user} = actor, pagination) do
-    with :ok <- authorize(actor, :index_own, Filter) do
-      {:ok,
-       Filter
-       |> where(user_id: ^user.id)
        |> order_by(asc: :id)
        |> Repo.paginate(pagination)}
     end

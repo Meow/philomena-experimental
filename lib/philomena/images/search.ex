@@ -228,7 +228,10 @@ defmodule Philomena.Images.Search do
   end
 
   defp delay_home_images?(nil), do: true
-  defp delay_home_images?(user) when user.role != "user", do: user.staff_delay_home_images
+
+  defp delay_home_images?(user) when user.role != "user",
+    do: user.settings.staff_delay_home_images
+
   defp delay_home_images?(user), do: user.settings.delay_home_images
 
   defp create_filters(scope) do
