@@ -35,17 +35,10 @@ defmodule Philomena.Filters do
     do: visibility_shoulds(nil) ++ [%{term: %{user_id: user.id}}]
 
   defp authorize_filter_tag(actor, action, current_filter, tag_slug) do
-    with :ok <- authorize(actor, action, current_filter),
-         {:ok, tag} <- fetch_tag_by_slug(tag_slug),
-         :ok <- authorize(actor, :show, tag) do
-      {:ok, tag}
-    end
-  end
-
-  defp fetch_tag_by_slug(slug) do
-    case Repo.get_by(Tag, slug: slug) do
-      nil -> {:error, :not_found}
-      %Tag{} = tag -> {:ok, tag}
+    with :ok <- authorize(actor, action, current_filter) do
+      Tag
+      |> where(slug: ^tag_slug)
+      |> Loader.one_and_authorize(actor, :show)
     end
   end
 
