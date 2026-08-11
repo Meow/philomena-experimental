@@ -73,39 +73,6 @@ defmodule Philomena.Filters do
   defp persist_current_filter(nil, _filter), do: {:ok, nil}
   defp persist_current_filter(%User{} = user, filter), do: Users.set_current_filter(user, filter)
 
-  defp recent_and_user_filter_choices(%User{} = user) do
-    recent_filter_ids = Enum.reject([user.current_filter_id | user.recent_filter_ids], &is_nil/1)
-
-    positions =
-      recent_filter_ids
-      |> Enum.with_index()
-      |> Map.new()
-
-    user_filter_query =
-      Filter
-      |> select([f], %{struct(f, [:id, :name]) | recent: false})
-      |> where(user_id: ^user.id)
-      |> order_by(desc: :updated_at)
-      |> limit(10)
-
-    recent_filter_query =
-      Filter
-      |> select([f], %{struct(f, [:id, :name]) | recent: true})
-      |> where([f], f.id in ^recent_filter_ids)
-      |> limit(10)
-
-    {recent_filters, user_filters} =
-      recent_filter_query
-      |> union_all(^user_filter_query)
-      |> Repo.all()
-      |> Enum.split_with(& &1.recent)
-
-    %FilterSelection{
-      user_filters: user_filters,
-      recent_filters: Enum.sort_by(recent_filters, &Map.fetch!(positions, &1.id))
-    }
-  end
-
   # Parses the id, loads the filter, and authorizes `action` on it. A
   # non-castable or missing id is not-found for every actor; an existing but
   # forbidden filter is unauthorized.
@@ -630,7 +597,38 @@ defmodule Philomena.Filters do
   @spec recent_and_user_filters(Actor.t()) :: {:ok, FilterSelection.t()} | {:error, :unauthorized}
   def recent_and_user_filters(%Actor{user: user} = actor) do
     with :ok <- authorize(actor, :index_own, Filter) do
-      {:ok, recent_and_user_filter_choices(user)}
+      recent_filter_ids =
+        Enum.reject([user.current_filter_id | user.recent_filter_ids], &is_nil/1)
+
+      positions =
+        recent_filter_ids
+        |> Enum.with_index()
+        |> Map.new()
+
+      user_filter_query =
+        Filter
+        |> select([f], %{struct(f, [:id, :name]) | recent: false})
+        |> where(user_id: ^user.id)
+        |> order_by(desc: :updated_at)
+        |> limit(10)
+
+      recent_filter_query =
+        Filter
+        |> select([f], %{struct(f, [:id, :name]) | recent: true})
+        |> where([f], f.id in ^recent_filter_ids)
+        |> limit(10)
+
+      {recent_filters, user_filters} =
+        recent_filter_query
+        |> union_all(^user_filter_query)
+        |> Repo.all()
+        |> Enum.split_with(& &1.recent)
+
+      {:ok,
+       %FilterSelection{
+         user_filters: user_filters,
+         recent_filters: Enum.sort_by(recent_filters, &Map.fetch!(positions, &1.id))
+       }}
     end
   end
 
