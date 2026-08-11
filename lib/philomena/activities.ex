@@ -21,9 +21,47 @@ defmodule Philomena.Activities do
   alias Philomena.Topics
   alias PhilomenaQuery.Search
 
-  @strip_pagination %{page_number: 1, page_size: 6}
+  @strip_count 6
+  @strip_pagination %{page_number: 1, page_size: @strip_count}
+  @image_preloads [:sources, tags: :aliases]
+  @comment_preloads [:user, image: @image_preloads]
 
-  @type load_result :: {:ok, FrontPage.t()} | {:error, :unauthorized | String.t()}
+  defp multi_search(images, top_scoring, comments, nil) do
+    responses =
+      Search.msearch_records(
+        [images, top_scoring, comments],
+        [
+          preload(Image, ^@image_preloads),
+          preload(Image, ^@image_preloads),
+          preload(Comment, ^@comment_preloads)
+        ]
+      )
+
+    responses ++ [nil]
+  end
+
+  defp multi_search(images, top_scoring, comments, watched) do
+    Search.msearch_records(
+      [images, top_scoring, comments, watched],
+      [
+        preload(Image, ^@image_preloads),
+        preload(Image, ^@image_preloads),
+        preload(Comment, ^@comment_preloads),
+        preload(Image, ^@image_preloads)
+      ]
+    )
+  end
+
+  defp watched_definition(%Actor{user: nil}, _scope), do: {:ok, nil}
+
+  defp watched_definition(%Actor{}, scope) do
+    with {:ok, {definition, _tags}} <-
+           ImageSearch.search_string(scope, "my:watched",
+             pagination: %{scope.pagination | page_number: 1}
+           ) do
+      {:ok, definition}
+    end
+  end
 
   defp search_definitions(%Actor{} = actor, %Scope{} = scope, %Filter{} = filter) do
     {images_definition, _tags} =
@@ -48,17 +86,6 @@ defmodule Philomena.Activities do
 
     with {:ok, watched_definition} <- watched_definition(actor, scope) do
       {:ok, {images_definition, top_scoring_definition, comments_definition, watched_definition}}
-    end
-  end
-
-  defp watched_definition(%Actor{user: nil}, _scope), do: {:ok, nil}
-
-  defp watched_definition(%Actor{}, scope) do
-    with {:ok, {definition, _tags}} <-
-           ImageSearch.search_string(scope, "my:watched",
-             pagination: %{scope.pagination | page_number: 1}
-           ) do
-      {:ok, definition}
     end
   end
 
@@ -89,7 +116,7 @@ defmodule Philomena.Activities do
     sections = load_search_sections(definitions)
     featured_image = load_featured_image(actor, scope)
     streams = load_streams(actor, show_nsfw_channels?)
-    topics = Topics.list_front_page_topics(actor)
+    topics = Topics.list_front_page_topics(actor, @strip_count)
 
     interactions =
       Interactions.user_interactions(actor, [
@@ -111,46 +138,16 @@ defmodule Philomena.Activities do
     }
   end
 
-  defp multi_search(images, top_scoring, comments, nil) do
-    responses =
-      Search.msearch_records(
-        [images, top_scoring, comments],
-        [
-          preload(Image, [:sources, tags: :aliases]),
-          preload(Image, [:sources, tags: :aliases]),
-          preload(Comment, [:user, image: [:sources, tags: :aliases]])
-        ]
-      )
-
-    responses ++ [nil]
-  end
-
-  defp multi_search(images, top_scoring, comments, watched) do
-    Search.msearch_records(
-      [images, top_scoring, comments, watched],
-      [
-        preload(Image, [:sources, tags: :aliases]),
-        preload(Image, [:sources, tags: :aliases]),
-        preload(Comment, [:user, image: [:sources, tags: :aliases]]),
-        preload(Image, [:sources, tags: :aliases])
-      ]
-    )
-  end
-
   @doc """
   Assembles the homepage for `actor` using the image-search state in `scope`.
 
-  Actor is the sole authority source: any `scope.user` supplied by the caller is
-  replaced with `actor.user`; the scope otherwise retains compiled filter,
-  pagination, and display parameters. `filter` supplies hidden tags for the
-  recent-comment strip, and `show_nsfw_channels?` controls the channel strip.
+  `scope` retains the compiled filter, pagination, and display parameters for
+  for the images strip, top scoring strip, and optional watched strip. `filter`
+  supplies hidden tags for the recent comments strip, and `show_nsfw_channels?`
+  controls the channel strip.
 
-  The four OpenSearch strips execute as one multi-search. Anonymous actors have
-  no watched strip (`nil`); authenticated actors receive a page, including an
-  empty page when no watched tags match. Featured-image, channel, and topic
-  visibility delegate to their owning contexts. No section failure is converted
-  into an empty section: compiler errors are returned and OpenSearch failures
-  fail the whole request.
+  All search queries execute as one multi-search. Anonymous actors receive no
+  watched strip.
 
   ## Examples
 
@@ -161,7 +158,8 @@ defmodule Philomena.Activities do
       {:ok, %FrontPage{watched: %Scrivener.Page{}}}
 
   """
-  @spec load_front_page(Actor.t(), Scope.t(), Filter.t(), boolean()) :: load_result()
+  @spec load_front_page(Actor.t(), Scope.t(), Filter.t(), boolean()) ::
+          {:ok, FrontPage.t()} | {:error, :unauthorized | String.t()}
   def load_front_page(
         %Actor{} = actor,
         %Scope{} = scope,

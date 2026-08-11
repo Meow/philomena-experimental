@@ -165,13 +165,11 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Loads the most recent featured image visible under `actor`'s personal hide
-  preference.
+  Loads the most recent featured image visible to `actor`.
 
-  Site-hidden images are always excluded. When `include_hidden?` is false, an
-  authenticated actor's personally hidden images are also excluded; anonymous
-  actors have no personal hide state. The next eligible historical feature is
-  returned when the newest one is excluded.
+  Hidden images are always excluded. When `include_hidden?` is false, an
+  authenticated actor's personally hidden images are also excluded. The next
+  eligible historical feature is returned when the newest one is excluded.
 
   ## Examples
 

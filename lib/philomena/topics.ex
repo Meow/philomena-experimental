@@ -253,21 +253,6 @@ defmodule Philomena.Topics do
 
   defp normalize_multi_error(result), do: result
 
-  defp front_page_topics(actor) do
-    visible_forums =
-      Forum
-      |> Visibility.visible_forums(actor)
-
-    Topic
-    |> join(:inner, [topic], forum in subquery(visible_forums), on: forum.id == topic.forum_id)
-    |> Visibility.visible_topics(actor)
-    |> where([topic], fragment("? !~ ?", topic.title, "NSFW"))
-    |> order_by(desc: :last_replied_to_at)
-    |> preload([:forum, last_post: :user])
-    |> limit(6)
-    |> Repo.all()
-  end
-
   @doc false
   @spec create_topic_for_fixture(Forum.t(), Actor.t(), map()) ::
           {:ok, map()} | {:error, Ecto.Multi.name(), term(), map()}
@@ -296,20 +281,30 @@ defmodule Philomena.Topics do
   def unhide_topic_for_fixture(topic), do: unhide_loaded_topic(topic)
 
   @doc """
-  Lists the latest homepage topics visible to `actor`.
+  Lists the latest `count` homepage topics visible to `actor`.
 
-  Forum access and hidden-topic visibility use the shared forum hierarchy
-  scopes before the six-topic limit. Titles containing `"NSFW"` are omitted
-  from this general homepage strip. Forums and last-post users are preloaded.
+  Forum access uses the shared forum hierarchy scopes. Topics with titles
+  containing `"NSFW"` are omitted. Forums and last post users are preloaded.
 
   ## Examples
 
-      iex> list_front_page_topics(actor)
+      iex> list_front_page_topics(actor, 6)
       [%Topic{}, ...]
 
   """
-  @spec list_front_page_topics(Actor.t()) :: [Topic.t()]
-  def list_front_page_topics(%Actor{} = actor), do: front_page_topics(actor)
+  @spec list_front_page_topics(Actor.t(), pos_integer()) :: [Topic.t()]
+  def list_front_page_topics(%Actor{} = actor, count) when is_integer(count) do
+    visible_forums = Visibility.visible_forums(Forum, actor)
+
+    Topic
+    |> join(:inner, [topic], forum in subquery(visible_forums), on: forum.id == topic.forum_id)
+    |> Visibility.visible_topics(actor)
+    |> where([topic], fragment("? !~ ?", topic.title, "NSFW"))
+    |> order_by(desc: :last_replied_to_at)
+    |> preload([:forum, last_post: :user])
+    |> limit(^count)
+    |> Repo.all()
+  end
 
   @doc """
   Subscribes `actor` to the topic named by `topic_slug` within the forum
