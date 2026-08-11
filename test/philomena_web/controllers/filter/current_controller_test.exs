@@ -117,15 +117,18 @@ defmodule PhilomenaWeb.Filter.CurrentControllerTest do
                "Switched to filter #{default.name}"
     end
 
-    test "a banned user cannot switch filters", %{conn: conn} do
+    test "a banned user can still switch filters", %{conn: conn} do
       %{conn: conn, user: user} = register_and_log_in_banned_user(%{conn: conn})
       filter = filter_fixture(user)
 
       conn = patch(conn, ~p"/filters/current?#{[id: filter.id]}")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You are currently banned."
-      refute Repo.get!(User, user.id).current_filter_id == filter.id
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Switched to filter #{filter.name}"
+
+      assert Repo.get!(User, user.id).current_filter_id == filter.id
     end
   end
 end

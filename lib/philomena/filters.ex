@@ -395,10 +395,10 @@ defmodule Philomena.Filters do
   @doc """
   Switches `actor`'s current filter to the one named by `id`.
 
-  Verifies write access and authorizes `:switch` before loading. `nil` explicitly
-  selects the canonical default filter. A visible filter is selected directly.
-  A private filter the actor may not see also resolves to the default. Malformed
-  and missing non-nil IDs are not-found.
+  Unlike most writes, banned users are permitted to switch filters.
+
+  Authorizes `:switch` before loading. `nil` explicitly selects the canonical default
+  filter. Malformed and missing non-nil IDs are not-found.
 
   For a signed-in actor, the selection is persisted to their account and added
   to recent filters. Anonymous actors must persist the filter through the returned
@@ -420,8 +420,7 @@ defmodule Philomena.Filters do
           {:ok, Filter.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def switch_current_filter(%Actor{user: user} = actor, id) do
-    with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, :switch, Filter),
+    with :ok <- authorize(actor, :switch, Filter),
          {:ok, filter} <- filter_for_switch(actor, id),
          {:ok, _user} <- persist_current_filter(user, filter) do
       {:ok, filter}

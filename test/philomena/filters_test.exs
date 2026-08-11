@@ -631,7 +631,6 @@ defmodule Philomena.FiltersTest do
       operations = [
         new: fn actor -> Filters.new_filter(actor, nil) end,
         edit: fn actor -> Filters.load_filter_for_edit(actor, filter.id) end,
-        switch: fn actor -> Filters.switch_current_filter(actor, filter.id) end,
         create: fn actor -> Filters.create_filter(actor, %{"name" => "Created"}) end,
         update: fn actor -> Filters.update_filter(actor, filter.id, %{"name" => "Updated"}) end,
         publish: fn actor -> Filters.make_filter_public(actor, filter.id) end,
