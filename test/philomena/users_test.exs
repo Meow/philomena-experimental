@@ -1345,7 +1345,9 @@ defmodule Philomena.UsersTest do
       target = confirmed_user_fixture()
       SearchHelpers.reindex_all!(User)
 
-      assert {:ok, page} = Users.search_users(actor(moderator_user_fixture()), %{}, @pagination)
+      assert {:ok, page, _changeset} =
+               Users.search_users(actor(moderator_user_fixture()), %{}, @pagination)
+
       assert target.id in Enum.map(page.entries, & &1.id)
     end
 
@@ -1353,29 +1355,31 @@ defmodule Philomena.UsersTest do
       target = confirmed_user_fixture()
       SearchHelpers.reindex_all!(User)
 
-      assert {:ok, page} = Users.search_users(actor(admin_user_fixture()), %{}, @pagination)
+      assert {:ok, page, _changeset} =
+               Users.search_users(actor(admin_user_fixture()), %{}, @pagination)
+
       assert target.id in Enum.map(page.entries, & &1.id)
     end
 
-    test "a blank uq searches everything" do
+    test "a blank query searches everything" do
       target = confirmed_user_fixture()
       SearchHelpers.reindex_all!(User)
 
-      assert {:ok, page} =
-               Users.search_users(actor(admin_user_fixture()), %{"uq" => ""}, @pagination)
+      assert {:ok, page, _changeset} =
+               Users.search_users(actor(admin_user_fixture()), %{"query" => ""}, @pagination)
 
       assert target.id in Enum.map(page.entries, & &1.id)
     end
 
-    test "the uq param filters by name" do
+    test "the query param filters by name" do
       target = confirmed_user_fixture(%{name: "search_target_needle"})
       _other = confirmed_user_fixture(%{name: "search_other_haystack"})
       SearchHelpers.reindex_all!(User)
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Users.search_users(
                  actor(admin_user_fixture()),
-                 %{"uq" => "name:search_target_needle"},
+                 %{"query" => "name:search_target_needle"},
                  @pagination
                )
 
@@ -1383,10 +1387,10 @@ defmodule Philomena.UsersTest do
     end
 
     test "an unparsable query returns the parser's message string" do
-      assert {:error, msg} =
-               Users.search_users(actor(admin_user_fixture()), %{"uq" => "("}, @pagination)
+      assert {:error, changeset} =
+               Users.search_users(actor(admin_user_fixture()), %{"query" => "("}, @pagination)
 
-      assert is_binary(msg)
+      assert errors_on(changeset)[:query]
     end
   end
 

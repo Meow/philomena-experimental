@@ -27,7 +27,7 @@ defmodule Philomena.Galleries.QueryBuilder do
   be used with `PhilomenaQuery.Search`, or `{:error, changeset}` if the provided
   parameters are invalid.
   """
-  @spec build_query(map()) :: {:ok, map()} | {:error, Ecto.Changeset.t()}
+  @spec build_query(map()) :: {:ok, map(), QueryForm.t()} | {:error, Ecto.Changeset.t()}
   def build_query(params \\ %{}) do
     %QueryForm{}
     |> QueryForm.changeset(params)
@@ -43,7 +43,7 @@ defmodule Philomena.Galleries.QueryBuilder do
           |> combine_clauses()
           |> apply_sort(query_form)
 
-        {:ok, query}
+        {:ok, query, query_form}
 
       error ->
         error
@@ -85,9 +85,9 @@ defmodule Philomena.Galleries.QueryBuilder do
   defp combine_clauses([]), do: %{match_all: %{}}
   defp combine_clauses(clauses), do: %{bool: %{must: clauses}}
 
-  defp apply_sort(bool_query, %QueryForm{sf: sf, sd: sd}) do
+  defp apply_sort(query, %QueryForm{sf: sf, sd: sd}) do
     %{
-      query: bool_query,
+      query: query,
       sort:
         if sf == "created_at" do
           [%{created_at: sd}, %{id: sd}]

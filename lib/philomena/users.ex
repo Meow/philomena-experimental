@@ -24,6 +24,8 @@ defmodule Philomena.Users do
   alias Philomena.Users.{
     AdminUserForm,
     AliasMatches,
+    QueryBuilder,
+    QueryForm,
     Settings,
     Uploader,
     User,
@@ -67,21 +69,6 @@ defmodule Philomena.Users do
           fingerprint: String.t(),
           user: %User{} | nil
         ]
-
-  @user_search_fields ~W(
-    name
-    confirmed_at
-    updated_at
-    deleted_at
-    images_count
-    image_faves_count
-    comments_count
-    image_votes_count
-    metadata_updates_count
-    posts_count
-    topics_count
-    _score
-  )
 
   # Shared forms, locators, and staff transaction composition.
 
@@ -190,7 +177,7 @@ defmodule Philomena.Users do
     |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["confirm"]))
   end
 
-  # Settings, role assignment, and user search mechanics.
+  # Settings, role assignment, and user searches.
 
   defp change_user(%User{} = user) do
     User.changeset(user, %{})
@@ -237,23 +224,7 @@ defmodule Philomena.Users do
     if length(roles) == length(role_ids), do: {:ok, roles}, else: :error
   end
 
-  defp user_search_sort(params) do
-    direction = user_search_direction(params)
-
-    case params do
-      %{"sf" => sf} when sf in @user_search_fields ->
-        [%{sf => direction}, %{"id" => direction}]
-
-      _ ->
-        [%{"id" => direction}]
-    end
-  end
-
-  defp user_search_direction(%{"sd" => sd}) when sd in ~W(asc desc), do: sd
-
-  defp user_search_direction(_params), do: "desc"
-
-  # Profile, avatar, and rename persistence mechanics.
+  # Profile, avatar, and rename persistence.
 
   defp alias_matches(user) do
     # N.B.: subquery runs faster and is easier to read
@@ -381,7 +352,7 @@ defmodule Philomena.Users do
     end
   end
 
-  # Authentication role hydration and restricted forum cleanup.
+  # Authentication role loading and restricted forum cleanup.
 
   defp load_with_roles(query) do
     query
@@ -1290,48 +1261,32 @@ defmodule Philomena.Users do
 
   Reading the user listing requires authorization to index users.
 
-  The `"uq"` param supplies the query (blank or missing searches everything),
-  and `"sf"`/`"sd"` select the sort field and direction from the user-domain fields.
-
-  Returns `{:ok, users}` with a `m:Scrivener.Page` of matching users, or
-  `{:error, message}` carrying the parser's message string when the query cannot
-  be compiled.
+  The `"uq"` param supplies the query, and `"sf"`/`"sd"` select the sort field
+  and direction. Returns a `m:Scrivener.Page` of matching users and a
+  changeset for a new search.
 
   ## Examples
 
       iex> search_users(actor, %{"uq" => "name:somebody"}, pagination)
-      {:ok, %Scrivener.Page{}}
+      {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
       iex> search_users(actor, %{"uq" => "("}, pagination)
-      {:error, "..."}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec search_users(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t()} | {:error, :unauthorized | String.t()}
+          {:ok, Scrivener.Page.t(), Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :unauthorized}
   def search_users(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, User) do
-      query_string =
-        case params["uq"] do
-          nil -> "*"
-          "" -> "*"
-          query_string -> query_string
-        end
+    with :ok <- authorize(actor, :index, User),
+         {:ok, query, form} <- QueryBuilder.build_query(params) do
+      users =
+        User
+        |> Search.search_definition(query, pagination)
+        |> Search.search_records(User)
 
-      case Users.Query.compile(query_string) do
-        {:ok, query} ->
-          users =
-            User
-            |> Search.search_definition(
-              %{query: query, sort: user_search_sort(params)},
-              pagination
-            )
-            |> Search.search_records(User)
-
-          {:ok, users}
-
-        {:error, msg} ->
-          {:error, msg}
-      end
+      {:ok, users, QueryForm.changeset(form)}
     end
   end
 

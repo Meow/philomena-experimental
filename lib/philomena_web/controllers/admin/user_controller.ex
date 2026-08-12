@@ -7,24 +7,25 @@ defmodule PhilomenaWeb.Admin.UserController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, users} <-
-           Users.search_users(conn.assigns.actor, params, conn.assigns.pagination) do
-      render(conn, "index.html",
-        title: "Admin - Users",
-        layout_class: "layout--medium",
-        users: users
-      )
-    else
-      {:error, :unauthorized} = error ->
-        error
-
-      {:error, msg} ->
+    case Users.search_users(conn.assigns.actor, params["user"] || %{}, conn.assigns.pagination) do
+      {:ok, users, changeset} ->
         render(conn, "index.html",
           title: "Admin - Users",
           layout_class: "layout--medium",
-          users: [],
-          error: msg
+          users: users,
+          changeset: changeset
         )
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "index.html",
+          title: "Admin - Users",
+          layout_class: "layout--medium",
+          users: nil,
+          changeset: changeset
+        )
+
+      error ->
+        error
     end
   end
 

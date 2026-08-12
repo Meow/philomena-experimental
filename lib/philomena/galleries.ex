@@ -481,7 +481,7 @@ defmodule Philomena.Galleries do
 
   @doc """
   Runs the gallery listing search `params` describes, returning the record page
-  with its thumbnail preloads and a fresh changeset for a new search.
+  with its thumbnail preloads and a changeset for a new search.
 
   ## Examples
 
@@ -498,13 +498,13 @@ defmodule Philomena.Galleries do
           | {:error, :unauthorized}
   def load_gallery_index(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Gallery),
-         {:ok, query} <- QueryBuilder.build_query(params) do
+         {:ok, query, form} <- QueryBuilder.build_query(params) do
       galleries =
         Gallery
         |> Search.search_definition(query, pagination)
-        |> Search.search_records(preload(Gallery, thumbnail: [:sources, tags: :aliases]))
+        |> Search.search_records(preload(Gallery, ^@gallery_preloads))
 
-      {:ok, galleries, QueryForm.changeset(%QueryForm{})}
+      {:ok, galleries, QueryForm.changeset(form)}
     end
   end
 
