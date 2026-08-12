@@ -9,7 +9,7 @@ defmodule Philomena.ImageVotes do
 
   import Ecto.Query, warn: false
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Images.Image
   alias Philomena.ImageVotes.ImageVote
   alias Philomena.UserStatistics
@@ -57,7 +57,7 @@ defmodule Philomena.ImageVotes do
 
       iex> (Multi.new()
       ...> |> put_vote_for_loaded_image(image, user, true)
-      ...> |> Repo.transaction())
+      ...> |> Multi.transact())
       {:ok, %{vote: %ImageVote{up: true}}}
 
   """
@@ -95,7 +95,7 @@ defmodule Philomena.ImageVotes do
 
       iex> (Multi.new()
       ...> |> delete_vote_for_loaded_image(image, user)
-      ...> |> Repo.transaction())
+      ...> |> Multi.transact())
       {:ok, %{unupvote: {0, nil}, undownvote: {0, nil}}}
 
   """

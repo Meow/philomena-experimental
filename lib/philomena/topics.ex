@@ -8,7 +8,7 @@ defmodule Philomena.Topics do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
 
   alias Philomena.Topics.{ForumTopic, Topic, TopicPage}
@@ -67,7 +67,7 @@ defmodule Philomena.Topics do
     end)
     |> Multi.run(:notification, &notify_topic/2)
     |> maybe_subscribe_on(:topic, actor.user, :watch_on_new_topic)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{topic: topic}} = result ->
         UserStatistics.increment(topic.user_id, :topics_count)
@@ -127,6 +127,7 @@ defmodule Philomena.Topics do
   defp move_topic(%Topic{} = topic, new_forum_id) do
     old_forum_id = topic.forum_id
 
+    # TODO: need to lock the forum
     Multi.new()
     |> Multi.update(:topic, Topic.move_changeset(topic, new_forum_id))
     |> Multi.update_all(
@@ -139,13 +140,14 @@ defmodule Philomena.Topics do
       Forums.update_forum_last_post_query(new_forum_id),
       inc: [post_count: topic.post_count, topic_count: 1]
     )
-    |> Repo.transaction()
+    |> Multi.transact()
     |> normalize_multi_error()
   end
 
   defp hide_loaded_topic(%Topic{} = topic, deletion_reason, %User{} = user) do
     topic = topic |> Repo.preload(:user)
 
+    # TODO: need to lock the forum
     Multi.new()
     |> Multi.update(:topic, Topic.hide_changeset(topic, deletion_reason, user))
     |> Multi.update_all(
@@ -153,7 +155,7 @@ defmodule Philomena.Topics do
       Forums.update_forum_last_post_query(topic.forum_id),
       inc: [post_count: -topic.post_count, topic_count: -1]
     )
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{topic: topic}} ->
         UserStatistics.increment(topic.user_id, :topics_count, -1)
@@ -176,7 +178,7 @@ defmodule Philomena.Topics do
       Forums.update_forum_last_post_query(topic.forum_id),
       inc: [post_count: topic.post_count, topic_count: 1]
     )
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{topic: topic}} ->
         UserStatistics.increment(topic.user_id, :topics_count)

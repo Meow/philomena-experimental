@@ -6,7 +6,7 @@ defmodule Philomena.Commissions do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.CommissionForm
@@ -102,10 +102,9 @@ defmodule Philomena.Commissions do
     Multi.new()
     |> Reports.put_close_reports(:reports, closing_user, commission_id: commission.id)
     |> Multi.delete(:commission, commission)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
-      {:ok, %{commission: commission, reports: {_count, report_ids}}} ->
-        Reports.reindex_closed_reports(report_ids)
+      {:ok, %{commission: commission}} ->
         {:ok, commission}
 
       {:error, _step, reason, _changes} ->
@@ -164,7 +163,7 @@ defmodule Philomena.Commissions do
     Multi.new()
     |> Multi.insert(:item, changeset)
     |> Multi.update_all(:commission, counter_query, [])
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:error, :item, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
       result -> result
@@ -180,7 +179,7 @@ defmodule Philomena.Commissions do
     Multi.new()
     |> Multi.delete(:item, item)
     |> Multi.update_all(:commission, counter_query, [])
-    |> Repo.transaction()
+    |> Multi.transact()
   end
 
   defp search_directory(params, pagination) do

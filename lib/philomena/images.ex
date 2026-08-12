@@ -10,7 +10,7 @@ defmodule Philomena.Images do
 
   require Logger
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
 
   alias PhilomenaQuery.Search
@@ -212,11 +212,11 @@ defmodule Philomena.Images do
       {:ok, count}
     end)
     |> maybe_subscribe_on(:image, user, :watch_on_upload)
-    |> Repo.transaction()
+    |> put_reindex_image(:image)
+    |> Multi.transact()
     |> case do
       {:ok, %{image: image}} ->
         upload_pid = async_upload(image, attrs["image"])
-        reindex_image(image)
         Tags.reindex_tags(image.added_tags)
         maybe_approve_image(image, user)
 
@@ -300,7 +300,7 @@ defmodule Philomena.Images do
     |> hide_image_multi(image, user, Multi.new())
     |> remove_gallery_interactions_multi(image)
     |> Multi.update_all(:duplicate_reports, duplicate_reports, [])
-    |> Repo.transaction()
+    |> Multi.transact()
     |> process_after_hide()
   end
 
@@ -328,7 +328,7 @@ defmodule Philomena.Images do
 
       {:ok, image.tags}
     end)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{image: image, tags: tags}} ->
         spawn(fn ->
@@ -411,7 +411,7 @@ defmodule Philomena.Images do
     end)
     |> Interactions.migrate_loaded_images(image, duplicate_of_image)
     |> Multi.run(:notification, &notify_merge(&1, &2, image, duplicate_of_image))
-    |> Repo.transaction()
+    |> Multi.transact()
     |> process_after_hide()
     |> case do
       {:ok, result} ->
@@ -505,7 +505,6 @@ defmodule Philomena.Images do
        %{
          image: image,
          tags: tags,
-         reports: {_, reports},
          galleries: {_, gallery_ids}
        } = result} ->
         spawn(fn ->
@@ -514,7 +513,6 @@ defmodule Philomena.Images do
         end)
 
         Comments.reindex_comments_on_image(image)
-        Reports.reindex_closed_reports(reports)
         Tags.reindex_tags(tags)
         Galleries.reindex_galleries(gallery_ids)
         reindex_image(image)
@@ -726,7 +724,7 @@ defmodule Philomena.Images do
 
       {:ok, count}
     end)
-    |> Repo.transaction()
+    |> Multi.transact()
   end
 
   defp source_change_attributes(%Actor{user: user} = actor, image, source, added) do
@@ -832,7 +830,7 @@ defmodule Philomena.Images do
 
         {:ok, count}
     end)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{image: {image, _added, _removed}}} = res ->
         update_tag_change_limits_after_commit(image, actor)
@@ -3048,7 +3046,7 @@ defmodule Philomena.Images do
       {:ok, result} =
         Multi.new()
         |> ImageVotes.delete_vote_for_loaded_image(image, user)
-        |> Repo.transaction()
+        |> Multi.transact()
 
       reindex_image(image)
 
@@ -3085,6 +3083,10 @@ defmodule Philomena.Images do
     else
       _ -> {:error, :not_found}
     end
+  end
+
+  def put_reindex_image(%Multi{} = multi, step) do
+    Multi.on_commit(multi, fn %{^step => image} -> reindex_image(image) end)
   end
 
   @doc """
@@ -3380,7 +3382,7 @@ defmodule Philomena.Images do
     with {:ok, image} <- load_image_for_hide(actor, image_id) do
       Multi.new()
       |> ImageHides.put_hide_for_loaded_image(image, actor.user)
-      |> Repo.transaction()
+      |> Multi.transact()
       |> hide_result(image)
     end
   end
@@ -3407,7 +3409,7 @@ defmodule Philomena.Images do
     with {:ok, image} <- load_image_for_hide(actor, image_id) do
       Multi.new()
       |> ImageHides.delete_hide_for_loaded_image(image, actor.user)
-      |> Repo.transaction()
+      |> Multi.transact()
       |> hide_result(image)
     end
   end
@@ -3492,7 +3494,7 @@ defmodule Philomena.Images do
       Multi.new()
       |> ImageFaves.put_fave_for_loaded_image(image, user)
       |> ImageVotes.put_vote_for_loaded_image(image, user, true)
-      |> Repo.transaction()
+      |> Multi.transact()
       |> interaction_result(image)
     end
   end
@@ -3517,7 +3519,7 @@ defmodule Philomena.Images do
     with {:ok, image} <- load_image_for_interaction(actor, image_id) do
       Multi.new()
       |> ImageFaves.delete_fave_for_loaded_image(image, user)
-      |> Repo.transaction()
+      |> Multi.transact()
       |> interaction_result(image)
     end
   end
@@ -3551,7 +3553,7 @@ defmodule Philomena.Images do
          {:ok, up} <- parse_vote(up) do
       Multi.new()
       |> ImageVotes.put_vote_for_loaded_image(image, user, up)
-      |> Repo.transaction()
+      |> Multi.transact()
       |> interaction_result(image)
     end
   end
@@ -3576,7 +3578,7 @@ defmodule Philomena.Images do
     with {:ok, image} <- load_image_for_interaction(actor, image_id) do
       Multi.new()
       |> ImageVotes.delete_vote_for_loaded_image(image, user)
-      |> Repo.transaction()
+      |> Multi.transact()
       |> interaction_result(image)
     end
   end

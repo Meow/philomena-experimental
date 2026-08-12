@@ -6,20 +6,20 @@ defmodule PhilomenaWeb.Image.FavoriteControllerTest do
 
   alias Philomena.ImageFaves
   alias Philomena.ImageVotes
-  alias Philomena.Repo
+  alias Philomena.Multi
 
   defp fave!(image, user) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageFaves.put_fave_for_loaded_image(image, user)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   defp upvote!(image, user) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageVotes.put_vote_for_loaded_image(image, user, true)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   describe "GET /images/:image_id/favorites" do

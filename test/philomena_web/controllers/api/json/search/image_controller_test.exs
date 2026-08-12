@@ -6,9 +6,9 @@ defmodule PhilomenaWeb.Api.Json.Search.ImageControllerTest do
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Multi
   alias Philomena.ImageFaves
   alias Philomena.Images.Image
-  alias Philomena.Repo
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 
@@ -72,9 +72,9 @@ defmodule PhilomenaWeb.Api.Json.Search.ImageControllerTest do
       image = image_fixture()
 
       {:ok, _} =
-        Ecto.Multi.new()
+        Multi.new()
         |> ImageFaves.put_fave_for_loaded_image(image, user)
-        |> Repo.transaction()
+        |> Multi.transact()
 
       SearchHelpers.reindex_all!(Image)
 

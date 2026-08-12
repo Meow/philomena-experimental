@@ -8,7 +8,7 @@ defmodule Philomena.DuplicateReports do
 
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.IntegerId
 

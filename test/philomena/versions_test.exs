@@ -1,7 +1,7 @@
 defmodule Philomena.VersionsTest do
   use Philomena.DataCase, async: false
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Comments
   alias Philomena.Comments.CommentVersion
   alias Philomena.Posts
@@ -132,7 +132,7 @@ defmodule Philomena.VersionsTest do
           actor(confirmed_user_fixture())
         )
         |> Multi.run(:forced_failure, fn _repo, _changes -> {:error, :forced_rollback} end)
-        |> Repo.transaction()
+        |> Multi.transact()
 
       assert {:error, :forced_failure, :forced_rollback, _changes} = result
       assert Repo.get!(Post, post.id).body == "before"

@@ -14,7 +14,7 @@ defmodule Philomena.Versions do
 
   import Ecto.Query, warn: false
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Comments.Comment
   alias Philomena.Comments.CommentVersion

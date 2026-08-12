@@ -9,7 +9,7 @@ defmodule Philomena.Galleries do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Loader
 
@@ -61,12 +61,12 @@ defmodule Philomena.Galleries do
     Multi.new()
     |> Reports.put_close_reports(:reports, closing_user, gallery_id: gallery.id)
     |> Multi.delete(:gallery, gallery)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
-      {:ok, %{gallery: gallery, reports: {_count, reports}}} ->
+      {:ok, %{gallery: gallery}} ->
         unindex_gallery(gallery)
+        # TODO: wtf? this doesn't work at all
         Images.reindex_images(images)
-        Reports.reindex_closed_reports(reports)
 
         {:ok, gallery}
 
@@ -137,7 +137,7 @@ defmodule Philomena.Galleries do
       update_gallery_after_add(repo, locked_gallery, added?)
     end)
     |> Multi.run(:notification, &notify_gallery_if_added/2)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, result} -> finish_image_add(result, image)
       error -> error
@@ -167,7 +167,7 @@ defmodule Philomena.Galleries do
 
       {:ok, repo.reload!(locked_gallery)}
     end)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{gallery: gallery, membership: removed_count} = result} ->
         if removed_count > 0 do

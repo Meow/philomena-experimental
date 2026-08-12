@@ -18,8 +18,8 @@ defmodule Philomena.Subscriptions do
   """
 
   import Ecto.Query, warn: false
-  alias Ecto.Multi
 
+  alias Philomena.Multi
   alias Philomena.Repo
 
   defmacro __using__(opts) do

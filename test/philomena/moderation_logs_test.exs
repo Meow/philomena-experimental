@@ -4,7 +4,7 @@ defmodule Philomena.ModerationLogsTest do
   import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
   import Philomena.UsersFixtures
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Repo
@@ -43,7 +43,7 @@ defmodule Philomena.ModerationLogsTest do
                  "/profiles/example",
                  "Updated user"
                )
-               |> Repo.transact()
+               |> Multi.transact()
 
       assert log.user_id == user.id
     end
@@ -69,7 +69,7 @@ defmodule Philomena.ModerationLogsTest do
                  "/profiles/deleted",
                  "Must fail attribution"
                )
-               |> Repo.transact()
+               |> Multi.transact()
 
       refute Repo.get_by(ModerationLog, body: "must roll back")
     end

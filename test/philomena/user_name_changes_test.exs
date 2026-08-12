@@ -4,7 +4,7 @@ defmodule Philomena.UserNameChangesTest do
   import Philomena.AttributionFixtures
   import Philomena.UsersFixtures
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.UserNameChanges
   alias Philomena.UserNameChanges.UserNameChange
@@ -17,7 +17,7 @@ defmodule Philomena.UserNameChangesTest do
     {:ok, %{name_change: change}} =
       Multi.new()
       |> UserNameChanges.record_rename(:name_change, user)
-      |> Repo.transact()
+      |> Multi.transact()
 
     change
   end
@@ -39,7 +39,7 @@ defmodule Philomena.UserNameChangesTest do
                Multi.new()
                |> UserNameChanges.record_rename(:name_change, user)
                |> Multi.run(:later_step, fn _repo, _changes -> {:error, :forced} end)
-               |> Repo.transact()
+               |> Multi.transact()
 
       refute Repo.get_by(UserNameChange, user_id: user.id)
     end

@@ -6,6 +6,7 @@ defmodule PhilomenaWeb.Image.VoteControllerTest do
   import Philomena.FiltersFixtures
   import Philomena.ImagesFixtures
 
+  alias Philomena.Multi
   alias Philomena.ImageVotes
   alias Philomena.ImageVotes.ImageVote
   alias Philomena.Repo
@@ -20,9 +21,9 @@ defmodule PhilomenaWeb.Image.VoteControllerTest do
 
   defp upvote!(image, user) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageVotes.put_vote_for_loaded_image(image, user, true)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   describe "POST /images/:image_id/vote" do

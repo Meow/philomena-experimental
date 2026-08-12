@@ -5,7 +5,7 @@ defmodule Philomena.Interactions do
 
   import Ecto.Query
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.ImageFaves.ImageFave
   alias Philomena.ImageHides.ImageHide
@@ -158,7 +158,7 @@ defmodule Philomena.Interactions do
 
       iex> (Multi.new()
       ...> |> migrate_loaded_images(source, target)
-      ...> |> Repo.transaction())
+      ...> |> Multi.transact())
       {:ok, %{interaction_image: 1}}
 
   """

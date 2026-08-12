@@ -9,7 +9,7 @@ defmodule Philomena.ImageFaves do
 
   import Ecto.Query, warn: false
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.ImageFaves.ImageFave
   alias Philomena.Images.Image
   alias Philomena.UserStatistics
@@ -48,7 +48,7 @@ defmodule Philomena.ImageFaves do
 
       iex> (Multi.new()
       ...> |> put_fave_for_loaded_image(image, user)
-      ...> |> Repo.transaction())
+      ...> |> Multi.transact())
       {:ok, %{fave: %ImageFave{}}}
 
   """
@@ -80,7 +80,7 @@ defmodule Philomena.ImageFaves do
 
       iex> (Multi.new()
       ...> |> delete_fave_for_loaded_image(image, user)
-      ...> |> Repo.transaction())
+      ...> |> Multi.transact())
       {:ok, %{unfave: {0, nil}}}
 
   """

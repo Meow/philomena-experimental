@@ -8,6 +8,7 @@ defmodule Philomena.UserStatistics do
 
   import Ecto.Query, warn: false
 
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Users
   alias Philomena.Users.User
@@ -58,6 +59,29 @@ defmodule Philomena.UserStatistics do
   end
 
   defp reindex_result(error, _user_id), do: error
+
+  @spec put_increment(Multi.t(), User.t() | integer() | nil, statistic(), integer()) ::
+          {:ok, nil} | {:error, :not_found | Ecto.Changeset.t()}
+  def put_increment(multi, user_or_id, statistic, amount \\ 1)
+
+  def put_increment(_multi, nil, statistic, amount)
+      when statistic in @permitted_actions and is_integer(amount),
+      do: {:ok, nil}
+
+  def put_increment(multi, %User{} = user, statistic, amount)
+      when statistic in @permitted_actions and is_integer(amount),
+      do: put_increment(multi, user.id, statistic, amount)
+
+  def put_increment(multi, user_id, statistic, amount)
+      when is_integer(user_id) and statistic in @permitted_actions and is_integer(amount) do
+    multi
+    |> Multi.run({:put_increment, user_id}, fn _repo, _changes ->
+      persist_increment(user_id, statistic, amount)
+    end)
+    |> Multi.on_commit(fn _changes ->
+      Users.reindex_user(%User{id: user_id})
+    end)
+  end
 
   @doc """
   Atomically increments one lifetime and UTC-daily statistic for `user_or_id`.

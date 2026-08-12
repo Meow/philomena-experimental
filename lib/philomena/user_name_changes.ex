@@ -10,7 +10,7 @@ defmodule Philomena.UserNameChanges do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Repo
   alias Philomena.UserNameChanges.UserNameChange
@@ -36,8 +36,8 @@ defmodule Philomena.UserNameChanges do
 
   ## Examples
 
-      iex> record_rename(Ecto.Multi.new(), :name_change, user)
-      %Ecto.Multi{}
+      iex> record_rename(Multi.new(), :name_change, user)
+      %Multi{}
 
   """
   @spec record_rename(Multi.t(), atom(), User.t()) :: Multi.t()

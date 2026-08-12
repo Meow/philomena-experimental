@@ -12,7 +12,7 @@ defmodule Philomena.ModNotes do
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.IntegerId
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Loader
   alias Philomena.ModerationLogs
@@ -71,7 +71,7 @@ defmodule Philomena.ModNotes do
   end
 
   defp transact_note(multi, step) do
-    case Repo.transact(multi) do
+    case Multi.transact(multi) do
       {:ok, %{^step => note}} -> {:ok, note}
       {:error, ^step, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
       {:error, :moderation_log, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}

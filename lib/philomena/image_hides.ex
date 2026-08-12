@@ -9,7 +9,7 @@ defmodule Philomena.ImageHides do
 
   import Ecto.Query, warn: false
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.ImageHides.ImageHide
   alias Philomena.Images.Image
   alias Philomena.Users.User
@@ -43,7 +43,7 @@ defmodule Philomena.ImageHides do
 
       iex> (Multi.new()
       ...> |> put_hide_for_loaded_image(image, user)
-      ...> |> Repo.transaction())
+      ...> |> Multi.transact())
       {:ok, %{hide: %ImageHide{}}}
 
   """
@@ -72,7 +72,7 @@ defmodule Philomena.ImageHides do
 
       iex> (Multi.new()
       ...> |> delete_hide_for_loaded_image(image, user)
-      ...> |> Repo.transaction())
+      ...> |> Multi.transact())
       {:ok, %{unhide: {0, nil}}}
 
   """

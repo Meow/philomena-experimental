@@ -10,8 +10,7 @@ defmodule Philomena.ModerationLogs do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
 
-  alias Ecto.Multi
-
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Repo

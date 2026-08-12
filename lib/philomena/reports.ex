@@ -6,7 +6,7 @@ defmodule Philomena.Reports do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Comments
   alias Philomena.Comments.Comment
@@ -561,8 +561,7 @@ defmodule Philomena.Reports do
   Adds a bulk close of reports for one already loaded target to `multi`.
 
   This is an internal composition API for owning contexts that delete or
-  approve a reportable target. The step returns `{count, report_ids}`; pass the
-  IDs to `reindex_closed_reports/1` only after the owning transaction commits.
+  approve a reportable target.
 
   ## Examples
 
@@ -572,7 +571,11 @@ defmodule Philomena.Reports do
   """
   @spec put_close_reports(Multi.t(), Multi.name(), User.t(), keyword()) :: Multi.t()
   def put_close_reports(%Multi{} = multi, step, %User{} = closing_user, target) do
-    Multi.update_all(multi, step, close_report_query(closing_user, target), [])
+    multi
+    |> Multi.update_all(step, close_report_query(closing_user, target), [])
+    |> Multi.on_commit(fn %{^step => {_count, report_ids}} ->
+      reindex_closed_reports(report_ids)
+    end)
   end
 
   @doc """
@@ -634,20 +637,8 @@ defmodule Philomena.Reports do
     end
   end
 
-  @doc """
-  Queues report IDs returned by `put_close_reports/4` for indexing.
-
-  Call this only after the owning transaction commits, so a rolled-back close
-  never publishes stale search state.
-
-  ## Examples
-
-      iex> reindex_closed_reports([1, 2])
-      [1, 2]
-
-  """
   @spec reindex_closed_reports([integer()]) :: [integer()]
-  def reindex_closed_reports(report_ids) do
+  defp reindex_closed_reports(report_ids) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", report_ids])
     report_ids
   end

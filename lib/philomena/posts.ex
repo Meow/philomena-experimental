@@ -8,7 +8,7 @@ defmodule Philomena.Posts do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
 
   alias PhilomenaQuery.Search
@@ -40,16 +40,12 @@ defmodule Philomena.Posts do
       Topic
       |> where(id: ^topic.id)
 
-    topic_lock_query =
-      topic_query
-      |> lock("FOR UPDATE")
-
     forum_query =
       Forum
       |> where(id: ^topic.forum_id)
 
     Multi.new()
-    |> Multi.one(:topic, topic_lock_query)
+    |> Multi.lock_one(:topic, topic_query)
     |> Multi.run(:post, fn repo, _ ->
       last_position =
         Post
@@ -80,7 +76,7 @@ defmodule Philomena.Posts do
     end)
     |> Multi.run(:notification, &notify_post/2)
     |> Topics.maybe_subscribe_on(:topic, user, :watch_on_reply)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{post: post}} = result ->
         reindex_post(post)
@@ -107,16 +103,19 @@ defmodule Philomena.Posts do
       Post.changeset(original_post, attrs, now)
     end)
     |> Versions.record_edit(:version, :original_post, :post, actor)
-    |> Repo.transaction()
+    |> put_reindex_post(:post)
+    |> Multi.transact()
     |> case do
-      {:ok, %{post: post}} = result ->
-        reindex_post(post)
-
+      {:ok, _changes} = result ->
         result
 
       error ->
         error
     end
+  end
+
+  defp put_reindex_post(%Multi{} = multi, step) do
+    Multi.on_commit(multi, fn %{^step => post} -> reindex_post(post) end)
   end
 
   defp hide_loaded_post(%Post{} = post, attrs, %User{} = user) do
@@ -127,12 +126,10 @@ defmodule Philomena.Posts do
     |> Reports.put_close_reports(:reports, user, post_id: post.id)
     |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
     |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
-    |> Repo.transaction()
+    |> put_reindex_post(:post)
+    |> Multi.transact()
     |> case do
-      {:ok, %{post: post, reports: {_count, reports}}} ->
-        Reports.reindex_closed_reports(reports)
-        reindex_post(post)
-
+      {:ok, %{post: post}} ->
         {:ok, post}
 
       error ->
@@ -148,11 +145,10 @@ defmodule Philomena.Posts do
     |> Multi.update(:post, Post.unhide_changeset(post))
     |> Multi.update_all(:topic, Topics.update_topic_last_post_query(post.topic_id), [])
     |> Multi.update_all(:forum, Forums.update_forum_last_post_query(post.topic.forum_id), [])
-    |> Repo.transaction()
+    |> put_reindex_post(:post)
+    |> Multi.transact()
     |> case do
       {:ok, %{post: post}} ->
-        reindex_post(post)
-
         {:ok, post}
 
       error ->
@@ -163,6 +159,7 @@ defmodule Philomena.Posts do
   defp destroy_loaded_post(%Post{} = post) do
     post = post |> Repo.preload([:topic, :user])
 
+    # TODO: bad. need to lock here.
     Multi.new()
     |> Multi.update(:post, Post.destroy_changeset(post))
     |> Multi.update_all(
@@ -175,11 +172,11 @@ defmodule Philomena.Posts do
       Forum |> where(id: ^post.topic.forum_id),
       inc: [post_count: -1]
     )
-    |> Repo.transaction()
+    |> put_reindex_post(:post)
+    |> Multi.transact()
     |> case do
       {:ok, %{post: post}} ->
         UserStatistics.increment(post.user_id, :posts_count, -1)
-        reindex_post(post)
 
         {:ok, post}
 
@@ -230,12 +227,11 @@ defmodule Philomena.Posts do
     Multi.new()
     |> Multi.update(:post, changeset)
     |> Reports.put_close_reports(:reports, user, post_id: post.id)
-    |> Repo.transaction()
+    |> put_reindex_post(:post)
+    |> Multi.transact()
     |> case do
-      {:ok, %{post: post, reports: {_count, reports}}} ->
+      {:ok, %{post: post}} ->
         UserStatistics.increment(post.user_id, :posts_count)
-        Reports.reindex_closed_reports(reports)
-        reindex_post(post)
 
         {:ok, post}
 

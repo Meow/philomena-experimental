@@ -8,7 +8,7 @@ defmodule Philomena.Comments do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Comments
   alias Philomena.Comments.{Comment, CommentForm, CommentHistory, Query, Visibility}
@@ -47,12 +47,14 @@ defmodule Philomena.Comments do
     image_query = where(Image, id: ^image.id)
 
     Multi.new()
-    |> Multi.one(:image, lock(image_query, "FOR UPDATE"))
+    |> Multi.lock_one(:image, image_query)
     |> Multi.insert(:comment, comment)
     |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
     |> Multi.run(:notification, &notify_comment/2)
     |> Images.maybe_subscribe_on(:image, actor.user, :watch_on_reply)
-    |> Repo.transaction()
+    |> Images.put_reindex_image(:image)
+    |> put_reindex_comment(:comment)
+    |> Multi.transact()
   end
 
   defp notify_comment(_repo, %{image: image, comment: comment}) do
@@ -66,15 +68,19 @@ defmodule Philomena.Comments do
       Comment
       |> where(id: ^comment.id)
       |> preload(:user)
-      |> lock("FOR UPDATE")
 
     Multi.new()
-    |> Multi.one(:original_comment, comment_query)
+    |> Multi.lock_one(:original_comment, comment_query)
     |> Multi.update(:comment, fn %{original_comment: original_comment} ->
       Comment.changeset(original_comment, attrs, now)
     end)
     |> Versions.record_edit(:version, :original_comment, :comment, actor)
-    |> Repo.transaction()
+    |> put_reindex_comment(:comment)
+    |> Multi.transact()
+  end
+
+  defp put_reindex_comment(%Multi{} = multi, step) do
+    Multi.on_commit(multi, fn %{^step => comment} -> reindex_comment(comment) end)
   end
 
   defp report_non_approved(%Comment{approved: true}), do: false
@@ -175,7 +181,7 @@ defmodule Philomena.Comments do
     Multi.new()
     |> Multi.update(:comment, Comment.destroy_changeset(comment))
     |> Multi.update_all(:image, where(Image, id: ^comment.image_id), inc: [comments_count: -1])
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{comment: destroyed_comment}} -> {:ok, reindex_comment(destroyed_comment)}
       {:error, _step, reason, _changes} -> {:error, reason}
@@ -463,7 +469,6 @@ defmodule Philomena.Comments do
          :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
       case persist_comment(image, actor, params) do
         {:ok, %{comment: comment}} ->
-          reindex_comment(comment)
           Images.reindex_image(image)
           record_comment_creation(actor, comment)
           RateLimiter.record_action(actor, :comment_create, @comment_create_window)
@@ -569,7 +574,6 @@ defmodule Philomena.Comments do
       case persist_comment_update(comment, actor, params || %{}) do
         {:ok, %{comment: comment}} ->
           report_non_approved(comment)
-          reindex_comment(comment)
           broadcast_comment("comment:update", comment)
 
           {:ok, {image, comment}}
@@ -660,12 +664,10 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Deleted comment on image #{comment.image_id} (#{reason})"
       )
-      |> Repo.transact()
+      |> put_reindex_comment(:comment)
+      |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
-          Reports.reindex_closed_reports(report_ids)
-          reindex_comment(comment)
-
+        {:ok, %{comment: comment}} ->
           {:ok, comment}
 
         {:error, _step, reason, _changes} ->
@@ -701,11 +703,10 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Restored comment on image #{comment.image_id}"
       )
-      |> Repo.transact()
+      |> put_reindex_comment(:comment)
+      |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
-          reindex_comment(comment)
-
           {:ok, comment}
 
         {:error, _step, reason, _changes} ->
@@ -732,11 +733,11 @@ defmodule Philomena.Comments do
     with {:ok, image} <- load_image(actor, image_id, :show),
          {:ok, comment} <-
            load_image_comment(actor, image, comment_id, :delete, @display_preloads) do
-      comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
+      comment_query = from(c in Comment, where: c.id == ^comment.id)
       image_query = from(i in Image, where: i.id == ^comment.image_id)
 
       Multi.new()
-      |> Multi.one(:locked_comment, comment_query)
+      |> Multi.lock_one(:locked_comment, comment_query)
       |> Multi.update(:comment, fn %{locked_comment: comment} ->
         Comment.destroy_changeset(comment)
       end)
@@ -748,11 +749,12 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Destroyed comment on image #{comment.image_id}"
       )
-      |> Repo.transact()
+      |> put_reindex_comment(:comment)
+      |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
+          # TODO: reindex the image
           UserStatistics.increment(comment.user_id, :comments_count, -1)
-          reindex_comment(comment)
 
           {:ok, comment}
 
@@ -780,10 +782,10 @@ defmodule Philomena.Comments do
     with {:ok, image} <- load_image(actor, image_id, :show),
          {:ok, comment} <-
            load_image_comment(actor, image, comment_id, :approve, @display_preloads) do
-      comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
+      comment_query = from(c in Comment, where: c.id == ^comment.id)
 
       Multi.new()
-      |> Multi.one(:locked_comment, comment_query)
+      |> Multi.lock_one(:locked_comment, comment_query)
       |> Multi.update(:comment, fn %{locked_comment: comment} ->
         Comment.approve_changeset(comment)
       end)
@@ -795,12 +797,11 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Approved comment on image #{comment.image_id}"
       )
-      |> Repo.transact()
+      |> put_reindex_comment(:comment)
+      |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
+        {:ok, %{comment: comment}} ->
           UserStatistics.increment(comment.user_id, :comments_count)
-          Reports.reindex_closed_reports(report_ids)
-          reindex_comment(comment)
 
           {:ok, comment}
 
@@ -826,11 +827,11 @@ defmodule Philomena.Comments do
   @spec erase_user_comment(Comment.t(), User.t()) ::
           {:ok, Comment.t()} | {:error, Ecto.Changeset.t() | term()}
   def erase_user_comment(%Comment{} = comment, %User{} = moderator) do
-    comment_query = from(c in Comment, where: c.id == ^comment.id, lock: "FOR UPDATE")
+    comment_query = from(c in Comment, where: c.id == ^comment.id)
     image_query = from(i in Image, where: i.id == ^comment.image_id)
 
     Multi.new()
-    |> Multi.one(:locked_comment, comment_query)
+    |> Multi.lock_one(:locked_comment, comment_query)
     |> Multi.update(:comment, fn %{locked_comment: comment} ->
       comment
       |> Comment.hide_changeset(%{deletion_reason: "Site abuse"}, moderator)
@@ -838,12 +839,12 @@ defmodule Philomena.Comments do
     end)
     |> Multi.update_all(:image, image_query, inc: [comments_count: -1])
     |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
-    |> Repo.transact()
+    |> put_reindex_comment(:comment)
+    |> Multi.transact()
     |> case do
-      {:ok, %{comment: comment, reports: {_count, report_ids}}} ->
+      {:ok, %{comment: comment}} ->
+        # TODO: reindex the image
         UserStatistics.increment(comment.user_id, :comments_count, -1)
-        Reports.reindex_closed_reports(report_ids)
-        reindex_comment(comment)
 
         {:ok, comment}
 

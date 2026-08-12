@@ -7,6 +7,7 @@ defmodule PhilomenaWeb.Api.Json.ImageControllerTest do
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Multi
   alias Philomena.ImageFaves
   alias Philomena.Images.Image
   alias Philomena.Repo
@@ -147,9 +148,9 @@ defmodule PhilomenaWeb.Api.Json.ImageControllerTest do
       image = image_fixture()
 
       {:ok, _} =
-        Ecto.Multi.new()
+        Multi.new()
         |> ImageFaves.put_fave_for_loaded_image(image, user)
-        |> Repo.transaction()
+        |> Multi.transact()
 
       conn = get(conn, ~p"/api/v1/json/images/#{image.id}?key=#{user.authentication_token}")
 

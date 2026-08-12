@@ -8,6 +8,7 @@ defmodule PhilomenaWeb.Image.HideControllerTest do
   import Ecto.Query
   import Philomena.ImagesFixtures
 
+  alias Philomena.Multi
   alias Philomena.ImageHides
   alias Philomena.ImageHides.ImageHide
   alias Philomena.Images
@@ -23,9 +24,9 @@ defmodule PhilomenaWeb.Image.HideControllerTest do
 
   defp hide!(image, user) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageHides.put_hide_for_loaded_image(image, user)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   describe "POST /images/:image_id/hide" do

@@ -6,7 +6,7 @@ defmodule Philomena.Conversations do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Conversations.Conversation
   alias Philomena.Conversations.ConversationForm
@@ -189,7 +189,7 @@ defmodule Philomena.Conversations do
     |> Multi.insert(:message, message_changeset)
     |> Multi.update(:conversation, conversation_changeset)
     |> Multi.one(:message_count, message_count_query(conversation))
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->
         report_non_approved_message(message)
@@ -239,10 +239,9 @@ defmodule Philomena.Conversations do
       "/",
       log_body
     )
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
-      {:ok, %{reports: {_count, report_ids}, message: message}} ->
-        Reports.reindex_closed_reports(report_ids)
+      {:ok, %{message: message}} ->
         {:ok, message}
 
       {:error, _step, reason, _changes} ->

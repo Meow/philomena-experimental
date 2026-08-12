@@ -13,7 +13,7 @@ defmodule Philomena.Users do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
 
   alias Philomena.Attribution.Actor
@@ -158,23 +158,23 @@ defmodule Philomena.Users do
   defp user_email_multi(user, email, context) do
     changeset = user |> User.email_changeset(%{email: email}) |> User.confirm_changeset()
 
-    Ecto.Multi.new()
-    |> Ecto.Multi.update(:user, changeset)
-    |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, [context]))
+    Multi.new()
+    |> Multi.update(:user, changeset)
+    |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, [context]))
   end
 
   defp unlock_user_multi(user) do
     changeset = User.unlock_changeset(user)
 
-    Ecto.Multi.new()
-    |> Ecto.Multi.update(:user, changeset)
-    |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["unlock"]))
+    Multi.new()
+    |> Multi.update(:user, changeset)
+    |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["unlock"]))
   end
 
   defp confirm_user_multi(user) do
-    Ecto.Multi.new()
-    |> Ecto.Multi.update(:user, User.confirm_changeset(user))
-    |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["confirm"]))
+    Multi.new()
+    |> Multi.update(:user, User.confirm_changeset(user))
+    |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["confirm"]))
   end
 
   # Settings, role assignment, and user searches.
@@ -338,7 +338,7 @@ defmodule Philomena.Users do
     Multi.new()
     |> UserNameChanges.record_rename(:name_change, user)
     |> Multi.update(:account, account)
-    |> Repo.transaction()
+    |> Multi.transact()
     |> case do
       {:ok, %{account: %{name: new_name} = account}} ->
         Exq.enqueue(Exq, "indexing", UserRenameWorker, [old_name, new_name])
@@ -758,7 +758,7 @@ defmodule Philomena.Users do
 
     with {:ok, query} <- UserToken.verify_change_email_token_query(token, context),
          %UserToken{sent_to: email} <- Repo.one(query),
-         {:ok, _} <- Repo.transaction(user_email_multi(user, email, context)) do
+         {:ok, _} <- Multi.transact(user_email_multi(user, email, context)) do
       reindex_user(user)
 
       :ok
@@ -808,7 +808,7 @@ defmodule Philomena.Users do
   def unlock_user_by_token(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "unlock"),
          %User{} = user <- Repo.one(query),
-         {:ok, %{user: user}} <- Repo.transaction(unlock_user_multi(user)) do
+         {:ok, %{user: user}} <- Multi.transact(unlock_user_multi(user)) do
       reindex_user(user)
 
       {:ok, user}
@@ -872,10 +872,10 @@ defmodule Philomena.Users do
       |> User.password_changeset(attrs)
       |> User.validate_current_password(password)
 
-    Ecto.Multi.new()
-    |> Ecto.Multi.update(:user, changeset)
-    |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
-    |> Repo.transaction()
+    Multi.new()
+    |> Multi.update(:user, changeset)
+    |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
+    |> Multi.transact()
     |> case do
       {:ok, %{user: user}} ->
         reindex_user(user)
@@ -1120,7 +1120,7 @@ defmodule Philomena.Users do
   def confirm_user(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "confirm"),
          %User{} = user <- Repo.one(query),
-         {:ok, %{user: user}} <- Repo.transaction(confirm_user_multi(user)) do
+         {:ok, %{user: user}} <- Multi.transact(confirm_user_multi(user)) do
       reindex_user(user)
 
       {:ok, user}
@@ -1202,10 +1202,10 @@ defmodule Philomena.Users do
   @spec reset_user_password(User.t(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def reset_user_password(user, attrs) do
-    Ecto.Multi.new()
-    |> Ecto.Multi.update(:user, User.password_changeset(user, attrs))
-    |> Ecto.Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
-    |> Repo.transaction()
+    Multi.new()
+    |> Multi.update(:user, User.password_changeset(user, attrs))
+    |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
+    |> Multi.transact()
     |> case do
       {:ok, %{user: user}} ->
         reindex_user(user)
@@ -2355,7 +2355,7 @@ defmodule Philomena.Users do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "reactivate"),
          %User{} = user <- Repo.one(query),
          {:ok, %{user: user}} <-
-           Repo.transaction(
+           Multi.transact(
              Multi.new()
              |> Multi.update(:user, User.reactivate_changeset(user))
              |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["reactivate"]))

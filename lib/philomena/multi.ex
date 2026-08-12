@@ -3,6 +3,8 @@ defmodule Philomena.Multi do
   `m:Ecto.Multi` wrapper with locking utilities and deferred action semantics.
   """
 
+  import Ecto.Query, only: [lock: 2]
+
   @enforce_keys [:multi, :on_commit]
   defstruct [:multi, on_commit: []]
 
@@ -10,6 +12,9 @@ defmodule Philomena.Multi do
           multi: Ecto.Multi.t(),
           on_commit: list((Ecto.Multi.changes() -> any()))
         }
+
+  @type name :: Ecto.Multi.name()
+  @type changes :: Ecto.Multi.changes()
 
   @doc """
   Runs a query and stores all results in the Multi.
@@ -379,6 +384,39 @@ defmodule Philomena.Multi do
   end
 
   @doc """
+  Adds a value to the changes so far under the given name.
+
+  The given `value` is added to the Multi before the transaction starts.
+  If you would like to run arbitrary functions as part of your transaction,
+  see `run/3` or `run/5`.
+
+  ## Example
+
+  Imagine there is an existing company schema that you retrieved from
+  the database. You can insert it as a change in the Multi using `put/3`:
+
+      Multi.new()
+      |> Multi.put(:company, company)
+      |> Multi.insert(:user, fn changes -> User.changeset(changes.company) end)
+      |> Multi.insert(:person, fn changes -> Person.changeset(changes.user, changes.company) end)
+      |> Multi.transact()
+
+  In the example above, there isn't a significant benefit in putting
+  the `company` in the Multi because you could also access the
+  `company` variable directly inside the anonymous function.
+
+  However, the benefit of `put/3` is seen when composing `Ecto.Multi`s.
+  If the insert operations above were defined in another module,
+  you could use `put(:company, company)` to inject changes that
+  will be accessed by other functions down the chain, removing
+  the need to pass both `multi` and `company` values around.
+  """
+  @spec put(t(), Ecto.Multi.name(), any()) :: t()
+  def put(%__MODULE__{} = multi, name, value) do
+    update_in(multi.multi, &Ecto.Multi.put(&1, name, value))
+  end
+
+  @doc """
   Adds a function to run as part of the Multi.
 
   The function should return either `{:ok, value}` or `{:error, value}`,
@@ -478,6 +516,22 @@ defmodule Philomena.Multi do
         ) :: t
   def update_all(%__MODULE__{} = multi, name, queryable_or_fun, updates, opts \\ []) do
     update_in(multi.multi, &Ecto.Multi.update_all(&1, name, queryable_or_fun, updates, opts))
+  end
+
+  @doc """
+  Locks a query result for update, or aborts the transaction if it was not found.
+  """
+  @spec lock_one(t(), Ecto.Multi.name(), Ecto.Queryable.t()) :: t()
+  def lock_one(%__MODULE__{} = multi, name, queryable) do
+    lock_fn =
+      fn repo, _changes ->
+        case repo.one(lock(queryable, "FOR UPDATE")) do
+          nil -> {:error, :not_found}
+          result -> {:ok, result}
+        end
+      end
+
+    update_in(multi.multi, &Ecto.Multi.run(&1, name, lock_fn))
   end
 
   @doc """

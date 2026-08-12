@@ -3,6 +3,7 @@ defmodule Philomena.ImagesTest do
 
   import Ecto.Query
 
+  alias Philomena.Multi
   alias Philomena.ImageFaves
   alias Philomena.ImageFaves.ImageFave
   alias Philomena.ImageFeatures.ImageFeature
@@ -98,23 +99,23 @@ defmodule Philomena.ImagesTest do
 
   defp fave!(image, user) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageFaves.put_fave_for_loaded_image(image, user)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   defp vote!(image, user, up) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageVotes.put_vote_for_loaded_image(image, user, up)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   defp hide!(image, user) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageHides.put_hide_for_loaded_image(image, user)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   defp has_vote?(image, user) do

@@ -6,6 +6,7 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
   import Philomena.FiltersFixtures
   import Philomena.ImagesFixtures
 
+  alias Philomena.Multi
   alias Philomena.ImageFaves
   alias Philomena.ImageFaves.ImageFave
   alias Philomena.ImageVotes
@@ -26,9 +27,9 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
 
   defp fave!(image, user) do
     {:ok, _} =
-      Ecto.Multi.new()
+      Multi.new()
       |> ImageFaves.put_fave_for_loaded_image(image, user)
-      |> Repo.transaction()
+      |> Multi.transact()
   end
 
   describe "POST /images/:image_id/fave" do
@@ -57,9 +58,9 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
       image = image_fixture()
 
       {:ok, _} =
-        Ecto.Multi.new()
+        Multi.new()
         |> ImageVotes.put_vote_for_loaded_image(image, user, false)
-        |> Repo.transaction()
+        |> Multi.transact()
 
       conn = post(conn, ~p"/images/#{image}/fave")
 
@@ -101,9 +102,9 @@ defmodule PhilomenaWeb.Image.FaveControllerTest do
       fave!(image, user)
 
       {:ok, _} =
-        Ecto.Multi.new()
+        Multi.new()
         |> ImageVotes.put_vote_for_loaded_image(image, user, true)
-        |> Repo.transaction()
+        |> Multi.transact()
 
       conn = delete(conn, ~p"/images/#{image}/fave")
 

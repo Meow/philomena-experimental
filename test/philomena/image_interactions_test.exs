@@ -1,7 +1,7 @@
 defmodule Philomena.ImageInteractionsTest do
   use Philomena.DataCase, async: true
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.ImageFaves
   alias Philomena.ImageFaves.ImageFave
   alias Philomena.ImageHides
@@ -18,7 +18,7 @@ defmodule Philomena.ImageInteractionsTest do
   import Philomena.UsersFixtures
 
   defp transact(multi) do
-    assert {:ok, changes} = Repo.transaction(multi)
+    assert {:ok, changes} = Multi.transact(multi)
     changes
   end
 
