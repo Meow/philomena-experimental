@@ -4,12 +4,15 @@ defmodule PhilomenaWeb.Image.Comment.ApproveControllerTest do
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
+  import Philomena.RulesFixtures
 
   alias Philomena.Repo
 
   # A comment whose body contains an external link, posted by an untrusted
   # (freshly-registered) user, is withheld from approval.
   defp unapproved_comment(image) do
+    _rule = rule_fixture(name: "Approval")
+
     comment =
       comment_fixture(image, confirmed_user_fixture(), %{
         "body" => "buy now at https://spam.example/"

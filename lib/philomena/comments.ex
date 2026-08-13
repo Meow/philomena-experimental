@@ -46,20 +46,24 @@ defmodule Philomena.Comments do
     Multi.on_commit(multi, fn %{^step => comment} -> reindex_comment(comment) end)
   end
 
-  defp report_non_approved(%Comment{approved: true}), do: false
+  defp put_increment_comment_count(%Multi{} = multi, _user, false), do: multi
 
-  defp report_non_approved(comment) do
-    Reports.create_system_report(
-      "Approval",
-      "Comment contains external links",
-      comment_id: comment.id
-    )
+  defp put_increment_comment_count(%Multi{} = multi, user, _approved?) do
+    UserStatistics.put_increment(multi, user, :comments_count)
   end
 
-  defp record_comment_creation(%Actor{user: user}, %Comment{approved: true}),
-    do: UserStatistics.increment(user, :comments_count)
+  defp put_approval_report(%Multi{} = multi, true), do: multi
 
-  defp record_comment_creation(_actor, comment), do: report_non_approved(comment)
+  defp put_approval_report(%Multi{} = multi, _approved?) do
+    Reports.put_create_system_report(
+      multi,
+      :report,
+      "Approval",
+      "Comment contains external links",
+      :comment,
+      :comment_id
+    )
+  end
 
   defp broadcast_comment(event, %Comment{} = comment) do
     PhilomenaWeb.Endpoint.broadcast!(
@@ -397,6 +401,8 @@ defmodule Philomena.Comments do
         |> Ecto.build_assoc(:comments)
         |> Comment.creation_changeset(attrs, actor)
 
+      approved? = Comment.approved?(comment_changeset)
+
       Multi.new()
       |> Multi.lock_one(:image, image_query)
       |> Multi.insert(:comment, comment_changeset)
@@ -404,11 +410,12 @@ defmodule Philomena.Comments do
       |> Multi.run(:notification, &notify_comment/2)
       |> Images.maybe_subscribe_on(:image, user, :watch_on_reply)
       |> Images.put_reindex_image(:image)
+      |> put_approval_report(approved?)
+      |> put_increment_comment_count(user, approved?)
       |> put_reindex_comment(:comment)
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
-          record_comment_creation(actor, comment)
           RateLimiter.record_action(actor, :comment_create, @comment_create_window)
           broadcast_comment("comment:create", comment)
           {:ok, comment}
@@ -511,6 +518,8 @@ defmodule Philomena.Comments do
          {:ok, comment} <-
            load_image_comment(actor, image, comment_id, :update, @display_preloads) do
       now = DateTime.utc_now(:second)
+      comment_changeset = Comment.changeset(comment, attrs, now)
+      approved? = Comment.approved?(comment_changeset)
 
       comment_query =
         Comment
@@ -519,15 +528,13 @@ defmodule Philomena.Comments do
 
       Multi.new()
       |> Multi.lock_one(:original_comment, comment_query)
-      |> Multi.update(:comment, fn %{original_comment: original_comment} ->
-        Comment.changeset(original_comment, attrs, now)
-      end)
+      |> Multi.update(:comment, comment_changeset)
       |> Versions.record_edit(:version, :original_comment, :comment, actor)
+      |> put_approval_report(approved?)
       |> put_reindex_comment(:comment)
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
-          report_non_approved(comment)
           broadcast_comment("comment:update", comment)
 
           {:ok, {image, comment}}

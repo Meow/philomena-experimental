@@ -7,6 +7,7 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentControllerTest do
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
+  import Philomena.RulesFixtures
 
   alias Philomena.Comments
   alias Philomena.Comments.Comment
@@ -63,6 +64,8 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentControllerTest do
 
       # A body with an external link is withheld from approval when the
       # author is new.
+      _rule = rule_fixture(name: "Approval")
+
       _unapproved =
         comment_fixture(image, user, %{"body" => "chartreuse https://spam.example/"})
 

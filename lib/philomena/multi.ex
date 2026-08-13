@@ -150,7 +150,7 @@ defmodule Philomena.Multi do
   """
   @spec error(t(), Ecto.Multi.name(), error :: term()) :: t()
   def error(%__MODULE__{} = multi, name, value) do
-    update_in(multi.multi, name, value)
+    update_in(multi.multi, &Ecto.Multi.error(&1, name, value))
   end
 
   @doc """

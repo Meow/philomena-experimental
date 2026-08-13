@@ -19,6 +19,7 @@ defmodule Philomena.CommentsTest do
   import Philomena.FiltersFixtures
   import Philomena.ImagesFixtures
   import Philomena.ReportsFixtures
+  import Philomena.RulesFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Comments
@@ -257,6 +258,7 @@ defmodule Philomena.CommentsTest do
   # is not auto-approved on creation (see Philomena.Schema.Approval); returns the
   # comment together with its author so the comments_count bump can be checked.
   defp unapproved_comment(image) do
+    _rule = rule_fixture(name: "Approval")
     author = confirmed_user_fixture()
 
     comment =

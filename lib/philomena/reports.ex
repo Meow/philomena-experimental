@@ -637,6 +637,56 @@ defmodule Philomena.Reports do
     end
   end
 
+  @doc """
+  Creates an internal system report within the transaction described by `multi`.
+
+  The rule name must identify a reportable rule. This trusted service is used by
+  owning contexts to add a report when their target has been created or moderated.
+
+  ## Examples
+
+      iex> put_create_system_report(
+      ...>   multi,
+      ...>   :report,
+      ...>   "Approval",
+      ...>   "Needs review",
+      ...>   :comment,
+      ...>   :comment_id
+      ...> )
+      %Multi{}
+
+  """
+  @spec put_create_system_report(
+          multi :: Multi.t(),
+          step :: Multi.name(),
+          rule_name :: String.t(),
+          reason :: String.t(),
+          target_column :: atom(),
+          target_id_step :: atom()
+        ) ::
+          Multi.t()
+  def put_create_system_report(multi, step, rule_name, reason, target_id_step, target_column) do
+    {:ok, rule} = Rules.fetch_rule_by_name(rule_name)
+
+    attrs = %{reason: reason, user_agent: "system"}
+
+    actor = %Actor{
+      ip: %Postgrex.INET{address: {127, 0, 0, 1}, netmask: 32},
+      fingerprint: "ffff"
+    }
+
+    multi
+    |> Multi.run(step, fn repo, %{^target_id_step => %{id: target_id}} ->
+      Report
+      |> struct([{target_column, target_id}])
+      |> Report.system_creation_changeset(attrs, actor, rule)
+      |> repo.insert()
+    end)
+    |> Multi.on_commit(fn %{^step => report} ->
+      reindex_report(report)
+    end)
+  end
+
   @spec reindex_closed_reports([integer()]) :: [integer()]
   defp reindex_closed_reports(report_ids) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", report_ids])

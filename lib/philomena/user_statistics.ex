@@ -61,12 +61,12 @@ defmodule Philomena.UserStatistics do
   defp reindex_result(error, _user_id), do: error
 
   @spec put_increment(Multi.t(), User.t() | integer() | nil, statistic(), integer()) ::
-          {:ok, nil} | {:error, :not_found | Ecto.Changeset.t()}
+          Multi.t()
   def put_increment(multi, user_or_id, statistic, amount \\ 1)
 
-  def put_increment(_multi, nil, statistic, amount)
+  def put_increment(multi, nil, statistic, amount)
       when statistic in @permitted_actions and is_integer(amount),
-      do: {:ok, nil}
+      do: multi
 
   def put_increment(multi, %User{} = user, statistic, amount)
       when statistic in @permitted_actions and is_integer(amount),
