@@ -24,7 +24,7 @@ defmodule Philomena.ArtistLinks.ArtistLink do
   end
 
   @doc false
-  def changeset(artist_link, attrs) do
+  def changeset(artist_link, attrs \\ %{}) do
     artist_link
     |> cast(attrs, [])
     |> validate_required([])
