@@ -19,7 +19,7 @@ defmodule Philomena.Badges.Badge do
   end
 
   @doc false
-  def changeset(badge, attrs) do
+  def changeset(badge, attrs \\ %{}) do
     badge
     |> cast(attrs, [:title, :description, :disable_award, :priority])
     |> validate_required([:title])

@@ -246,6 +246,8 @@ defmodule Philomena.Adverts do
           {:ok, {Advert.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
   def load_advert_for_image_edit(%Actor{} = actor, id) do
+    # TODO: this is the same function and the authorization is not separate in practice.
+    # Just combine these.
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :update_image, id) do
       {:ok, {advert, Advert.changeset(advert)}}

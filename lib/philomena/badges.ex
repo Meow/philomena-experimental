@@ -11,115 +11,14 @@ defmodule Philomena.Badges do
   alias Philomena.Attribution.Actor
   alias Philomena.Authorization
   alias Philomena.Badges.{Badge, Uploader}
-  alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.Repo
   alias Philomena.Users.User
 
-  # Creates a badge.
-  defp create_badge(attrs) do
-    badge_changeset =
-      %Badge{}
-      |> Badge.changeset(attrs)
-      |> Uploader.analyze_upload(attrs)
-
-    Multi.new()
-    |> Multi.insert(:badge, badge_changeset)
-    |> Uploader.put_persist_upload(:badge)
-    |> Uploader.put_unpersist_old_upload(:badge)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{badge: badge}} ->
-        {:ok, badge}
-
-      {:error, :badge, changeset, _changes} ->
-        {:error, changeset}
-    end
-  end
-
-  # Updates a badge without updating its image.
-  defp update_badge(%Badge{} = badge, attrs) do
-    badge
-    |> Badge.changeset(attrs)
-    |> Repo.update()
-  end
-
-  # Updates the image for a badge.
-  defp update_badge_image(%Badge{} = badge, attrs) do
-    badge_changeset =
-      badge
-      |> Badge.changeset(attrs)
-      |> Uploader.analyze_upload(attrs)
-
-    Multi.new()
-    |> Multi.update(:badge, badge_changeset)
-    |> Uploader.put_persist_upload(:badge)
-    |> Uploader.put_unpersist_old_upload(:badge)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{badge: badge}} ->
-        {:ok, badge}
-
-      {:error, :badge, changeset, _changes} ->
-        {:error, changeset}
-    end
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking badge changes.
-  defp change_badge(%Badge{} = badge) do
-    Badge.changeset(badge, %{})
-  end
-
   defp load_badge(actor, action, id) do
     Loader.fetch_and_authorize(Badge, actor, action, id)
-  end
-
-  defp load_badge_change(actor, action, id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, badge} <- load_badge(actor, action, id) do
-      {:ok, {badge, change_badge(badge)}}
-    end
-  end
-
-  defp transact_and_log(operation, log) do
-    Repo.transact(fn ->
-      with {:ok, result} <- operation.(),
-           {:ok, _log} <- log.(result) do
-        {:ok, result}
-      end
-    end)
-  end
-
-  # Uploader operations interact with object storage and therefore must not run
-  # inside Repo.transact/1. Until uploads can be staged transactionally, their
-  # database write, storage side effects, and moderation log are intentionally
-  # sequential rather than atomic.
-  defp upload_and_log(operation, log) do
-    # TODO: Use Multi.
-    with {:ok, result} <- operation.(),
-         {:ok, _log} <- log.(result) do
-      {:ok, result}
-    end
-  end
-
-  @spec badge_log(Loader.actor(), atom(), Badge.t()) :: any()
-  defp badge_log(actor, action, badge) do
-    body =
-      case action do
-        :create -> "Created badge '#{badge.title}'"
-        :update -> "Updated badge '#{badge.title}'"
-        :update_image -> "Updated image of badge '#{badge.title}'"
-      end
-
-    type =
-      case action do
-        :update_image -> "Admin.Badge.Image:update"
-        action -> "Admin.Badge:#{action}"
-      end
-
-    ModerationLogs.create_moderation_log(actor, type, "/admin/badges", body)
   end
 
   @doc """
@@ -139,12 +38,10 @@ defmodule Philomena.Badges do
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
   def load_badges(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, Badge) do
-      badges =
-        Badge
-        |> order_by(asc: :title)
-        |> Repo.paginate(pagination)
-
-      {:ok, badges}
+      {:ok,
+       Badge
+       |> order_by(asc: :title)
+       |> Repo.paginate(pagination)}
     end
   end
 
@@ -164,7 +61,7 @@ defmodule Philomena.Badges do
   def new_badge(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Badge) do
-      {:ok, change_badge(%Badge{})}
+      {:ok, Badge.changeset(%Badge{})}
     end
   end
 
@@ -191,7 +88,30 @@ defmodule Philomena.Badges do
   def create_badge(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Badge) do
-      upload_and_log(fn -> create_badge(attrs) end, &badge_log(actor, :create, &1))
+      badge_changeset =
+        %Badge{}
+        |> Badge.changeset(attrs)
+        |> Uploader.analyze_upload(attrs)
+
+      Multi.new()
+      |> Multi.insert(:badge, badge_changeset)
+      |> Uploader.put_persist_upload(:badge)
+      |> Uploader.put_unpersist_old_upload(:badge)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{badge: badge} ->
+          {"Admin.Badge:create", "/admin/badges", "Created badge '#{badge.title}'"}
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{badge: badge}} ->
+          {:ok, badge}
+
+        {:error, :badge, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -215,7 +135,10 @@ defmodule Philomena.Badges do
           {:ok, {Badge.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
   def load_badge_for_edit(%Actor{} = actor, id) do
-    load_badge_change(actor, :edit, id)
+    with :ok <- verify_write_access(actor),
+         {:ok, badge} <- load_badge(actor, :edit, id) do
+      {:ok, {badge, Badge.changeset(badge)}}
+    end
   end
 
   @doc """
@@ -226,7 +149,12 @@ defmodule Philomena.Badges do
           {:ok, {Badge.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
   def load_badge_for_image_edit(%Actor{} = actor, id) do
-    load_badge_change(actor, :update_image, id)
+    # TODO: this is the same function and the authorization is not separate in practice.
+    # Just combine these.
+    with :ok <- verify_write_access(actor),
+         {:ok, badge} <- load_badge(actor, :update_image, id) do
+      {:ok, {badge, Badge.changeset(badge)}}
+    end
   end
 
   @doc """
@@ -256,7 +184,25 @@ defmodule Philomena.Badges do
   def update_badge(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, badge} <- load_badge(actor, :update, id) do
-      transact_and_log(fn -> update_badge(badge, attrs) end, &badge_log(actor, :update, &1))
+      badge_changeset = Badge.changeset(badge, attrs)
+
+      Multi.new()
+      |> Multi.update(:badge, badge_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{badge: badge} ->
+          {"Admin.Badge:update", "/admin/badges", "Updated badge '#{badge.title}'"}
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{badge: badge}} ->
+          {:ok, badge}
+
+        {:error, :badge, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -287,10 +233,30 @@ defmodule Philomena.Badges do
   def update_badge_image(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, badge} <- load_badge(actor, :update_image, id) do
-      upload_and_log(
-        fn -> update_badge_image(badge, attrs) end,
-        &badge_log(actor, :update_image, &1)
+      badge_changeset =
+        badge
+        |> Badge.changeset(attrs)
+        |> Uploader.analyze_upload(attrs)
+
+      Multi.new()
+      |> Multi.update(:badge, badge_changeset)
+      |> Uploader.put_persist_upload(:badge)
+      |> Uploader.put_unpersist_old_upload(:badge)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{badge: badge} ->
+          {"Admin.Badge.Image:update", "/admin/badges", "Updated image of badge '#{badge.title}'"}
+        end
       )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{badge: badge}} ->
+          {:ok, badge}
+
+        {:error, :badge, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -327,29 +293,6 @@ defmodule Philomena.Badges do
 
   alias Philomena.Badges.Award
 
-  defp create_badge_award(%Actor{user: creator}, user, attrs) do
-    %Award{awarded_by_id: creator.id, user_id: user.id}
-    |> Award.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  # Updates an award.
-  defp update_badge_award(%Award{} = badge_award, attrs) do
-    badge_award
-    |> Award.changeset(attrs)
-    |> Repo.update()
-  end
-
-  # Deletes an award.
-  defp delete_badge_award(%Award{} = badge_award) do
-    Repo.delete(badge_award)
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking award changes.
-  defp change_badge_award(%Award{} = badge_award) do
-    Award.changeset(badge_award, %{})
-  end
-
   defp awardable_badges do
     Badge
     |> where(disable_award: false)
@@ -357,51 +300,21 @@ defmodule Philomena.Badges do
     |> Repo.all()
   end
 
-  defp award_profile_query(slug) do
+  defp load_authorized_profile(%Actor{} = actor, action, slug) do
+    # TODO: duplicated in ArtistLinks context
     User
     |> where(slug: ^slug)
-    |> where([user], is_nil(user.deleted_at))
+    |> where([u], is_nil(u.deleted_at))
+    |> Loader.one_and_authorize(actor, action)
   end
 
-  defp load_award_profile(actor, action, slug) do
-    with {:ok, user} <- Loader.one(award_profile_query(slug)),
-         :ok <- authorize(actor, action, Award) do
-      {:ok, user}
+  defp load_scoped_award(%Actor{} = actor, action, slug, id) do
+    with {:ok, user} <- load_authorized_profile(actor, :show, slug) do
+      Award
+      |> where(user_id: ^user.id)
+      |> preload([:user, :badge])
+      |> Loader.fetch_and_authorize(actor, action, id)
     end
-  end
-
-  defp scoped_award_query(slug, award_id) do
-    Award
-    |> join(:inner, [award], user in assoc(award, :user))
-    |> where([award, user], award.id == ^award_id and user.slug == ^slug)
-    |> where([_award, user], is_nil(user.deleted_at))
-    |> preload([award, user], user: user)
-    |> preload(:badge)
-  end
-
-  defp load_award(actor, action, slug, id) do
-    case IntegerId.parse(id) do
-      {:ok, award_id} ->
-        with {:ok, award} <-
-               Loader.one_and_authorize(scoped_award_query(slug, award_id), actor, action) do
-          {:ok, {award.user, award}}
-        end
-
-      :error ->
-        {:error, :not_found}
-    end
-  end
-
-  defp present_award_create({:ok, award}, user), do: {:ok, {user, award}}
-
-  defp present_award_create({:error, changeset}, user) do
-    {:error, {user, changeset, awardable_badges()}}
-  end
-
-  defp present_award_update({:ok, award}, user, _original), do: {:ok, {user, award}}
-
-  defp present_award_update({:error, changeset}, user, original) do
-    {:error, {user, original, changeset, awardable_badges()}}
   end
 
   @doc """
@@ -425,8 +338,9 @@ defmodule Philomena.Badges do
           | {:error, Authorization.write_error_reason() | :not_found}
   def load_award_for_new(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, user} <- load_award_profile(actor, :new, slug) do
-      {:ok, {user, change_badge_award(%Award{}), awardable_badges()}}
+         {:ok, user} <- load_authorized_profile(actor, :show, slug),
+         :ok <- authorize(actor, :new, Award) do
+      {:ok, {user, Award.changeset(%Award{}), awardable_badges()}}
     end
   end
 
@@ -456,14 +370,41 @@ defmodule Philomena.Badges do
           {:ok, {User.t(), Award.t()}}
           | {:error, {User.t(), Ecto.Changeset.t(), [Badge.t()]}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def award_badge(%Actor{} = actor, slug, attrs) do
+  def award_badge(%Actor{user: creator} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, user} <- load_award_profile(actor, :create, slug) do
-      transact_and_log(
-        fn -> create_badge_award(actor, user, attrs) end,
-        &award_log(actor, :create, user, &1)
+         {:ok, user} <- load_authorized_profile(actor, :show, slug),
+         :ok <- authorize(actor, :create, Award) do
+      award_changeset =
+        %Award{awarded_by_id: creator.id, user_id: user.id}
+        |> Award.changeset(attrs)
+
+      Multi.new()
+      |> Multi.insert(:award, award_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{award: award} ->
+          # TODO: this problem occurs because we don't take the badge id
+          # as an argument and load it separately. That would also allow
+          # use of Ecto.build_assoc above instead of casting the badge
+          # from form parameters.
+          award = Repo.preload(award, :badge)
+
+          {
+            "Profile.Award:create",
+            Paths.profile_path(user),
+            "Awarded badge '#{award.badge.title}' to #{user.name}"
+          }
+        end
       )
-      |> present_award_create(user)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{award: award}} ->
+          {:ok, {user, award}}
+
+        {:error, :award, changeset, _changes} ->
+          {:error, {user, changeset, awardable_badges()}}
+      end
     end
   end
 
@@ -491,8 +432,8 @@ defmodule Philomena.Badges do
           | {:error, Authorization.write_error_reason() | :not_found}
   def load_award_for_edit(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, award}} <- load_award(actor, :edit, slug, id) do
-      {:ok, {user, award, change_badge_award(award), awardable_badges()}}
+         {:ok, award} <- load_scoped_award(actor, :edit, slug, id) do
+      {:ok, {award.user, award, Award.changeset(award), awardable_badges()}}
     end
   end
 
@@ -526,12 +467,30 @@ defmodule Philomena.Badges do
           | {:error, Authorization.write_error_reason() | :not_found}
   def update_badge_award(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, award}} <- load_award(actor, :update, slug, id) do
-      transact_and_log(
-        fn -> update_badge_award(award, attrs) end,
-        &award_log(actor, :update, user, &1)
+         {:ok, award} <- load_scoped_award(actor, :update, slug, id) do
+      award_changeset = Award.changeset(award, attrs)
+
+      Multi.new()
+      |> Multi.update(:award, award_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{award: award} ->
+          {
+            "Profile.Award:update",
+            Paths.profile_path(award.user),
+            "Updated award of badge '#{award.badge.title}' on #{award.user.name}"
+          }
+        end
       )
-      |> present_award_update(user, award)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{award: award}} ->
+          {:ok, {award.user, award}}
+
+        {:error, :award, changeset, _changes} ->
+          {:error, {award.user, award, changeset, awardable_badges()}}
+      end
     end
   end
 
@@ -561,33 +520,28 @@ defmodule Philomena.Badges do
           | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
   def revoke_badge_award(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, award}} <- load_award(actor, :delete, slug, id),
-         {:ok, award} <-
-           transact_and_log(
-             fn -> delete_badge_award(award) end,
-             &award_log(actor, :delete, user, &1)
-           ) do
-      {:ok, {user, award}}
-    end
-  end
+         {:ok, award} <- load_scoped_award(actor, :delete, slug, id) do
+      Multi.new()
+      |> Multi.delete(:award, award)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{award: award} ->
+          {
+            "Profile.Award:delete",
+            Paths.profile_path(award.user),
+            "Removed badge '#{award.badge.title}' from #{award.user.name}"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{award: award}} ->
+          {:ok, {award.user, award}}
 
-  @spec award_log(Loader.actor(), atom(), User.t(), Award.t()) :: any()
-  defp award_log(actor, action, user, award) do
-    award = Repo.preload(award, [:badge])
-
-    {type, body} =
-      case action do
-        :create ->
-          {"Profile.Award:create", "Awarded badge '#{award.badge.title}' to #{user.name}"}
-
-        :update ->
-          {"Profile.Award:update",
-           "Updated award of badge '#{award.badge.title}' on #{user.name}"}
-
-        :delete ->
-          {"Profile.Award:delete", "Removed badge '#{award.badge.title}' from #{user.name}"}
+        {:error, :award, changeset, _changes} ->
+          {:error, changeset}
       end
-
-    ModerationLogs.create_moderation_log(actor, type, Paths.profile_path(user), body)
+    end
   end
 end
