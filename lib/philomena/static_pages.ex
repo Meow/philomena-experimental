@@ -6,7 +6,7 @@ defmodule Philomena.StaticPages do
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
 
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
 
   alias Philomena.Attribution.Actor
@@ -34,7 +34,7 @@ defmodule Philomena.StaticPages do
       |> Version.changeset(attrs)
       |> repo.insert()
     end)
-    |> Repo.transaction()
+    |> Multi.transact()
   end
 
   # Updates a static page. Visible for testing.
@@ -51,7 +51,7 @@ defmodule Philomena.StaticPages do
     Multi.new()
     |> Multi.update(:static_page, static_page)
     |> Multi.insert(:version, version)
-    |> Repo.transaction()
+    |> Multi.transact()
   end
 
   # Returns an `%Ecto.Changeset{}` for tracking static page changes.

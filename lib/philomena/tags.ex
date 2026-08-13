@@ -5,7 +5,7 @@ defmodule Philomena.Tags do
 
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
-  alias Ecto.Multi
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Attribution.Actor
 
@@ -441,7 +441,7 @@ defmodule Philomena.Tags do
         |> where([t], t.name in ^tag_names)
         |> preload([:implied_tags, aliased_tag: :implied_tags])
       )
-      |> Repo.transaction()
+      |> Multi.transact()
       |> case do
         {:ok, ok} ->
           ok
