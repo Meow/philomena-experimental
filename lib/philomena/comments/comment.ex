@@ -72,6 +72,7 @@ defmodule Philomena.Comments.Comment do
 
   def destroy_changeset(comment) do
     change(comment)
+    |> validate_hidden()
     |> validate_undestroyed()
     |> put_change(:destroyed_content, true)
     |> put_change(:body, "")
@@ -87,6 +88,14 @@ defmodule Philomena.Comments.Comment do
   defp validate_unapproved(changeset) do
     if get_field(changeset, :approved) do
       add_error(changeset, :approved, "is already approved")
+    else
+      changeset
+    end
+  end
+
+  defp validate_hidden(changeset) do
+    if not get_field(changeset, :hidden_from_users) do
+      add_error(changeset, :destroyed_content, "cannot be set while comment is visible")
     else
       changeset
     end

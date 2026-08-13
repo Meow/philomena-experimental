@@ -93,15 +93,20 @@ defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
       assert id == comment.id
     end
 
-    test "returns 404 for a destroyed comment", %{conn: conn} do
+    test "returns 403 for a destroyed comment", %{conn: conn} do
       image = image_fixture()
       comment = comment_fixture(image, nil)
+
+      {:ok, _} =
+        Comments.hide_comment(actor(admin_user_fixture()), image.id, comment.id, %{
+          "deletion_reason" => "spam"
+        })
 
       {:ok, _} = Comments.destroy_comment(actor(admin_user_fixture()), image.id, comment.id)
 
       conn = get(conn, ~p"/api/v1/json/comments/#{comment.id}")
 
-      assert json_response(conn, 404) == %{"error" => "Not found"}
+      assert response(conn, 403) == ""
     end
 
     test "returns 403 for a comment on a hidden image", %{conn: conn} do

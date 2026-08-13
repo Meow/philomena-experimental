@@ -198,7 +198,7 @@ defmodule Philomena.CommentsTest do
   end
 
   describe "load_comment/2 visibility matrix" do
-    test "normalizes malformed, missing, hidden-parent, hidden-comment, and destroyed rows" do
+    test "normalizes malformed, missing, hidden-parent, and hidden-comment rows" do
       user = confirmed_user_fixture()
       moderator = moderator_user_fixture()
       assistant = assistant_user_fixture()
@@ -216,16 +216,9 @@ defmodule Philomena.CommentsTest do
       hidden_image = image_fixture(hidden_from_users: true)
       parent_hidden_comment = comment_fixture(hidden_image, moderator)
 
-      destroyed_comment =
-        visible_image
-        |> comment_fixture()
-        |> Ecto.Changeset.change(destroyed_content: true)
-        |> Repo.update!()
-
       for viewer <- [actor(), actor(user), actor(moderator), actor(comment_assistant)] do
         assert Comments.load_comment(viewer, "not-an-id") == {:error, :not_found}
         assert Comments.load_comment(viewer, "2147483647") == {:error, :not_found}
-        assert Comments.load_comment(viewer, destroyed_comment.id) == {:error, :not_found}
       end
 
       for viewer <- [actor(), actor(user)] do
@@ -456,7 +449,7 @@ defmodule Philomena.CommentsTest do
     end
 
     test "a moderator destroys the comment, emptying its body", %{image: image} do
-      comment = visible_comment(image)
+      comment = already_hidden_comment(image)
       moderator = moderator_user_fixture()
 
       assert {:ok, %Comment{} = destroyed} =
@@ -464,19 +457,15 @@ defmodule Philomena.CommentsTest do
 
       assert destroyed.id == comment.id
 
-      # The destroy engine blanks the body and marks the content destroyed; it
-      # does not touch the comment's hidden/deletion_reason fields, so a visible
-      # comment stays visible while its text is wiped.
+      # The destroy engine blanks the body and marks the content destroyed. It
+      # requires but does not touch the comment's hidden/deletion_reason fields.
       reloaded = Repo.reload!(comment)
       assert reloaded.body == ""
       assert reloaded.destroyed_content
-      refute reloaded.hidden_from_users
-      assert reloaded.deletion_reason == ""
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Spam"
     end
 
-    # The engine authorizes :delete and never inspects hidden_from_users, so an
-    # already-hidden comment is destroyable too; it keeps its hidden flag and
-    # reason while the text is wiped.
     test "destroys an already-hidden comment, keeping its hidden flag and reason",
          %{image: image} do
       comment = already_hidden_comment(image)
@@ -503,8 +492,27 @@ defmodule Philomena.CommentsTest do
       assert reloaded.deletion_reason == "Spam"
     end
 
-    test "the moderation log names the image and comment exactly", %{image: image} do
+    test "fails to destroy a visible comment", %{image: image} do
       comment = visible_comment(image)
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Comments.destroy_comment(actor(admin_user_fixture()), image.id, comment.id)
+
+      no_moderation_logs!()
+
+      reloaded = Repo.reload!(comment)
+
+      assert %{destroyed_content: ["cannot be set while comment is visible"]} =
+               errors_on(changeset)
+
+      refute reloaded.body == ""
+      refute reloaded.destroyed_content
+      refute reloaded.hidden_from_users
+      refute reloaded.deletion_reason == "Spam"
+    end
+
+    test "the moderation log names the image and comment exactly", %{image: image} do
+      comment = already_hidden_comment(image)
       moderator = moderator_user_fixture()
 
       assert {:ok, _} = Comments.destroy_comment(actor(moderator), image.id, comment.id)
@@ -520,6 +528,11 @@ defmodule Philomena.CommentsTest do
       author = confirmed_user_fixture()
       comment = comment_fixture(image, author, %{"body" => "Rule-breaking comment"})
       before = Repo.get!(User, author.id).comments_count
+
+      assert {:ok, _} =
+               Comments.hide_comment(actor(moderator_user_fixture()), image.id, comment.id, %{
+                 "deletion_reason" => "spam"
+               })
 
       assert {:ok, _} =
                Comments.destroy_comment(actor(moderator_user_fixture()), image.id, comment.id)

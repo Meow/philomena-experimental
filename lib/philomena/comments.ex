@@ -32,11 +32,16 @@ defmodule Philomena.Comments do
 
   @comment_create_window 15
   @image_preloads [:sources, tags: :aliases]
-  @display_preloads [:deleted_by, user: [awards: :badge]]
-  @search_preloads [:deleted_by, image: @image_preloads, user: [awards: :badge]]
+  @preloads [:deleted_by, image: @image_preloads, user: [awards: :badge]]
 
   @typedoc "A normalized request-facing failure."
   @type request_error :: :ban | :unauthorized | :not_found | :forced_filter
+
+  defp load_image_comment(%Actor{} = actor, %Image{} = image, comment_id, action, preloads) do
+    Comment
+    |> where(image_id: ^image.id)
+    |> Loader.fetch_and_authorize(actor, action, comment_id, preloads)
+  end
 
   defp notify_comment(_repo, %{image: image, comment: comment}) do
     Notifications.broadcast_image_comment(comment.user, image, comment)
@@ -73,23 +78,6 @@ defmodule Philomena.Comments do
     )
 
     comment
-  end
-
-  defp load_image_comment(%Actor{} = actor, %Image{} = image, comment_id, action, preloads) do
-    with {:ok, comment_id} <- IntegerId.parse(comment_id),
-         {:ok, comment} <-
-           Comment
-           |> where([comment], comment.image_id == ^image.id and comment.id == ^comment_id)
-           |> preload(^preloads)
-           |> Loader.one_and_authorize(actor, action) do
-      {:ok, %{comment | image: image}}
-    else
-      :error ->
-        {:error, :not_found}
-
-      error ->
-        error
-    end
   end
 
   defp load_direction(%User{settings: %{comments_newest_first: false}}), do: :asc
@@ -134,7 +122,7 @@ defmodule Philomena.Comments do
   Loads a globally addressed comment visible to `actor`.
 
   IDs are parsed safely. Destroyed comments and missing IDs are not-found. The
-  parent image is authorized before the comment, so either forbidden resource
+  parent image is authorized alongside the comment, so either forbidden resource
   returns unauthorized.
 
   ## Examples
@@ -149,21 +137,9 @@ defmodule Philomena.Comments do
   @spec load_comment(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
   def load_comment(%Actor{} = actor, id) do
-    with {:ok, id} <- IntegerId.parse(id),
-         {:ok, comment} <-
-           Comment
-           |> where([comment], comment.id == ^id and comment.destroyed_content == false)
-           |> preload([:image, :user])
-           |> Loader.one(),
-         :ok <- authorize(actor, :show, comment.image),
-         :ok <- authorize(actor, :show, comment) do
+    with {:ok, comment} <- Loader.fetch_and_authorize(Comment, actor, :show, id, @preloads),
+         :ok <- authorize(actor, :show, comment.image) do
       {:ok, comment}
-    else
-      :error ->
-        {:error, :not_found}
-
-      error ->
-        error
     end
   end
 
@@ -193,7 +169,7 @@ defmodule Philomena.Comments do
         ) ::
           {:ok, Scrivener.Page.t(Comment.t())} | {:error, String.t()}
   def search_comments(%Actor{} = actor, %Filter{} = filter, query_string, pagination, opts \\ []) do
-    preloads = Keyword.get(opts, :preload, @search_preloads)
+    preloads = Keyword.get(opts, :preload, @preloads)
 
     case Query.compile(query_string, actor: actor) do
       {:ok, query} ->
@@ -257,13 +233,12 @@ defmodule Philomena.Comments do
           Scrivener.Page.t(Comment.t())
   def paginate_image_comments(%Actor{} = actor, %Image{} = image, pagination) do
     direction = load_direction(actor.user)
-    preloads = [:image | @display_preloads]
 
     Comment
     |> where(image_id: ^image.id)
     |> Visibility.visible_comments(actor)
     |> order_by([{^direction, :created_at}, {^direction, :id}])
-    |> preload(^preloads)
+    |> preload(^@preloads)
     |> Repo.paginate(pagination)
   end
 
@@ -450,8 +425,7 @@ defmodule Philomena.Comments do
           {:ok, {Image.t(), Comment.t()}} | {:error, :unauthorized | :not_found}
   def load_comment_for_show(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- load_image(actor, image_id, :show),
-         {:ok, comment} <-
-           load_image_comment(actor, image, comment_id, :show, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :show, @preloads) do
       {:ok, {image, comment}}
     end
   end
@@ -481,7 +455,7 @@ defmodule Philomena.Comments do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
-         {:ok, comment} <- load_image_comment(actor, image, comment_id, :edit, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :edit, @preloads) do
       {:ok, %CommentForm{image: image, comment: comment, changeset: Comment.changeset(comment)}}
     end
   end
@@ -515,8 +489,7 @@ defmodule Philomena.Comments do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
-         {:ok, comment} <-
-           load_image_comment(actor, image, comment_id, :update, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :update, @preloads) do
       now = DateTime.utc_now(:second)
       comment_changeset = Comment.changeset(comment, attrs, now)
       approved? = Comment.approved?(comment_changeset)
@@ -564,8 +537,7 @@ defmodule Philomena.Comments do
           {:ok, CommentHistory.t()} | {:error, :unauthorized | :not_found}
   def comment_history(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- load_image(actor, image_id, :show),
-         {:ok, comment} <-
-           load_image_comment(actor, image, comment_id, :show, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :show, @preloads) do
       {:ok,
        %CommentHistory{
          image: image,
@@ -591,7 +563,7 @@ defmodule Philomena.Comments do
           {:ok, Comment.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- load_image(actor, image_id, :show) do
-      load_image_comment(actor, image, comment_id, :show, @display_preloads)
+      load_image_comment(actor, image, comment_id, :show, @preloads)
     end
   end
 
@@ -611,7 +583,7 @@ defmodule Philomena.Comments do
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def hide_comment(%Actor{user: user} = actor, image_id, comment_id, params) do
     with {:ok, image} <- load_image(actor, image_id, :show),
-         {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @preloads) do
       changeset = Comment.hide_changeset(comment, params, user)
       reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
 
@@ -652,7 +624,7 @@ defmodule Philomena.Comments do
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def unhide_comment(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- load_image(actor, image_id, :show),
-         {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @preloads) do
       changeset = Comment.unhide_changeset(comment)
 
       Multi.new()
@@ -692,8 +664,7 @@ defmodule Philomena.Comments do
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def destroy_comment(%Actor{} = actor, image_id, comment_id) do
     with {:ok, image} <- load_image(actor, image_id, :show),
-         {:ok, comment} <-
-           load_image_comment(actor, image, comment_id, :delete, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :delete, @preloads) do
       comment_query = from(c in Comment, where: c.id == ^comment.id)
       image_query = from(i in Image, where: i.id == ^comment.image_id)
 
@@ -741,8 +712,7 @@ defmodule Philomena.Comments do
           {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
   def approve_comment(%Actor{user: user} = actor, image_id, comment_id) do
     with {:ok, image} <- load_image(actor, image_id, :show),
-         {:ok, comment} <-
-           load_image_comment(actor, image, comment_id, :approve, @display_preloads) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :approve, @preloads) do
       comment_query = from(c in Comment, where: c.id == ^comment.id)
 
       Multi.new()
