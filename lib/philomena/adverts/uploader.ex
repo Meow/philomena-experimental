@@ -3,6 +3,7 @@ defmodule Philomena.Adverts.Uploader do
   Upload and processing callback logic for Advert images.
   """
 
+  alias Philomena.Multi
   alias Philomena.Adverts.Advert
   alias PhilomenaMedia.Uploader
 
@@ -10,12 +11,16 @@ defmodule Philomena.Adverts.Uploader do
     Uploader.analyze_upload(advert, "image", params["image"], &Advert.image_changeset/2)
   end
 
-  def persist_upload(advert) do
-    Uploader.persist_upload(advert, advert_file_root(), "image")
+  def put_persist_upload(multi, step) do
+    Multi.on_commit(multi, fn %{^step => advert} ->
+      Uploader.persist_upload(advert, advert_file_root(), "image")
+    end)
   end
 
-  def unpersist_old_upload(advert) do
-    Uploader.unpersist_old_upload(advert, advert_file_root(), "image")
+  def put_unpersist_old_upload(multi, step) do
+    Multi.on_commit(multi, fn %{^step => advert} ->
+      Uploader.unpersist_old_upload(advert, advert_file_root(), "image")
+    end)
   end
 
   defp advert_file_root do

@@ -28,7 +28,7 @@ defmodule Philomena.Adverts.Advert do
   end
 
   @doc false
-  def changeset(advert, attrs) do
+  def changeset(advert, attrs \\ %{}) do
     advert
     |> cast(attrs, [:title, :link, :start_date, :finish_date, :live, :restrictions, :notes])
     |> validate_required([:title, :link, :start_date, :finish_date])

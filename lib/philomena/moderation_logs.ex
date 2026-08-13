@@ -66,10 +66,40 @@ defmodule Philomena.ModerationLogs do
       %Ecto.Multi{}
 
   """
-  @spec put_log(Multi.t(), Multi.name(), Actor.t(), String.t(), String.t(), String.t()) ::
+  @spec put_log(
+          multi :: Multi.t(),
+          step :: Multi.name(),
+          actor :: Actor.t(),
+          type :: String.t(),
+          subject_path :: String.t(),
+          body :: String.t()
+        ) ::
           Multi.t()
-  def put_log(%Multi{} = multi, step, %Actor{user: %User{} = user}, type, subject_path, body) do
+  def put_log(multi, step, actor, type, subject_path, body_or_callback)
+
+  def put_log(%Multi{} = multi, step, %Actor{user: %User{} = user}, type, subject_path, body)
+      when is_binary(body) do
     Multi.insert(multi, step, log_changeset(user, type, subject_path, body))
+  end
+
+  # Variant of put_log that receives {type, subject_path, body} from a callback with the
+  # changes from the Multi.
+  @spec put_log(
+          multi :: Multi.t(),
+          step :: Multi.name(),
+          actor :: Actor.t(),
+          callback :: (Ecto.Multi.changes() -> {String.t(), String.t(), String.t()})
+        ) ::
+          Multi.t()
+  def put_log(%Multi{} = multi, step, %Actor{user: %User{} = user}, callback)
+      when is_function(callback, 1) do
+    Multi.run(multi, step, fn repo, changes ->
+      {type, subject_path, body} = callback.(changes)
+
+      user
+      |> log_changeset(type, subject_path, body)
+      |> repo.insert()
+    end)
   end
 
   @doc """

@@ -7,6 +7,7 @@ defmodule Philomena.Badges do
 
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
+  alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Authorization
   alias Philomena.Badges.{Badge, Uploader}
@@ -19,19 +20,22 @@ defmodule Philomena.Badges do
 
   # Creates a badge.
   defp create_badge(attrs) do
-    %Badge{}
-    |> Badge.changeset(attrs)
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, badge} ->
-        Uploader.persist_upload(badge)
-        Uploader.unpersist_old_upload(badge)
+    badge_changeset =
+      %Badge{}
+      |> Badge.changeset(attrs)
+      |> Uploader.analyze_upload(attrs)
 
+    Multi.new()
+    |> Multi.insert(:badge, badge_changeset)
+    |> Uploader.put_persist_upload(:badge)
+    |> Uploader.put_unpersist_old_upload(:badge)
+    |> Multi.transact()
+    |> case do
+      {:ok, %{badge: badge}} ->
         {:ok, badge}
 
-      error ->
-        error
+      {:error, :badge, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 
@@ -44,19 +48,22 @@ defmodule Philomena.Badges do
 
   # Updates the image for a badge.
   defp update_badge_image(%Badge{} = badge, attrs) do
-    badge
-    |> Badge.changeset(attrs)
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.update()
-    |> case do
-      {:ok, badge} ->
-        Uploader.persist_upload(badge)
-        Uploader.unpersist_old_upload(badge)
+    badge_changeset =
+      badge
+      |> Badge.changeset(attrs)
+      |> Uploader.analyze_upload(attrs)
 
+    Multi.new()
+    |> Multi.update(:badge, badge_changeset)
+    |> Uploader.put_persist_upload(:badge)
+    |> Uploader.put_unpersist_old_upload(:badge)
+    |> Multi.transact()
+    |> case do
+      {:ok, %{badge: badge}} ->
         {:ok, badge}
 
-      error ->
-        error
+      {:error, :badge, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 
@@ -90,6 +97,7 @@ defmodule Philomena.Badges do
   # database write, storage side effects, and moderation log are intentionally
   # sequential rather than atomic.
   defp upload_and_log(operation, log) do
+    # TODO: Use Multi.
     with {:ok, result} <- operation.(),
          {:ok, _log} <- log.(result) do
       {:ok, result}

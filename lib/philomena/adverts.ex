@@ -11,72 +11,10 @@ defmodule Philomena.Adverts do
   alias Philomena.Attribution.Actor
   alias Philomena.Authorization
   alias Philomena.Images.Image
-  alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
+  alias Philomena.Multi
   alias Philomena.Repo
-
-  # Creates an advert with an image.
-  defp create_advert(attrs) do
-    %Advert{}
-    |> Advert.changeset(attrs)
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, advert} ->
-        Uploader.persist_upload(advert)
-        Uploader.unpersist_old_upload(advert)
-
-        {:ok, advert}
-
-      error ->
-        error
-    end
-  end
-
-  # Updates an Advert without updating its image.
-  defp update_advert(%Advert{} = advert, attrs) do
-    advert
-    |> Advert.changeset(attrs)
-    |> Repo.update()
-  end
-
-  # Updates the image for an Advert.
-  defp update_advert_image(%Advert{} = advert, attrs) do
-    advert
-    |> Advert.changeset(attrs)
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.update()
-    |> case do
-      {:ok, advert} ->
-        Uploader.persist_upload(advert)
-        Uploader.unpersist_old_upload(advert)
-
-        {:ok, advert}
-
-      error ->
-        error
-    end
-  end
-
-  # Deletes an Advert.
-  defp delete_advert(%Advert{} = advert) do
-    Repo.delete(advert)
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking advert changes.
-  defp change_advert(%Advert{} = advert) do
-    Advert.changeset(advert, %{})
-  end
-
-  defp random_live_for_tags(tags) do
-    tags
-    |> Restrictions.tags()
-    |> live_adverts_query()
-    |> order_by(asc: fragment("random()"))
-    |> limit(1)
-    |> Repo.one()
-  end
 
   defp live_adverts_query(restrictions \\ nil) do
     now = DateTime.utc_now()
@@ -93,54 +31,17 @@ defmodule Philomena.Adverts do
     end
   end
 
-  defp load_live_advert(id) do
-    case IntegerId.parse(id) do
-      {:ok, id} -> live_adverts_query() |> where(id: ^id) |> Loader.one()
-      :error -> {:error, :not_found}
-    end
+  defp random_live_for_tags(tags) do
+    tags
+    |> Restrictions.tags()
+    |> live_adverts_query()
+    |> order_by(asc: fragment("random()"))
+    |> limit(1)
+    |> Repo.one()
   end
 
   defp load_advert(actor, action, id) do
     Loader.fetch_and_authorize(Advert, actor, action, id)
-  end
-
-  defp load_advert_change(actor, action, id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, advert} <- load_advert(actor, action, id) do
-      {:ok, {advert, change_advert(advert)}}
-    end
-  end
-
-  defp transact_and_log(operation, actor, action) do
-    Repo.transact(fn ->
-      with {:ok, advert} <- operation.(),
-           {:ok, _log} <- advert_log(actor, action, advert) do
-        {:ok, advert}
-      end
-    end)
-  end
-
-  # Uploader operations interact with object storage and therefore must not run
-  # inside Repo.transact/1. Until uploads can be staged transactionally, their
-  # database write, storage side effects, and moderation log are intentionally
-  # sequential rather than atomic.
-  defp upload_and_log(operation, actor, action) do
-    with {:ok, advert} <- operation.(),
-         {:ok, _log} <- advert_log(actor, action, advert) do
-      {:ok, advert}
-    end
-  end
-
-  defp advert_log(actor, action, advert) do
-    {type, body} =
-      case action do
-        :create -> {"Admin.Advert:create", "Created advert #{advert.id}"}
-        :update -> {"Admin.Advert:update", "Updated advert #{advert.id}"}
-        :update_image -> {"Admin.Advert.Image:update", "Updated image for advert #{advert.id}"}
-        :delete -> {"Admin.Advert:delete", "Deleted advert #{advert.id}"}
-      end
-
-    ModerationLogs.create_moderation_log(actor, type, "/admin/adverts", body)
   end
 
   @doc """
@@ -211,7 +112,7 @@ defmodule Philomena.Adverts do
   """
   @spec record_click(Loader.integer_id()) :: {:ok, Advert.t()} | {:error, :not_found}
   def record_click(id) do
-    with {:ok, advert} <- load_live_advert(id),
+    with {:ok, advert} <- Loader.fetch(live_adverts_query(), id),
          :ok <- Server.record_click(advert.id) do
       {:ok, advert}
     end
@@ -261,7 +162,7 @@ defmodule Philomena.Adverts do
   def new_advert(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Advert) do
-      {:ok, change_advert(%Advert{})}
+      {:ok, Advert.changeset(%Advert{})}
     end
   end
 
@@ -284,7 +185,30 @@ defmodule Philomena.Adverts do
   def create_advert(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Advert) do
-      upload_and_log(fn -> create_advert(attrs) end, actor, :create)
+      advert_changeset =
+        %Advert{}
+        |> Advert.changeset(attrs)
+        |> Uploader.analyze_upload(attrs)
+
+      Multi.new()
+      |> Multi.insert(:advert, advert_changeset)
+      |> Uploader.put_persist_upload(:advert)
+      |> Uploader.put_unpersist_old_upload(:advert)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{advert: advert} ->
+          {"Admin.Advert:create", "/admin/adverts", "Created advert #{advert.id}"}
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{advert: advert}} ->
+          {:ok, advert}
+
+        {:error, :advert, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -308,7 +232,10 @@ defmodule Philomena.Adverts do
           {:ok, {Advert.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
   def load_advert_for_edit(%Actor{} = actor, id) do
-    load_advert_change(actor, :edit, id)
+    with :ok <- verify_write_access(actor),
+         {:ok, advert} <- load_advert(actor, :edit, id) do
+      {:ok, {advert, Advert.changeset(advert)}}
+    end
   end
 
   @doc """
@@ -319,7 +246,10 @@ defmodule Philomena.Adverts do
           {:ok, {Advert.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
   def load_advert_for_image_edit(%Actor{} = actor, id) do
-    load_advert_change(actor, :update_image, id)
+    with :ok <- verify_write_access(actor),
+         {:ok, advert} <- load_advert(actor, :update_image, id) do
+      {:ok, {advert, Advert.changeset(advert)}}
+    end
   end
 
   @doc """
@@ -349,7 +279,25 @@ defmodule Philomena.Adverts do
   def update_advert(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :update, id) do
-      transact_and_log(fn -> update_advert(advert, attrs) end, actor, :update)
+      advert_changeset = Advert.changeset(advert, attrs)
+
+      Multi.new()
+      |> Multi.update(:advert, advert_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{advert: advert} ->
+          {"Admin.Advert:update", "/admin/adverts", "Updated advert #{advert.id}"}
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{advert: advert}} ->
+          {:ok, advert}
+
+        {:error, :advert, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -375,7 +323,24 @@ defmodule Philomena.Adverts do
   def delete_advert(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :delete, id) do
-      transact_and_log(fn -> delete_advert(advert) end, actor, :delete)
+      # TODO: this orphans the file.
+      Multi.new()
+      |> Multi.delete(:advert, advert)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{advert: advert} ->
+          {"Admin.Advert:delete", "/admin/adverts", "Deleted advert #{advert.id}"}
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{advert: advert}} ->
+          {:ok, advert}
+
+        {:error, :advert, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -406,7 +371,30 @@ defmodule Philomena.Adverts do
   def update_advert_image(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :update_image, id) do
-      upload_and_log(fn -> update_advert_image(advert, attrs) end, actor, :update_image)
+      advert_changeset =
+        advert
+        |> Advert.changeset(attrs)
+        |> Uploader.analyze_upload(attrs)
+
+      Multi.new()
+      |> Multi.update(:advert, advert_changeset)
+      |> Uploader.put_persist_upload(:advert)
+      |> Uploader.put_unpersist_old_upload(:advert)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{advert: advert} ->
+          {"Admin.Advert.Image:update", "/admin/adverts", "Updated image for advert #{advert.id}"}
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{advert: advert}} ->
+          {:ok, advert}
+
+        {:error, :advert, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 end

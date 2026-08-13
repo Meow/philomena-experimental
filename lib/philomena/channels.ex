@@ -2,10 +2,6 @@ defmodule Philomena.Channels do
   @moduledoc """
   Livestream discovery, staff-managed channel configuration, and per-user
   subscription/read state.
-
-  Public browsing is available to anonymous actors. Subscription mutations are
-  authenticated writes, while fetcher state updates are an operational service
-  used only by the automatic updater.
   """
 
   import Ecto.Query, warn: false
