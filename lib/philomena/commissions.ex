@@ -13,7 +13,6 @@ defmodule Philomena.Commissions do
   alias Philomena.Commissions.CommissionPage
   alias Philomena.Commissions.Directory
   alias Philomena.Commissions.Item
-  alias Philomena.Commissions.ItemForm
   alias Philomena.Commissions.QueryBuilder
   alias Philomena.Commissions.SearchQuery
   alias Philomena.IntegerId
@@ -115,7 +114,7 @@ defmodule Philomena.Commissions do
   defp item_for_commission(actor, commission, action, id) do
     Item
     |> where(commission_id: ^commission.id)
-    |> preload(:commission)
+    |> preload(commission: :user)
     |> Loader.fetch_and_authorize(actor, action, id)
   end
 
@@ -138,48 +137,6 @@ defmodule Philomena.Commissions do
          {:ok, item} <- item_for_commission(actor, commission, action, id) do
       {:ok, {user, commission, item}}
     end
-  end
-
-  defp item_form(user, commission, item, changeset \\ nil) do
-    %ItemForm{
-      user: user,
-      commission: commission,
-      item: item,
-      changeset: changeset || Item.changeset(item, %{})
-    }
-  end
-
-  defp insert_item(%Commission{} = commission, attrs) do
-    changeset =
-      commission
-      |> new_item()
-      |> Item.changeset(attrs)
-
-    counter_query =
-      Commission
-      |> where(id: ^commission.id)
-      |> update(inc: [commission_items_count: 1])
-
-    Multi.new()
-    |> Multi.insert(:item, changeset)
-    |> Multi.update_all(:commission, counter_query, [])
-    |> Multi.transact()
-    |> case do
-      {:error, :item, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
-      result -> result
-    end
-  end
-
-  defp delete_item_record(%Item{} = item) do
-    counter_query =
-      Commission
-      |> where(id: ^item.commission_id)
-      |> update(inc: [commission_items_count: -1])
-
-    Multi.new()
-    |> Multi.delete(:item, item)
-    |> Multi.update_all(:commission, counter_query, [])
-    |> Multi.transact()
   end
 
   defp search_directory(params, pagination) do
@@ -404,7 +361,7 @@ defmodule Philomena.Commissions do
   end
 
   @doc """
-  Builds a new item form for the commission belonging to the active profile
+  Builds a new item changeset for the commission belonging to the active profile
   named by `slug`.
 
   Commission items are owner-only, including for staff. Write access is checked
@@ -413,15 +370,15 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> new_item(actor, "artist")
-      {:ok, %ItemForm{}}
+      {:ok, %Ecto.Changeset{}}
 
   """
   @spec new_item(Actor.t(), String.t()) ::
-          {:ok, ItemForm.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def new_item(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission, item}} <- load_new_item(actor, slug, :new) do
-      {:ok, item_form(user, commission, item)}
+         {:ok, {_user, _commission, item}} <- load_new_item(actor, slug, :new) do
+      {:ok, Item.changeset(item)}
     end
   end
 
@@ -429,28 +386,42 @@ defmodule Philomena.Commissions do
   Creates an item under the commission belonging to the active profile named by
   `slug` and increments the listing's item count.
 
-  Validation failures return an `ItemForm` retaining the scoped profile and
-  commission.
-
   ## Examples
 
       iex> create_item(actor, "artist", attrs)
-      {:ok, %User{}}
+      {:ok, %Item{}}
 
       iex> create_item(actor, "artist", invalid_attrs)
-      {:error, %ItemForm{}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec create_item(Actor.t(), String.t(), map()) ::
-          {:ok, User.t()}
-          | {:error, ItemForm.t()}
+          {:ok, Item.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
   def create_item(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission, item}} <- load_new_item(actor, slug, :create) do
-      case insert_item(commission, attrs) do
-        {:ok, _changes} -> {:ok, user}
-        {:error, changeset} -> {:error, item_form(user, commission, item, changeset)}
+         {:ok, {_user, commission, _item}} <- load_new_item(actor, slug, :create) do
+      changeset =
+        commission
+        |> new_item()
+        |> Item.changeset(attrs)
+
+      counter_query =
+        Commission
+        |> where(id: ^commission.id)
+        |> update(inc: [commission_items_count: 1])
+
+      Multi.new()
+      |> Multi.insert(:item, changeset)
+      |> Multi.update_all(:commission, counter_query, [])
+      |> Multi.transact()
+      |> case do
+        {:ok, %{item: item}} ->
+          {:ok, item}
+
+        {:error, :item, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -465,18 +436,18 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> load_item_for_edit(actor, "artist", "12")
-      {:ok, %ItemForm{}}
+      {:ok, %Ecto.Changeset{}}
 
       iex> load_item_for_edit(actor, "artist", "bad")
       {:error, :not_found}
 
   """
   @spec load_item_for_edit(Actor.t(), String.t(), IntegerId.integer_id()) ::
-          {:ok, ItemForm.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_item_for_edit(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission, item}} <- load_existing_item(actor, slug, id, :edit) do
-      {:ok, item_form(user, commission, item)}
+         {:ok, {_user, _commission, item}} <- load_existing_item(actor, slug, id, :edit) do
+      {:ok, Item.changeset(item)}
     end
   end
 
@@ -485,28 +456,24 @@ defmodule Philomena.Commissions do
   profile named by `slug`.
 
   Parent scoping and authorization match `load_item_for_edit/3`. Validation
-  failures return an `ItemForm`.
+  failures return an `m:Ecto.Changeset`.
 
   ## Examples
 
       iex> update_item(actor, "artist", "12", attrs)
-      {:ok, %User{}}
+      {:ok, %Item{}}
 
   """
   @spec update_item(Actor.t(), String.t(), IntegerId.integer_id(), map()) ::
-          {:ok, User.t()}
-          | {:error, ItemForm.t()}
+          {:ok, Item.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
   def update_item(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission, item}} <- load_existing_item(actor, slug, id, :update) do
+         {:ok, {_user, _commission, item}} <- load_existing_item(actor, slug, id, :update) do
       item
       |> Item.changeset(attrs)
       |> Repo.update()
-      |> case do
-        {:ok, _item} -> {:ok, user}
-        {:error, changeset} -> {:error, item_form(user, commission, item, changeset)}
-      end
     end
   end
 
@@ -519,19 +486,30 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> delete_item(actor, "artist", "12")
-      {:ok, %User{}}
+      {:ok, %Item{}}
 
   """
   @spec delete_item(Actor.t(), String.t(), IntegerId.integer_id()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found | term()}
+          {:ok, Item.t()} | {:error, :ban | :unauthorized | :not_found | term()}
   def delete_item(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, _commission, item}} <- load_existing_item(actor, slug, id, :delete),
-         {:ok, _changes} <- delete_item_record(item) do
-      {:ok, user}
-    else
-      {:error, _step, reason, _changes} -> {:error, reason}
-      error -> error
+         {:ok, {_user, _commission, item}} <- load_existing_item(actor, slug, id, :delete) do
+      counter_query =
+        Commission
+        |> where(id: ^item.commission_id)
+        |> update(inc: [commission_items_count: -1])
+
+      Multi.new()
+      |> Multi.delete(:item, item)
+      |> Multi.update_all(:commission, counter_query, [])
+      |> Multi.transact()
+      |> case do
+        {:ok, %{item: item}} ->
+          {:ok, item}
+
+        {:error, :item, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 end

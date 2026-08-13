@@ -20,7 +20,7 @@ defmodule Philomena.Commissions.Item do
   end
 
   @doc false
-  def changeset(item, attrs) do
+  def changeset(item, attrs \\ %{}) do
     item
     |> cast(attrs, [:item_type, :description, :base_price, :add_ons, :example_image_id])
     |> validate_required([:commission_id, :base_price, :item_type, :description])

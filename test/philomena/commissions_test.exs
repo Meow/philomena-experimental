@@ -25,7 +25,6 @@ defmodule Philomena.CommissionsTest do
   alias Philomena.Commissions.CommissionPage
   alias Philomena.Commissions.Directory
   alias Philomena.Commissions.Item
-  alias Philomena.Commissions.ItemForm
   alias Philomena.Repo
   alias Philomena.Reports.Report
 
@@ -302,11 +301,10 @@ defmodule Philomena.CommissionsTest do
       user = verified_user_with_link()
       commission = commission_fixture(user)
 
-      assert {:ok, %ItemForm{} = form} = Commissions.new_item(actor(user), user.slug)
+      assert {:ok, %Ecto.Changeset{data: item}} = Commissions.new_item(actor(user), user.slug)
 
-      assert form.user.id == user.id
-      assert form.commission.id == commission.id
-      assert %Ecto.Changeset{data: %Item{}} = form.changeset
+      assert item.commission.user.id == user.id
+      assert item.commission.id == commission.id
     end
 
     test "items have no staff bypass, so moderators and admins are unauthorized" do
@@ -332,25 +330,25 @@ defmodule Philomena.CommissionsTest do
       user = verified_user_with_link()
       commission = commission_fixture(user)
 
-      assert {:ok, loaded_user} =
+      assert {:ok, item} =
                Commissions.create_item(actor(user), user.slug, item_params())
 
-      assert loaded_user.id == user.id
+      assert item.commission.user.id == user.id
 
       assert Repo.aggregate(from(i in Item, where: i.commission_id == ^commission.id), :count) ==
                1
     end
 
-    test "validation errors retain the parent-scoped form" do
+    test "validation errors retain the parent association" do
       user = verified_user_with_link()
       commission = commission_fixture(user)
 
-      assert {:error, %ItemForm{} = form} =
+      assert {:error, %Ecto.Changeset{data: item} = changeset} =
                Commissions.create_item(actor(user), user.slug, %{})
 
-      assert form.user.id == user.id
-      assert form.commission.id == commission.id
-      refute form.changeset.valid?
+      assert item.commission.user.id == user.id
+      assert item.commission.id == commission.id
+      refute changeset.valid?
     end
   end
 
@@ -360,12 +358,11 @@ defmodule Philomena.CommissionsTest do
       commission = commission_fixture(user)
       item = commission_item_fixture(commission)
 
-      assert {:ok, %ItemForm{} = form} =
+      assert {:ok, %Ecto.Changeset{data: item}} =
                Commissions.load_item_for_edit(actor(user), user.slug, "#{item.id}")
 
-      assert form.user.id == user.id
-      assert form.item.id == item.id
-      assert %Ecto.Changeset{} = form.changeset
+      assert item.commission.user.id == user.id
+      assert item.id == item.id
     end
 
     test "malformed, absent, and wrong-commission item IDs are not found" do
@@ -398,8 +395,8 @@ defmodule Philomena.CommissionsTest do
       commission = commission_fixture(user)
       item = commission_item_fixture(commission)
 
-      assert {:ok, loaded_user} = Commissions.delete_item(actor(user), user.slug, "#{item.id}")
-      assert loaded_user.id == user.id
+      assert {:ok, deleted_item} = Commissions.delete_item(actor(user), user.slug, "#{item.id}")
+      assert deleted_item.commission.user.id == user.id
       assert Repo.get(Item, item.id) == nil
     end
 
@@ -423,12 +420,12 @@ defmodule Philomena.CommissionsTest do
       commission = commission_fixture(user)
       item = commission_item_fixture(commission)
 
-      assert {:ok, loaded_user} =
+      assert {:ok, item} =
                Commissions.update_item(actor(user), user.slug, "#{item.id}", %{
                  "description" => "Updated description"
                })
 
-      assert loaded_user.id == user.id
+      assert item.commission.user.id == user.id
       assert Repo.get!(Item, item.id).description == "Updated description"
     end
 
