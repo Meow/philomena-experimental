@@ -3,6 +3,7 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentControllerTest do
 
   @moduletag :search
 
+  import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
@@ -44,7 +45,9 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentControllerTest do
       hidden = comment_fixture(image, nil, %{"body" => "chartreuse guanaco"})
 
       {:ok, _} =
-        Comments.hide_comment_for_fixture(hidden, %{"deletion_reason" => "spam"}, moderator)
+        Comments.hide_comment(actor(moderator), image.id, hidden.id, %{
+          "deletion_reason" => "spam"
+        })
 
       SearchHelpers.reindex_all!(Comment)
 

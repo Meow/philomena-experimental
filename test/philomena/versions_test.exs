@@ -182,11 +182,11 @@ defmodule Philomena.VersionsTest do
     test "first edit creates the initial row and attributed edited snapshot" do
       image = image_fixture()
       author = confirmed_user_fixture()
-      editor = confirmed_user_fixture()
+      editor = admin_user_fixture()
       comment = comment_fixture(image, author, %{"body" => "Original comment"})
 
       {:ok, _result} =
-        Comments.update_comment_for_fixture(comment, actor(editor), %{
+        Comments.update_comment(actor(editor), image.id, comment.id, %{
           "body" => "Edited comment",
           "edit_reason" => "clarify"
         })
@@ -202,11 +202,12 @@ defmodule Philomena.VersionsTest do
     end
 
     test "an update with unchanged content creates no history" do
+      user = confirmed_user_fixture()
       image = image_fixture()
-      comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "same"})
+      comment = comment_fixture(image, user, %{"body" => "same"})
 
-      assert {:ok, %{version: nil}} =
-               Comments.update_comment_for_fixture(comment, actor(confirmed_user_fixture()), %{
+      assert {:ok, _comment} =
+               Comments.update_comment(actor(user), image.id, comment.id, %{
                  "body" => comment.body,
                  "edit_reason" => comment.edit_reason
                })
@@ -240,12 +241,12 @@ defmodule Philomena.VersionsTest do
     end
 
     test "comment history follows the same pairing rules" do
+      user = confirmed_user_fixture()
       image = image_fixture()
-      comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "c0"})
-      editor = confirmed_user_fixture()
+      comment = comment_fixture(image, user, %{"body" => "c0"})
 
-      {:ok, %{comment: comment}} =
-        Comments.update_comment_for_fixture(comment, actor(editor), %{"body" => "c1"})
+      {:ok, {_image, comment}} =
+        Comments.update_comment(actor(user), image.id, comment.id, %{"body" => "c1"})
 
       assert [%CommentVersion{} = version] = Versions.for_comment(comment)
       assert version.body == "c1"

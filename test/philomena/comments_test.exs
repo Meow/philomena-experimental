@@ -409,15 +409,18 @@ defmodule Philomena.CommentsTest do
     comment_fixture(image, confirmed_user_fixture(), %{"body" => "Rule-breaking comment"})
   end
 
-  # An already-hidden comment, set up through the log-free hide engine so no
-  # moderation log exists before the destroy under test runs.
+  # An already-hidden comment, set up so no moderation log exists
+  # before the destroy under test runs.
   defp already_hidden_comment(image) do
     {:ok, hidden} =
-      Comments.hide_comment_for_fixture(
-        visible_comment(image),
-        %{"deletion_reason" => "Spam"},
-        moderator_user_fixture()
+      Comments.hide_comment(
+        actor(moderator_user_fixture()),
+        image.id,
+        visible_comment(image).id,
+        %{"deletion_reason" => "Spam"}
       )
+
+    Repo.delete_all(ModerationLog)
 
     hidden
   end
@@ -476,7 +479,6 @@ defmodule Philomena.CommentsTest do
          %{image: image} do
       comment = already_hidden_comment(image)
 
-      # Set up through the log-free engine, so no log exists before the destroy.
       no_moderation_logs!()
 
       assert {:ok, %Comment{}} =
@@ -808,7 +810,7 @@ defmodule Philomena.CommentsTest do
       comment = comment_fixture(image, author, %{"body" => "Original comment body"})
 
       {:ok, _} =
-        Comments.update_comment_for_fixture(comment, actor(author), %{
+        Comments.update_comment(actor(author), image.id, comment.id, %{
           "body" => "Original comment body plus an edit",
           "edit_reason" => "typo fix"
         })
@@ -829,8 +831,8 @@ defmodule Philomena.CommentsTest do
       # Each update records one version, so 26 edits record 26 versions; the
       # query limits the result to 25.
       Enum.reduce(1..26, comment, fn n, current ->
-        {:ok, %{comment: updated}} =
-          Comments.update_comment_for_fixture(current, actor(author), %{"body" => "edit #{n}"})
+        {:ok, {_image, updated}} =
+          Comments.update_comment(actor(author), image.id, current.id, %{"body" => "edit #{n}"})
 
         updated
       end)

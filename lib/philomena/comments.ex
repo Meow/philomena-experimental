@@ -154,40 +154,6 @@ defmodule Philomena.Comments do
   def create_comment_for_fixture(%Image{} = image, %Actor{} = actor, attrs \\ %{}),
     do: persist_comment(image, actor, attrs)
 
-  @doc false
-  @spec hide_comment_for_fixture(Comment.t(), map(), User.t()) ::
-          {:ok, Comment.t()} | {:error, term()}
-  def hide_comment_for_fixture(%Comment{} = comment, attrs, %User{} = user) do
-    comment
-    |> Comment.hide_changeset(attrs, user)
-    |> Repo.update()
-    |> case do
-      {:ok, hidden_comment} -> {:ok, reindex_comment(hidden_comment)}
-      error -> error
-    end
-  end
-
-  @doc false
-  @spec update_comment_for_fixture(Comment.t(), Actor.t(), map()) ::
-          {:ok, map()} | {:error, Multi.name(), term(), map()}
-  def update_comment_for_fixture(%Comment{} = comment, %Actor{} = actor, attrs) do
-    persist_comment_update(comment, actor, attrs)
-  end
-
-  @doc false
-  @spec destroy_comment_for_fixture(Comment.t()) ::
-          {:ok, Comment.t()} | {:error, term()}
-  def destroy_comment_for_fixture(%Comment{} = comment) do
-    Multi.new()
-    |> Multi.update(:comment, Comment.destroy_changeset(comment))
-    |> Multi.update_all(:image, where(Image, id: ^comment.image_id), inc: [comments_count: -1])
-    |> Multi.transact()
-    |> case do
-      {:ok, %{comment: destroyed_comment}} -> {:ok, reindex_comment(destroyed_comment)}
-      {:error, _step, reason, _changes} -> {:error, reason}
-    end
-  end
-
   @doc """
   Builds the blank comment changeset used while assembling an image page.
 

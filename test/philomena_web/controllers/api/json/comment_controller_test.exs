@@ -1,6 +1,7 @@
 defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
+  import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
@@ -63,7 +64,9 @@ defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
       comment = comment_fixture(image, user, %{"body" => "Rule-breaking comment"})
 
       {:ok, _} =
-        Comments.hide_comment_for_fixture(comment, %{"deletion_reason" => "spam"}, moderator)
+        Comments.hide_comment(actor(moderator), image.id, comment.id, %{
+          "deletion_reason" => "spam"
+        })
 
       conn = get(conn, ~p"/api/v1/json/comments/#{comment.id}")
 
@@ -76,7 +79,9 @@ defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
       comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "Hidden body"})
 
       {:ok, _} =
-        Comments.hide_comment_for_fixture(comment, %{"deletion_reason" => "spam"}, moderator)
+        Comments.hide_comment(actor(moderator), image.id, comment.id, %{
+          "deletion_reason" => "spam"
+        })
 
       conn =
         get(
@@ -92,7 +97,7 @@ defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
       image = image_fixture()
       comment = comment_fixture(image, nil)
 
-      {:ok, _} = Comments.destroy_comment_for_fixture(comment)
+      {:ok, _} = Comments.destroy_comment(actor(admin_user_fixture()), image.id, comment.id)
 
       conn = get(conn, ~p"/api/v1/json/comments/#{comment.id}")
 

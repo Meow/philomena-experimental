@@ -1,6 +1,7 @@
 defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
+  import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
@@ -12,10 +13,11 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
     comment = comment_fixture(image)
 
     {:ok, comment} =
-      Comments.hide_comment_for_fixture(
-        comment,
-        %{"deletion_reason" => "Spam"},
-        moderator_user_fixture()
+      Comments.hide_comment(
+        actor(moderator_user_fixture()),
+        image.id,
+        comment.id,
+        %{"deletion_reason" => "Spam"}
       )
 
     comment
