@@ -213,7 +213,7 @@ defmodule Philomena.CommentsTest do
         |> Repo.update!()
 
       hidden_image = image_fixture(hidden_from_users: true)
-      parent_hidden_comment = comment_fixture(hidden_image)
+      parent_hidden_comment = comment_fixture(hidden_image, moderator)
 
       destroyed_comment =
         visible_image

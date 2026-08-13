@@ -41,8 +41,8 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentControllerTest do
       hidden_image = image_fixture(hidden_from_users: true)
 
       _visible = comment_fixture(image, nil, %{"body" => "chartreuse llama"})
-      _on_hidden = comment_fixture(hidden_image, nil, %{"body" => "chartreuse vicuna"})
-      hidden = comment_fixture(image, nil, %{"body" => "chartreuse guanaco"})
+      _on_hidden = comment_fixture(hidden_image, moderator, %{"body" => "chartreuse vicuna"})
+      hidden = comment_fixture(image, moderator, %{"body" => "chartreuse guanaco"})
 
       {:ok, _} =
         Comments.hide_comment(actor(moderator), image.id, hidden.id, %{

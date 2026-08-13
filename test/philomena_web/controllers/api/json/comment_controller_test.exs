@@ -106,7 +106,7 @@ defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
 
     test "returns 403 for a comment on a hidden image", %{conn: conn} do
       image = image_fixture(hidden_from_users: true)
-      comment = comment_fixture(image, nil)
+      comment = comment_fixture(image, moderator_user_fixture())
 
       conn = get(conn, ~p"/api/v1/json/comments/#{comment.id}")
 
@@ -117,7 +117,7 @@ defmodule PhilomenaWeb.Api.Json.CommentControllerTest do
          %{conn: conn} do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
-      comment = comment_fixture(image, confirmed_user_fixture(), %{"body" => "Hidden image body"})
+      comment = comment_fixture(image, moderator, %{"body" => "Hidden image body"})
 
       conn =
         get(

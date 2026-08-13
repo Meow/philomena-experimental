@@ -148,12 +148,6 @@ defmodule Philomena.Comments do
     )
   end
 
-  @doc false
-  @spec create_comment_for_fixture(Image.t(), Actor.t(), map()) ::
-          {:ok, map()} | {:error, Multi.name(), term(), map()}
-  def create_comment_for_fixture(%Image{} = image, %Actor{} = actor, attrs \\ %{}),
-    do: persist_comment(image, actor, attrs)
-
   @doc """
   Builds the blank comment changeset used while assembling an image page.
 

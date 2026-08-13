@@ -4230,8 +4230,7 @@ defmodule Philomena.ImagesTest do
 
       user = %{user | settings: settings}
       image = image_fixture()
-      author = confirmed_user_fixture()
-      for _ <- 1..3, do: comment_fixture(image, author)
+      for _ <- 1..3, do: comment_fixture(image, confirmed_user_fixture())
 
       page = Images.load_image_page(actor(user), image, page: 1, page_size: 2)
 
@@ -4242,8 +4241,7 @@ defmodule Philomena.ImagesTest do
     test "a viewer without the jump preference stays on the requested page" do
       user = confirmed_user_fixture()
       image = image_fixture()
-      author = confirmed_user_fixture()
-      for _ <- 1..3, do: comment_fixture(image, author)
+      for _ <- 1..3, do: comment_fixture(image, confirmed_user_fixture())
 
       page = Images.load_image_page(actor(user), image, page: 1, page_size: 2)
 

@@ -35,10 +35,22 @@ defmodule Philomena.AttributionFixtures do
     attrs = attribution(user)
 
     %Philomena.Attribution.Actor{
-      ip: attrs[:ip],
+      ip: Keyword.get(opts, :ip, attrs[:ip]),
       fingerprint: Keyword.get(opts, :fingerprint, attrs[:fingerprint]),
       user: attrs[:user],
       ban: Keyword.get(opts, :ban)
+    }
+  end
+
+  @doc """
+  Generates a random IP address for use in fixtures which track rate limiting.
+  """
+  def random_ip do
+    ip = List.to_tuple(for <<u::integer-size(16) <- :crypto.strong_rand_bytes(16)>>, do: u)
+
+    %Postgrex.INET{
+      address: ip,
+      netmask: 128
     }
   end
 

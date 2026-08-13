@@ -55,7 +55,7 @@ defmodule PhilomenaWeb.Image.CommentControllerTest do
 
     test "redirects to / for a comment on a hidden image", %{conn: conn} do
       image = image_fixture(hidden_from_users: true)
-      comment = comment_fixture(image)
+      comment = comment_fixture(image, moderator_user_fixture())
 
       conn = get(conn, ~p"/images/#{image}/comments/#{comment}")
 

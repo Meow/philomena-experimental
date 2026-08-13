@@ -131,7 +131,7 @@ defmodule Philomena.ProfilesTest do
     test "excludes a comment on a hidden image from recent_comments" do
       user = confirmed_user_fixture()
       hidden_image = image_fixture(%{hidden_from_users: true})
-      comment = comment_fixture(hidden_image, user)
+      comment = comment_fixture(hidden_image, moderator_user_fixture())
 
       SearchHelpers.reindex_all!(Image)
       SearchHelpers.reindex_all!(Comment)
