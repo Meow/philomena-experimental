@@ -20,13 +20,15 @@ defmodule Philomena.Channels.Channel do
     field :last_fetched_at, :utc_datetime
     field :thumbnail_url, :string, default: ""
 
+    field :artist_tag, :string, virtual: true
+
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
 
   @doc false
-  def changeset(channel, attrs) do
+  def changeset(channel, attrs \\ %{}) do
     channel
-    |> cast(attrs, [:type, :short_name])
+    |> cast(attrs, [:type, :short_name, :artist_tag])
     |> validate_required([:type, :short_name])
     |> validate_inclusion(:type, ["PicartoChannel", "PiczelChannel"])
   end
@@ -44,9 +46,16 @@ defmodule Philomena.Channels.Channel do
   end
 
   @doc false
-  def artist_tag_changeset(channel, tag) do
-    tag_id = Map.get(tag || %{}, :id)
+  def artist_tag_name(changeset) do
+    fetch_change(changeset, :artist_tag)
+  end
 
-    change(channel, associated_artist_tag_id: tag_id)
+  @doc false
+  def artist_tag_changeset(changeset, name, tag) do
+    if not is_nil(name) and is_nil(tag) do
+      add_error(changeset, :artist_tag, "is invalid")
+    else
+      put_change(changeset, :associated_artist_tag, tag)
+    end
   end
 end

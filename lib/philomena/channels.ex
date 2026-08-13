@@ -18,53 +18,20 @@ defmodule Philomena.Channels do
   use Philomena.Subscriptions,
     id_name: :channel_id
 
-  @spec insert_channel(map()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
-  defp insert_channel(attrs) do
-    %Channel{}
-    |> update_artist_tag(attrs)
-    |> Channel.changeset(attrs)
-    |> Repo.insert()
-  end
+  defp change_channel(%Channel{} = channel, attrs) do
+    changeset = Channel.changeset(channel, attrs)
 
-  # Updates a channel.
-  @spec update_channel(Channel.t(), map()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
-  defp update_channel(%Channel{} = channel, attrs) do
-    channel
-    |> update_artist_tag(attrs)
-    |> Channel.changeset(attrs)
-    |> Repo.update()
-  end
+    case Channel.artist_tag_name(changeset) do
+      {:ok, nil = artist_tag_name} ->
+        Channel.artist_tag_changeset(changeset, artist_tag_name, nil)
 
-  # Adds the artist tag from the `"artist_tag"` tag name attribute.
-  defp update_artist_tag(%Channel{} = channel, attrs) do
-    tag =
-      attrs
-      |> Map.get("artist_tag", "")
-      |> Tags.get_tag_by_name()
+      {:ok, artist_tag_name} ->
+        tag = Tags.get_tag_by_name(artist_tag_name)
+        Channel.artist_tag_changeset(changeset, artist_tag_name, tag)
 
-    Channel.artist_tag_changeset(channel, tag)
-  end
-
-  # Deletes a channel.
-  @spec delete_channel(Channel.t()) :: {:ok, Channel.t()} | {:error, Ecto.Changeset.t()}
-  defp delete_channel(%Channel{} = channel) do
-    Repo.delete(channel)
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking channel changes.
-  defp change_channel(%Channel{} = channel) do
-    Channel.changeset(channel, %{})
-  end
-
-  defp list_channels(show_nsfw?, params, pagination) do
-    Channel
-    |> maybe_show_nsfw(show_nsfw?)
-    |> where([c], not is_nil(c.last_fetched_at))
-    |> order_by(desc: :is_live, asc: :title)
-    |> join(:left, [c], _ in assoc(c, :associated_artist_tag))
-    |> preload([_c, t], associated_artist_tag: t)
-    |> maybe_search(params)
-    |> Repo.paginate(pagination)
+      _error ->
+        changeset
+    end
   end
 
   defp clear_notification_for(%Channel{} = channel, user) do
@@ -72,28 +39,27 @@ defmodule Philomena.Channels do
     :ok
   end
 
-  @spec load_channel(Actor.t(), Loader.integer_id(), atom()) ::
-          Loader.fetch_and_authorize_result(Channel.t())
   defp load_channel(actor, id, action) do
     Loader.fetch_and_authorize(Channel, actor, action, id)
   end
+
+  # TODO: manual parameter parsing. Move to changeset.
 
   defp maybe_search(query, %{"cq" => cq}) when is_binary(cq) and cq != "" do
     title_query = "#{cq}%"
     tag_query = "%#{cq}%"
 
-    where(
-      query,
-      [c, t],
-      ilike(c.title, ^title_query) or ilike(c.short_name, ^title_query) or
-        ilike(t.name, ^tag_query)
-    )
+    from channel in query,
+      left_join: tag in assoc(channel, :associated_artist_tag),
+      where:
+        ilike(channel.title, ^title_query) or ilike(channel.short_name, ^title_query) or
+          ilike(tag.name, ^tag_query)
   end
 
   defp maybe_search(query, _params), do: query
 
   defp maybe_show_nsfw(query, true), do: query
-  defp maybe_show_nsfw(query, _falsy), do: where(query, [c], c.nsfw == false)
+  defp maybe_show_nsfw(query, _falsy), do: where(query, nsfw: false)
 
   @doc """
   Updates all tracked channels for which an automatic fetch scheme is known.
@@ -128,7 +94,15 @@ defmodule Philomena.Channels do
   @spec load_channels(Actor.t(), boolean(), map(), Repo.pagination_params()) ::
           {Scrivener.Page.t(), %{optional(integer()) => true}}
   def load_channels(%Actor{} = actor, show_nsfw?, params, pagination) do
-    channels = list_channels(show_nsfw?, params, pagination)
+    channels =
+      Channel
+      |> maybe_show_nsfw(show_nsfw?)
+      |> where([c], not is_nil(c.last_fetched_at))
+      |> order_by(desc: :is_live, asc: :title)
+      |> preload([:associated_artist_tag])
+      |> maybe_search(params)
+      |> Repo.paginate(pagination)
+
     {channels, subscriptions(channels, actor.user)}
   end
 
@@ -199,7 +173,7 @@ defmodule Philomena.Channels do
   def new_channel(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Channel) do
-      {:ok, change_channel(%Channel{})}
+      {:ok, Channel.changeset(%Channel{})}
     end
   end
 
@@ -225,7 +199,9 @@ defmodule Philomena.Channels do
   def create_channel(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Channel) do
-      insert_channel(attrs)
+      %Channel{}
+      |> change_channel(attrs)
+      |> Repo.insert()
     end
   end
 
@@ -251,7 +227,7 @@ defmodule Philomena.Channels do
   def load_channel_for_edit(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, channel} <- load_channel(actor, id, :edit) do
-      {:ok, {channel, change_channel(channel)}}
+      {:ok, {channel, Channel.changeset(channel)}}
     end
   end
 
@@ -282,7 +258,9 @@ defmodule Philomena.Channels do
   def update_channel(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, channel} <- load_channel(actor, id, :update) do
-      update_channel(channel, attrs)
+      channel
+      |> change_channel(attrs)
+      |> Repo.update()
     end
   end
 
@@ -322,7 +300,7 @@ defmodule Philomena.Channels do
   def delete_channel(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, channel} <- load_channel(actor, id, :delete) do
-      delete_channel(channel)
+      Repo.delete(channel)
     end
   end
 
