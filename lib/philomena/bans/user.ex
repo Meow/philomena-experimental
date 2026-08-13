@@ -22,7 +22,7 @@ defmodule Philomena.Bans.User do
   end
 
   @doc false
-  def changeset(user_ban, attrs) do
+  def changeset(user_ban, attrs \\ %{}) do
     user_ban
     |> cast(attrs, [:reason, :note, :enabled, :override_ip_ban, :user_id, :valid_until])
     |> put_ban_id("U")

@@ -21,7 +21,7 @@ defmodule Philomena.Bans.Subnet do
   end
 
   @doc false
-  def changeset(subnet_ban, attrs) do
+  def changeset(subnet_ban, attrs \\ %{}) do
     subnet_ban
     |> cast(attrs, [:reason, :note, :enabled, :specification, :valid_until])
     |> put_ban_id("S")
