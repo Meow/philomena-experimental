@@ -7,9 +7,7 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentController do
     actor = conn.assigns.actor
     filter = conn.assigns.current_filter
 
-    case Comments.search_comments(actor, filter, params["q"], conn.assigns.pagination,
-           preload: [:image, :user]
-         ) do
+    case Comments.search_comments(actor, filter, params["q"], conn.assigns.pagination) do
       {:ok, comments} ->
         conn
         |> put_view(PhilomenaWeb.Api.Json.CommentView)

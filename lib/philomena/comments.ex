@@ -121,9 +121,8 @@ defmodule Philomena.Comments do
   @doc """
   Loads a globally addressed comment visible to `actor`.
 
-  IDs are parsed safely. Destroyed comments and missing IDs are not-found. The
-  parent image is authorized alongside the comment, so either forbidden resource
-  returns unauthorized.
+  Destroyed comments and missing IDs are not-found. The parent image is authorized
+  alongside the comment, so either forbidden resource returns unauthorized.
 
   ## Examples
 
@@ -149,7 +148,7 @@ defmodule Philomena.Comments do
 
   Hidden images, hidden or destroyed comments, and approval states are filtered
   independently through the actor's abilities. A signed-in author may see their
-  own unapproved comments. `opts[:preload]` overrides the display associations.
+  own unapproved comments.
 
   ## Examples
 
@@ -164,19 +163,16 @@ defmodule Philomena.Comments do
           Actor.t(),
           Filter.t(),
           String.t() | nil,
-          Search.pagination_params(),
-          keyword()
+          Search.pagination_params()
         ) ::
           {:ok, Scrivener.Page.t(Comment.t())} | {:error, String.t()}
-  def search_comments(%Actor{} = actor, %Filter{} = filter, query_string, pagination, opts \\ []) do
-    preloads = Keyword.get(opts, :preload, @preloads)
-
+  def search_comments(%Actor{} = actor, %Filter{} = filter, query_string, pagination) do
     case Query.compile(query_string, actor: actor) do
       {:ok, query} ->
         results =
           actor
           |> comment_search_definition(filter, query, pagination: pagination)
-          |> Search.search_records(preload(Comment, ^preloads))
+          |> Search.search_records(preload(Comment, ^@preloads))
 
         {:ok, results}
 
@@ -265,24 +261,15 @@ defmodule Philomena.Comments do
           {:ok, {Image.t(), pos_integer()}} | {:error, :unauthorized | :not_found}
   def find_comment_page(%Actor{} = actor, image_id, comment_id, pagination) do
     with {:ok, image} <- load_image(actor, image_id, :index),
-         {:ok, comment_id} <- IntegerId.parse(comment_id),
-         {:ok, comment} <-
-           Comment
-           |> where(image_id: ^image.id)
-           |> Visibility.visible_comments(actor)
-           |> where([comment], comment.id == ^comment_id)
-           |> Loader.one_and_authorize(actor, :show) do
+         {:ok, comment} <- load_image_comment(actor, image, comment_id, :show, []) do
       offset =
         Comment
         |> where(image_id: ^image.id)
         |> Visibility.visible_comments(actor)
         |> filter_direction(comment, actor.user)
-        |> Repo.aggregate(:count, :id)
+        |> Repo.aggregate(:count)
 
       {:ok, {image, div(offset, pagination[:page_size]) + 1}}
-    else
-      :error -> {:error, :not_found}
-      error -> error
     end
   end
 
@@ -354,7 +341,7 @@ defmodule Philomena.Comments do
       {:ok, {%Image{}, %Comment{}}}
 
       iex> create_comment(actor, image_id, %{"body" => ""})
-      {:error, {:creation_failed, %Image{}}}
+      {:error, {%Image{}, %Ecto.Changeset{}}}
 
       iex> create_comment(banned_actor, image_id, %{"body" => "Hi"})
       {:error, :ban}
@@ -362,9 +349,9 @@ defmodule Philomena.Comments do
   """
   @spec create_comment(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Comment.t()}
-          | {:error, {:creation_failed, Image.t()}}
+          | {:error, {Image.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :forced_filter | :rate_limited}
-  def create_comment(%Actor{user: user} = actor, image_id, attrs) do
+  def create_comment(%Actor{user: creator} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
@@ -383,10 +370,10 @@ defmodule Philomena.Comments do
       |> Multi.insert(:comment, comment_changeset)
       |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
       |> Multi.run(:notification, &notify_comment/2)
-      |> Images.maybe_subscribe_on(:image, user, :watch_on_reply)
+      |> Images.maybe_subscribe_on(:image, creator, :watch_on_reply)
       |> Images.put_reindex_image(:image)
       |> put_approval_report(approved?)
-      |> put_increment_comment_count(user, approved?)
+      |> put_increment_comment_count(creator, approved?)
       |> put_reindex_comment(:comment)
       |> Multi.transact()
       |> case do
@@ -395,9 +382,8 @@ defmodule Philomena.Comments do
           broadcast_comment("comment:create", comment)
           {:ok, comment}
 
-        _error ->
-          # TODO: return the comment changeset.
-          {:error, {:creation_failed, image}}
+        {:error, :comment, changeset, _changes} ->
+          {:error, {image, changeset}}
       end
     end
   end
@@ -434,7 +420,7 @@ defmodule Philomena.Comments do
   Loads an editable comment and changeset through its parent image.
 
   Write access is checked before image authorization, forced-filter enforcement,
-  and comment authorization, matching the update path exactly.
+  and comment authorization.
 
   ## Examples
 
@@ -463,11 +449,11 @@ defmodule Philomena.Comments do
   @doc """
   Updates a parent-scoped comment on behalf of `actor`.
 
-  The write-access, parent permission, and forced-filter prerequisites match the
-  edit form. A successful transaction records the prior version. Reporting,
-  indexing, and the firehose broadcast run after commit. Validation returns a
-  `CommentForm` preserving the loaded comment. On success, the image is returned
-  for the caller to reuse.
+  Write access is checked before image authorization, forced-filter enforcement,
+  and comment authorization. A successful transaction records the prior version
+  Reporting, indexing, and the firehose broadcast run after commit. Validation
+  returns a `CommentForm` preserving the loaded comment. On success, the image
+  is returned for the caller to reuse.
 
   ## Examples
 
@@ -571,7 +557,6 @@ defmodule Philomena.Comments do
   Hides a comment scoped through its parent image.
 
   The comment update, report closure, and moderation log commit atomically.
-  Report and comment indexing run after commit.
 
   ## Examples
 
@@ -603,16 +588,14 @@ defmodule Philomena.Comments do
         {:ok, %{comment: comment}} ->
           {:ok, comment}
 
-        {:error, _step, reason, _changes} ->
-          {:error, reason}
+        {:error, :comment, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
 
   @doc """
   Restores a comment through its parent image.
-
-  The restore and moderation log commit together. Indexing runs after commit.
 
   ## Examples
 
@@ -642,8 +625,8 @@ defmodule Philomena.Comments do
         {:ok, %{comment: comment}} ->
           {:ok, comment}
 
-        {:error, _step, reason, _changes} ->
-          {:error, reason}
+        {:error, :comment, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -652,7 +635,7 @@ defmodule Philomena.Comments do
   Destroys a comment's content through its parent image.
 
   Authorization uses the distinct `:delete` action. Content removal, image
-  counters, and the moderation log commit together. Indexing runs after commit.
+  counters, and the moderation log commit together.
 
   ## Examples
 
@@ -669,11 +652,12 @@ defmodule Philomena.Comments do
       image_query = from(i in Image, where: i.id == ^comment.image_id)
 
       Multi.new()
+      |> Multi.lock_one(:image, image_query)
       |> Multi.lock_one(:locked_comment, comment_query)
       |> Multi.update(:comment, fn %{locked_comment: comment} ->
         Comment.destroy_changeset(comment)
       end)
-      |> Multi.update_all(:image, image_query, inc: [comments_count: -1])
+      |> Multi.update_all(:update_image, image_query, inc: [comments_count: -1])
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -681,17 +665,16 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Destroyed comment on image #{comment.image_id}"
       )
+      |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
+      |> Images.put_reindex_image(:image)
       |> put_reindex_comment(:comment)
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
-          # TODO: reindex the image
-          UserStatistics.increment(comment.user_id, :comments_count, -1)
-
           {:ok, comment}
 
-        {:error, _step, reason, _changes} ->
-          {:error, reason}
+        {:error, :comment, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -728,16 +711,15 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Approved comment on image #{comment.image_id}"
       )
+      |> UserStatistics.put_increment(comment.user_id, :comments_count, 1)
       |> put_reindex_comment(:comment)
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
-          UserStatistics.increment(comment.user_id, :comments_count)
-
           {:ok, comment}
 
-        {:error, _step, reason, _changes} ->
-          {:error, reason}
+        {:error, :comment, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -746,8 +728,7 @@ defmodule Philomena.Comments do
   Hides and destroys an already loaded user comment for account erasure.
 
   This internal function does not perform any request authorization. It
-  closes reports and updates counters in one transaction, then reindexes
-  after commit.
+  closes reports and updates counters in a single transaction.
 
   ## Examples
 
@@ -762,21 +743,21 @@ defmodule Philomena.Comments do
     image_query = from(i in Image, where: i.id == ^comment.image_id)
 
     Multi.new()
+    |> Multi.lock_one(:image, image_query)
     |> Multi.lock_one(:locked_comment, comment_query)
     |> Multi.update(:comment, fn %{locked_comment: comment} ->
       comment
       |> Comment.hide_changeset(%{deletion_reason: "Site abuse"}, moderator)
       |> Comment.destroy_changeset()
     end)
-    |> Multi.update_all(:image, image_query, inc: [comments_count: -1])
+    |> Multi.update_all(:update_image, image_query, inc: [comments_count: -1])
     |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
+    |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
+    |> Images.put_reindex_image(:image)
     |> put_reindex_comment(:comment)
     |> Multi.transact()
     |> case do
       {:ok, %{comment: comment}} ->
-        # TODO: reindex the image
-        UserStatistics.increment(comment.user_id, :comments_count, -1)
-
         {:ok, comment}
 
       {:error, :comment, %{errors: [destroyed_content: {"has already been destroyed", []}]},

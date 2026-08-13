@@ -984,7 +984,7 @@ defmodule Philomena.CommentsTest do
     end
 
     test "an empty body is a creation failure, inserting nothing", %{image: image} do
-      assert {:error, {:creation_failed, _image}} =
+      assert {:error, {_image, _changeset}} =
                Comments.create_comment(actor(confirmed_user_fixture()), image.id, %{"body" => ""})
 
       # The insert and its image comment-count bump are rolled back together.
