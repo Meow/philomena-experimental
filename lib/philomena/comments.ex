@@ -38,45 +38,8 @@ defmodule Philomena.Comments do
   @typedoc "A normalized request-facing failure."
   @type request_error :: :ban | :unauthorized | :not_found | :forced_filter
 
-  defp persist_comment(%Image{} = image, %Actor{} = actor, attrs) do
-    comment =
-      image
-      |> Ecto.build_assoc(:comments)
-      |> Comment.creation_changeset(attrs, actor)
-
-    image_query = where(Image, id: ^image.id)
-
-    Multi.new()
-    |> Multi.lock_one(:image, image_query)
-    |> Multi.insert(:comment, comment)
-    |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
-    |> Multi.run(:notification, &notify_comment/2)
-    |> Images.maybe_subscribe_on(:image, actor.user, :watch_on_reply)
-    |> Images.put_reindex_image(:image)
-    |> put_reindex_comment(:comment)
-    |> Multi.transact()
-  end
-
   defp notify_comment(_repo, %{image: image, comment: comment}) do
     Notifications.broadcast_image_comment(comment.user, image, comment)
-  end
-
-  defp persist_comment_update(%Comment{} = comment, %Actor{} = actor, attrs) do
-    now = DateTime.utc_now(:second)
-
-    comment_query =
-      Comment
-      |> where(id: ^comment.id)
-      |> preload(:user)
-
-    Multi.new()
-    |> Multi.lock_one(:original_comment, comment_query)
-    |> Multi.update(:comment, fn %{original_comment: original_comment} ->
-      Comment.changeset(original_comment, attrs, now)
-    end)
-    |> Versions.record_edit(:version, :original_comment, :comment, actor)
-    |> put_reindex_comment(:comment)
-    |> Multi.transact()
   end
 
   defp put_reindex_comment(%Multi{} = multi, step) do
@@ -422,20 +385,36 @@ defmodule Philomena.Comments do
           {:ok, Comment.t()}
           | {:error, {:creation_failed, Image.t()}}
           | {:error, :ban | :unauthorized | :forced_filter | :rate_limited}
-  def create_comment(%Actor{} = actor, image_id, params) do
+  def create_comment(%Actor{user: user} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
          :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
-      case persist_comment(image, actor, params) do
+      image_query = where(Image, id: ^image.id)
+
+      comment_changeset =
+        image
+        |> Ecto.build_assoc(:comments)
+        |> Comment.creation_changeset(attrs, actor)
+
+      Multi.new()
+      |> Multi.lock_one(:image, image_query)
+      |> Multi.insert(:comment, comment_changeset)
+      |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
+      |> Multi.run(:notification, &notify_comment/2)
+      |> Images.maybe_subscribe_on(:image, user, :watch_on_reply)
+      |> Images.put_reindex_image(:image)
+      |> put_reindex_comment(:comment)
+      |> Multi.transact()
+      |> case do
         {:ok, %{comment: comment}} ->
-          Images.reindex_image(image)
           record_comment_creation(actor, comment)
           RateLimiter.record_action(actor, :comment_create, @comment_create_window)
           broadcast_comment("comment:create", comment)
           {:ok, comment}
 
         _error ->
+          # TODO: return the comment changeset.
           {:error, {:creation_failed, image}}
       end
     end
@@ -522,16 +501,31 @@ defmodule Philomena.Comments do
           actor :: Actor.t(),
           image_id :: IntegerId.integer_id(),
           comment_id :: IntegerId.integer_id(),
-          params :: map() | nil
+          attrs :: map() | nil
         ) ::
           {:ok, {Image.t(), Comment.t()}} | {:error, CommentForm.t() | request_error()}
-  def update_comment(%Actor{} = actor, image_id, comment_id, params) do
+  def update_comment(%Actor{} = actor, image_id, comment_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
          {:ok, comment} <-
            load_image_comment(actor, image, comment_id, :update, @display_preloads) do
-      case persist_comment_update(comment, actor, params || %{}) do
+      now = DateTime.utc_now(:second)
+
+      comment_query =
+        Comment
+        |> where(id: ^comment.id)
+        |> preload(:user)
+
+      Multi.new()
+      |> Multi.lock_one(:original_comment, comment_query)
+      |> Multi.update(:comment, fn %{original_comment: original_comment} ->
+        Comment.changeset(original_comment, attrs, now)
+      end)
+      |> Versions.record_edit(:version, :original_comment, :comment, actor)
+      |> put_reindex_comment(:comment)
+      |> Multi.transact()
+      |> case do
         {:ok, %{comment: comment}} ->
           report_non_approved(comment)
           broadcast_comment("comment:update", comment)
