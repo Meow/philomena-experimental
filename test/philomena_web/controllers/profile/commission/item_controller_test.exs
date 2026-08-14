@@ -38,17 +38,15 @@ defmodule PhilomenaWeb.Profile.Commission.ItemControllerTest do
       assert response =~ "New Item on Listing"
     end
 
-    test "redirects a moderator with the authorization flash", %{conn: conn} do
-      # Commission item abilities have no moderator/admin bypass: they are
-      # strictly owner-only.
+    test "renders the form for a moderator", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       artist = confirmed_user_fixture()
       commission_fixture(artist)
 
-      conn = get(conn, ~p"/profiles/#{artist}/commission/items/new")
+      response = html_response(get(conn, ~p"/profiles/#{artist}/commission/items/new"), 200)
 
-      assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+      assert response =~ "New Commission Item - Derpibooru"
+      assert response =~ "New Item on Listing"
     end
 
     test "redirects with the not-found flash when no commission exists", %{conn: conn} do

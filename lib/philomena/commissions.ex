@@ -97,46 +97,17 @@ defmodule Philomena.Commissions do
     }
   end
 
-  defp delete_commission_record(%Commission{} = commission, %User{} = closing_user) do
-    Multi.new()
-    |> Reports.put_close_reports(:reports, closing_user, commission_id: commission.id)
-    |> Multi.delete(:commission, commission)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{commission: commission}} ->
-        {:ok, commission}
-
-      {:error, _step, reason, _changes} ->
-        {:error, reason}
-    end
-  end
-
-  defp item_for_commission(actor, commission, action, id) do
+  defp item_for_commission(%Commission{} = commission, id) do
     Item
     |> where(commission_id: ^commission.id)
     |> preload(commission: :user)
-    |> Loader.fetch_and_authorize(actor, action, id)
+    |> Loader.fetch(id)
   end
 
   defp new_item(%Commission{} = commission) do
     commission
     |> Ecto.build_assoc(:items)
     |> Map.put(:commission, commission)
-  end
-
-  defp load_new_item(actor, slug, action) do
-    with {:ok, {user, commission}} <- load_commission(actor, slug, :show),
-         item = new_item(commission),
-         :ok <- authorize(actor, action, item) do
-      {:ok, {user, commission, item}}
-    end
-  end
-
-  defp load_existing_item(actor, slug, id, action) do
-    with {:ok, {user, commission}} <- load_commission(actor, slug, :show),
-         {:ok, item} <- item_for_commission(actor, commission, action, id) do
-      {:ok, {user, commission, item}}
-    end
   end
 
   defp search_directory(params, pagination) do
@@ -347,16 +318,20 @@ defmodule Philomena.Commissions do
   @spec delete_commission(Actor.t(), String.t()) ::
           {:ok, Commission.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links | term()}
-  def delete_commission(%Actor{user: %User{} = closing_user} = actor, slug) do
+  def delete_commission(%Actor{user: closing_user} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, {_user, commission}} <- load_manageable_commission(actor, slug, :delete) do
-      delete_commission_record(commission, closing_user)
-    end
-  end
+      Multi.new()
+      |> Reports.put_close_reports(:reports, closing_user, commission_id: commission.id)
+      |> Multi.delete(:commission, commission)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{commission: commission}} ->
+          {:ok, commission}
 
-  def delete_commission(%Actor{} = actor, _slug) do
-    with :ok <- verify_write_access(actor) do
-      {:error, :unauthorized}
+        {:error, _step, reason, _changes} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -364,8 +339,8 @@ defmodule Philomena.Commissions do
   Builds a new item changeset for the commission belonging to the active profile
   named by `slug`.
 
-  Commission items are owner-only, including for staff. Write access is checked
-  before the profile and commission are loaded.
+  Creating commission items requires permission to edit the commission. Write access
+  is checked before the profile and commission are loaded.
 
   ## Examples
 
@@ -377,8 +352,8 @@ defmodule Philomena.Commissions do
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def new_item(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, _commission, item}} <- load_new_item(actor, slug, :new) do
-      {:ok, Item.changeset(item)}
+         {:ok, {_user, commission}} <- load_commission(actor, slug, :new_item) do
+      {:ok, Item.changeset(new_item(commission))}
     end
   end
 
@@ -401,7 +376,7 @@ defmodule Philomena.Commissions do
           | {:error, :ban | :unauthorized | :not_found}
   def create_item(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission, _item}} <- load_new_item(actor, slug, :create) do
+         {:ok, {_user, commission}} <- load_commission(actor, slug, :create_item) do
       changeset =
         commission
         |> new_item()
@@ -430,7 +405,7 @@ defmodule Philomena.Commissions do
   Loads the item named by `id` for editing under the commission belonging to
   the active profile named by `slug`.
 
-  The item query is constrained by the route commission before authorization.
+  The item lookup is constrained by the commission before authorization.
   Malformed, absent, and wrong-commission IDs are all not found.
 
   ## Examples
@@ -446,7 +421,8 @@ defmodule Philomena.Commissions do
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_item_for_edit(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, _commission, item}} <- load_existing_item(actor, slug, id, :edit) do
+         {:ok, {_user, commission}} <- load_commission(actor, slug, :edit_item),
+         {:ok, item} <- item_for_commission(commission, id) do
       {:ok, Item.changeset(item)}
     end
   end
@@ -455,7 +431,8 @@ defmodule Philomena.Commissions do
   Updates the item named by `id` under the commission belonging to the active
   profile named by `slug`.
 
-  Parent scoping and authorization match `load_item_for_edit/3`. Validation
+  The item lookup is constrained by the commission before authorization.
+  Malformed, absent, and wrong-commission IDs are all not found. Validation
   failures return an `m:Ecto.Changeset`.
 
   ## Examples
@@ -470,7 +447,8 @@ defmodule Philomena.Commissions do
           | {:error, :ban | :unauthorized | :not_found}
   def update_item(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, _commission, item}} <- load_existing_item(actor, slug, id, :update) do
+         {:ok, {_user, commission}} <- load_commission(actor, slug, :update_item),
+         {:ok, item} <- item_for_commission(commission, id) do
       item
       |> Item.changeset(attrs)
       |> Repo.update()
@@ -493,7 +471,8 @@ defmodule Philomena.Commissions do
           {:ok, Item.t()} | {:error, :ban | :unauthorized | :not_found | term()}
   def delete_item(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, _commission, item}} <- load_existing_item(actor, slug, id, :delete) do
+         {:ok, {_user, commission}} <- load_commission(actor, slug, :delete_item),
+         {:ok, item} <- item_for_commission(commission, id) do
       counter_query =
         Commission
         |> where(id: ^item.commission_id)

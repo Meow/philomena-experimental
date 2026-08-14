@@ -307,12 +307,12 @@ defmodule Philomena.CommissionsTest do
       assert item.commission.id == commission.id
     end
 
-    test "items have no staff bypass, so moderators and admins are unauthorized" do
+    test "items can be edited by moderators and admins" do
       user = verified_user_with_link()
       commission_fixture(user)
 
       for staff <- [moderator_user_fixture(), admin_user_fixture()] do
-        assert Commissions.new_item(actor(staff), user.slug) == {:error, :unauthorized}
+        assert {:ok, _changeset} = Commissions.new_item(actor(staff), user.slug)
       end
     end
 

@@ -9,7 +9,6 @@ defimpl Canada.Can, for: Philomena.Users.User do
   alias Philomena.Channels.Channel
   alias Philomena.Comments.Comment
   alias Philomena.Commissions.Commission
-  alias Philomena.Commissions.Item
   alias Philomena.Conversations.Conversation
   alias Philomena.Conversations.Message
   alias Philomena.DnpEntries.DnpEntry
@@ -36,8 +35,18 @@ defimpl Canada.Can, for: Philomena.Users.User do
   @award_member_actions [:edit, :update, :delete]
   @badge_class_actions [:index, :new, :create]
   @badge_member_actions [:edit, :update, :update_image, :show_users]
-  @commission_management_actions [:new, :create, :edit, :update, :delete]
-  @commission_item_actions [:new, :create, :edit, :update, :delete]
+  @commission_management_actions [
+    :new,
+    :create,
+    :edit,
+    :update,
+    :delete,
+    :new_item,
+    :create_item,
+    :edit_item,
+    :update_item,
+    :delete_item
+  ]
   @conversation_class_actions [:index, :new, :create]
   @topic_moderation_actions [
     :show,
@@ -85,13 +94,6 @@ defimpl Canada.Can, for: Philomena.Users.User do
     :wipe_votes,
     :wipe
   ]
-
-  # Commission items deliberately remain owner-only, including for staff.
-  def can?(%User{id: id}, action, %Item{commission: %Commission{user_id: id}})
-      when action in @commission_item_actions,
-      do: true
-
-  def can?(%User{}, action, %Item{}) when action in @commission_item_actions, do: false
 
   # Admins can do anything
   def can?(%User{role: "admin"}, _action, _model), do: true
@@ -193,9 +195,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
       when action in @dnp_entry_member_actions,
       do: true
 
-  # Manage bans. Deletion deliberately remains admin-only via the admin rule
-  # above; context member flows authorize both the class and the loaded record.
+  # Manage bans, but not delete them
   @ban_management_actions [:index, :new, :create, :edit, :update]
+
   def can?(%User{role: "moderator"}, action, Bans.User)
       when action in @ban_management_actions,
       do: true
@@ -605,7 +607,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
       when action in [:index, :index_system, :index_own, :search, :switch, :new, :create],
       do: true
 
-  # View the assembled homepage
+  # View the homepage
   def can?(%User{}, :index, FrontPage), do: true
 
   def can?(%User{id: id}, action, %Filter{user_id: id})
@@ -626,7 +628,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{id: id}, :create_links, %User{id: id}), do: true
   def can?(%User{id: id}, :show, %ArtistLink{user_id: id}), do: true
 
-  # View the directory/listings and manage their own commission.
+  # View the directory/listings and manage their own commission
   def can?(%User{}, :index, Commission), do: true
   def can?(%User{}, :show, %Commission{}), do: true
 
