@@ -11,7 +11,7 @@ defmodule Philomena.Commissions.Directory do
   defstruct [:commissions, :changeset, :current_user]
 
   @type t :: %__MODULE__{
-          commissions: Scrivener.Page.t(Commission.t()),
+          commissions: Scrivener.Page.t(Commission.t()) | nil,
           changeset: Ecto.Changeset.t(),
           current_user: User.t() | nil
         }

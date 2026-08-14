@@ -23,30 +23,26 @@ defmodule Philomena.Galleries.QueryBuilder do
         * `asc` - Results ascending by `sf`
         * `desc` - Results descending by `sf`
 
-  Returns `{:ok, query}` with an OpenSearch query body for `Galleries` that can
-  be used with `PhilomenaQuery.Search`, or `{:error, changeset}` if the provided
-  parameters are invalid.
+  Returns `{:ok, query, query_form}` with an OpenSearch query body for `Galleries`
+  that can be used with `PhilomenaQuery.Search`, or `{:error, changeset}` if the
+  provided parameters are invalid.
   """
   @spec build_query(map()) :: {:ok, map(), QueryForm.t()} | {:error, Ecto.Changeset.t()}
   def build_query(params \\ %{}) do
-    %QueryForm{}
-    |> QueryForm.changeset(params)
-    |> Ecto.Changeset.apply_action(:create)
-    |> case do
-      {:ok, query_form} ->
-        query =
-          []
-          |> maybe_query_title(query_form)
-          |> maybe_query_creator(query_form)
-          |> maybe_query_include_image(query_form)
-          |> maybe_query_description(query_form)
-          |> combine_clauses()
-          |> apply_sort(query_form)
+    with {:ok, query_form} <-
+           %QueryForm{}
+           |> QueryForm.changeset(params)
+           |> Ecto.Changeset.apply_action(:create) do
+      query =
+        []
+        |> maybe_query_title(query_form)
+        |> maybe_query_creator(query_form)
+        |> maybe_query_include_image(query_form)
+        |> maybe_query_description(query_form)
+        |> combine_clauses()
+        |> apply_sort(query_form)
 
-        {:ok, query, query_form}
-
-      error ->
-        error
+      {:ok, query, query_form}
     end
   end
 

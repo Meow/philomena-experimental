@@ -3,17 +3,13 @@ defmodule PhilomenaWeb.CommissionController do
 
   alias Philomena.Commissions
 
-  plug PhilomenaWeb.MapParameterPlug, [param: "commission"] when action in [:index]
-
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    commission_params = Map.get(params, "commission", %{})
-
     with {:ok, directory} <-
            Commissions.load_directory(
              conn.assigns.actor,
-             commission_params,
+             params["commission"] || %{},
              conn.assigns.scrivener
            ) do
       conn

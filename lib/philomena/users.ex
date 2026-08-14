@@ -541,11 +541,12 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_profile(Actor.t(), String.t()) ::
+  @spec load_profile(Actor.t(), String.t(), list()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def load_profile(%Actor{} = actor, slug) do
+  def load_profile(%Actor{} = actor, slug, preloads \\ []) do
     User
     |> where([user], user.slug == ^slug and is_nil(user.deleted_at))
+    |> preload(^preloads)
     |> Loader.one_and_authorize(actor, :show)
   end
 

@@ -465,7 +465,7 @@ defmodule Philomena.CommissionsTest do
       assert directory.current_user == nil
     end
 
-    test "an invalid search returns an empty page and the invalid changeset" do
+    test "an invalid search returns a blank page and the invalid changeset" do
       directory_commission()
 
       assert {:ok, %Directory{} = directory} =
@@ -475,8 +475,7 @@ defmodule Philomena.CommissionsTest do
                  @pagination
                )
 
-      assert directory.commissions.entries == []
-      assert directory.commissions.total_entries == 0
+      assert directory.commissions == nil
       refute directory.changeset.valid?
     end
 

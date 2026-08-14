@@ -12,7 +12,7 @@ defmodule Philomena.Commissions do
   alias Philomena.Commissions.Directory
   alias Philomena.Commissions.Item
   alias Philomena.Commissions.QueryBuilder
-  alias Philomena.Commissions.SearchQuery
+  alias Philomena.Commissions.QueryForm
   alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.Repo
@@ -20,7 +20,7 @@ defmodule Philomena.Commissions do
   alias Philomena.Users
   alias Philomena.Users.User
 
-  @profile_preloads [:verified_links]
+  @profile_preloads [:commission, :verified_links]
   @commission_preloads [
     sheet_image: [:sources, tags: :aliases],
     user: [awards: :badge],
@@ -28,9 +28,7 @@ defmodule Philomena.Commissions do
   ]
 
   defp load_profile(actor, slug, _action) do
-    with {:ok, user} <- Users.load_profile(actor, slug) do
-      {:ok, Repo.preload(user, @profile_preloads)}
-    end
+    Users.load_profile(actor, slug, @profile_preloads)
   end
 
   defp load_profile_commission(%Actor{} = actor, %User{id: user_id}, action) do
@@ -47,7 +45,7 @@ defmodule Philomena.Commissions do
     |> Loader.fetch(id)
   end
 
-  defp load_new_commission(%Actor{} = actor, %User{} = user, action) do
+  defp new_commission(%Actor{} = actor, %User{} = user, action) do
     commission =
       user
       |> Ecto.build_assoc(:commission)
@@ -55,7 +53,7 @@ defmodule Philomena.Commissions do
 
     with :ok <- authorize(actor, action, commission) do
       cond do
-        Repo.exists?(where(Commission, user_id: ^user.id)) ->
+        not is_nil(user.commission) ->
           {:error, :unauthorized}
 
         Enum.empty?(user.verified_links) ->
@@ -71,16 +69,6 @@ defmodule Philomena.Commissions do
     commission
     |> Ecto.build_assoc(:items)
     |> Map.put(:commission, commission)
-  end
-
-  defp search_directory(params, pagination) do
-    case QueryBuilder.search_commissions(params) do
-      {:ok, commissions} ->
-        {Repo.paginate(commissions, pagination), SearchQuery.changeset(%SearchQuery{})}
-
-      {:error, commissions, changeset} ->
-        {Repo.paginate(commissions, pagination), changeset}
-    end
   end
 
   @doc """
@@ -99,15 +87,24 @@ defmodule Philomena.Commissions do
   """
   @spec load_directory(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Directory.t()} | {:error, :unauthorized}
-  def load_directory(%Actor{} = actor, params, pagination) do
+  def load_directory(%Actor{user: user} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Commission) do
-      {commissions, changeset} = search_directory(params, pagination)
+      {commissions, changeset} =
+        params
+        |> QueryBuilder.search_commissions()
+        |> case do
+          {:ok, query, query_form} ->
+            {Repo.paginate(query, pagination), QueryForm.changeset(query_form)}
+
+          {:error, changeset} ->
+            {nil, changeset}
+        end
 
       {:ok,
        %Directory{
          commissions: commissions,
          changeset: changeset,
-         current_user: Repo.preload(actor.user, :commission)
+         current_user: Repo.preload(user, @profile_preloads)
        }}
     end
   end
@@ -169,7 +166,7 @@ defmodule Philomena.Commissions do
   def new_commission(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_profile(actor, slug, :show),
-         {:ok, commission} <- load_new_commission(actor, user, :new) do
+         {:ok, commission} <- new_commission(actor, user, :new) do
       {:ok, Commission.changeset(commission)}
     end
   end
@@ -197,17 +194,12 @@ defmodule Philomena.Commissions do
   def create_commission(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_profile(actor, slug, :show),
-         {:ok, commission} <- load_new_commission(actor, user, :create) do
-      commission
-      |> Commission.changeset(attrs)
-      |> Repo.insert()
-      |> case do
-        {:ok, commission} ->
-          {:ok, Repo.preload(commission, @commission_preloads)}
-
-        error ->
-          error
-      end
+         {:ok, commission} <- new_commission(actor, user, :create),
+         {:ok, commission} <-
+           commission
+           |> Commission.changeset(attrs)
+           |> Repo.insert() do
+      {:ok, Repo.preload(commission, @commission_preloads)}
     end
   end
 
@@ -257,13 +249,6 @@ defmodule Philomena.Commissions do
       commission
       |> Commission.changeset(attrs)
       |> Repo.update()
-      |> case do
-        {:ok, commission} ->
-          {:ok, commission}
-
-        error ->
-          error
-      end
     end
   end
 
@@ -319,7 +304,10 @@ defmodule Philomena.Commissions do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_profile(actor, slug, :show),
          {:ok, commission} <- load_profile_commission(actor, user, :new_item) do
-      {:ok, Item.changeset(new_item(commission))}
+      {:ok,
+       commission
+       |> new_item()
+       |> Item.changeset()}
     end
   end
 

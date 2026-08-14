@@ -1,4 +1,4 @@
-defmodule Philomena.Commissions.SearchQuery do
+defmodule Philomena.Commissions.QueryForm do
   @moduledoc false
 
   use Ecto.Schema

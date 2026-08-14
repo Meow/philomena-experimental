@@ -27,21 +27,17 @@ defmodule Philomena.Users.QueryBuilder do
         * `asc` - Results ascending by `sf`
         * `desc` - Results descending by `sf`
 
-  Returns `{:ok, query}` with an OpenSearch query body for `Users` that can
-  be used with `PhilomenaQuery.Search`, or `{:error, changeset}` if the provided
+  Returns `{:ok, query, query_form}` with an OpenSearch query body for `Users` that
+  can be used with `PhilomenaQuery.Search`, or `{:error, changeset}` if the provided
   parameters are invalid.
   """
   @spec build_query(map()) :: {:ok, map(), QueryForm.t()} | {:error, Ecto.Changeset.t()}
   def build_query(params \\ %{}) do
-    %QueryForm{}
-    |> QueryForm.changeset(params)
-    |> Ecto.Changeset.apply_action(:create)
-    |> case do
-      {:ok, query_form} ->
-        {:ok, apply_sort(query_form.compiled_query, query_form), query_form}
-
-      error ->
-        error
+    with {:ok, query_form} <-
+           %QueryForm{}
+           |> QueryForm.changeset(params)
+           |> Ecto.Changeset.apply_action(:create) do
+      {:ok, apply_sort(query_form.compiled_query, query_form), query_form}
     end
   end
 

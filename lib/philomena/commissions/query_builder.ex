@@ -3,7 +3,7 @@ defmodule Philomena.Commissions.QueryBuilder do
 
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.Item
-  alias Philomena.Commissions.SearchQuery
+  alias Philomena.Commissions.QueryForm
   alias Philomena.UserIps.UserIp
   alias Philomena.Users.User
   import Ecto.Query
@@ -20,24 +20,23 @@ defmodule Philomena.Commissions.QueryBuilder do
       * price_min - Minimum base price
       * price_max - Maximum base price
 
-  Returns `{:ok, query}` with a queryable that can be used with Repo.paginate/2,
-  or `{:error, default_query, changeset}` if the provided parameters are invalid.
+  Returns `{:ok, query, quyery_form}` with a queryable that can be used with
+  `Repo.paginate/2`, or `{:error, changeset}` if the provided parameters are
+  invalid.
   """
   def search_commissions(params \\ %{}) do
-    %SearchQuery{}
-    |> SearchQuery.changeset(params)
-    |> Ecto.Changeset.apply_action(:create)
-    |> case do
-      {:ok, sq} ->
-        {:ok,
-         commission_search_query()
-         |> maybe_filter_price(sq)
-         |> maybe_filter_item_type(sq)
-         |> maybe_filter_categories(sq)
-         |> maybe_filter_keywords(sq)}
+    with {:ok, query_form} <-
+           %QueryForm{}
+           |> QueryForm.changeset(params)
+           |> Ecto.Changeset.apply_action(:create) do
+      query =
+        commission_search_query()
+        |> maybe_filter_price(query_form)
+        |> maybe_filter_item_type(query_form)
+        |> maybe_filter_categories(query_form)
+        |> maybe_filter_keywords(query_form)
 
-      {:error, changeset} ->
-        {:error, invalid_search_query(), changeset}
+      {:ok, query, query_form}
     end
   end
 
@@ -71,11 +70,7 @@ defmodule Philomena.Commissions.QueryBuilder do
       preload: [user: [awards: :badge], items: [example_image: [:sources, tags: :aliases]]]
   end
 
-  defp invalid_search_query do
-    where(commission_search_query(), false)
-  end
-
-  defp maybe_filter_price(query, %SearchQuery{} = sq) do
+  defp maybe_filter_price(query, %QueryForm{} = sq) do
     if not is_nil(sq.price_min) and not is_nil(sq.price_max) do
       from [commission_item: ci] in query,
         where: ci.base_price >= ^sq.price_min and ci.base_price <= ^sq.price_max
@@ -84,7 +79,7 @@ defmodule Philomena.Commissions.QueryBuilder do
     end
   end
 
-  defp maybe_filter_item_type(query, %SearchQuery{} = sq) do
+  defp maybe_filter_item_type(query, %QueryForm{} = sq) do
     if sq.item_type do
       from [commission_item: ci] in query,
         where: ci.item_type == ^sq.item_type
@@ -93,7 +88,7 @@ defmodule Philomena.Commissions.QueryBuilder do
     end
   end
 
-  defp maybe_filter_categories(query, %SearchQuery{} = sq) do
+  defp maybe_filter_categories(query, %QueryForm{} = sq) do
     if sq.category do
       from [commission: c] in query,
         where: fragment("? @> ?", c.categories, ^sq.category)
@@ -102,7 +97,7 @@ defmodule Philomena.Commissions.QueryBuilder do
     end
   end
 
-  defp maybe_filter_keywords(query, %SearchQuery{} = sq) do
+  defp maybe_filter_keywords(query, %QueryForm{} = sq) do
     if sq.keywords do
       keywords = like_sanitize(sq.keywords)
 
