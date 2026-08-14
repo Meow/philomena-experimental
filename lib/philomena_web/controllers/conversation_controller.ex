@@ -4,7 +4,6 @@ defmodule PhilomenaWeb.ConversationController do
   alias PhilomenaWeb.NotificationCountPlug
   alias PhilomenaWeb.RateLimitedResponse
   alias Philomena.Conversations
-  alias Philomena.Conversations.ConversationForm
   alias Philomena.Conversations.ConversationIndex
   alias PhilomenaWeb.MarkdownRenderer
 
@@ -49,9 +48,8 @@ defmodule PhilomenaWeb.ConversationController do
   end
 
   def new(conn, params) do
-    with {:ok, %ConversationForm{} = form} <-
-           Conversations.new_conversation(conn.assigns.actor, params["recipient"]) do
-      render(conn, "new.html", title: "New Conversation", changeset: form.changeset)
+    with {:ok, changeset} <- Conversations.new_conversation(conn.assigns.actor, params) do
+      render(conn, "new.html", title: "New Conversation", changeset: changeset)
     end
   end
 
@@ -62,13 +60,13 @@ defmodule PhilomenaWeb.ConversationController do
         |> put_flash(:info, "Conversation successfully created.")
         |> redirect(to: ~p"/conversations/#{conversation}")
 
-      {:error, %ConversationForm{} = form} ->
-        render(conn, "new.html", changeset: form.changeset)
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "new.html", changeset: changeset)
 
       {:error, :rate_limited} ->
         RateLimitedResponse.call(conn, "You may only create a conversation once every minute.")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

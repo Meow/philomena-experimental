@@ -9,7 +9,6 @@ defmodule Philomena.Conversations do
   alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Conversations.Conversation
-  alias Philomena.Conversations.ConversationForm
   alias Philomena.Conversations.ConversationIndex
   alias Philomena.Conversations.ConversationPage
   alias Philomena.Conversations.QueryBuilder
@@ -44,28 +43,6 @@ defmodule Philomena.Conversations do
     |> where(conversation_id: ^conversation.id)
     |> preload(:conversation)
     |> Loader.fetch_and_authorize(actor, action, message_id)
-  end
-
-  defp new_conversation(recipient) do
-    %Conversation{recipient: recipient, messages: [%Message{}]}
-  end
-
-  defp conversation_form(%Conversation{} = conversation, %Ecto.Changeset{} = changeset) do
-    %ConversationForm{conversation: conversation, changeset: changeset}
-  end
-
-  defp conversation_form(%Conversation{} = conversation) do
-    conversation_form(conversation, Conversation.changeset(conversation))
-  end
-
-  defp recipient_for_creation(actor, params) do
-    with %{"recipient" => recipient} when is_binary(recipient) <- params,
-         {:ok, user} <- Users.load_active_user_by_name(actor, recipient) do
-      user
-    else
-      _ ->
-        nil
-    end
   end
 
   defp report_non_approved_message(nil), do: {:ok, nil}
@@ -199,30 +176,26 @@ defmodule Philomena.Conversations do
   ## Examples
 
       iex> new_conversation(actor, "Recipient")
-      {:ok, %ConversationForm{}}
+      {:ok, %Ecto.Changeset{}}
 
   """
   @spec new_conversation(Actor.t(), term()) ::
-          {:ok, ConversationForm.t()} | {:error, :ban | :unauthorized}
-  def new_conversation(%Actor{} = actor, recipient) do
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
+  def new_conversation(%Actor{} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Conversation) do
-      recipient = if is_binary(recipient), do: recipient, else: nil
+      conversation = %Conversation{messages: [%Message{}]}
 
-      {:ok,
-       recipient
-       |> new_conversation()
-       |> conversation_form()}
+      {:ok, Conversation.changeset(conversation, params)}
     end
   end
 
   @doc """
   Creates a conversation and its single initial message for `actor`.
 
-  Active recipients resolve through Users; missing or deactivated recipients produce
-  a `ConversationForm` validation error. Successful writes are rate-counted
-  after commit, and an unapproved first message creates its system report after
-  the conversation transaction succeeds.
+  Active recipients resolve through Users. Missing or deactivated recipients produce
+  a changeset validation error. Successful writes are rate-counted after commit. An
+  unapproved first message creates a system report.
 
   ## Examples
 
@@ -230,20 +203,26 @@ defmodule Philomena.Conversations do
       {:ok, %Conversation{}}
 
       iex> create_conversation(actor, invalid_attrs)
-      {:error, %ConversationForm{}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec create_conversation(Actor.t(), term()) ::
           {:ok, Conversation.t()}
-          | {:error, ConversationForm.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :rate_limited}
   def create_conversation(%Actor{user: user} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Conversation),
-         :ok <- RateLimiter.check_rate_limit(actor, :conversation_create) do
-      recipient = recipient_for_creation(actor, params)
+         :ok <- RateLimiter.check_rate_limit(actor, :conversation_create),
+         changeset = Conversation.recipient_changeset(%Conversation{}, params),
+         {:ok, recipient_name} = Conversation.recipient_name(changeset) do
+      recipient =
+        case Users.load_active_user_by_name(actor, recipient_name) do
+          {:ok, user} -> user
+          _ -> nil
+        end
 
-      %Conversation{}
+      changeset
       |> Conversation.creation_changeset(user, recipient, params)
       |> Repo.insert()
       |> case do
@@ -257,7 +236,7 @@ defmodule Philomena.Conversations do
           {:ok, conversation}
 
         {:error, changeset} ->
-          {:error, conversation_form(changeset.data, changeset)}
+          {:error, changeset}
       end
     end
   end

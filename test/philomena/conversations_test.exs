@@ -18,7 +18,6 @@ defmodule Philomena.ConversationsTest do
 
   alias Philomena.Conversations
   alias Philomena.Conversations.Conversation
-  alias Philomena.Conversations.ConversationForm
   alias Philomena.Conversations.ConversationIndex
   alias Philomena.Conversations.ConversationPage
   alias Philomena.Conversations.Message
@@ -201,25 +200,25 @@ defmodule Philomena.ConversationsTest do
     test "a signed-in actor gets a changeset prefilled with the recipient" do
       recipient = confirmed_user_fixture()
 
-      assert {:ok, %ConversationForm{} = form} =
+      assert {:ok, %Ecto.Changeset{} = changeset} =
                Conversations.new_conversation(
                  actor(confirmed_user_fixture()),
-                 recipient.name
+                 %{"recipient" => recipient.name}
                )
 
-      assert form.conversation.recipient == recipient.name
-      assert %Ecto.Changeset{data: %Conversation{recipient: recipient_name}} = form.changeset
-      assert recipient_name == recipient.name
+      assert fetch_change!(changeset, :recipient) == recipient.name
     end
 
     test "a banned actor is rejected even while carrying a fingerprint" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Conversations.new_conversation(actor, "anyone") == {:error, :ban}
+      assert Conversations.new_conversation(actor, %{"recipient" => "anyone"}) == {:error, :ban}
     end
 
     test "an actor without a fingerprint may not reach the form" do
-      assert Conversations.new_conversation(actor(nil, fingerprint: nil), "anyone") ==
+      assert Conversations.new_conversation(actor(nil, fingerprint: nil), %{
+               "recipient" => "anyone"
+             }) ==
                {:error, :unauthorized}
     end
   end
@@ -250,25 +249,25 @@ defmodule Philomena.ConversationsTest do
         "messages" => %{"0" => %{"body" => "A fine day to you"}}
       }
 
-      assert {:error, %ConversationForm{} = form} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Conversations.create_conversation(actor(confirmed_user_fixture()), params)
 
-      refute form.changeset.valid?
+      refute changeset.valid?
     end
 
     test "a deactivated recipient is a rejected changeset" do
       sender = confirmed_user_fixture()
       recipient = deactivated_user_fixture()
 
-      assert {:error, %ConversationForm{} = form} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Conversations.create_conversation(actor(sender), %{
                  "recipient" => recipient.name,
                  "title" => "Hello",
                  "messages" => %{"0" => %{"body" => "Hello"}}
                })
 
-      refute form.changeset.valid?
-      assert {"can't be blank", _} = form.changeset.errors[:to]
+      refute changeset.valid?
+      assert {"can't be blank", _} = changeset.errors[:to]
     end
 
     test "non-map params raise" do

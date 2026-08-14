@@ -32,9 +32,35 @@ defmodule Philomena.Conversations.Conversation do
 
   @doc false
   def changeset(conversation, attrs \\ %{}) do
+    cast(conversation, attrs, [:recipient])
+  end
+
+  @doc false
+  def recipient_changeset(conversation, attrs) do
     conversation
-    |> cast(attrs, [])
-    |> validate_required([])
+    |> cast(attrs, [:recipient])
+    |> validate_required([:recipient])
+  end
+
+  @doc false
+  def recipient_name(changeset) do
+    with {:ok, conversation} <- apply_action(changeset, :create) do
+      {:ok, conversation.recipient}
+    end
+  end
+
+  @doc false
+  def creation_changeset(conversation, from, to, attrs) do
+    conversation
+    |> cast(attrs, [:title, :recipient])
+    |> put_assoc(:from, from)
+    |> put_assoc(:to, to)
+    |> put_change(:slug, Ecto.UUID.generate())
+    |> cast_assoc(:messages, with: &Message.creation_changeset(&1, &2, from))
+    |> set_last_message()
+    |> validate_length(:messages, is: 1)
+    |> validate_length(:title, max: 300, count: :bytes)
+    |> validate_required([:title, :from, :to])
   end
 
   @doc false
@@ -51,20 +77,6 @@ defmodule Philomena.Conversations.Conversation do
     |> change()
     |> put_conditional(conversation.from_id == user.id, :from_hidden, desired_state)
     |> put_conditional(conversation.to_id == user.id, :to_hidden, desired_state)
-  end
-
-  @doc false
-  def creation_changeset(conversation, from, to, attrs) do
-    conversation
-    |> cast(attrs, [:title, :recipient])
-    |> put_assoc(:from, from)
-    |> put_assoc(:to, to)
-    |> put_change(:slug, Ecto.UUID.generate())
-    |> cast_assoc(:messages, with: &Message.creation_changeset(&1, &2, from))
-    |> set_last_message()
-    |> validate_length(:messages, is: 1)
-    |> validate_length(:title, max: 300, count: :bytes)
-    |> validate_required([:title, :from, :to])
   end
 
   @doc false
