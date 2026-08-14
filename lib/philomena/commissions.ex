@@ -27,71 +27,44 @@ defmodule Philomena.Commissions do
     items: [example_image: [:sources, tags: :aliases]]
   ]
 
-  defp load_profile(actor, slug) do
+  defp load_profile(actor, slug, _action) do
     with {:ok, user} <- Users.load_profile(actor, slug) do
       {:ok, Repo.preload(user, @profile_preloads)}
     end
   end
 
-  defp commission_for_user(%User{id: user_id}) do
+  defp load_profile_commission(%Actor{} = actor, %User{id: user_id}, action) do
     Commission
     |> where(user_id: ^user_id)
     |> preload(^@commission_preloads)
-    |> Loader.one()
+    |> Loader.one_and_authorize(actor, action)
   end
 
-  defp load_commission(actor, slug, action) do
-    with {:ok, user} <- load_profile(actor, slug),
-         {:ok, commission} <- commission_for_user(user),
-         :ok <- authorize(actor, action, commission) do
-      {:ok, {user, commission}}
-    end
-  end
-
-  defp load_manageable_commission(actor, slug, action) do
-    with {:ok, {user, commission}} <- load_commission(actor, slug, action),
-         :ok <- ensure_links_verified(user) do
-      {:ok, {user, commission}}
-    end
-  end
-
-  defp new_commission(%User{} = user) do
-    user
-    |> Ecto.build_assoc(:commission)
-    |> Map.put(:user, user)
-  end
-
-  defp load_new_commission(actor, slug, action) do
-    with {:ok, user} <- load_profile(actor, slug),
-         commission = new_commission(user),
-         :ok <- authorize(actor, action, commission),
-         :ok <- ensure_no_commission(user),
-         :ok <- ensure_links_verified(user) do
-      {:ok, {user, commission}}
-    end
-  end
-
-  defp ensure_no_commission(%User{id: user_id}) do
-    if Repo.exists?(where(Commission, user_id: ^user_id)) do
-      {:error, :unauthorized}
-    else
-      :ok
-    end
-  end
-
-  defp ensure_links_verified(%User{verified_links: links}) do
-    if Enum.any?(links) do
-      :ok
-    else
-      {:error, :no_verified_links}
-    end
-  end
-
-  defp item_for_commission(%Commission{} = commission, id) do
+  defp load_commission_item(%Commission{} = commission, id) do
     Item
     |> where(commission_id: ^commission.id)
     |> preload(commission: :user)
     |> Loader.fetch(id)
+  end
+
+  defp load_new_commission(%Actor{} = actor, %User{} = user, action) do
+    commission =
+      user
+      |> Ecto.build_assoc(:commission)
+      |> Map.put(:user, user)
+
+    with :ok <- authorize(actor, action, commission) do
+      cond do
+        Repo.exists?(where(Commission, user_id: ^user.id)) ->
+          {:error, :unauthorized}
+
+        Enum.empty?(user.verified_links) ->
+          {:error, :no_verified_links}
+
+        true ->
+          {:ok, commission}
+      end
+    end
   end
 
   defp new_item(%Commission{} = commission) do
@@ -155,8 +128,8 @@ defmodule Philomena.Commissions do
   @spec load_commission_for_show(Actor.t(), String.t()) ::
           {:ok, Commission.t()} | {:error, :unauthorized | :not_found}
   def load_commission_for_show(%Actor{} = actor, slug) do
-    with {:ok, {_user, commission}} <- load_commission(actor, slug, :show) do
-      {:ok, commission}
+    with {:ok, user} <- load_profile(actor, slug, :show) do
+      load_profile_commission(actor, user, :show)
     end
   end
 
@@ -195,7 +168,8 @@ defmodule Philomena.Commissions do
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def new_commission(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_new_commission(actor, slug, :new) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_new_commission(actor, user, :new) do
       {:ok, Commission.changeset(commission)}
     end
   end
@@ -222,7 +196,8 @@ defmodule Philomena.Commissions do
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def create_commission(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_new_commission(actor, slug, :create) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_new_commission(actor, user, :create) do
       commission
       |> Commission.changeset(attrs)
       |> Repo.insert()
@@ -250,10 +225,11 @@ defmodule Philomena.Commissions do
   """
   @spec load_commission_for_edit(Actor.t(), String.t()) ::
           {:ok, Ecto.Changeset.t()}
-          | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
+          | {:error, :ban | :unauthorized | :not_found}
   def load_commission_for_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_manageable_commission(actor, slug, :edit) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :edit) do
       {:ok, Commission.changeset(commission)}
     end
   end
@@ -273,10 +249,11 @@ defmodule Philomena.Commissions do
   @spec update_commission(Actor.t(), String.t(), map()) ::
           {:ok, Commission.t()}
           | {:error, Ecto.Changeset.t()}
-          | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
+          | {:error, :ban | :unauthorized | :not_found}
   def update_commission(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_manageable_commission(actor, slug, :update) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :update) do
       commission
       |> Commission.changeset(attrs)
       |> Repo.update()
@@ -304,10 +281,11 @@ defmodule Philomena.Commissions do
   """
   @spec delete_commission(Actor.t(), String.t()) ::
           {:ok, Commission.t()}
-          | {:error, :ban | :unauthorized | :not_found | :no_verified_links | term()}
+          | {:error, :ban | :unauthorized | :not_found}
   def delete_commission(%Actor{user: closing_user} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_manageable_commission(actor, slug, :delete) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :delete) do
       Multi.new()
       |> Reports.put_close_reports(:reports, closing_user, commission_id: commission.id)
       |> Multi.delete(:commission, commission)
@@ -316,8 +294,8 @@ defmodule Philomena.Commissions do
         {:ok, %{commission: commission}} ->
           {:ok, commission}
 
-        {:error, _step, reason, _changes} ->
-          {:error, reason}
+        {:error, :commission, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -339,7 +317,8 @@ defmodule Philomena.Commissions do
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def new_item(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_commission(actor, slug, :new_item) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :new_item) do
       {:ok, Item.changeset(new_item(commission))}
     end
   end
@@ -363,7 +342,8 @@ defmodule Philomena.Commissions do
           | {:error, :ban | :unauthorized | :not_found}
   def create_item(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_commission(actor, slug, :create_item) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :create_item) do
       changeset =
         commission
         |> new_item()
@@ -408,8 +388,9 @@ defmodule Philomena.Commissions do
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_item_for_edit(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_commission(actor, slug, :edit_item),
-         {:ok, item} <- item_for_commission(commission, id) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :edit_item),
+         {:ok, item} <- load_commission_item(commission, id) do
       {:ok, Item.changeset(item)}
     end
   end
@@ -434,8 +415,9 @@ defmodule Philomena.Commissions do
           | {:error, :ban | :unauthorized | :not_found}
   def update_item(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_commission(actor, slug, :update_item),
-         {:ok, item} <- item_for_commission(commission, id) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :update_item),
+         {:ok, item} <- load_commission_item(commission, id) do
       item
       |> Item.changeset(attrs)
       |> Repo.update()
@@ -455,11 +437,12 @@ defmodule Philomena.Commissions do
 
   """
   @spec delete_item(Actor.t(), String.t(), IntegerId.integer_id()) ::
-          {:ok, Item.t()} | {:error, :ban | :unauthorized | :not_found | term()}
+          {:ok, Item.t()} | {:error, :ban | :unauthorized | :not_found}
   def delete_item(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, {_user, commission}} <- load_commission(actor, slug, :delete_item),
-         {:ok, item} <- item_for_commission(commission, id) do
+         {:ok, user} <- load_profile(actor, slug, :show),
+         {:ok, commission} <- load_profile_commission(actor, user, :delete_item),
+         {:ok, item} <- load_commission_item(commission, id) do
       counter_query =
         Commission
         |> where(id: ^item.commission_id)

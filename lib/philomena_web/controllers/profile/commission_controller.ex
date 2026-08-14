@@ -62,7 +62,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
       {:error, :no_verified_links} ->
         require_verified_link(conn)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -80,7 +80,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
       {:error, :no_verified_links} ->
         require_verified_link(conn)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -94,10 +94,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
           changeset: changeset
         )
 
-      {:error, :no_verified_links} ->
-        require_verified_link(conn)
-
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -112,10 +109,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
       {:error, %Ecto.Changeset{data: commission} = changeset} ->
         render(conn, "edit.html", user: commission.user, changeset: changeset)
 
-      {:error, :no_verified_links} ->
-        require_verified_link(conn)
-
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -127,10 +121,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
         |> put_flash(:info, "Commission deleted successfully.")
         |> redirect(to: ~p"/commissions")
 
-      {:error, :no_verified_links} ->
-        require_verified_link(conn)
-
-      {:error, _} = error ->
+      error ->
         error
     end
   end
