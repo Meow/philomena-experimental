@@ -8,6 +8,7 @@ defmodule Philomena.DnpEntries do
 
   alias Philomena.Attribution.Actor
   alias Philomena.DnpEntries.{DnpEntry, DnpEntryForm, DnpEntryPage, DnpListing}
+  alias Philomena.DnpEntries.{QueryBuilder, QueryForm}
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
@@ -109,27 +110,6 @@ defmodule Philomena.DnpEntries do
     |> Loader.fetch_and_authorize(actor, action, id, [:tag])
   end
 
-  defp admin_dnp_entries_query(%{"states" => states}) when is_list(states) do
-    where(DnpEntry, [d], d.aasm_state in ^states)
-  end
-
-  defp admin_dnp_entries_query(%{"eq" => q}) when is_binary(q) do
-    q = "%" <> q <> "%"
-
-    DnpEntry
-    |> join(:inner, [d], _ in assoc(d, :tag))
-    |> join(:inner, [d, _t], _ in assoc(d, :requesting_user))
-    |> where(
-      [d, t, u],
-      ilike(u.name, ^q) or ilike(t.name, ^q) or ilike(d.reason, ^q) or ilike(d.conditions, ^q) or
-        ilike(d.instructions, ^q)
-    )
-  end
-
-  defp admin_dnp_entries_query(_params) do
-    where(DnpEntry, [d], d.aasm_state in ["requested", "claimed", "rescinded", "acknowledged"])
-  end
-
   defp transition_dnp_entry_transaction(actor, id, new_state) do
     Repo.transact(fn ->
       with {:ok, dnp_entry} <- lock_and_authorize_dnp_entry(actor, id, :transition),
@@ -203,17 +183,20 @@ defmodule Philomena.DnpEntries do
 
   """
   @spec load_admin_dnp_entries(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(DnpEntry.t())} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(DnpEntry.t()), Ecto.Changeset.t()}
+          | {:error, :unauthorized}
   def load_admin_dnp_entries(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, DnpEntry) do
-      entries =
-        params
-        |> admin_dnp_entries_query()
-        |> preload([:tag, :requesting_user, :modifying_user])
-        |> order_by(desc: :updated_at)
-        |> Repo.paginate(pagination)
+      {entries, changeset} =
+        case QueryBuilder.search_dnp_entries(params) do
+          {:ok, query, query_form} ->
+            {Repo.paginate(query, pagination), QueryForm.changeset(query_form)}
 
-      {:ok, entries}
+          {:error, changeset} ->
+            {Repo.paginate(where(DnpEntry, false), pagination), changeset}
+        end
+
+      {:ok, entries, changeset}
     end
   end
 

@@ -99,4 +99,13 @@ defmodule Philomena.DnpEntries.DnpEntry do
       "closed"
     ]
   end
+
+  def active_states do
+    [
+      "requested",
+      "claimed",
+      "rescinded",
+      "acknowledged"
+    ]
+  end
 end

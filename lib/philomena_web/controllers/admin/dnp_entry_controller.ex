@@ -7,10 +7,10 @@ defmodule PhilomenaWeb.Admin.DnpEntryController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, dnp_entries} <-
+    with {:ok, dnp_entries, changeset} <-
            DnpEntries.load_admin_dnp_entries(
              conn.assigns.actor,
-             params,
+             params["eq"] || %{},
              conn.assigns.scrivener
            ) do
       bodies =
@@ -23,7 +23,8 @@ defmodule PhilomenaWeb.Admin.DnpEntryController do
       render(conn, "index.html",
         layout_class: "layout--wide",
         title: "Admin - DNP Entries",
-        dnp_entries: dnp_entries
+        dnp_entries: dnp_entries,
+        changeset: changeset
       )
     end
   end

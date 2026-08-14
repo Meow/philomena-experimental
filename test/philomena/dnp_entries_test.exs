@@ -516,7 +516,7 @@ defmodule Philomena.DnpEntriesTest do
 
     test "a moderator and an admin are authorized" do
       for user <- [moderator_user_fixture(), admin_user_fixture()] do
-        assert {:ok, %Scrivener.Page{}} =
+        assert {:ok, %Scrivener.Page{}, %Ecto.Changeset{valid?: true}} =
                  DnpEntries.load_admin_dnp_entries(actor(user), %{}, @pagination)
       end
     end
@@ -528,7 +528,7 @@ defmodule Philomena.DnpEntriesTest do
       {other, other_tag} = linked_user()
       listed = dnp_entry_fixture(other, other_tag, %{state: "listed"})
 
-      assert {:ok, page} =
+      assert {:ok, page, %Ecto.Changeset{valid?: true}} =
                DnpEntries.load_admin_dnp_entries(
                  actor(moderator_user_fixture()),
                  %{},
@@ -547,7 +547,7 @@ defmodule Philomena.DnpEntriesTest do
       {other, other_tag} = linked_user()
       listed = dnp_entry_fixture(other, other_tag, %{state: "listed"})
 
-      assert {:ok, page} =
+      assert {:ok, page, %Ecto.Changeset{valid?: true}} =
                DnpEntries.load_admin_dnp_entries(
                  actor(moderator_user_fixture()),
                  %{"states" => ["listed"]},
@@ -559,23 +559,41 @@ defmodule Philomena.DnpEntriesTest do
       refute requested.id in ids
     end
 
-    test "an eq param filters by the tag name" do
+    test "a text param filters by the tag name" do
       {user, tag} = linked_user()
       wanted = dnp_entry_fixture(user, tag)
 
       {other, other_tag} = linked_user()
       unrelated = dnp_entry_fixture(other, other_tag)
 
-      assert {:ok, page} =
+      assert {:ok, page, %Ecto.Changeset{valid?: true}} =
                DnpEntries.load_admin_dnp_entries(
                  actor(moderator_user_fixture()),
-                 %{"eq" => tag.name},
+                 %{"text" => tag.name},
                  @pagination
                )
 
       ids = Enum.map(page.entries, & &1.id)
       assert wanted.id in ids
       refute unrelated.id in ids
+    end
+
+    test "states and text filters are applied together" do
+      {user, tag} = linked_user()
+      listed_match = dnp_entry_fixture(user, tag, %{state: "listed"})
+
+      {other, other_tag} = linked_user()
+      listed_other = dnp_entry_fixture(other, other_tag, %{state: "listed"})
+
+      assert {:ok, page, %Ecto.Changeset{valid?: true}} =
+               DnpEntries.load_admin_dnp_entries(
+                 actor(moderator_user_fixture()),
+                 %{"states" => ["listed"], "text" => tag.name},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [listed_match.id]
+      refute listed_other.id in Enum.map(page.entries, & &1.id)
     end
   end
 
