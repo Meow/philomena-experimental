@@ -43,14 +43,16 @@ defmodule Philomena.Conversations do
     |> Loader.fetch_and_authorize(actor, action, message_id)
   end
 
-  defp report_non_approved_message(nil), do: {:ok, nil}
-  defp report_non_approved_message(%Message{approved: true}), do: {:ok, nil}
+  defp put_approval_report(%Multi{} = multi, true), do: multi
 
-  defp report_non_approved_message(%Message{} = message) do
-    Reports.create_system_report(
+  defp put_approval_report(%Multi{} = multi, _approved?) do
+    Reports.put_create_system_report(
+      multi,
+      :report,
       "Approval",
       "PM contains externally-embedded images",
-      conversation_id: message.conversation_id
+      :conversation,
+      :conversation_id
     )
   end
 
@@ -219,20 +221,23 @@ defmodule Philomena.Conversations do
           _ -> nil
         end
 
-      %Conversation{}
-      |> Conversation.creation_changeset(user, recipient, params)
-      |> Repo.insert()
-      |> case do
-        {:ok, conversation} ->
-          conversation.messages
-          |> List.first()
-          |> report_non_approved_message()
+      conversation_changeset =
+        %Conversation{}
+        |> Conversation.creation_changeset(user, recipient, params)
 
+      approved? = Conversation.approved?(conversation_changeset)
+
+      Multi.new()
+      |> Multi.insert(:conversation, conversation_changeset)
+      |> put_approval_report(approved?)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{conversation: conversation}} ->
           RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
 
           {:ok, conversation}
 
-        {:error, changeset} ->
+        {:error, :conversation, changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -306,16 +311,16 @@ defmodule Philomena.Conversations do
         |> Message.creation_changeset(params, user)
 
       conversation_changeset = Conversation.new_message_changeset(conversation)
+      approved? = Message.approved?(message_changeset)
 
       Multi.new()
       |> Multi.insert(:message, message_changeset)
       |> Multi.update(:conversation, conversation_changeset)
       |> Multi.one(:message_count, message_count_query)
+      |> put_approval_report(approved?)
       |> Multi.transact()
       |> case do
         {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->
-          report_non_approved_message(message)
-
           conversation = %{conversation | message_count: message_count}
           message = %{message | conversation: conversation}
 
