@@ -3,7 +3,6 @@ defmodule PhilomenaWeb.Conversation.MessageController do
 
   alias Philomena.Conversations
   alias Philomena.Conversations.MessageCreated
-  alias Philomena.Conversations.MessageForm
   alias PhilomenaWeb.ConversationView
   alias PhilomenaWeb.MarkdownRenderer
 
@@ -20,15 +19,15 @@ defmodule PhilomenaWeb.Conversation.MessageController do
         |> put_flash(:info, "Message successfully sent.")
         |> redirect(to: ~p"/conversations/#{created.conversation}?#{[page: page]}")
 
-      {:error, %MessageForm{} = form} ->
-        render_message_error(conn, conversation_id, form)
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render_message_error(conn, conversation_id, changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
 
-  defp render_message_error(conn, conversation_id, form) do
+  defp render_message_error(conn, conversation_id, changeset) do
     with {:ok, page} <-
            Conversations.load_conversation_page(
              conn.assigns.actor,
@@ -44,7 +43,7 @@ defmodule PhilomenaWeb.Conversation.MessageController do
         title: "Showing Conversation",
         conversation: page.conversation,
         messages: messages,
-        changeset: form.changeset
+        changeset: changeset
       )
     end
   end

@@ -15,7 +15,6 @@ defmodule Philomena.Conversations do
   alias Philomena.Conversations.QueryForm
   alias Philomena.Conversations.Message
   alias Philomena.Conversations.MessageCreated
-  alias Philomena.Conversations.MessageForm
   alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
@@ -277,9 +276,9 @@ defmodule Philomena.Conversations do
   Posts a reply to a visible conversation.
 
   Write access is checked before loading. Participant and staff reply policy is
-  represented by the `:reply` ability. Validation failures return a
-  `MessageForm` containing the actual rejected changeset. Success returns the
-  message and total count needed for the redirect page.
+  represented by the `:reply` ability. Validation failures return a rejected
+  changeset. Success returns the message and total count needed for the redirect
+  page.
 
   ## Examples
 
@@ -287,12 +286,12 @@ defmodule Philomena.Conversations do
       {:ok, %MessageCreated{}}
 
       iex> create_message(actor, "slug", %{"body" => ""})
-      {:error, %MessageForm{}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec create_message(Actor.t(), String.t(), term()) ::
           {:ok, MessageCreated.t()}
-          | {:error, MessageForm.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def create_message(%Actor{user: user} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
@@ -326,12 +325,7 @@ defmodule Philomena.Conversations do
            }}
 
         {:error, :message, changeset, _changes} ->
-          {:error,
-           %MessageForm{
-             conversation: conversation,
-             message: message_changeset.data,
-             changeset: changeset
-           }}
+          {:error, changeset}
       end
     end
   end

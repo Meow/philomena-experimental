@@ -22,7 +22,6 @@ defmodule Philomena.ConversationsTest do
   alias Philomena.Conversations.ConversationPage
   alias Philomena.Conversations.Message
   alias Philomena.Conversations.MessageCreated
-  alias Philomena.Conversations.MessageForm
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Repo
   alias Philomena.Reports.Report
@@ -485,12 +484,11 @@ defmodule Philomena.ConversationsTest do
       recipient = confirmed_user_fixture()
       conversation = conversation_fixture(sender, recipient)
 
-      assert {:error, %MessageForm{} = form} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Conversations.create_message(actor(recipient), conversation.slug, %{"body" => ""})
 
-      assert form.conversation.id == conversation.id
-      assert form.message.conversation_id == conversation.id
-      refute form.changeset.valid?
+      assert changeset.data.conversation_id == conversation.id
+      refute changeset.valid?
     end
 
     test "a non-participant regular user is unauthorized" do
