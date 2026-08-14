@@ -24,9 +24,27 @@ defmodule Philomena.Conversations do
   alias Philomena.Repo
   alias Philomena.Reports
   alias Philomena.Users
-  alias Philomena.Users.User
 
   @conversation_create_window 60
+
+  defp load_conversation(%Actor{} = actor, slug, action, preloads \\ []) do
+    Conversation
+    |> where(slug: ^slug)
+    |> preload(^preloads)
+    |> Loader.one_and_authorize(actor, action)
+  end
+
+  defp load_conversation_message(
+         %Actor{} = actor,
+         %Conversation{} = conversation,
+         message_id,
+         action
+       ) do
+    Message
+    |> where(conversation_id: ^conversation.id)
+    |> preload(:conversation)
+    |> Loader.fetch_and_authorize(actor, action, message_id)
+  end
 
   defp new_conversation(recipient) do
     %Conversation{recipient: recipient, messages: [%Message{}]}
@@ -47,126 +65,6 @@ defmodule Philomena.Conversations do
     else
       _ ->
         nil
-    end
-  end
-
-  defp insert_conversation(actor, attrs, to) do
-    changeset = Conversation.creation_changeset(%Conversation{}, actor.user, to, attrs)
-
-    case Repo.insert(changeset) do
-      {:ok, conversation} ->
-        conversation.messages
-        |> List.first()
-        |> report_non_approved_message()
-
-        {:ok, conversation}
-
-      {:error, changeset} ->
-        {:error, conversation_form(changeset.data, changeset)}
-    end
-  end
-
-  defp load_conversation(actor, slug, action, preloads \\ []) do
-    Conversation
-    |> where(slug: ^slug)
-    |> preload(^preloads)
-    |> Loader.one_and_authorize(actor, action)
-  end
-
-  defp unread_count(%User{id: user_id}) do
-    Conversation
-    |> where(
-      [conversation],
-      ((conversation.to_id == ^user_id and not conversation.to_read) or
-         (conversation.from_id == ^user_id and not conversation.from_read)) and
-        not ((conversation.to_id == ^user_id and conversation.to_hidden) or
-               (conversation.from_id == ^user_id and conversation.from_hidden))
-    )
-    |> Repo.aggregate(:count)
-  end
-
-  defp paginate_messages(conversation, user, pagination) do
-    direction = if user.settings.messages_newest_first, do: :desc, else: :asc
-
-    Message
-    |> where(conversation_id: ^conversation.id)
-    |> order_by([{^direction, :created_at}, {^direction, :id}])
-    |> preload(:from)
-    |> Repo.paginate(pagination)
-  end
-
-  defp message_count_query(%Conversation{id: conversation_id}) do
-    from message in Message,
-      where: message.conversation_id == ^conversation_id,
-      select: count(message.id)
-  end
-
-  defp insert_message(%Conversation{} = conversation, %User{} = user, attrs) do
-    message = Ecto.build_assoc(conversation, :messages)
-    message_changeset = Message.creation_changeset(message, attrs, user)
-    conversation_changeset = Conversation.new_message_changeset(conversation)
-
-    Multi.new()
-    |> Multi.insert(:message, message_changeset)
-    |> Multi.update(:conversation, conversation_changeset)
-    |> Multi.one(:message_count, message_count_query(conversation))
-    |> Multi.transact()
-    |> case do
-      {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->
-        report_non_approved_message(message)
-
-        {:ok,
-         %MessageCreated{
-           conversation: conversation,
-           message: message,
-           message_count: message_count
-         }}
-
-      {:error, :message, %Ecto.Changeset{} = changeset, _changes} ->
-        {:error, %MessageForm{conversation: conversation, message: message, changeset: changeset}}
-
-      {:error, _step, reason, _changes} ->
-        {:error, reason}
-    end
-  end
-
-  defp item_for_approval(actor, conversation, message_id) do
-    Message
-    |> where(conversation_id: ^conversation.id)
-    |> preload(:conversation)
-    |> Loader.fetch_and_authorize(actor, :approve, message_id)
-  end
-
-  defp approve_loaded_message(actor, message) do
-    conversation_update_query =
-      from conversation in Conversation,
-        where: conversation.id == ^message.conversation_id,
-        update: [set: [from_read: false, to_read: false]]
-
-    log_body = "Approved private message in conversation ##{message.conversation_id}"
-
-    Multi.new()
-    |> Multi.update(:message, Message.approve_changeset(message))
-    |> Multi.update_all(:conversation, conversation_update_query, [])
-    |> Reports.put_close_reports(
-      :reports,
-      actor.user,
-      conversation_id: message.conversation_id
-    )
-    |> ModerationLogs.put_log(
-      :moderation_log,
-      actor,
-      "Conversation.Message.Approve:create",
-      "/",
-      log_body
-    )
-    |> Multi.transact()
-    |> case do
-      {:ok, %{message: message}} ->
-        {:ok, message}
-
-      {:error, _step, reason, _changes} ->
-        {:error, reason}
     end
   end
 
@@ -225,7 +123,18 @@ defmodule Philomena.Conversations do
           {:ok, non_neg_integer()} | {:error, :unauthorized}
   def unread_conversation_count(%Actor{user: user} = actor) do
     with :ok <- authorize(actor, :index, Conversation) do
-      {:ok, unread_count(user)}
+      count =
+        Conversation
+        |> where(
+          [conversation],
+          ((conversation.to_id == ^user.id and not conversation.to_read) or
+             (conversation.from_id == ^user.id and not conversation.from_read)) and
+            not ((conversation.to_id == ^user.id and conversation.to_hidden) or
+                   (conversation.from_id == ^user.id and conversation.from_hidden))
+        )
+        |> Repo.aggregate(:count)
+
+      {:ok, count}
     end
   end
 
@@ -246,12 +155,19 @@ defmodule Philomena.Conversations do
           {:ok, ConversationPage.t()} | {:error, :unauthorized | :not_found}
   def load_conversation_page(%Actor{user: user} = actor, slug, pagination) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show, [:to, :from]) do
-      messages = paginate_messages(conversation, user, pagination)
-
       {:ok, _conversation} =
         conversation
         |> Conversation.read_changeset(user, true)
         |> Repo.update()
+
+      direction = if user.settings.messages_newest_first, do: :desc, else: :asc
+
+      messages =
+        Message
+        |> where(conversation_id: ^conversation.id)
+        |> order_by([{^direction, :created_at}, {^direction, :id}])
+        |> preload(:from)
+        |> Repo.paginate(pagination)
 
       {:ok,
        %ConversationPage{
@@ -321,14 +237,28 @@ defmodule Philomena.Conversations do
           {:ok, Conversation.t()}
           | {:error, ConversationForm.t()}
           | {:error, :ban | :unauthorized | :rate_limited}
-  def create_conversation(%Actor{} = actor, params) do
+  def create_conversation(%Actor{user: user} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Conversation),
-         :ok <- RateLimiter.check_rate_limit(actor, :conversation_create),
-         recipient = recipient_for_creation(actor, params),
-         {:ok, conversation} <- insert_conversation(actor, params, recipient) do
-      RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
-      {:ok, conversation}
+         :ok <- RateLimiter.check_rate_limit(actor, :conversation_create) do
+      recipient = recipient_for_creation(actor, params)
+
+      %Conversation{}
+      |> Conversation.creation_changeset(user, recipient, params)
+      |> Repo.insert()
+      |> case do
+        {:ok, conversation} ->
+          conversation.messages
+          |> List.first()
+          |> report_non_approved_message()
+
+          RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
+
+          {:ok, conversation}
+
+        {:error, changeset} ->
+          {:error, conversation_form(changeset.data, changeset)}
+      end
     end
   end
 
@@ -389,7 +319,42 @@ defmodule Philomena.Conversations do
   def create_message(%Actor{user: user} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, conversation} <- load_conversation(actor, slug, :reply) do
-      insert_message(conversation, user, params)
+      message_count_query =
+        from message in Message,
+          where: message.conversation_id == ^conversation.id,
+          select: count(message.id)
+
+      message_changeset =
+        conversation
+        |> Ecto.build_assoc(:messages)
+        |> Message.creation_changeset(params, user)
+
+      conversation_changeset = Conversation.new_message_changeset(conversation)
+
+      Multi.new()
+      |> Multi.insert(:message, message_changeset)
+      |> Multi.update(:conversation, conversation_changeset)
+      |> Multi.one(:message_count, message_count_query)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->
+          report_non_approved_message(message)
+
+          {:ok,
+           %MessageCreated{
+             conversation: conversation,
+             message: message,
+             message_count: message_count
+           }}
+
+        {:error, :message, changeset, _changes} ->
+          {:error,
+           %MessageForm{
+             conversation: conversation,
+             message: message_changeset.data,
+             changeset: changeset
+           }}
+      end
     end
   end
 
@@ -412,8 +377,35 @@ defmodule Philomena.Conversations do
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def approve_message(%Actor{} = actor, conversation_slug, message_id) do
     with {:ok, conversation} <- load_conversation(actor, conversation_slug, :show),
-         {:ok, message} <- item_for_approval(actor, conversation, message_id) do
-      approve_loaded_message(actor, message)
+         {:ok, message} <- load_conversation_message(actor, conversation, message_id, :approve) do
+      conversation_update_query =
+        from conversation in Conversation,
+          where: conversation.id == ^message.conversation_id,
+          update: [set: [from_read: false, to_read: false]]
+
+      Multi.new()
+      |> Multi.update(:message, Message.approve_changeset(message))
+      |> Multi.update_all(:conversation, conversation_update_query, [])
+      |> Reports.put_close_reports(
+        :reports,
+        actor.user,
+        conversation_id: message.conversation_id
+      )
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Conversation.Message.Approve:create",
+        "/",
+        "Approved private message in conversation ##{message.conversation_id}"
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{message: message}} ->
+          {:ok, message}
+
+        {:error, :message, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 end
