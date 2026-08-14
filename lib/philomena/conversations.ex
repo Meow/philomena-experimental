@@ -32,16 +32,12 @@ defmodule Philomena.Conversations do
     %Conversation{recipient: recipient, messages: [%Message{}]}
   end
 
-  defp change_conversation(%Conversation{} = conversation) do
-    Conversation.changeset(conversation, %{})
-  end
-
   defp conversation_form(%Conversation{} = conversation, %Ecto.Changeset{} = changeset) do
     %ConversationForm{conversation: conversation, changeset: changeset}
   end
 
   defp conversation_form(%Conversation{} = conversation) do
-    conversation_form(conversation, change_conversation(conversation))
+    conversation_form(conversation, Conversation.changeset(conversation))
   end
 
   defp recipient_for_creation(actor, params) do
@@ -76,31 +72,6 @@ defmodule Philomena.Conversations do
     |> preload(^preloads)
     |> Loader.one_and_authorize(actor, action)
   end
-
-  defp update_read_state(%Conversation{} = conversation, %User{} = user, read) do
-    changes =
-      %{}
-      |> put_conditional(:to_read, read, conversation.to_id == user.id)
-      |> put_conditional(:from_read, read, conversation.from_id == user.id)
-
-    conversation
-    |> Conversation.read_changeset(changes)
-    |> Repo.update()
-  end
-
-  defp update_hidden_state(%Conversation{} = conversation, %User{} = user, hidden) do
-    changes =
-      %{}
-      |> put_conditional(:to_hidden, hidden, conversation.to_id == user.id)
-      |> put_conditional(:from_hidden, hidden, conversation.from_id == user.id)
-
-    conversation
-    |> Conversation.hidden_changeset(changes)
-    |> Repo.update()
-  end
-
-  defp put_conditional(map, key, value, true), do: Map.put(map, key, value)
-  defp put_conditional(map, _key, _value, false), do: map
 
   defp unread_count(%User{id: user_id}) do
     Conversation
@@ -277,7 +248,10 @@ defmodule Philomena.Conversations do
     with {:ok, conversation} <- load_conversation(actor, slug, :show, [:to, :from]) do
       messages = paginate_messages(conversation, user, pagination)
 
-      {:ok, _conversation} = update_read_state(conversation, user, true)
+      {:ok, _conversation} =
+        conversation
+        |> Conversation.read_changeset(user, true)
+        |> Repo.update()
 
       {:ok,
        %ConversationPage{
@@ -369,7 +343,9 @@ defmodule Philomena.Conversations do
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def set_conversation_read(%Actor{user: user} = actor, slug, read \\ true) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show) do
-      update_read_state(conversation, user, read)
+      conversation
+      |> Conversation.read_changeset(user, read)
+      |> Repo.update()
     end
   end
 
@@ -383,7 +359,9 @@ defmodule Philomena.Conversations do
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def set_conversation_hidden(%Actor{user: user} = actor, slug, hidden \\ true) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show) do
-      update_hidden_state(conversation, user, hidden)
+      conversation
+      |> Conversation.hidden_changeset(user, hidden)
+      |> Repo.update()
     end
   end
 

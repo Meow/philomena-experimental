@@ -31,20 +31,26 @@ defmodule Philomena.Conversations.Conversation do
   end
 
   @doc false
-  def changeset(conversation, attrs) do
+  def changeset(conversation, attrs \\ %{}) do
     conversation
     |> cast(attrs, [])
     |> validate_required([])
   end
 
   @doc false
-  def read_changeset(conversation, attrs) do
-    cast(conversation, attrs, [:from_read, :to_read])
+  def read_changeset(conversation, user, desired_state) do
+    conversation
+    |> change()
+    |> put_conditional(conversation.from_id == user.id, :from_read, desired_state)
+    |> put_conditional(conversation.to_id == user.id, :to_read, desired_state)
   end
 
   @doc false
-  def hidden_changeset(conversation, attrs) do
-    cast(conversation, attrs, [:from_hidden, :to_hidden])
+  def hidden_changeset(conversation, user, desired_state) do
+    conversation
+    |> change()
+    |> put_conditional(conversation.from_id == user.id, :from_hidden, desired_state)
+    |> put_conditional(conversation.to_id == user.id, :to_hidden, desired_state)
   end
 
   @doc false
@@ -72,4 +78,7 @@ defmodule Philomena.Conversations.Conversation do
   defp set_last_message(changeset) do
     change(changeset, last_message_at: DateTime.utc_now(:second))
   end
+
+  defp put_conditional(changeset, true, key, value), do: put_change(changeset, key, value)
+  defp put_conditional(changeset, false, _key, _value), do: changeset
 end
