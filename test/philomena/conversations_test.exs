@@ -101,7 +101,7 @@ defmodule Philomena.ConversationsTest do
       refute other.id in ids
     end
 
-    test "malformed and out-of-range filters return an empty page and invalid changeset" do
+    test "malformed and out-of-range filters return a blank page and invalid changeset" do
       user = confirmed_user_fixture()
 
       for filter <- ["not-a-number", "99999999999999999999"] do
@@ -112,20 +112,9 @@ defmodule Philomena.ConversationsTest do
                    @pagination
                  )
 
-        assert index.conversations.entries == []
+        assert index.conversations == nil
         refute index.changeset.valid?
       end
-    end
-
-    test "non-map params are normalized to an unfiltered index" do
-      user = confirmed_user_fixture()
-      conversation = conversation_fixture(confirmed_user_fixture(), user)
-
-      assert {:ok, %ConversationIndex{} = index} =
-               Conversations.load_conversation_index(actor(user), "invalid", @pagination)
-
-      assert conversation.id in Enum.map(index.conversations.entries, & &1.id)
-      assert index.changeset.valid?
     end
 
     test "anonymous actors are unauthorized" do

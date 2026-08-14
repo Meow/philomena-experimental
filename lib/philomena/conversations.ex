@@ -12,7 +12,8 @@ defmodule Philomena.Conversations do
   alias Philomena.Conversations.ConversationForm
   alias Philomena.Conversations.ConversationIndex
   alias Philomena.Conversations.ConversationPage
-  alias Philomena.Conversations.ConversationQuery
+  alias Philomena.Conversations.QueryBuilder
+  alias Philomena.Conversations.QueryForm
   alias Philomena.Conversations.Message
   alias Philomena.Conversations.MessageCreated
   alias Philomena.Conversations.MessageForm
@@ -67,57 +68,6 @@ defmodule Philomena.Conversations do
       {:error, changeset} ->
         {:error, conversation_form(changeset.data, changeset)}
     end
-  end
-
-  defp compile_index_query(params) do
-    changeset = ConversationQuery.changeset(%ConversationQuery{}, params)
-
-    case Ecto.Changeset.apply_action(changeset, :index) do
-      {:ok, query} -> {:ok, {query, changeset}}
-      {:error, changeset} -> {:error, changeset}
-    end
-  end
-
-  defp conversation_index_query(%User{id: user_id}, partner_id) do
-    Conversation
-    |> where(
-      [conversation],
-      (conversation.from_id == ^user_id and not conversation.from_hidden) or
-        (conversation.to_id == ^user_id and not conversation.to_hidden)
-    )
-    |> maybe_filter_partner(user_id, partner_id)
-    |> then(fn query ->
-      from conversation in query,
-        as: :conversation,
-        inner_lateral_join:
-          count in subquery(
-            from message in Message,
-              where: message.conversation_id == parent_as(:conversation).id,
-              select: %{value: count()}
-          ),
-        on: true,
-        order_by: [desc: conversation.last_message_at, desc: conversation.id],
-        preload: [:to, :from],
-        select: %{conversation | message_count: count.value}
-    end)
-  end
-
-  defp maybe_filter_partner(query, _user_id, nil), do: query
-
-  defp maybe_filter_partner(query, user_id, partner_id) do
-    where(
-      query,
-      [conversation],
-      (conversation.from_id == ^partner_id and conversation.to_id == ^user_id) or
-        (conversation.to_id == ^partner_id and conversation.from_id == ^user_id)
-    )
-  end
-
-  defp empty_page(%User{} = user, pagination) do
-    user
-    |> conversation_index_query(nil)
-    |> where(false)
-    |> Repo.paginate(pagination)
   end
 
   defp load_conversation(actor, slug, action, preloads \\ []) do
@@ -263,9 +213,8 @@ defmodule Philomena.Conversations do
   @doc """
   Loads the signed-in actor's paginated conversation index.
 
-  The optional `"with"` filter is parsed as a positive user ID before query
-  compilation. Invalid or out-of-range filters return an empty page and a
-  rejected changeset.
+  The optional `"with"` filter is parsed as a user ID.
+  Invalid filters return an blank page and a rejected changeset.
 
   ## Examples
 
@@ -277,22 +226,18 @@ defmodule Philomena.Conversations do
           {:ok, ConversationIndex.t()} | {:error, :unauthorized}
   def load_conversation_index(%Actor{user: user} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Conversation) do
-      case compile_index_query(params) do
-        {:ok, {query, changeset}} ->
-          conversations =
-            user
-            |> conversation_index_query(query.partner_id)
-            |> Repo.paginate(pagination)
+      {conversations, changeset} =
+        params
+        |> QueryBuilder.search_conversations(user)
+        |> case do
+          {:ok, query, query_form} ->
+            {Repo.paginate(query, pagination), QueryForm.changeset(query_form)}
 
-          {:ok, %ConversationIndex{conversations: conversations, changeset: changeset}}
+          {:error, changeset} ->
+            {nil, changeset}
+        end
 
-        {:error, changeset} ->
-          {:ok,
-           %ConversationIndex{
-             conversations: empty_page(user, pagination),
-             changeset: changeset
-           }}
-      end
+      {:ok, %ConversationIndex{conversations: conversations, changeset: changeset}}
     end
   end
 

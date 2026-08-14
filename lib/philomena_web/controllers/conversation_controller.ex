@@ -20,7 +20,7 @@ defmodule PhilomenaWeb.ConversationController do
       render(conn, "index.html",
         title: "Conversations",
         conversations: index.conversations,
-        query_changeset: index.changeset
+        changeset: index.changeset
       )
     end
   end

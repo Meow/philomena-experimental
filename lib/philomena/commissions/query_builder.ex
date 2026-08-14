@@ -20,7 +20,7 @@ defmodule Philomena.Commissions.QueryBuilder do
       * price_min - Minimum base price
       * price_max - Maximum base price
 
-  Returns `{:ok, query, quyery_form}` with a queryable that can be used with
+  Returns `{:ok, query, query_form}` with a queryable that can be used with
   `Repo.paginate/2`, or `{:error, changeset}` if the provided parameters are
   invalid.
   """
