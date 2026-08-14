@@ -9,7 +9,6 @@ defmodule Philomena.Commissions do
   alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Commissions.Commission
-  alias Philomena.Commissions.CommissionForm
   alias Philomena.Commissions.Directory
   alias Philomena.Commissions.Item
   alias Philomena.Commissions.QueryBuilder
@@ -86,14 +85,6 @@ defmodule Philomena.Commissions do
     else
       {:error, :no_verified_links}
     end
-  end
-
-  defp commission_form(user, commission, changeset \\ nil) do
-    %CommissionForm{
-      user: user,
-      commission: commission,
-      changeset: changeset || Commission.changeset(commission, %{})
-    }
   end
 
   defp item_for_commission(%Commission{} = commission, id) do
@@ -196,16 +187,16 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> new_commission(actor, "artist")
-      {:ok, %CommissionForm{}}
+      {:ok, %Ecto.Changeset{}}
 
   """
   @spec new_commission(Actor.t(), String.t()) ::
-          {:ok, CommissionForm.t()}
+          {:ok, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def new_commission(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission}} <- load_new_commission(actor, slug, :new) do
-      {:ok, commission_form(user, commission)}
+         {:ok, {_user, commission}} <- load_new_commission(actor, slug, :new) do
+      {:ok, Commission.changeset(commission)}
     end
   end
 
@@ -214,7 +205,7 @@ defmodule Philomena.Commissions do
 
   Authorization and verified link rules match `new_commission/2`. The database
   uniquely enforces one commission per profile. Validation failures return a
-  `CommissionForm` retaining the safely loaded profile and attempted changes.
+  `m:Ecto.Changeset` retaining the loaded profile and attempted changes.
 
   ## Examples
 
@@ -222,16 +213,16 @@ defmodule Philomena.Commissions do
       {:ok, %Commission{}}
 
       iex> create_commission(actor, "artist", invalid_attrs)
-      {:error, %CommissionForm{}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec create_commission(Actor.t(), String.t(), map()) ::
           {:ok, Commission.t()}
-          | {:error, CommissionForm.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def create_commission(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission}} <- load_new_commission(actor, slug, :create) do
+         {:ok, {_user, commission}} <- load_new_commission(actor, slug, :create) do
       commission
       |> Commission.changeset(attrs)
       |> Repo.insert()
@@ -239,8 +230,8 @@ defmodule Philomena.Commissions do
         {:ok, commission} ->
           {:ok, Repo.preload(commission, @commission_preloads)}
 
-        {:error, changeset} ->
-          {:error, commission_form(user, commission, changeset)}
+        error ->
+          error
       end
     end
   end
@@ -254,23 +245,23 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> load_commission_for_edit(actor, "artist")
-      {:ok, %CommissionForm{}}
+      {:ok, %Ecto.Changeset{}}
 
   """
   @spec load_commission_for_edit(Actor.t(), String.t()) ::
-          {:ok, CommissionForm.t()}
+          {:ok, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def load_commission_for_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission}} <- load_manageable_commission(actor, slug, :edit) do
-      {:ok, commission_form(user, commission)}
+         {:ok, {_user, commission}} <- load_manageable_commission(actor, slug, :edit) do
+      {:ok, Commission.changeset(commission)}
     end
   end
 
   @doc """
   Updates the existing commission for the active profile named by `slug`.
 
-  Validation failures return a `CommissionForm`. Successful updates preserve
+  Validation failures return a `m:Ecto.Changeset`. Successful updates preserve
   item ordering and count.
 
   ## Examples
@@ -281,11 +272,11 @@ defmodule Philomena.Commissions do
   """
   @spec update_commission(Actor.t(), String.t(), map()) ::
           {:ok, Commission.t()}
-          | {:error, CommissionForm.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def update_commission(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, {user, commission}} <- load_manageable_commission(actor, slug, :update) do
+         {:ok, {_user, commission}} <- load_manageable_commission(actor, slug, :update) do
       commission
       |> Commission.changeset(attrs)
       |> Repo.update()
@@ -293,8 +284,8 @@ defmodule Philomena.Commissions do
         {:ok, commission} ->
           {:ok, commission}
 
-        {:error, changeset} ->
-          {:error, commission_form(user, commission, changeset)}
+        error ->
+          error
       end
     end
   end

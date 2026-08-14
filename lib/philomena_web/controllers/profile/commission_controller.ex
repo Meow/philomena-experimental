@@ -2,7 +2,6 @@ defmodule PhilomenaWeb.Profile.CommissionController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Commissions
-  alias Philomena.Commissions.CommissionForm
   alias PhilomenaWeb.MarkdownRenderer
 
   action_fallback PhilomenaWeb.FallbackController
@@ -53,11 +52,11 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def new(conn, %{"profile_id" => slug}) do
     case Commissions.new_commission(conn.assigns.actor, slug) do
-      {:ok, %CommissionForm{} = form} ->
+      {:ok, %Ecto.Changeset{data: commission} = changeset} ->
         render(conn, "new.html",
           title: "New Commission",
-          user: form.user,
-          changeset: form.changeset
+          user: commission.user,
+          changeset: changeset
         )
 
       {:error, :no_verified_links} ->
@@ -75,8 +74,8 @@ defmodule PhilomenaWeb.Profile.CommissionController do
         |> put_flash(:info, "Commission successfully created.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
 
-      {:error, %CommissionForm{} = form} ->
-        render(conn, "new.html", user: form.user, changeset: form.changeset)
+      {:error, %Ecto.Changeset{data: commission} = changeset} ->
+        render(conn, "new.html", user: commission.user, changeset: changeset)
 
       {:error, :no_verified_links} ->
         require_verified_link(conn)
@@ -88,11 +87,11 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def edit(conn, %{"profile_id" => slug}) do
     case Commissions.load_commission_for_edit(conn.assigns.actor, slug) do
-      {:ok, %CommissionForm{} = form} ->
+      {:ok, %Ecto.Changeset{data: commission} = changeset} ->
         render(conn, "edit.html",
           title: "Editing Commission",
-          user: form.user,
-          changeset: form.changeset
+          user: commission.user,
+          changeset: changeset
         )
 
       {:error, :no_verified_links} ->
@@ -110,8 +109,8 @@ defmodule PhilomenaWeb.Profile.CommissionController do
         |> put_flash(:info, "Commission successfully updated.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
 
-      {:error, %CommissionForm{} = form} ->
-        render(conn, "edit.html", user: form.user, changeset: form.changeset)
+      {:error, %Ecto.Changeset{data: commission} = changeset} ->
+        render(conn, "edit.html", user: commission.user, changeset: changeset)
 
       {:error, :no_verified_links} ->
         require_verified_link(conn)

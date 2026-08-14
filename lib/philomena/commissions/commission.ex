@@ -27,7 +27,7 @@ defmodule Philomena.Commissions.Commission do
   end
 
   @doc false
-  def changeset(commission, attrs) do
+  def changeset(commission, attrs \\ %{}) do
     commission
     |> cast(attrs, [
       :information,

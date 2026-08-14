@@ -21,7 +21,6 @@ defmodule Philomena.CommissionsTest do
 
   alias Philomena.Commissions
   alias Philomena.Commissions.Commission
-  alias Philomena.Commissions.CommissionForm
   alias Philomena.Commissions.Directory
   alias Philomena.Commissions.Item
   alias Philomena.Repo
@@ -107,18 +106,19 @@ defmodule Philomena.CommissionsTest do
     test "the owner with a verified link and no commission gets a form" do
       user = verified_user_with_link()
 
-      assert {:ok, %CommissionForm{} = form} = Commissions.new_commission(actor(user), user.slug)
-      assert form.user.id == user.id
-      assert %Ecto.Changeset{data: %Commission{}} = form.changeset
+      assert {:ok, %Ecto.Changeset{data: commission}} =
+               Commissions.new_commission(actor(user), user.slug)
+
+      assert commission.user.id == user.id
     end
 
     test "a moderator may open the new form for another user (staff bypass)" do
       user = verified_user_with_link()
 
-      assert {:ok, loaded} =
+      assert {:ok, %Ecto.Changeset{data: commission}} =
                Commissions.new_commission(actor(moderator_user_fixture()), user.slug)
 
-      assert loaded.user.id == user.id
+      assert commission.user.id == user.id
     end
 
     test "a banned actor is rejected before any gating" do
@@ -195,14 +195,14 @@ defmodule Philomena.CommissionsTest do
              ) == {:error, :unauthorized}
     end
 
-    test "validation errors retain the scoped form" do
+    test "validation errors retain the scoped commission" do
       user = verified_user_with_link()
 
-      assert {:error, %CommissionForm{} = form} =
+      assert {:error, %Ecto.Changeset{data: commission} = changeset} =
                Commissions.create_commission(actor(user), user.slug, %{})
 
-      assert form.user.id == user.id
-      refute form.changeset.valid?
+      assert commission.user.id == user.id
+      refute changeset.valid?
     end
   end
 
@@ -211,12 +211,11 @@ defmodule Philomena.CommissionsTest do
       user = verified_user_with_link()
       commission = commission_fixture(user)
 
-      assert {:ok, %CommissionForm{} = form} =
+      assert {:ok, %Ecto.Changeset{data: loaded_commission}} =
                Commissions.load_commission_for_edit(actor(user), user.slug)
 
-      assert form.user.id == user.id
-      assert form.commission.id == commission.id
-      assert %Ecto.Changeset{} = form.changeset
+      assert loaded_commission.user.id == user.id
+      assert loaded_commission.id == commission.id
     end
 
     test "a profile without a commission is not-found" do
