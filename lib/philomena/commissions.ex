@@ -10,7 +10,6 @@ defmodule Philomena.Commissions do
   alias Philomena.Attribution.Actor
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.CommissionForm
-  alias Philomena.Commissions.CommissionPage
   alias Philomena.Commissions.Directory
   alias Philomena.Commissions.Item
   alias Philomena.Commissions.QueryBuilder
@@ -42,12 +41,6 @@ defmodule Philomena.Commissions do
     |> Loader.one()
   end
 
-  defp commission_page(%User{} = user, %Commission{} = commission) do
-    commission = Repo.preload(commission, @commission_preloads)
-
-    %CommissionPage{user: user, commission: commission}
-  end
-
   defp load_commission(actor, slug, action) do
     with {:ok, user} <- load_profile(actor, slug),
          {:ok, commission} <- commission_for_user(user),
@@ -63,9 +56,15 @@ defmodule Philomena.Commissions do
     end
   end
 
+  defp new_commission(%User{} = user) do
+    user
+    |> Ecto.build_assoc(:commission)
+    |> Map.put(:user, user)
+  end
+
   defp load_new_commission(actor, slug, action) do
     with {:ok, user} <- load_profile(actor, slug),
-         commission = Ecto.build_assoc(user, :commission),
+         commission = new_commission(user),
          :ok <- authorize(actor, action, commission),
          :ok <- ensure_no_commission(user),
          :ok <- ensure_links_verified(user) do
@@ -159,14 +158,14 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> load_commission_for_show(actor, "artist")
-      {:ok, %CommissionPage{}}
+      {:ok, %Commission{}}
 
   """
   @spec load_commission_for_show(Actor.t(), String.t()) ::
-          {:ok, CommissionPage.t()} | {:error, :unauthorized | :not_found}
+          {:ok, Commission.t()} | {:error, :unauthorized | :not_found}
   def load_commission_for_show(%Actor{} = actor, slug) do
-    with {:ok, {user, commission}} <- load_commission(actor, slug, :show) do
-      {:ok, commission_page(user, commission)}
+    with {:ok, {_user, commission}} <- load_commission(actor, slug, :show) do
+      {:ok, commission}
     end
   end
 
@@ -184,10 +183,7 @@ defmodule Philomena.Commissions do
   @spec load_report_target(Actor.t(), String.t()) ::
           {:ok, Commission.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, slug) do
-    with {:ok, %CommissionPage{commission: commission}} <-
-           load_commission_for_show(actor, slug) do
-      {:ok, commission}
-    end
+    load_commission_for_show(actor, slug)
   end
 
   @doc """
@@ -223,14 +219,14 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> create_commission(actor, "artist", attrs)
-      {:ok, %CommissionPage{}}
+      {:ok, %Commission{}}
 
       iex> create_commission(actor, "artist", invalid_attrs)
       {:error, %CommissionForm{}}
 
   """
   @spec create_commission(Actor.t(), String.t(), map()) ::
-          {:ok, CommissionPage.t()}
+          {:ok, Commission.t()}
           | {:error, CommissionForm.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def create_commission(%Actor{} = actor, slug, attrs) do
@@ -241,7 +237,7 @@ defmodule Philomena.Commissions do
       |> Repo.insert()
       |> case do
         {:ok, commission} ->
-          {:ok, commission_page(user, commission)}
+          {:ok, Repo.preload(commission, @commission_preloads)}
 
         {:error, changeset} ->
           {:error, commission_form(user, commission, changeset)}
@@ -280,11 +276,11 @@ defmodule Philomena.Commissions do
   ## Examples
 
       iex> update_commission(actor, "artist", attrs)
-      {:ok, %CommissionPage{}}
+      {:ok, %Commission{}}
 
   """
   @spec update_commission(Actor.t(), String.t(), map()) ::
-          {:ok, CommissionPage.t()}
+          {:ok, Commission.t()}
           | {:error, CommissionForm.t()}
           | {:error, :ban | :unauthorized | :not_found | :no_verified_links}
   def update_commission(%Actor{} = actor, slug, attrs) do
@@ -295,7 +291,7 @@ defmodule Philomena.Commissions do
       |> Repo.update()
       |> case do
         {:ok, commission} ->
-          {:ok, commission_page(user, commission)}
+          {:ok, commission}
 
         {:error, changeset} ->
           {:error, commission_form(user, commission, changeset)}

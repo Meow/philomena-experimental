@@ -22,7 +22,6 @@ defmodule Philomena.CommissionsTest do
   alias Philomena.Commissions
   alias Philomena.Commissions.Commission
   alias Philomena.Commissions.CommissionForm
-  alias Philomena.Commissions.CommissionPage
   alias Philomena.Commissions.Directory
   alias Philomena.Commissions.Item
   alias Philomena.Repo
@@ -73,12 +72,12 @@ defmodule Philomena.CommissionsTest do
       expensive = commission_item_fixture(commission, base_price: 30)
       cheap = commission_item_fixture(commission, base_price: 10)
 
-      assert {:ok, %CommissionPage{} = page} =
+      assert {:ok, %Commission{} = loaded_commission} =
                Commissions.load_commission_for_show(actor(), user.slug)
 
-      assert page.user.id == user.id
-      assert page.commission.id == commission.id
-      assert Enum.map(page.commission.items, & &1.id) == [cheap.id, expensive.id]
+      assert loaded_commission.user.id == user.id
+      assert loaded_commission.id == commission.id
+      assert Enum.map(loaded_commission.items, & &1.id) == [cheap.id, expensive.id]
     end
 
     test "missing and deactivated profiles are not found for every viewer" do
@@ -165,12 +164,12 @@ defmodule Philomena.CommissionsTest do
     test "the owner creates a commission" do
       user = verified_user_with_link()
 
-      assert {:ok, %CommissionPage{} = page} =
+      assert {:ok, %Commission{} = commission} =
                Commissions.create_commission(actor(user), user.slug, commission_params())
 
-      assert page.user.id == user.id
-      assert Repo.get(Commission, page.commission.id).user_id == user.id
-      assert page.commission.items == []
+      assert commission.user.id == user.id
+      assert Repo.get(Commission, commission.id).user_id == user.id
+      assert commission.items == []
     end
 
     test "the database enforces one commission per profile" do
@@ -250,7 +249,7 @@ defmodule Philomena.CommissionsTest do
       user = verified_user_with_link()
       commission = commission_fixture(user)
 
-      assert {:ok, %CommissionPage{commission: updated}} =
+      assert {:ok, %Commission{} = updated} =
                Commissions.update_commission(
                  actor(user),
                  user.slug,

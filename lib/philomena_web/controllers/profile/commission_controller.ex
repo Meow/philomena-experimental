@@ -3,13 +3,12 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   alias Philomena.Commissions
   alias Philomena.Commissions.CommissionForm
-  alias Philomena.Commissions.CommissionPage
   alias PhilomenaWeb.MarkdownRenderer
 
   action_fallback PhilomenaWeb.FallbackController
 
   def show(conn, %{"profile_id" => slug}) do
-    with {:ok, %CommissionPage{user: user, commission: commission}} <-
+    with {:ok, commission} <-
            Commissions.load_commission_for_show(conn.assigns.actor, slug) do
       item_descriptions =
         commission.items
@@ -43,7 +42,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
       render(conn, "show.html",
         title: "Showing Commission",
-        user: user,
+        user: commission.user,
         rendered: rendered,
         commission: commission,
         items: items,
@@ -71,7 +70,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def create(conn, %{"profile_id" => slug, "commission" => commission_params}) do
     case Commissions.create_commission(conn.assigns.actor, slug, commission_params) do
-      {:ok, %CommissionPage{user: user}} ->
+      {:ok, %{user: user} = _commission} ->
         conn
         |> put_flash(:info, "Commission successfully created.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
@@ -106,7 +105,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def update(conn, %{"profile_id" => slug, "commission" => commission_params}) do
     case Commissions.update_commission(conn.assigns.actor, slug, commission_params) do
-      {:ok, %CommissionPage{user: user}} ->
+      {:ok, %{user: user} = _commission} ->
         conn
         |> put_flash(:info, "Commission successfully updated.")
         |> redirect(to: ~p"/profiles/#{user}/commission")
