@@ -14,7 +14,6 @@ defmodule Philomena.Conversations do
   alias Philomena.Conversations.QueryBuilder
   alias Philomena.Conversations.QueryForm
   alias Philomena.Conversations.Message
-  alias Philomena.Conversations.MessageCreated
   alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
@@ -283,14 +282,14 @@ defmodule Philomena.Conversations do
   ## Examples
 
       iex> create_message(actor, "slug", %{"body" => "hello"})
-      {:ok, %MessageCreated{}}
+      {:ok, %Message{}}
 
       iex> create_message(actor, "slug", %{"body" => ""})
       {:error, %Ecto.Changeset{}}
 
   """
   @spec create_message(Actor.t(), String.t(), term()) ::
-          {:ok, MessageCreated.t()}
+          {:ok, Message.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def create_message(%Actor{user: user} = actor, slug, params) do
@@ -317,12 +316,10 @@ defmodule Philomena.Conversations do
         {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->
           report_non_approved_message(message)
 
-          {:ok,
-           %MessageCreated{
-             conversation: conversation,
-             message: message,
-             message_count: message_count
-           }}
+          conversation = %{conversation | message_count: message_count}
+          message = %{message | conversation: conversation}
+
+          {:ok, message}
 
         {:error, :message, changeset, _changes} ->
           {:error, changeset}

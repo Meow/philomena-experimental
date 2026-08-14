@@ -2,7 +2,6 @@ defmodule PhilomenaWeb.Conversation.MessageController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Conversations
-  alias Philomena.Conversations.MessageCreated
   alias PhilomenaWeb.ConversationView
   alias PhilomenaWeb.MarkdownRenderer
 
@@ -12,12 +11,12 @@ defmodule PhilomenaWeb.Conversation.MessageController do
 
   def create(conn, %{"conversation_id" => conversation_id} = params) do
     case Conversations.create_message(conn.assigns.actor, conversation_id, params["message"]) do
-      {:ok, %MessageCreated{} = created} ->
-        page = div(created.message_count + @page_size - 1, @page_size)
+      {:ok, %{conversation: conversation}} ->
+        page = div(conversation.message_count + @page_size - 1, @page_size)
 
         conn
         |> put_flash(:info, "Message successfully sent.")
-        |> redirect(to: ~p"/conversations/#{created.conversation}?#{[page: page]}")
+        |> redirect(to: ~p"/conversations/#{conversation}?#{[page: page]}")
 
       {:error, %Ecto.Changeset{} = changeset} ->
         render_message_error(conn, conversation_id, changeset)

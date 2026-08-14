@@ -21,7 +21,6 @@ defmodule Philomena.ConversationsTest do
   alias Philomena.Conversations.ConversationIndex
   alias Philomena.Conversations.ConversationPage
   alias Philomena.Conversations.Message
-  alias Philomena.Conversations.MessageCreated
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Repo
   alias Philomena.Reports.Report
@@ -465,13 +464,13 @@ defmodule Philomena.ConversationsTest do
       # The recipient reads the conversation, clearing their unread flag.
       {:ok, _} = Conversations.set_conversation_read(actor(recipient), conversation.slug)
 
-      assert {:ok, %MessageCreated{} = created} =
+      assert {:ok, %Message{} = message} =
                Conversations.create_message(actor(recipient), conversation.slug, %{
                  "body" => "a reply from the recipient"
                })
 
-      assert created.message.body == "a reply from the recipient"
-      assert created.message_count == 2
+      assert message.body == "a reply from the recipient"
+      assert message.conversation.message_count == 2
 
       # Posting a message marks both sides unread again.
       reloaded = Repo.reload!(conversation)
