@@ -36,15 +36,12 @@ defmodule Philomena.Conversations.Conversation do
   end
 
   @doc false
-  def recipient_changeset(conversation, attrs) do
-    conversation
-    |> cast(attrs, [:recipient])
-    |> validate_required([:recipient])
-  end
-
-  @doc false
-  def recipient_name(changeset) do
-    with {:ok, conversation} <- apply_action(changeset, :create) do
+  def recipient_name(attrs) do
+    with {:ok, conversation} <-
+           %__MODULE__{}
+           |> cast(attrs, [:recipient])
+           |> validate_required([:recipient])
+           |> apply_action(:create) do
       {:ok, conversation.recipient}
     end
   end

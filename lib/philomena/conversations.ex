@@ -214,15 +214,14 @@ defmodule Philomena.Conversations do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Conversation),
          :ok <- RateLimiter.check_rate_limit(actor, :conversation_create),
-         changeset = Conversation.recipient_changeset(%Conversation{}, params),
-         {:ok, recipient_name} = Conversation.recipient_name(changeset) do
+         {:ok, recipient_name} <- Conversation.recipient_name(params) do
       recipient =
         case Users.load_active_user_by_name(actor, recipient_name) do
           {:ok, user} -> user
           _ -> nil
         end
 
-      changeset
+      %Conversation{}
       |> Conversation.creation_changeset(user, recipient, params)
       |> Repo.insert()
       |> case do
