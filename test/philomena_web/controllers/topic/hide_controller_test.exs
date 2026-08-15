@@ -14,12 +14,15 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
     %{forum: forum, topic: topic}
   end
 
-  defp hidden_topic(topic) do
-    {:ok, topic} =
-      Topics.hide_topic_for_fixture(
-        topic,
-        "Spam",
-        Philomena.UsersFixtures.moderator_user_fixture()
+  defp hidden_topic(forum, topic) do
+    moderator = Philomena.UsersFixtures.moderator_user_fixture()
+
+    {:ok, {_forum, topic}} =
+      Topics.hide_topic(
+        Philomena.AttributionFixtures.actor(moderator),
+        forum.short_name,
+        topic.slug,
+        "Spam"
       )
 
     topic
@@ -105,7 +108,7 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
 
   describe "DELETE /forums/:forum_id/topics/:topic_id/hide" do
     test "redirects anonymous users to the login page", %{conn: conn, forum: forum, topic: topic} do
-      topic = hidden_topic(topic)
+      topic = hidden_topic(forum, topic)
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/hide")
 
@@ -118,7 +121,7 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
     # not-authorized result comes from the load-visibility step.
     test "rejects a regular user with the authorization flash",
          %{conn: conn, forum: forum, topic: topic} do
-      topic = hidden_topic(topic)
+      topic = hidden_topic(forum, topic)
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/hide")
@@ -129,7 +132,7 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
     end
 
     test "as a moderator restores the topic", %{conn: conn, forum: forum, topic: topic} do
-      topic = hidden_topic(topic)
+      topic = hidden_topic(forum, topic)
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/hide")

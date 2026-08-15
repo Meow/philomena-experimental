@@ -205,8 +205,12 @@ defmodule Philomena.ActivitiesTest do
   describe "load_front_page/4 topic visibility" do
     test "forum and hidden-topic visibility delegates to the forum hierarchy scopes" do
       moderator = moderator_user_fixture()
-      hidden = topic_fixture(forum_fixture())
-      {:ok, hidden} = Topics.hide_topic_for_fixture(hidden, "Rule #0", moderator)
+      forum = forum_fixture()
+      hidden = topic_fixture(forum)
+
+      {:ok, {_forum, hidden}} =
+        Topics.hide_topic(actor(moderator), forum.short_name, hidden.slug, "Rule #0")
+
       staff_topic = topic_fixture(forum_fixture(%{access_level: "staff"}))
 
       assert {:ok, public_front} =

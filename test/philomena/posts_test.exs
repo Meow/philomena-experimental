@@ -739,11 +739,14 @@ defmodule Philomena.PostsTest do
     test "a regular actor cannot post in a locked topic", %{forum: forum, topic: topic} do
       # authorize(:create_post, topic) permits no rule on a locked topic, so a
       # regular actor is unauthorized after the load.
-      {:ok, _} =
-        Philomena.Topics.lock_topic_for_fixture(
-          topic,
-          %{"lock_reason" => "Test lock"},
-          moderator_user_fixture()
+      moderator = moderator_user_fixture()
+
+      {:ok, {_forum, _topic}} =
+        Philomena.Topics.lock_topic(
+          actor(moderator),
+          forum.short_name,
+          topic.slug,
+          %{"lock_reason" => "Test lock"}
         )
 
       assert Posts.create_post(actor(confirmed_user_fixture()), forum.short_name, topic.slug, %{

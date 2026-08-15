@@ -7,6 +7,7 @@ defmodule Philomena.TopicsFixtures do
   import Ecto.Query
 
   import Philomena.AttributionFixtures
+  import Philomena.UsersFixtures
 
   alias Philomena.Polls.Poll
   alias Philomena.Repo
@@ -16,7 +17,7 @@ defmodule Philomena.TopicsFixtures do
 
   @doc """
   Creates a topic (with its required first post) in `forum`, authored by
-  `user` (anonymous attribution when `nil`).
+  `user` (an anonymously displayed topic when `nil`).
 
   `attrs` are merged into the string-keyed params map the way the topic
   controller would submit them; pass `"posts" => %{"0" => %{"body" => ...}}`
@@ -25,14 +26,25 @@ defmodule Philomena.TopicsFixtures do
   Returns the topic with `posts: [first_post]` loaded.
   """
   def topic_fixture(forum, user \\ nil, attrs \\ %{}) do
+    anonymous? = is_nil(user)
+
+    user =
+      if anonymous? do
+        user = Repo.preload(admin_user_fixture(), :settings)
+        put_in(user.settings.watch_on_new_topic, false)
+      else
+        user
+      end
+
     attrs =
       Enum.into(attrs, %{
         "title" => unique_topic_title(),
-        "anonymous" => "false",
+        "anonymous" => to_string(anonymous?),
         "posts" => %{"0" => %{"body" => "Test topic body"}}
       })
 
-    {:ok, %{topic: topic}} = Topics.create_topic_for_fixture(forum, actor(user), attrs)
+    {:ok, %{topic: topic}} =
+      Topics.create_topic(actor(user, ip: random_ip()), forum.short_name, attrs)
 
     topic
   end

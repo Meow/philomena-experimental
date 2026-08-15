@@ -58,7 +58,13 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
-      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
+      {:ok, {_forum, _topic}} =
+        Topics.hide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          "spam"
+        )
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics")
 
@@ -70,7 +76,13 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
-      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
+      {:ok, {_forum, _topic}} =
+        Topics.hide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          "spam"
+        )
 
       conn =
         get(
@@ -147,7 +159,13 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
-      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
+      {:ok, {_forum, _topic}} =
+        Topics.hide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          "spam"
+        )
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}")
 

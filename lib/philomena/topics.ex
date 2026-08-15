@@ -255,33 +255,6 @@ defmodule Philomena.Topics do
 
   defp normalize_multi_error(result), do: result
 
-  @doc false
-  @spec create_topic_for_fixture(Forum.t(), Actor.t(), map()) ::
-          {:ok, map()} | {:error, Ecto.Multi.name(), term(), map()}
-  def create_topic_for_fixture(%Forum{} = forum, %Actor{} = actor, attrs),
-    do: persist_topic(forum, actor, attrs)
-
-  @doc false
-  @spec stick_topic_for_fixture(Topic.t()) ::
-          {:ok, Topic.t()} | {:error, Ecto.Changeset.t()}
-  def stick_topic_for_fixture(topic), do: persist_topic_stick(topic)
-
-  @doc false
-  @spec lock_topic_for_fixture(Topic.t(), map(), User.t()) ::
-          {:ok, Topic.t()} | {:error, Ecto.Changeset.t()}
-  def lock_topic_for_fixture(%Topic{} = topic, attrs, %User{} = user),
-    do: persist_topic_lock(topic, attrs, user)
-
-  @doc false
-  @spec hide_topic_for_fixture(Topic.t(), String.t() | nil, User.t()) ::
-          {:ok, Topic.t()} | {:error, term()}
-  def hide_topic_for_fixture(topic, deletion_reason, %User{} = user),
-    do: hide_loaded_topic(topic, deletion_reason, user)
-
-  @doc false
-  @spec unhide_topic_for_fixture(Topic.t()) :: {:ok, Topic.t()} | {:error, term()}
-  def unhide_topic_for_fixture(topic), do: unhide_loaded_topic(topic)
-
   @doc """
   Paginates homepage topics visible to `actor`.
 

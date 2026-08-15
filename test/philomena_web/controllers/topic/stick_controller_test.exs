@@ -59,8 +59,16 @@ defmodule PhilomenaWeb.Topic.StickControllerTest do
   end
 
   describe "DELETE /forums/:forum_id/topics/:topic_id/stick" do
-    setup %{topic: topic} do
-      {:ok, topic} = Philomena.Topics.stick_topic_for_fixture(topic)
+    setup %{forum: forum, topic: topic} do
+      moderator = Philomena.UsersFixtures.moderator_user_fixture()
+
+      {:ok, {_forum, topic}} =
+        Philomena.Topics.stick_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug
+        )
+
       %{topic: topic}
     end
 

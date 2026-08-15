@@ -47,8 +47,13 @@ defmodule Philomena.ForumsTest do
       hidden_topic = topic_fixture(public_forum)
       _restricted_topic = topic_fixture(restricted_forum)
 
-      {:ok, _hidden_topic} =
-        Philomena.Topics.hide_topic_for_fixture(hidden_topic, "Spam", moderator)
+      {:ok, {_forum, _hidden_topic}} =
+        Philomena.Topics.hide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          public_forum.short_name,
+          hidden_topic.slug,
+          "Spam"
+        )
 
       assert %ForumIndex{forums: user_forums, topic_count: 1} =
                Forums.load_forum_index(actor(user), @pagination)

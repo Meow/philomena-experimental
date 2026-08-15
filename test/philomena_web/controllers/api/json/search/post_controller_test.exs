@@ -84,7 +84,14 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       forum = forum_fixture()
       topic = topic_fixture(forum, nil, %{"posts" => %{"0" => %{"body" => "chartreuse okapi"}}})
 
-      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
+      {:ok, {_forum, _topic}} =
+        Topics.hide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          "spam"
+        )
+
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")
@@ -103,7 +110,14 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       topic = topic_fixture(forum, nil, %{"posts" => %{"0" => %{"body" => "chartreuse okapi"}}})
 
       # Hiding the topic and reindexing folds its posts to hidden, excluding them.
-      {:ok, hidden_topic} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
+      {:ok, {_forum, hidden_topic}} =
+        Topics.hide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          "spam"
+        )
+
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")
@@ -112,7 +126,13 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       # Unhiding it (which enqueues a topic-wide post reindex in production; here
       # we drive the reindex explicitly) folds the posts back to visible, so the
       # post is searchable again with its real body.
-      {:ok, _} = Topics.unhide_topic_for_fixture(hidden_topic)
+      {:ok, {_forum, _topic}} =
+        Topics.unhide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          hidden_topic.slug
+        )
+
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")

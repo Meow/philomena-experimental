@@ -172,7 +172,13 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       topic = topic_fixture(forum)
       post = post_fixture(topic, nil)
 
-      {:ok, _} = Topics.hide_topic_for_fixture(topic, "spam", moderator)
+      {:ok, {_forum, _topic}} =
+        Topics.hide_topic(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          "spam"
+        )
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts/#{post.id}")
 

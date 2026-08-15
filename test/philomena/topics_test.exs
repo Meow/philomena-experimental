@@ -74,46 +74,49 @@ defmodule Philomena.TopicsTest do
     {forum, topic}
   end
 
-  # A hidden topic in a normal forum, the shape unhide_topic/3 operates on. The
-  # internal hide engine writes no moderation log, so a later log assertion sees
-  # only the row unhide_topic/3 itself creates.
+  # A hidden topic in a normal forum, the shape unhide_topic/3 operates on.
   defp hidden_topic do
     forum = forum_fixture()
     topic = topic_fixture(forum)
-    {:ok, hidden} = Topics.hide_topic_for_fixture(topic, "Spam", moderator_user_fixture())
+    moderator = moderator_user_fixture()
+
+    {:ok, {_forum, hidden}} =
+      Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "Spam")
+
     {forum, hidden}
   end
 
   # A locked topic in a normal forum, the shape unlock_topic/3 operates on.
   # Locking (unlike hiding) leaves the topic visible, so the loader still admits
-  # a regular user. The internal lock engine writes no moderation log, so a later
-  # log assertion sees only the row unlock_topic/3 itself creates.
+  # a regular user.
   defp locked_topic do
     forum = forum_fixture()
     topic = topic_fixture(forum)
 
-    {:ok, locked} =
-      Topics.lock_topic_for_fixture(
-        topic,
-        %{"lock_reason" => "Off topic"},
-        moderator_user_fixture()
-      )
+    moderator = moderator_user_fixture()
+
+    {:ok, {_forum, locked}} =
+      Topics.lock_topic(actor(moderator), forum.short_name, topic.slug, %{
+        "lock_reason" => "Off topic"
+      })
 
     {forum, locked}
   end
 
   # A sticky topic in a normal forum, the shape unstick_topic/3 operates on.
   # Sticking (like locking) leaves the topic visible, so the loader still admits
-  # a regular user. The internal stick engine writes no moderation log, so a
-  # later log assertion sees only the row unstick_topic/3 itself creates.
+  # a regular user.
   defp sticky_topic do
     forum = forum_fixture()
     topic = topic_fixture(forum)
-    {:ok, sticky} = Topics.stick_topic_for_fixture(topic)
+    moderator = moderator_user_fixture()
+    {:ok, {_forum, sticky}} = Topics.stick_topic(actor(moderator), forum.short_name, topic.slug)
     {forum, sticky}
   end
 
-  defp only_moderation_log!, do: Repo.one!(ModerationLog)
+  defp latest_moderation_log! do
+    Repo.one!(from log in ModerationLog, order_by: [desc: log.id], limit: 1)
+  end
 
   defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
 
@@ -211,7 +214,10 @@ defmodule Philomena.TopicsTest do
       # topic :show authorization, which a regular user fails.
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
-      {:ok, topic} = Topics.hide_topic_for_fixture(topic, "test hiding", moderator_user_fixture())
+      moderator = moderator_user_fixture()
+
+      {:ok, {_forum, topic}} =
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
 
       assert Topics.subscribe(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
@@ -222,7 +228,9 @@ defmodule Philomena.TopicsTest do
     test "a hidden topic is subscribable by a moderator" do
       moderator = moderator_user_fixture()
       {forum, topic} = visible_topic()
-      {:ok, topic} = Topics.hide_topic_for_fixture(topic, "test hiding", moderator_user_fixture())
+
+      {:ok, {_forum, topic}} =
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
 
       assert {:ok, {_forum, _topic}} =
                Topics.subscribe(actor(moderator), forum.short_name, topic.slug)
@@ -288,7 +296,10 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
       {:ok, _} = Topics.create_subscription(topic, user)
-      {:ok, topic} = Topics.hide_topic_for_fixture(topic, "test hiding", moderator_user_fixture())
+      moderator = moderator_user_fixture()
+
+      {:ok, {_forum, topic}} =
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
 
       assert {:ok, {_forum, _topic}} =
                Topics.unsubscribe(actor(user), forum.short_name, topic.slug)
@@ -352,7 +363,10 @@ defmodule Philomena.TopicsTest do
       # would refuse with :unauthorized.
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
-      {:ok, topic} = Topics.hide_topic_for_fixture(topic, "test hiding", moderator_user_fixture())
+      moderator = moderator_user_fixture()
+
+      {:ok, {_forum, topic}} =
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
 
       assert {:ok, loaded_topic} =
                Topics.mark_topic_read(actor(user), forum.short_name, topic.slug)
@@ -475,7 +489,7 @@ defmodule Philomena.TopicsTest do
       assert {:ok, _} =
                Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "Rule violation")
 
-      log = only_moderation_log!()
+      log = latest_moderation_log!()
       assert log.user_id == moderator.id
       assert log.type == "Topic.Hide:create"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
@@ -572,7 +586,7 @@ defmodule Philomena.TopicsTest do
 
       assert {:ok, _} = Topics.unhide_topic(actor(moderator), forum.short_name, topic.slug)
 
-      log = only_moderation_log!()
+      log = latest_moderation_log!()
       assert log.user_id == moderator.id
       assert log.type == "Topic.Hide:delete"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
@@ -656,7 +670,7 @@ defmodule Philomena.TopicsTest do
                  "lock_reason" => "Off topic"
                })
 
-      log = only_moderation_log!()
+      log = latest_moderation_log!()
       assert log.user_id == moderator.id
       assert log.type == "Topic.Lock:create"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
@@ -741,7 +755,7 @@ defmodule Philomena.TopicsTest do
 
       assert {:ok, _} = Topics.unlock_topic(actor(moderator), forum.short_name, topic.slug)
 
-      log = only_moderation_log!()
+      log = latest_moderation_log!()
       assert log.user_id == moderator.id
       assert log.type == "Topic.Lock:delete"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
@@ -814,7 +828,7 @@ defmodule Philomena.TopicsTest do
 
       assert {:ok, _} = Topics.stick_topic(actor(moderator), forum.short_name, topic.slug)
 
-      log = only_moderation_log!()
+      log = latest_moderation_log!()
       assert log.user_id == moderator.id
       assert log.type == "Topic.Stick:create"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
@@ -833,7 +847,7 @@ defmodule Philomena.TopicsTest do
                {:error, :unauthorized}
 
       assert Repo.reload!(topic).sticky
-      assert moderation_log_count() == 0
+      assert moderation_log_count() == 1
     end
 
     test "an anonymous actor cannot unstick a topic" do
@@ -843,7 +857,7 @@ defmodule Philomena.TopicsTest do
                {:error, :unauthorized}
 
       assert Repo.reload!(topic).sticky
-      assert moderation_log_count() == 0
+      assert moderation_log_count() == 1
     end
 
     test "an unknown forum is unauthorized for a regular user" do
@@ -898,7 +912,7 @@ defmodule Philomena.TopicsTest do
 
       assert {:ok, _} = Topics.unstick_topic(actor(moderator), forum.short_name, topic.slug)
 
-      log = only_moderation_log!()
+      log = latest_moderation_log!()
       assert log.user_id == moderator.id
       assert log.type == "Topic.Stick:delete"
       assert log.subject_path == "/forums/#{forum.short_name}/topics/#{topic.slug}"
@@ -994,7 +1008,7 @@ defmodule Philomena.TopicsTest do
                  "target_forum_id" => to_string(target.id)
                })
 
-      log = only_moderation_log!()
+      log = latest_moderation_log!()
       assert log.user_id == moderator.id
       assert log.type == "Topic.Move:create"
       assert log.subject_path == "/forums/#{target.short_name}/topics/#{topic.slug}"
