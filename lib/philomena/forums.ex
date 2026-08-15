@@ -15,44 +15,17 @@ defmodule Philomena.Forums do
 
   use Philomena.Subscriptions, id_name: :forum_id
 
-  defp insert_forum(attrs) do
-    %Forum{}
-    |> Forum.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  defp persist_forum_update(%Forum{} = forum, attrs) do
-    forum
-    |> Forum.changeset(attrs)
-    |> Repo.update()
-  end
-
-  defp load_authorized_forum(actor, action, short_name) when is_binary(short_name) do
+  defp load_authorized_forum(actor, action, short_name) do
     Forum
     |> where([forum], forum.short_name == ^short_name)
     |> Loader.one_and_authorize(actor, action)
   end
-
-  defp load_authorized_forum(_actor, _action, _short_name), do: {:error, :not_found}
 
   defp visible_forums_query(actor) do
     Forum
     |> Visibility.visible_forums(actor)
     |> order_by(asc: :name)
   end
-
-  defp forum_topics(actor, forum, pagination) do
-    Topic
-    |> where([topic], topic.forum_id == ^forum.id)
-    |> Visibility.visible_topics(actor)
-    |> order_by(desc: :sticky, desc: :last_replied_to_at)
-    |> preload([:poll, :forum, :user, last_post: :user])
-    |> Repo.paginate(pagination)
-  end
-
-  @doc false
-  @spec create_forum_for_fixture(map()) :: {:ok, Forum.t()} | {:error, Ecto.Changeset.t()}
-  def create_forum_for_fixture(attrs \\ %{}), do: insert_forum(attrs)
 
   @doc """
   Lists the forums visible to `actor`, ordered by name.
@@ -146,10 +119,18 @@ defmodule Philomena.Forums do
           {:ok, ForumPage.t()} | {:error, :not_found | :unauthorized}
   def load_forum_show(%Actor{} = actor, short_name, pagination) do
     with {:ok, forum} <- load_authorized_forum(actor, :show, short_name) do
+      topics =
+        Topic
+        |> where([topic], topic.forum_id == ^forum.id)
+        |> Visibility.visible_topics(actor)
+        |> order_by(desc: :sticky, desc: :last_replied_to_at)
+        |> preload([:poll, :forum, :user, last_post: :user])
+        |> Repo.paginate(pagination)
+
       {:ok,
        %ForumPage{
          forum: forum,
-         topics: forum_topics(actor, forum, pagination),
+         topics: topics,
          watching: subscribed?(forum, actor.user)
        }}
     end
@@ -229,7 +210,9 @@ defmodule Philomena.Forums do
   def create_forum(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Forum) do
-      insert_forum(attrs)
+      %Forum{}
+      |> Forum.changeset(attrs)
+      |> Repo.insert()
     end
   end
 
@@ -265,7 +248,9 @@ defmodule Philomena.Forums do
   def update_forum(%Actor{} = actor, short_name, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, forum} <- load_authorized_forum(actor, :update, short_name) do
-      persist_forum_update(forum, attrs)
+      forum
+      |> Forum.changeset(attrs)
+      |> Repo.update()
     end
   end
 
