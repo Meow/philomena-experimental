@@ -19,7 +19,6 @@ defmodule Philomena.ModNotes do
   alias Philomena.ModNotes.ModNote
   alias Philomena.ModNotes.Target
   alias Philomena.Repo
-  alias Philomena.Users.User
 
   @embedded_page_size 250
 
@@ -53,29 +52,8 @@ defmodule Philomena.ModNotes do
     %{page | entries: render_notes(page.entries, collection_renderer)}
   end
 
-  defp change_mod_note(%ModNote{} = mod_note) do
-    ModNote.changeset(mod_note, %{})
-  end
-
-  defp creation_changeset(%Actor{user: %User{} = moderator}, attrs, target) do
-    %ModNote{moderator_id: moderator.id}
-    |> ModNote.creation_changeset(attrs, Target.to_changes(target))
-  end
-
-  defp update_mod_note_changeset(%ModNote{} = mod_note, attrs) do
-    ModNote.changeset(mod_note, attrs)
-  end
-
   defp load_mod_note(actor, id, action) do
     Loader.fetch_and_authorize(ModNote, actor, action, id, ModNote.target_preloads())
-  end
-
-  defp transact_note(multi, step) do
-    case Multi.transact(multi) do
-      {:ok, %{^step => note}} -> {:ok, note}
-      {:error, ^step, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
-      {:error, :moderation_log, %Ecto.Changeset{} = changeset, _changes} -> {:error, changeset}
-    end
   end
 
   @doc """
@@ -165,12 +143,14 @@ defmodule Philomena.ModNotes do
   """
   @spec new_mod_note(Actor.t(), map()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :not_found | :unauthorized}
-  def new_mod_note(%Actor{} = actor, params) do
+  def new_mod_note(%Actor{user: moderator} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, ModNote),
          {:ok, target} <- Target.from_params(params),
          {:ok, _} <- fetch_and_authorize_target(actor, target, :annotate) do
-      {:ok, creation_changeset(actor, %{}, target)}
+      {:ok,
+       %ModNote{moderator_id: moderator.id}
+       |> ModNote.creation_changeset(%{}, Target.to_changes(target))}
     end
   end
 
@@ -191,15 +171,17 @@ defmodule Philomena.ModNotes do
   @spec create_mod_note(Actor.t(), map()) ::
           {:ok, ModNote.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def create_mod_note(%Actor{} = actor, attrs \\ %{}) do
+  def create_mod_note(%Actor{user: moderator} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, ModNote),
          {:ok, target} <- Target.from_params(attrs),
          {:ok, _} <- fetch_and_authorize_target(actor, target, :annotate) do
-      changeset = creation_changeset(actor, attrs, target)
+      mod_note_changeset =
+        %ModNote{moderator_id: moderator.id}
+        |> ModNote.creation_changeset(attrs, Target.to_changes(target))
 
       Multi.new()
-      |> Multi.insert(:mod_note, changeset)
+      |> Multi.insert(:mod_note, mod_note_changeset)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -207,7 +189,14 @@ defmodule Philomena.ModNotes do
         "/admin/mod_notes",
         "Created mod note for #{Target.label(target)}"
       )
-      |> transact_note(:mod_note)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{mod_note: mod_note}} ->
+          {:ok, mod_note}
+
+        {:error, :mod_note, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -229,7 +218,7 @@ defmodule Philomena.ModNotes do
   def load_mod_note_for_edit(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, mod_note} <- load_mod_note(actor, id, :edit) do
-      {:ok, {mod_note, change_mod_note(mod_note)}}
+      {:ok, {mod_note, ModNote.changeset(mod_note)}}
     end
   end
 
@@ -251,8 +240,10 @@ defmodule Philomena.ModNotes do
   def update_mod_note(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, mod_note} <- load_mod_note(actor, id, :update) do
+      mod_note_changeset = ModNote.changeset(mod_note, attrs)
+
       Multi.new()
-      |> Multi.update(:mod_note, update_mod_note_changeset(mod_note, attrs))
+      |> Multi.update(:mod_note, mod_note_changeset)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -260,7 +251,14 @@ defmodule Philomena.ModNotes do
         "/admin/mod_notes/#{mod_note.id}",
         "Updated mod note #{mod_note.id}"
       )
-      |> transact_note(:mod_note)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{mod_note: mod_note}} ->
+          {:ok, mod_note}
+
+        {:error, :mod_note, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -291,7 +289,14 @@ defmodule Philomena.ModNotes do
         "/admin/mod_notes/#{mod_note.id}",
         "Deleted mod note #{mod_note.id}"
       )
-      |> transact_note(:mod_note)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{mod_note: mod_note}} ->
+          {:ok, mod_note}
+
+        {:error, :mod_note, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 end

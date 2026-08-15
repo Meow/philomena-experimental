@@ -38,7 +38,7 @@ defmodule Philomena.ModNotes.ModNote do
   end
 
   @doc false
-  def changeset(mod_note, attrs) do
+  def changeset(mod_note, attrs \\ %{}) do
     mod_note
     |> cast(attrs, [:body])
     |> validate_required([:body])
