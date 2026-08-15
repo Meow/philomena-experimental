@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
   end
 
   def create(conn, %{"user" => user_ban_params}) do
-    case Bans.create_user_ban(conn.assigns.actor, user_ban_params) do
+    case Bans.create_user_ban(conn.assigns.actor, user_ban_params["user_id"], user_ban_params) do
       {:ok, _user_ban} ->
         conn
         |> put_flash(:info, "User was successfully banned.")

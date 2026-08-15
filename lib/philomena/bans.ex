@@ -528,10 +528,8 @@ defmodule Philomena.Bans do
   end
 
   defp create_user_multi(%Users.User{} = creator, %Users.User{} = target, attrs) do
-    attrs = put_user_ban_target(attrs, target.id)
-
     user_changeset =
-      %User{banning_user_id: creator.id}
+      %User{banning_user_id: creator.id, user_id: target.id}
       |> User.changeset(attrs)
 
     Multi.new()
@@ -544,19 +542,6 @@ defmodule Philomena.Bans do
     end)
   end
 
-  # TODO: manual parameter parsing.
-  # This definitely belongs in a/the Bans.User changeset.
-
-  defp put_user_ban_target(attrs, target_id) do
-    attrs
-    |> Map.delete(:user_id)
-    |> Map.put("user_id", target_id)
-  end
-
-  defp user_ban_target_id(attrs) do
-    Map.get(attrs, "user_id") || Map.get(attrs, :user_id)
-  end
-
   @doc """
   Creates a user ban for a trusted, already-authorized system workflow.
 
@@ -565,10 +550,10 @@ defmodule Philomena.Bans do
   callers must use `create_user_ban/2` so write policy and authorization are
   applied and a moderation log is recorded.
   """
-  @spec create_system_user_ban(Users.User.t(), map()) ::
+  @spec create_system_user_ban(Users.User.t(), Loader.integer_id(), map()) ::
           {:ok, User.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def create_system_user_ban(%Users.User{} = creator, attrs) do
-    with {:ok, target} <- Loader.fetch(Users.User, user_ban_target_id(attrs)) do
+  def create_system_user_ban(%Users.User{} = creator, user_id, attrs) do
+    with {:ok, target} <- Loader.fetch(Users.User, user_id) do
       creator
       |> create_user_multi(target, attrs)
       |> Multi.transact()
@@ -638,8 +623,7 @@ defmodule Philomena.Bans do
     with :ok <- verify_write_access(actor),
          {:ok, target} <- Loader.fetch(Users.User, user_id),
          :ok <- authorize(actor, :new, User) do
-      user_ban = %User{user_id: target.id}
-      {:ok, {target, User.changeset(user_ban, put_user_ban_target(attrs, target.id))}}
+      {:ok, {target, %User{user_id: target.id} |> User.changeset(attrs)}}
     end
   end
 
@@ -650,22 +634,22 @@ defmodule Philomena.Bans do
 
   ## Examples
 
-      iex> create_user_ban(admin, ban_params)
+      iex> create_user_ban(admin, user_id, ban_params)
       {:ok, %User{}}
 
-      iex> create_user_ban(admin, invalid_params)
+      iex> create_user_ban(admin, user_id, invalid_params)
       {:error, %Ecto.Changeset{}}
 
-      iex> create_user_ban(user, ban_params)
+      iex> create_user_ban(user, user_id, ban_params)
       {:error, :unauthorized}
 
   """
-  @spec create_user_ban(Actor.t(), map()) ::
+  @spec create_user_ban(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, User.t()}
           | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
-  def create_user_ban(%Actor{user: creator} = actor, attrs) do
+  def create_user_ban(%Actor{user: creator} = actor, user_id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, target} <- Loader.fetch(Users.User, user_ban_target_id(attrs)),
+         {:ok, target} <- Loader.fetch(Users.User, user_id),
          :ok <- authorize(actor, :create, User) do
       creator
       |> create_user_multi(target, attrs)

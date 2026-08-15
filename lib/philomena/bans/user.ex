@@ -26,7 +26,7 @@ defmodule Philomena.Bans.User do
     user_ban
     |> cast(attrs, [:reason, :note, :enabled, :override_ip_ban, :user_id, :valid_until])
     |> put_ban_id("U")
-    |> validate_required([:reason, :enabled, :user_id, :valid_until])
+    |> validate_required([:reason, :enabled, :valid_until])
     |> check_constraint(:valid_until, name: :user_ban_duration_must_be_valid)
   end
 end

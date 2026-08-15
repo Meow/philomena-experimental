@@ -204,7 +204,8 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
       target = confirmed_user_fixture()
 
-      assert {:ok, ban} = Bans.create_user_ban(actor(moderator), valid_user_ban_attrs(target))
+      assert {:ok, ban} =
+               Bans.create_user_ban(actor(moderator), target.id, valid_user_ban_attrs())
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -217,7 +218,7 @@ defmodule Philomena.BansTest do
       admin = admin_user_fixture()
       target = confirmed_user_fixture()
 
-      assert {:ok, _ban} = Bans.create_user_ban(actor(admin), valid_user_ban_attrs(target))
+      assert {:ok, _ban} = Bans.create_user_ban(actor(admin), target.id, valid_user_ban_attrs())
     end
 
     test "creation automatically bans the target's latest IPv6 /64" do
@@ -225,7 +226,8 @@ defmodule Philomena.BansTest do
       target = confirmed_user_fixture()
       user_ip_fixture(target, "2001:db8:1:2:3:4:5:6")
 
-      assert {:ok, _ban} = Bans.create_user_ban(actor(moderator), valid_user_ban_attrs(target))
+      assert {:ok, _ban} =
+               Bans.create_user_ban(actor(moderator), target.id, valid_user_ban_attrs())
 
       assert %Bans.Subnet{
                specification: %Postgrex.INET{
@@ -240,7 +242,8 @@ defmodule Philomena.BansTest do
       target = confirmed_user_fixture()
       user_ip_fixture(target, "203.0.113.51")
 
-      assert {:ok, _ban} = Bans.create_user_ban(actor(moderator), valid_user_ban_attrs(target))
+      assert {:ok, _ban} =
+               Bans.create_user_ban(actor(moderator), target.id, valid_user_ban_attrs())
 
       assert %Bans.Subnet{
                specification: %Postgrex.INET{address: {203, 0, 113, 51}, netmask: 32}
@@ -252,8 +255,8 @@ defmodule Philomena.BansTest do
       target = confirmed_user_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Bans.create_user_ban(actor(moderator), %{
-                 valid_user_ban_attrs(target)
+               Bans.create_user_ban(actor(moderator), target.id, %{
+                 valid_user_ban_attrs()
                  | "reason" => ""
                })
 
@@ -263,7 +266,11 @@ defmodule Philomena.BansTest do
     test "a regular user is not authorized and creates nothing" do
       target = confirmed_user_fixture()
 
-      assert Bans.create_user_ban(actor(confirmed_user_fixture()), valid_user_ban_attrs(target)) ==
+      assert Bans.create_user_ban(
+               actor(confirmed_user_fixture()),
+               target.id,
+               valid_user_ban_attrs()
+             ) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -272,7 +279,7 @@ defmodule Philomena.BansTest do
     test "an anonymous visitor is not authorized" do
       target = confirmed_user_fixture()
 
-      assert Bans.create_user_ban(actor(), valid_user_ban_attrs(target)) ==
+      assert Bans.create_user_ban(actor(), target.id, valid_user_ban_attrs()) ==
                {:error, :unauthorized}
     end
   end
@@ -933,7 +940,7 @@ defmodule Philomena.BansTest do
       target = confirmed_user_fixture()
       banned_actor = actor(moderator, ban: %{active: true})
 
-      assert Bans.create_user_ban(banned_actor, valid_user_ban_attrs(target)) ==
+      assert Bans.create_user_ban(banned_actor, target.id, valid_user_ban_attrs()) ==
                {:error, :ban}
 
       assert Bans.create_subnet_ban(banned_actor, valid_subnet_ban_attrs()) ==
@@ -950,7 +957,7 @@ defmodule Philomena.BansTest do
       target = confirmed_user_fixture()
       unattributed_actor = actor(moderator, fingerprint: nil)
 
-      assert Bans.create_user_ban(unattributed_actor, valid_user_ban_attrs(target)) ==
+      assert Bans.create_user_ban(unattributed_actor, target.id, valid_user_ban_attrs()) ==
                {:error, :unauthorized}
 
       assert Bans.create_subnet_ban(unattributed_actor, valid_subnet_ban_attrs()) ==
@@ -1027,9 +1034,8 @@ defmodule Philomena.BansTest do
 
   # Controller-shaped attrs (string keys) a user ban insert requires: a target,
   # a reason, and a valid_until (a RelativeDate a plain DateTime casts fine).
-  defp valid_user_ban_attrs(target) do
+  defp valid_user_ban_attrs do
     %{
-      "user_id" => target.id,
       "reason" => "Test ban reason",
       "valid_until" => DateTime.add(DateTime.utc_now(:second), 365, :day)
     }

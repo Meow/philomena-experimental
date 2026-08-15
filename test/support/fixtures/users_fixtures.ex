@@ -103,8 +103,7 @@ defmodule Philomena.UsersFixtures do
     banning_user = banning_user || admin_user_fixture()
 
     {:ok, ban} =
-      Bans.create_user_ban(AttributionFixtures.actor(banning_user), %{
-        "user_id" => user.id,
+      Bans.create_user_ban(AttributionFixtures.actor(banning_user), user.id, %{
         "reason" => "Banned in test",
         "valid_until" => DateTime.add(DateTime.utc_now(:second), 365, :day)
       })

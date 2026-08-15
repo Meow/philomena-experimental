@@ -24,8 +24,8 @@ defmodule Philomena.BansFixtures do
     {:ok, ban} =
       Bans.create_user_ban(
         Philomena.AttributionFixtures.actor(creator),
+        target.id,
         Enum.into(attrs, %{
-          "user_id" => target.id,
           "reason" => "Test ban reason",
           "valid_until" => DateTime.add(DateTime.utc_now(:second), 365, :day)
         })
