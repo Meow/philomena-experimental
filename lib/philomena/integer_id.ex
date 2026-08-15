@@ -41,13 +41,20 @@ defmodule Philomena.IntegerId do
   def parse(id)
 
   def parse(id) when is_integer(id) do
-    if in_range?(id), do: {:ok, id}, else: :error
+    if in_range?(id) do
+      {:ok, id}
+    else
+      :error
+    end
   end
 
   def parse(id) when is_binary(id) do
     case Integer.parse(id) do
-      {int, ""} -> parse(int)
-      _ -> :error
+      {int, ""} ->
+        parse(int)
+
+      _ ->
+        :error
     end
   end
 

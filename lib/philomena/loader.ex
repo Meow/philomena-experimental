@@ -95,8 +95,11 @@ defmodule Philomena.Loader do
         |> preload(^preloads)
         |> Repo.get(id)
         |> case do
-          nil -> {:error, :not_found}
-          record -> {:ok, record}
+          nil ->
+            {:error, :not_found}
+
+          record ->
+            {:ok, record}
         end
 
       :error ->
@@ -125,8 +128,11 @@ defmodule Philomena.Loader do
   @spec one(query :: Ecto.Queryable.t()) :: fetch_result(struct())
   def one(query) do
     case Repo.one(query) do
-      nil -> {:error, :not_found}
-      record -> {:ok, record}
+      nil ->
+        {:error, :not_found}
+
+      record ->
+        {:ok, record}
     end
   end
 
