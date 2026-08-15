@@ -4,6 +4,8 @@ This directory plans the remaining context-layer cleanup after the namespace
 refactor. [all-contexts.md](all-contexts.md) defines the contract and migration
 order shared by every context. The files under [contexts/](contexts/) record the
 context-specific audit findings, behavior decisions, and verification work.
+Implementation style for this work is defined by the repository's
+[context development guide](../../CONTEXT_STYLE.md).
 
 ## Scope
 

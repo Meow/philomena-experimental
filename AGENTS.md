@@ -1,4 +1,4 @@
-# AGENDS.md
+# AGENTS.md
 
 This file provides guidance to coding assistants when working with code in this repository.
 
@@ -37,6 +37,15 @@ docker compose exec -T -e MIX_ENV=test app mix test [test/path/to/file_test.exs]
 (and once on a fresh stack, `mix ecto.create && mix ecto.load` with the same `-e MIX_ENV=test`).
 
 Test conventions — file layout, auth-level setup helpers, fixtures, OpenSearch index handling, external-call stubbing — are documented in `test/CONVENTIONS.md`; read it before writing controller or context tests.
+
+### Context development
+
+Before creating or refactoring a `Philomena` domain context, its schemas, or a
+controller-facing context API, read `CONTEXT_STYLE.md`. It defines the expected
+code shape, changeset and query boundaries, transaction composition, result
+types, and testing style. The loading and authorization contract in
+`plans/context-refactor/all-contexts.md` remains authoritative for access and
+error semantics.
 
 ### Database
 
