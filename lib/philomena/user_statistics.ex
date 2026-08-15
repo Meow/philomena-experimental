@@ -60,6 +60,19 @@ defmodule Philomena.UserStatistics do
 
   defp reindex_result(error, _user_id), do: error
 
+  @doc """
+  Adds an atomic statistic increment to `multi`.
+
+  The Multi updates both the user's lifetime counter and current UTC-daily
+  counter. Passing `nil` leaves the Multi unchanged, which supports anonymous
+  activity. After the transaction commits, it reindexes the user.
+
+  ## Example
+
+      iex> Multi.new() |> put_increment(user, :images_count, 2)
+      %Multi{}
+
+  """
   @spec put_increment(Multi.t(), User.t() | integer() | nil, statistic(), integer()) ::
           Multi.t()
   def put_increment(multi, user_or_id, statistic, amount \\ 1)

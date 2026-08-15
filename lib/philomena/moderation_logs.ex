@@ -82,8 +82,21 @@ defmodule Philomena.ModerationLogs do
     Multi.insert(multi, step, log_changeset(user, type, subject_path, body))
   end
 
-  # Variant of put_log that receives {type, subject_path, body} from a callback with the
-  # changes from the Multi.
+  @doc ~S"""
+  Adds an audit-log insert whose attributes are derived from prior Multi changes.
+
+  `callback` receives the completed changes and must return
+  `{type, subject_path, body}`. Use this form when the audited subject is
+  created by an earlier Multi step.
+
+  ## Examples
+
+      iex> put_log(multi, :log, actor, fn %{user: user} ->
+      ...>   {"User:create", "/profiles/#{user.name}", "Created user"}
+      ...> end)
+      %Ecto.Multi{}
+
+  """
   @spec put_log(
           multi :: Multi.t(),
           step :: Multi.name(),

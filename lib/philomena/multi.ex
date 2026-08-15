@@ -520,6 +520,16 @@ defmodule Philomena.Multi do
 
   @doc """
   Locks a query result for update, or aborts the transaction if it was not found.
+
+  The locked result is available under `name` to later Multi steps. This is
+  useful before making a change that depends on the row's current state.
+
+  ## Example
+
+      Multi.new()
+      |> Multi.lock_one(:user, from(u in User, where: u.id == ^user_id))
+      |> Multi.transact()
+
   """
   @spec lock_one(t(), Ecto.Multi.name(), Ecto.Queryable.t()) :: t()
   def lock_one(%__MODULE__{} = multi, name, queryable) do
@@ -558,7 +568,19 @@ defmodule Philomena.Multi do
   end
 
   @doc """
-  Registers a callback to occur when the Multi commits.
+  Registers a callback to occur after the Multi commits.
+
+  The callback receives the transaction changes and runs only after a
+  successful transaction, in registration order. Use it for side effects that
+  must occur after transaction completion, like object storage or indexing.
+
+  ## Example
+
+      Multi.new()
+      |> Multi.run(:user, fn _repo, _changes -> {:ok, user} end)
+      |> Multi.on_commit(fn %{user: user} -> Users.reindex_user(user) end)
+      |> Multi.transact()
+
   """
   @spec on_commit(t(), (Ecto.Multi.changes() -> any())) :: t()
   def on_commit(%__MODULE__{} = multi, fun) when is_function(fun, 1) do
