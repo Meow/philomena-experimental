@@ -12,6 +12,7 @@ defmodule Philomena.Filters do
   alias Philomena.Filters.FilterPage
   alias Philomena.Filters.FilterSelection
   alias Philomena.Filters.Query
+  alias Philomena.Filters.Visibility
   alias Philomena.Filters
   alias Philomena.Attribution.Actor
   alias Philomena.Schema.TagList
@@ -21,46 +22,18 @@ defmodule Philomena.Filters do
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
 
-  defp visibility_filters(%Actor{user: user} = actor) do
-    case authorize(actor, :search_all, Filter) do
-      :ok ->
-        []
-
-      {:error, :unauthorized} ->
-        %{
-          bool: %{
-            should: [
-              %{term: %{public: true}},
-              %{term: %{system: true}}
-              | user_visibility_filters(user)
-            ]
-          }
-        }
-    end
-  end
-
-  defp user_visibility_filters(nil),
-    do: []
-
-  defp user_visibility_filters(user),
-    do: [%{term: %{user_id: user.id}}]
-
-  defp ensure_current_filter(%User{current_filter: %Filter{} = filter}), do: {:ok, filter}
-
-  defp ensure_current_filter(%User{} = user) do
-    filter = default_filter()
-
-    case Users.set_current_filter(user, filter) do
-      {:ok, _user} -> {:ok, filter}
-      {:error, changeset} -> {:error, changeset}
+  defp ensure_current_filter(%User{current_filter: current_filter} = user) do
+    if current_filter do
+      current_filter
+    else
+      filter = default_filter()
+      {:ok, _user} = Users.set_current_filter(user, filter)
+      filter
     end
   end
 
   defp filter_for_switch(_actor, nil), do: {:ok, default_filter()}
   defp filter_for_switch(actor, id), do: load_and_authorize_filter(actor, id, :show)
-
-  defp persist_current_filter(nil, _filter), do: {:ok, nil}
-  defp persist_current_filter(%User{} = user, filter), do: Users.set_current_filter(user, filter)
 
   defp load_and_authorize_filter(actor, id, action, preloads \\ []) do
     Loader.fetch_and_authorize(Filter, actor, action, id, preloads)
@@ -116,9 +89,9 @@ defmodule Philomena.Filters do
 
   Signed-in actors use their account associations. When no current filter has
   been selected, the canonical default is persisted first. Anonymous actors may
-  select a visible filter through `cookie_filter_id`. Malformed, missing, or
-  forbidden cookie IDs fall back to the `default_filter/0`. Anonymous actors
-  cannot have a forced filter.
+  select a visible filter through `filter_id`. Malformed, missing, or forbidden
+  `filter_id`s fall back to the `default_filter/0`. Anonymous actors cannot have
+  a forced filter.
 
   ## Examples
 
@@ -128,23 +101,21 @@ defmodule Philomena.Filters do
   """
   @spec load_selected_filters(Actor.t(), Loader.integer_id() | nil) ::
           {:ok, %{current_filter: Filter.t(), forced_filter: Filter.t() | nil}}
-          | {:error, Ecto.Changeset.t()}
-  def load_selected_filters(%Actor{user: nil} = actor, cookie_filter_id) do
-    current_filter =
-      case load_and_authorize_filter(actor, cookie_filter_id, :show) do
-        {:ok, filter} -> filter
-        {:error, _reason} -> default_filter()
-      end
+  def load_selected_filters(%Actor{user: nil} = actor, filter_id) do
+    case load_and_authorize_filter(actor, filter_id, :show) do
+      {:ok, filter} ->
+        {:ok, %{current_filter: filter, forced_filter: nil}}
 
-    {:ok, %{current_filter: current_filter, forced_filter: nil}}
+      _ ->
+        {:ok, %{current_filter: default_filter(), forced_filter: nil}}
+    end
   end
 
-  def load_selected_filters(%Actor{user: %User{} = user}, _cookie_filter_id) do
+  def load_selected_filters(%Actor{user: %User{} = user}, _filter_id) do
     user = Repo.preload(user, [:current_filter, :forced_filter])
+    current_filter = ensure_current_filter(user)
 
-    with {:ok, current_filter} <- ensure_current_filter(user) do
-      {:ok, %{current_filter: current_filter, forced_filter: user.forced_filter}}
-    end
+    {:ok, %{current_filter: current_filter, forced_filter: user.forced_filter}}
   end
 
   @doc """
@@ -287,7 +258,7 @@ defmodule Philomena.Filters do
             query: %{
               bool: %{
                 must: query,
-                filter: visibility_filters(actor)
+                filter: Visibility.search_filters(actor)
               }
             },
             sort: [
@@ -436,8 +407,11 @@ defmodule Philomena.Filters do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def switch_current_filter(%Actor{user: user} = actor, id) do
     with :ok <- authorize(actor, :switch, Filter),
-         {:ok, filter} <- filter_for_switch(actor, id),
-         {:ok, _user} <- persist_current_filter(user, filter) do
+         {:ok, filter} <- filter_for_switch(actor, id) do
+      if user do
+        Users.set_current_filter(user, filter)
+      end
+
       {:ok, filter}
     end
   end

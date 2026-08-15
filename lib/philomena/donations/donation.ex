@@ -20,7 +20,7 @@ defmodule Philomena.Donations.Donation do
   end
 
   @doc false
-  def changeset(donation, attrs) do
+  def changeset(donation, attrs \\ %{}) do
     donation
     |> cast(attrs, [:email, :amount, :note, :user_id])
     |> validate_required([])

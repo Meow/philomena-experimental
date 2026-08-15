@@ -1,10 +1,6 @@
 defmodule Philomena.Donations do
   @moduledoc """
   Authorized administration of donation records.
-
-  Donation history is financial data. Controller-facing functions authorize
-  the requested action, and the per-user loader additionally authorizes the
-  sensitive target before returning it.
   """
 
   import Ecto.Query, warn: false
@@ -16,17 +12,6 @@ defmodule Philomena.Donations do
   alias Philomena.Loader
   alias Philomena.Repo
   alias Philomena.Users.User
-
-  defp insert_donation(attrs) do
-    %Donation{}
-    |> Donation.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking donation changes.
-  defp change_donation(%Donation{} = donation) do
-    Donation.changeset(donation, %{})
-  end
 
   @doc """
   Returns the paginated donation listing for the admin index, on behalf of
@@ -60,9 +45,8 @@ defmodule Philomena.Donations do
   changeset.
 
   This form loader verifies write access, authorizes the routed `:show` action
-  against donations, then safely loads and authorizes the target user's
-  financial history. A missing slug is not found; a real but forbidden target
-  is unauthorized.
+  against donations, then loads and authorizes the target user's
+  donation history.
 
   ## Examples
 
@@ -89,7 +73,7 @@ defmodule Philomena.Donations do
          :ok <- authorize(actor, :show, Donation),
          {:ok, user} <- Loader.one(user_query),
          :ok <- authorize(actor, :show_donations, user) do
-      {:ok, {user, change_donation(%Donation{})}}
+      {:ok, {user, Donation.changeset(%Donation{})}}
     end
   end
 
@@ -118,7 +102,9 @@ defmodule Philomena.Donations do
   def create_donation(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Donation) do
-      insert_donation(attrs)
+      %Donation{}
+      |> Donation.changeset(attrs)
+      |> Repo.insert()
     end
   end
 end
