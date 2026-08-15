@@ -5,8 +5,8 @@ defmodule Philomena.Notifications do
   At most one unread row exists per recipient and event subject, and a repeated
   broadcast refreshes it without changing its original creation time.
 
-  Event owners call these services from `Ecto.Multi.run/3`, so their database changes
-  and notifications commit or roll back together.
+  Event owners call these services from `Philomena.Multi.run/3`, so their
+  database changes and notifications commit or roll back together.
   """
 
   import Ecto.Query, warn: false
@@ -43,7 +43,7 @@ defmodule Philomena.Notifications do
 
   @category_params Map.new(@categories, &{Atom.to_string(&1), &1})
 
-  @typedoc "A route-visible unread-notification category."
+  @typedoc "A category of unread notifications."
   @type category ::
           :channel_live
           | :forum_post
@@ -87,47 +87,11 @@ defmodule Philomena.Notifications do
     |> where(user_id: ^user.id)
   end
 
-  defp unread_count(%User{} = user) do
-    queries =
-      Enum.map(@categories, fn category ->
-        category
-        |> user_category_query(user)
-        |> exclude(:preload)
-        |> select([_notification], %{one: 1})
-      end)
-
-    queries
-    |> Enum.reduce(&union_all(&2, ^&1))
-    |> Repo.aggregate(:count)
-  end
-
-  defp grouped_unread(%User{} = user, pagination) do
-    Enum.map(@categories, fn category ->
-      {category, unread_page(category, user, pagination)}
-    end)
-  end
-
   defp unread_page(category, %User{} = user, pagination) do
     category
     |> user_category_query(user)
     |> order_by(desc: :updated_at)
     |> Repo.paginate(pagination)
-  end
-
-  defp broadcast_notification(opts) do
-    opts = Keyword.validate!(opts, [:notification_author, :from, :into, :select, :unique_key])
-
-    notification_author = Keyword.get(opts, :notification_author)
-    {subscription_schema, filters} = Keyword.fetch!(opts, :from)
-    notification_schema = Keyword.fetch!(opts, :into)
-    select_keywords = Keyword.fetch!(opts, :select)
-    unique_key = Keyword.fetch!(opts, :unique_key)
-
-    subscription_schema
-    |> subscription_query(notification_author)
-    |> where(^filters)
-    |> convert_to_notification(select_keywords)
-    |> insert_notifications(notification_schema, unique_key)
   end
 
   defp subscription_query(subscription, author) do
@@ -170,6 +134,22 @@ defmodule Philomena.Notifications do
       )
 
     {:ok, count}
+  end
+
+  defp broadcast_notification(opts) do
+    opts = Keyword.validate!(opts, [:notification_author, :from, :into, :select, :unique_key])
+
+    notification_author = Keyword.get(opts, :notification_author)
+    {subscription_schema, filters} = Keyword.fetch!(opts, :from)
+    notification_schema = Keyword.fetch!(opts, :into)
+    select_keywords = Keyword.fetch!(opts, :select)
+    unique_key = Keyword.fetch!(opts, :unique_key)
+
+    subscription_schema
+    |> subscription_query(notification_author)
+    |> where(^filters)
+    |> convert_to_notification(select_keywords)
+    |> insert_notifications(notification_schema, unique_key)
   end
 
   defp clear_for_user(_query, nil), do: {:ok, 0}
@@ -223,7 +203,20 @@ defmodule Philomena.Notifications do
   """
   @spec total_unread_count(Actor.t()) :: non_neg_integer()
   def total_unread_count(%Actor{user: nil}), do: 0
-  def total_unread_count(%Actor{user: %User{} = user}), do: unread_count(user)
+
+  def total_unread_count(%Actor{user: %User{} = user}) do
+    queries =
+      Enum.map(@categories, fn category ->
+        category
+        |> user_category_query(user)
+        |> exclude(:preload)
+        |> select([_notification], %{one: 1})
+      end)
+
+    queries
+    |> Enum.reduce(&union_all(&2, ^&1))
+    |> Repo.aggregate(:count)
+  end
 
   @doc """
   Loads paginated notifications for every unread category belonging to `actor`.
@@ -244,7 +237,12 @@ defmodule Philomena.Notifications do
   def load_unread(%Actor{user: nil}, _pagination), do: {:error, :unauthorized}
 
   def load_unread(%Actor{user: %User{} = user}, pagination) do
-    {:ok, grouped_unread(user, pagination)}
+    unread =
+      Enum.map(@categories, fn category ->
+        {category, unread_page(category, user, pagination)}
+      end)
+
+    {:ok, unread}
   end
 
   @doc """
