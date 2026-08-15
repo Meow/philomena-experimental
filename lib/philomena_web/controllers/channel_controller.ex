@@ -8,15 +8,25 @@ defmodule PhilomenaWeb.ChannelController do
   def index(conn, params) do
     show_nsfw? = conn.cookies["chan_nsfw"] == "true"
 
-    {channels, subscriptions} =
-      Channels.load_channels(conn.assigns.actor, show_nsfw?, params, conn.assigns.scrivener)
+    case Channels.load_channels(conn.assigns.actor, show_nsfw?, params, conn.assigns.scrivener) do
+      {:ok, channels, subscriptions, changeset} ->
+        render(conn, "index.html",
+          title: "Livestreams",
+          layout_class: "layout--wide",
+          channels: channels,
+          subscriptions: subscriptions,
+          changeset: changeset
+        )
 
-    render(conn, "index.html",
-      title: "Livestreams",
-      layout_class: "layout--wide",
-      channels: channels,
-      subscriptions: subscriptions
-    )
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "index.html",
+          title: "Livestreams",
+          layout_class: "layout--wide",
+          channels: nil,
+          subscriptions: %{},
+          changeset: changeset
+        )
+    end
   end
 
   def show(conn, params) do

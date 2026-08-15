@@ -33,7 +33,9 @@ defmodule Philomena.ChannelsTest do
       fetched = listed_channel_fixture()
       unfetched = channel_fixture()
 
-      {page, _subscriptions} = Channels.load_channels(actor(), true, %{}, @pagination)
+      {:ok, page, _subscriptions, _changeset} =
+        Channels.load_channels(actor(), true, %{}, @pagination)
+
       ids = Enum.map(page.entries, & &1.id)
 
       assert fetched.id in ids
@@ -44,7 +46,9 @@ defmodule Philomena.ChannelsTest do
       sfw = listed_channel_fixture(%{}, %{nsfw: false})
       nsfw = listed_channel_fixture(%{}, %{nsfw: true})
 
-      {page, _subscriptions} = Channels.load_channels(actor(), false, %{}, @pagination)
+      {:ok, page, _subscriptions, _changeset} =
+        Channels.load_channels(actor(), false, %{}, @pagination)
+
       ids = Enum.map(page.entries, & &1.id)
 
       assert sfw.id in ids
@@ -54,7 +58,8 @@ defmodule Philomena.ChannelsTest do
     test "includes NSFW channels when NSFW is shown" do
       nsfw = listed_channel_fixture(%{}, %{nsfw: true})
 
-      {page, _subscriptions} = Channels.load_channels(actor(), true, %{}, @pagination)
+      {:ok, page, _subscriptions, _changeset} =
+        Channels.load_channels(actor(), true, %{}, @pagination)
 
       assert nsfw.id in Enum.map(page.entries, & &1.id)
     end
@@ -63,7 +68,9 @@ defmodule Philomena.ChannelsTest do
       offline = listed_channel_fixture(%{}, %{is_live: false, title: "zzz offline"})
       live = listed_channel_fixture(%{}, %{is_live: true, title: "aaa live"})
 
-      {page, _subscriptions} = Channels.load_channels(actor(), true, %{}, @pagination)
+      {:ok, page, _subscriptions, _changeset} =
+        Channels.load_channels(actor(), true, %{}, @pagination)
+
       ids = Enum.map(page.entries, & &1.id)
 
       assert Enum.find_index(ids, &(&1 == live.id)) <
@@ -74,7 +81,7 @@ defmodule Philomena.ChannelsTest do
       match = listed_channel_fixture(%{}, %{title: "Pony Stream"})
       other = listed_channel_fixture(%{}, %{title: "Cat Stream"})
 
-      {page, _subscriptions} =
+      {:ok, page, _subscriptions, _changeset} =
         Channels.load_channels(actor(), true, %{"cq" => "Pony"}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
@@ -87,7 +94,7 @@ defmodule Philomena.ChannelsTest do
       match = listed_channel_fixture(%{"short_name" => "searchablechan"})
       other = listed_channel_fixture()
 
-      {page, _subscriptions} =
+      {:ok, page, _subscriptions, _changeset} =
         Channels.load_channels(actor(), true, %{"cq" => "searchable"}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
@@ -101,7 +108,7 @@ defmodule Philomena.ChannelsTest do
       match = listed_channel_fixture(%{"artist_tag" => tag.name})
       other = listed_channel_fixture()
 
-      {page, _subscriptions} =
+      {:ok, page, _subscriptions, _changeset} =
         Channels.load_channels(actor(), true, %{"cq" => "cqsearchtarget"}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
@@ -114,7 +121,9 @@ defmodule Philomena.ChannelsTest do
       tag = tag_fixture(%{name: "artist:preloadtag"})
       listed_channel_fixture(%{"artist_tag" => tag.name})
 
-      {page, _subscriptions} = Channels.load_channels(actor(), true, %{}, @pagination)
+      {:ok, page, _subscriptions, _changeset} =
+        Channels.load_channels(actor(), true, %{}, @pagination)
+
       [channel | _] = page.entries
 
       assert Ecto.assoc_loaded?(channel.associated_artist_tag)
@@ -126,12 +135,12 @@ defmodule Philomena.ChannelsTest do
       other_user = confirmed_user_fixture()
       {:ok, _subscription} = Channels.create_subscription(channel, user)
 
-      {_page, subscriptions} =
+      {:ok, _page, subscriptions, _changeset} =
         Channels.load_channels(actor(user), true, %{}, @pagination)
 
       assert subscriptions == %{channel.id => true}
 
-      {_page, subscriptions} =
+      {:ok, _page, subscriptions, _changeset} =
         Channels.load_channels(actor(other_user), true, %{}, @pagination)
 
       assert subscriptions == %{}

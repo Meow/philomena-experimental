@@ -109,7 +109,7 @@ defmodule Philomena.Activities do
     featured_image = load_featured_image(actor, scope)
     topics = Topics.list_front_page_topics(actor, @strip_pagination)
 
-    {streams, _subscriptions} =
+    {:ok, streams, _subscriptions, _changeset} =
       Channels.load_channels(actor, show_nsfw_channels?, %{}, @strip_pagination)
 
     interactions =

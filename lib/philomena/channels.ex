@@ -10,6 +10,8 @@ defmodule Philomena.Channels do
   alias Philomena.Attribution.Actor
   alias Philomena.Channels.AutomaticUpdater
   alias Philomena.Channels.Channel
+  alias Philomena.Channels.QueryBuilder
+  alias Philomena.Channels.QueryForm
   alias Philomena.Loader
   alias Philomena.Notifications
   alias Philomena.Repo
@@ -43,21 +45,6 @@ defmodule Philomena.Channels do
     Loader.fetch_and_authorize(Channel, actor, action, id)
   end
 
-  # TODO: manual parameter parsing. Move to changeset.
-
-  defp maybe_search(query, %{"cq" => cq}) when is_binary(cq) and cq != "" do
-    title_query = "#{cq}%"
-    tag_query = "%#{cq}%"
-
-    from channel in query,
-      left_join: tag in assoc(channel, :associated_artist_tag),
-      where:
-        ilike(channel.title, ^title_query) or ilike(channel.short_name, ^title_query) or
-          ilike(tag.name, ^tag_query)
-  end
-
-  defp maybe_search(query, _params), do: query
-
   defp maybe_show_nsfw(query, true), do: query
   defp maybe_show_nsfw(query, _falsy), do: where(query, nsfw: false)
 
@@ -88,22 +75,24 @@ defmodule Philomena.Channels do
   ## Examples
 
       iex> load_channels(actor, false, %{"cq" => "pony"}, pagination)
-      {%Scrivener.Page{}, %{12 => true}}
+      {:ok, %Scrivener.Page{}, %{12 => true}, %Ecto.Changeset{}}
 
   """
   @spec load_channels(Actor.t(), boolean(), map(), Repo.pagination_params()) ::
-          {Scrivener.Page.t(), %{optional(integer()) => true}}
+          {:ok, Scrivener.Page.t(), %{optional(integer()) => true}, Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t()}
   def load_channels(%Actor{} = actor, show_nsfw?, params, pagination) do
-    channels =
-      Channel
-      |> maybe_show_nsfw(show_nsfw?)
-      |> where([c], not is_nil(c.last_fetched_at))
-      |> order_by(desc: :is_live, asc: :title)
-      |> preload([:associated_artist_tag])
-      |> maybe_search(params)
-      |> Repo.paginate(pagination)
+    with {:ok, query, query_form} <- QueryBuilder.build_query(params) do
+      channels =
+        query
+        |> maybe_show_nsfw(show_nsfw?)
+        |> where([c], not is_nil(c.last_fetched_at))
+        |> order_by(desc: :is_live, asc: :title)
+        |> preload([:associated_artist_tag])
+        |> Repo.paginate(pagination)
 
-    {channels, subscriptions(channels, actor.user)}
+      {:ok, channels, subscriptions(channels, actor.user), QueryForm.changeset(query_form)}
+    end
   end
 
   @doc """
