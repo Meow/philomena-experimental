@@ -39,7 +39,7 @@ defmodule Philomena.Topics.Topic do
   end
 
   @doc false
-  def changeset(topic, attrs) do
+  def changeset(topic, attrs \\ %{}) do
     topic
     |> cast(attrs, [])
     |> validate_required([])
@@ -99,16 +99,21 @@ defmodule Philomena.Topics.Topic do
     |> foreign_key_constraint(:forum_id, name: :fk_rails_eac66eb971)
   end
 
-  def hide_changeset(topic, deletion_reason, user) do
-    change(topic)
+  @doc false
+  def hide_changeset(topic, user, attrs) do
+    topic
+    |> cast(attrs, [:deletion_reason])
+    |> validate_required([:deletion_reason])
+    |> validate_hidden(false, "is already hidden")
     |> put_change(:hidden_from_users, true)
     |> put_change(:deleted_by_id, user.id)
-    |> put_change(:deletion_reason, deletion_reason)
-    |> validate_required([:deletion_reason])
   end
 
+  @doc false
   def unhide_changeset(topic) do
-    change(topic)
+    topic
+    |> change()
+    |> validate_hidden(true, "is not hidden")
     |> put_change(:hidden_from_users, false)
     |> put_change(:deleted_by_id, nil)
     |> put_change(:deletion_reason, "")
@@ -130,5 +135,13 @@ defmodule Philomena.Topics.Topic do
     changeset
     |> put_change(:slug, slug)
     |> validate_required(:slug, message: "must be printable")
+  end
+
+  defp validate_hidden(changeset, required_state, message) do
+    if get_field(changeset, :hidden_from_users) != required_state do
+      add_error(changeset, :hidden_from_users, message)
+    else
+      changeset
+    end
   end
 end

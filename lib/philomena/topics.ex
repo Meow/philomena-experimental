@@ -8,6 +8,8 @@ defmodule Philomena.Topics do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
+  import Philomena.Forums.TransactionWorkflow
+
   alias Philomena.Multi
   alias Philomena.Repo
 
@@ -21,7 +23,6 @@ defmodule Philomena.Topics do
   alias Philomena.Polls.Poll
   alias Philomena.PollVotes
   alias Philomena.PollOptions.PollOption
-  alias Philomena.UserStatistics
   alias Philomena.Notifications
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
@@ -30,60 +31,13 @@ defmodule Philomena.Topics do
   alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
   alias Philomena.Users.User
+  alias Philomena.UserStatistics
 
   @topic_create_window 300
 
   use Philomena.Subscriptions,
     on_delete: :clear_topic_notification,
     id_name: :topic_id
-
-  defp persist_topic(%Forum{} = forum, %Actor{} = actor, attrs) do
-    now = DateTime.utc_now(:second)
-
-    topic =
-      %Topic{}
-      |> Topic.creation_changeset(attrs, forum, actor)
-
-    Multi.new()
-    |> Multi.insert(:topic, topic)
-    |> Multi.run(:update_topic, fn repo, %{topic: topic} ->
-      {count, nil} =
-        Topic
-        |> where(id: ^topic.id)
-        |> repo.update_all(set: [last_post_id: hd(topic.posts).id, last_replied_to_at: now])
-
-      {:ok, count}
-    end)
-    |> Multi.run(:update_forum, fn repo, %{topic: topic} ->
-      {count, nil} =
-        Forum
-        |> where(id: ^topic.forum_id)
-        |> repo.update_all(
-          inc: [post_count: 1, topic_count: 1],
-          set: [last_post_id: hd(topic.posts).id]
-        )
-
-      {:ok, count}
-    end)
-    |> Multi.run(:notification, &notify_topic/2)
-    |> maybe_subscribe_on(:topic, actor.user, :watch_on_new_topic)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{topic: topic}} = result ->
-        UserStatistics.increment(topic.user_id, :topics_count)
-        Posts.reindex_post(hd(topic.posts))
-        Posts.report_non_approved(hd(topic.posts))
-
-        result
-
-      error ->
-        error
-    end
-  end
-
-  defp notify_topic(_repo, %{topic: topic}) do
-    Notifications.broadcast_forum_topic(topic.user, topic)
-  end
 
   defp broadcast_topic_creation(%{forum: %{access_level: "normal"}} = result) do
     PhilomenaWeb.Endpoint.broadcast!(
@@ -97,127 +51,30 @@ defmodule Philomena.Topics do
 
   defp broadcast_topic_creation(result), do: result
 
-  defp persist_topic_stick(%Topic{} = topic) do
-    topic
-    |> Topic.stick_changeset()
-    |> Repo.update()
+  defp notify_topic(_repo, %{topic: topic}) do
+    Notifications.broadcast_forum_topic(topic.user, topic)
   end
 
-  # Removes sticky status from a topic.
-  defp unstick_topic(%Topic{} = topic) do
-    topic
-    |> Topic.unstick_changeset()
-    |> Repo.update()
-  end
-
-  defp persist_topic_lock(%Topic{} = topic, attrs, %User{} = user) do
-    topic
-    |> Topic.lock_changeset(attrs, user)
-    |> Repo.update()
-  end
-
-  # Unlocks a topic to allow posting again.
-  defp unlock_topic(%Topic{} = topic) do
-    topic
-    |> Topic.unlock_changeset()
-    |> Repo.update()
-  end
-
-  # Moves a topic to a different forum, updating post counts for both forums.
-  defp move_topic(%Topic{} = topic, new_forum_id) do
-    old_forum_id = topic.forum_id
-
-    # TODO: need to lock the forum
-    Multi.new()
-    |> Multi.update(:topic, Topic.move_changeset(topic, new_forum_id))
-    |> Multi.update_all(
-      :old_forum,
-      Forums.update_forum_last_post_query(old_forum_id),
-      inc: [post_count: -topic.post_count, topic_count: -1]
-    )
-    |> Multi.update_all(
-      :new_forum,
-      Forums.update_forum_last_post_query(new_forum_id),
-      inc: [post_count: topic.post_count, topic_count: 1]
-    )
-    |> Multi.transact()
-    |> normalize_multi_error()
-  end
-
-  defp hide_loaded_topic(%Topic{} = topic, deletion_reason, %User{} = user) do
-    topic = topic |> Repo.preload(:user)
-
-    # TODO: need to lock the forum
-    Multi.new()
-    |> Multi.update(:topic, Topic.hide_changeset(topic, deletion_reason, user))
-    |> Multi.update_all(
-      :forum,
-      Forums.update_forum_last_post_query(topic.forum_id),
-      inc: [post_count: -topic.post_count, topic_count: -1]
-    )
-    |> Multi.transact()
-    |> case do
-      {:ok, %{topic: topic}} ->
-        UserStatistics.increment(topic.user_id, :topics_count, -1)
-        Posts.reindex_posts_in_topic(topic)
-
-        {:ok, topic}
-
-      error ->
-        normalize_multi_error(error)
-    end
-  end
-
-  defp unhide_loaded_topic(%Topic{} = topic) do
-    topic = topic |> Repo.preload(:user)
-
-    Multi.new()
-    |> Multi.update(:topic, Topic.unhide_changeset(topic))
-    |> Multi.update_all(
-      :forum,
-      Forums.update_forum_last_post_query(topic.forum_id),
-      inc: [post_count: topic.post_count, topic_count: 1]
-    )
-    |> Multi.transact()
-    |> case do
-      {:ok, %{topic: topic}} ->
-        UserStatistics.increment(topic.user_id, :topics_count)
-        Posts.reindex_posts_in_topic(topic)
-
-        {:ok, topic}
-
-      error ->
-        error
-    end
-  end
-
-  # Updates a topic's title.
-  defp update_topic_title(%Topic{} = topic, attrs) do
-    topic
-    |> Topic.title_changeset(attrs)
-    |> Repo.update()
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking topic changes.
-  defp change_topic(%Topic{} = topic) do
-    Topic.changeset(topic, %{})
-  end
-
-  defp load_topic_in_forum(%Actor{} = actor, action, forum, topic_slug, preloads)
-       when is_binary(topic_slug) do
-    Topic
-    |> where(forum_id: ^forum.id, slug: ^topic_slug)
-    |> preload(^preloads)
+  defp load_forum(%Actor{} = actor, forum_slug, action) do
+    Forum
+    |> where(short_name: ^forum_slug)
     |> Loader.one_and_authorize(actor, action)
   end
 
-  defp load_topic_in_forum(_actor, _action, _forum, _topic_slug, _preloads),
-    do: {:error, :not_found}
+  defp load_forum_topic(%Actor{} = actor, %Forum{} = forum, topic_slug, action) do
+    Topic
+    |> where(forum_id: ^forum.id, slug: ^topic_slug)
+    |> preload(:forum)
+    |> Loader.one_and_authorize(actor, action)
+  end
 
   defp topic_pagination(%Topic{} = topic, post_id_param, pagination) do
     page_number =
       with {:ok, post_id} <- IntegerId.parse(post_id_param),
-           [post] <- Post |> where(id: ^post_id, topic_id: ^topic.id) |> Repo.all() do
+           [post] <-
+             Post
+             |> where(id: ^post_id, topic_id: ^topic.id)
+             |> Repo.all() do
         div(post.topic_position, pagination.page_size) + 1
       else
         _ -> pagination.page_number
@@ -245,15 +102,29 @@ defmodule Philomena.Topics do
     }
   end
 
-  defp load_target_forum(%Actor{} = actor, topic_params) do
-    target_id = if is_map(topic_params), do: Map.get(topic_params, "target_forum_id")
-    Loader.fetch_and_authorize(Forum, actor, :show, target_id)
+  defp fetch_target_forum(attrs) do
+    # TODO: move this out
+    {%{}, %{target_forum: :string}}
+    |> Ecto.Changeset.cast(attrs, [:target_forum])
+    |> Ecto.Changeset.validate_required(:target_forum)
+    |> Ecto.Changeset.apply_action(:create)
+    |> case do
+      {:ok, %{target_forum: target_forum}} -> {:ok, target_forum}
+      _ -> {:error, :not_found}
+    end
   end
 
-  defp normalize_multi_error({:error, _name, %Ecto.Changeset{} = changeset, _changes}),
-    do: {:error, changeset}
-
-  defp normalize_multi_error(result), do: result
+  defp hide_topic_steps(user, forum_slug, topic_slug, params) do
+    Multi.new()
+    |> put_forum_and_topic_locks(user, forum_slug, :show, topic_slug, :hide)
+    |> Multi.update(:topic, fn %{locked_topic: topic} ->
+      Topic.hide_changeset(topic, user, params)
+    end)
+    |> put_topic_visibility_counters(visible?: false)
+    |> put_refresh_topic_last_post()
+    |> put_refresh_forum_last_post()
+    |> Posts.put_reindex_posts_in_topic()
+  end
 
   @doc """
   Paginates homepage topics visible to `actor`.
@@ -307,7 +178,7 @@ defmodule Philomena.Topics do
   def subscribe(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :subscribe),
+           load_forum_topic_struct(actor, forum_slug, topic_slug, action: :subscribe),
          {:ok, _subscription} <- create_subscription(topic, actor.user) do
       {:ok, {forum, topic}}
     end
@@ -336,7 +207,7 @@ defmodule Philomena.Topics do
   def unsubscribe(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :unsubscribe) do
+           load_forum_topic_struct(actor, forum_slug, topic_slug, action: :unsubscribe) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(topic, actor.user)
       {:ok, {forum, topic}}
@@ -358,23 +229,27 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> load_forum_topic(moderator_actor, "dis", "some-topic", action: :show)
+      iex> load_forum_topic_struct(moderator_actor, "dis", "some-topic", action: :show)
       {:ok, %ForumTopic{}}
 
   """
-  @spec load_forum_topic(
+  @spec load_forum_topic_struct(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
           opts :: keyword()
         ) ::
           {:ok, ForumTopic.t()} | {:error, :unauthorized | :not_found}
-  def load_forum_topic(%Actor{} = actor, forum_slug, topic_slug, opts \\ []) do
+  def load_forum_topic_struct(%Actor{} = actor, forum_slug, topic_slug, opts \\ []) do
     action = Keyword.get(opts, :action, :show)
     preloads = Keyword.get(opts, :preloads, [])
 
     with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_topic_in_forum(actor, action, forum, topic_slug, preloads) do
+         {:ok, topic} <-
+           Topic
+           |> where(forum_id: ^forum.id, slug: ^topic_slug)
+           |> preload(^preloads)
+           |> Loader.one_and_authorize(actor, action) do
       {:ok, %ForumTopic{forum: forum, topic: topic}}
     end
   end
@@ -403,7 +278,7 @@ defmodule Philomena.Topics do
           {:ok, Topic.t()} | {:error, :not_found | :unauthorized}
   def mark_topic_read(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, %ForumTopic{topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :mark_read) do
+           load_forum_topic_struct(actor, forum_slug, topic_slug, action: :mark_read) do
       clear_topic_notification(topic, actor.user)
       {:ok, topic}
     end
@@ -446,7 +321,7 @@ defmodule Philomena.Topics do
           {:ok, TopicPage.t()} | {:error, :unauthorized | :not_found}
   def load_topic_page(%Actor{} = actor, forum_slug, topic_slug, post_id_param, pagination) do
     with {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug) do
+           load_forum_topic_struct(actor, forum_slug, topic_slug) do
       topic = Repo.preload(topic, [:user, :forum, :deleted_by, :locked_by, poll: :options])
       pagination = topic_pagination(topic, post_id_param, pagination)
 
@@ -461,7 +336,7 @@ defmodule Philomena.Topics do
          voted: PollVotes.voted?(actor, topic.poll),
          poll_active: Polls.active?(topic.poll),
          post_changeset: Posts.change_post(%Post{}),
-         topic_changeset: change_topic(topic)
+         topic_changeset: Topic.changeset(topic)
        }}
     end
   end
@@ -481,23 +356,25 @@ defmodule Philomena.Topics do
   @spec load_topic(Actor.t(), String.t(), String.t()) ::
           {:ok, ForumTopic.t()} | {:error, :not_found | :unauthorized}
   def load_topic(%Actor{} = actor, forum_slug, topic_slug) do
-    load_forum_topic(actor, forum_slug, topic_slug, preloads: [:user])
+    load_forum_topic_struct(actor, forum_slug, topic_slug, preloads: [:user])
   end
 
   @doc """
   Creates a topic, on behalf of `actor`.
 
-  `actor`'s write access is verified first. The forum is then loaded by short
-  name and authorized for `:show`, and the topic together with its first post
-  is inserted from `topic_params`. On success, the returned map carries the
-  topic, forum, and first post.
+  `actor`'s write access and the topic-creation rate limit are verified first.
+  The forum is then locked, loaded by short name, and authorized for
+  `:create_topic` before the topic and its first post are inserted from
+  `params`. The topic's last post and the forum's visible counters are updated
+  in the same transaction. On success, the returned map carries the topic,
+  forum, and first post; the topic is also indexed, reported if unapproved,
+  and broadcast when the forum is public.
 
   Returns `{:ok, %{topic: topic, forum: forum, post: post}}` on success,
-  `{:error, forum, changeset}` when the topic changeset is rejected,
-  `{:error, :creation_failed, forum}` when the insert fails for another reason,
-  or `{:error, :ban | :unauthorized}` from the write-access and forum checks.
-  A non-exempt actor who has created a topic within the last 5 minutes gets
-  `{:error, :rate_limited}`.
+  `{:error, forum, changeset}` when the topic changeset is rejected, or
+  `{:error, :ban | :unauthorized | :not_found}` from the access, rate-limit,
+  forum, or transaction checks. A non-exempt actor who has created a topic
+  within the last 5 minutes gets`{:error, :rate_limited}`.
 
   ## Examples
 
@@ -508,27 +385,39 @@ defmodule Philomena.Topics do
   @spec create_topic(Actor.t(), String.t(), map() | nil) ::
           {:ok, %{topic: Topic.t(), forum: Forum.t(), post: Post.t()}}
           | {:error, Forum.t(), Ecto.Changeset.t()}
-          | {:error, :creation_failed, Forum.t()}
-          | {:error, :ban | :unauthorized | :rate_limited}
+          | {:error, :ban | :not_found | :unauthorized | :rate_limited}
   @spec create_topic(Forum.t(), keyword(), map()) ::
           {:ok, %{topic: Topic.t()}} | {:error, atom(), Ecto.Changeset.t(), map()}
-  def create_topic(%Actor{} = actor, forum_slug, topic_params) do
+  def create_topic(%Actor{user: creator} = actor, forum_slug, params) do
     with :ok <- verify_write_access(actor),
-         :ok <- RateLimiter.check_rate_limit(actor, :topic_create),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         :ok <- authorize(actor, :create_topic, forum) do
-      case persist_topic(forum, actor, topic_params || %{}) do
-        {:ok, %{topic: topic}} ->
+         :ok <- RateLimiter.check_rate_limit(actor, :topic_create) do
+      Multi.new()
+      |> put_forum_lock(actor, forum_slug, :create_topic)
+      |> Multi.insert(:topic, fn %{locked_forum: forum} ->
+        Topic.creation_changeset(%Topic{}, params, forum, actor)
+      end)
+      |> put_topic_visibility_counters(visible?: true)
+      |> UserStatistics.put_increment(creator, :posts_count)
+      |> put_refresh_topic_last_post(:topic)
+      |> put_refresh_forum_last_post()
+      |> maybe_subscribe_on(:topic, creator, :watch_on_new_topic)
+      |> Multi.run(:notification, &notify_topic/2)
+      |> Posts.put_approval_report(fn %{topic: %{posts: [post]}} -> post end)
+      |> Posts.put_reindex_posts_in_topic()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{locked_forum: forum, topic: topic}} ->
           RateLimiter.record_action(actor, :topic_create, @topic_create_window)
+
           result = %{topic: topic, forum: forum, post: hd(topic.posts)}
 
           {:ok, broadcast_topic_creation(result)}
 
-        {:error, :topic, changeset, _changes} ->
+        {:error, :topic, changeset, %{locked_forum: forum}} ->
           {:error, forum, changeset}
 
-        _error ->
-          {:error, :creation_failed, forum}
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -559,7 +448,7 @@ defmodule Philomena.Topics do
          {:ok, forum} <- Forums.load_forum(actor, forum_slug),
          :ok <- authorize(actor, :create_topic, forum) do
       changeset =
-        change_topic(%Topic{
+        Topic.changeset(%Topic{
           poll: %Poll{options: [%PollOption{}, %PollOption{}]},
           posts: [%Post{}]
         })
@@ -569,11 +458,210 @@ defmodule Philomena.Topics do
   end
 
   @doc """
+  Hides the topic named by `topic_slug` within the forum named by `forum_slug`,
+  recording `deletion_reason`, on behalf of `actor`.
+
+  Write access is verified first, then the parent-scoped topic is authorized
+  for `:hide`. On success the forum post/topic counts are updated, the topic's
+  posts are reindexed, and a moderation log is written attributing the deletion
+  to the actor.
+
+  Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` when the hide
+  changeset is rejected (e.g. a blank reason, so the caller can still act on it),
+  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide the
+  topic, or `{:error, :not_found}` when the topic does not exist.
+
+  ## Examples
+
+      iex> hide_topic(moderator, "dis", "some-topic", %{"deletion_reason" => "Rule violation"})
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> hide_topic(moderator, "dis", "some-topic", %{})
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec hide_topic(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          params :: map()
+        ) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :ban | :unauthorized | :not_found}
+  def hide_topic(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
+    with :ok <- verify_write_access(actor) do
+      user
+      |> hide_topic_steps(forum_slug, topic_slug, params)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{locked_forum: forum, topic: topic} ->
+          {
+            "Topic.Hide:create",
+            Paths.topic_path(forum, topic),
+            "Deleted topic '#{topic.title}' (#{topic.deletion_reason}) in #{forum.name}"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{locked_forum: forum, topic: topic}} ->
+          {:ok, {forum, topic}}
+
+        {:error, :topic, _changeset, %{locked_forum: forum, locked_topic: topic}} ->
+          {:error, forum, topic}
+
+        error ->
+          map_lock_errors(error)
+      end
+    end
+  end
+
+  @doc """
+  Restores the topic named by `topic_slug` within the forum named by
+  `forum_slug`, on behalf of `actor`.
+
+  The forum and topic are locked together; the forum is authorized for `:show`
+  and the topic for `:unhide`, allowing a moderator to see the hidden topic.
+  On success the forum counts are restored, the topic's posts are reindexed,
+  and a moderation log is written.
+
+  Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
+  restore is rejected (so the caller can act on it),
+  `{:error, :unauthorized}`, or `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> unhide_topic(moderator, "dis", "some-topic")
+      {:ok, {%Forum{}, %Topic{}}}
+
+  """
+  @spec unhide_topic(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :ban | :unauthorized | :not_found}
+  def unhide_topic(%Actor{} = actor, forum_slug, topic_slug) do
+    with :ok <- verify_write_access(actor) do
+      Multi.new()
+      |> put_forum_and_topic_locks(actor, forum_slug, :show, topic_slug, :unhide)
+      |> Multi.update(:topic, fn %{locked_topic: topic} -> Topic.unhide_changeset(topic) end)
+      |> put_topic_visibility_counters(visible?: true)
+      |> put_refresh_topic_last_post()
+      |> put_refresh_forum_last_post()
+      |> Posts.put_reindex_posts_in_topic()
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{locked_forum: forum, topic: topic} ->
+          {
+            "Topic.Hide:delete",
+            Paths.topic_path(forum, topic),
+            "Restored topic '#{topic.title}' in #{forum.name}"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{locked_forum: forum, topic: topic}} ->
+          {:ok, {forum, topic}}
+
+        {:error, :topic, _changeset, %{locked_forum: forum, locked_topic: topic}} ->
+          {:error, forum, topic}
+
+        error ->
+          map_lock_errors(error)
+      end
+    end
+  end
+
+  @doc """
+  Moves the topic named by `topic_slug` within the source forum named by
+  `source_forum_slug` to the forum identified by the `target_forum` key of
+  `params`, on behalf of `actor`.
+
+  Write access is verified first. The source and target forums are locked in a
+  consistent order, both are authorized for `:show`, and the topic is
+  authorized for `:move`. On success the target forum is returned for the
+  caller to reuse, post/topic counts are updated for both forums, and a
+  moderation log is written.
+
+  Returns `{:ok, {new_forum, topic}}` on success (the target forum is returned
+  for the caller to reuse), `{:error, forum, topic}` carrying the source forum and
+  topic when the move cannot happen, `{:error, :unauthorized}` when the actor may
+  not see the forum/topic or move the topic, or `{:error, :not_found}` when the
+  topic does not exist.
+
+  ## Examples
+
+      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum" => "generals"})
+      {:ok, {%Forum{}, %Topic{}}}
+
+      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum" => "bogus"})
+      {:error, %Forum{}, %Topic{}}
+
+  """
+  @spec move_topic(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t(),
+          topic_params :: map() | nil
+        ) ::
+          {:ok, {Forum.t(), Topic.t()}}
+          | {:error, Forum.t(), Topic.t()}
+          | {:error, :ban | :unauthorized | :not_found}
+  def move_topic(%Actor{} = actor, source_forum_slug, topic_slug, params) do
+    with :ok <- verify_write_access(actor),
+         {:ok, target_forum_slug} <- fetch_target_forum(params) do
+      Multi.new()
+      |> put_source_and_target_forum_and_topic_locks(
+        actor,
+        source_forum_slug,
+        :show,
+        target_forum_slug,
+        :show,
+        topic_slug,
+        :move
+      )
+      |> Multi.update(:topic, fn %{locked_topic: topic, locked_target_forum: target_forum} ->
+        Topic.move_changeset(topic, target_forum.id)
+      end)
+      |> put_topic_transfer_counters()
+      |> put_refresh_forum_last_post(:locked_source_forum)
+      |> put_refresh_forum_last_post(:locked_target_forum)
+      |> Posts.put_reindex_posts_in_topic()
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{locked_target_forum: target_forum, topic: topic} ->
+          {
+            "Topic.Move:create",
+            Paths.topic_path(target_forum, topic),
+            "Topic '#{topic.title}' moved to #{target_forum.name}"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{locked_target_forum: target_forum, topic: topic}} ->
+          {:ok, {target_forum, topic}}
+
+        {:error, :topic, _changeset, %{locked_source_forum: source_forum, locked_topic: topic}} ->
+          {:error, source_forum, topic}
+
+        error ->
+          map_lock_errors(error)
+      end
+    end
+  end
+
+  @doc """
   Sticks the topic named by `topic_slug` within the forum named by
   `forum_slug`, on behalf of `actor`.
 
-  Write access is verified first, then the topic is authorized for `:stick`
-   On success a moderation log is written attributing the change.
+  Write access is verified first, the forum is authorized for `:show`, and the
+  topic is authorized for `:stick`. On success a moderation log is written
+  attributing the change.
 
   Returns `{:ok, {forum, topic}}` on success (both are returned for the caller
   to reuse), `{:error, forum, topic}` when the stick changeset is rejected,
@@ -592,17 +680,22 @@ defmodule Philomena.Topics do
           | {:error, :ban | :unauthorized | :not_found}
   def stick_topic(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :stick) do
-      case persist_topic_stick(topic) do
-        {:ok, topic} ->
-          ModerationLogs.create_moderation_log(
-            actor,
-            "Topic.Stick:create",
-            Paths.topic_path(forum, topic),
-            "Stickied topic '#{topic.title}' in #{forum.name}"
-          )
+         {:ok, forum} <- load_forum(actor, forum_slug, :show),
+         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :stick) do
+      topic_changeset = Topic.stick_changeset(topic)
 
+      Multi.new()
+      |> Multi.update(:topic, topic_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Topic.Stick:create",
+        Paths.topic_path(topic),
+        "Stickied topic '#{topic.title}' in #{forum.name}"
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{topic: topic}} ->
           {:ok, {forum, topic}}
 
         _error ->
@@ -634,17 +727,22 @@ defmodule Philomena.Topics do
           | {:error, :ban | :unauthorized | :not_found}
   def unstick_topic(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :unstick) do
-      case unstick_topic(topic) do
-        {:ok, topic} ->
-          ModerationLogs.create_moderation_log(
-            actor,
-            "Topic.Stick:delete",
-            Paths.topic_path(forum, topic),
-            "Unstickied topic '#{topic.title}' in #{forum.name}"
-          )
+         {:ok, forum} <- load_forum(actor, forum_slug, :show),
+         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :unstick) do
+      topic_changeset = Topic.unstick_changeset(topic)
 
+      Multi.new()
+      |> Multi.update(:topic, topic_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Topic.Stick:delete",
+        Paths.topic_path(topic),
+        "Unstickied topic '#{topic.title}' in #{forum.name}"
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{topic: topic}} ->
           {:ok, {forum, topic}}
 
         _error ->
@@ -685,19 +783,28 @@ defmodule Philomena.Topics do
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def lock_topic(%Actor{} = actor, forum_slug, topic_slug, topic_params) do
+  def lock_topic(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :lock) do
-      case persist_topic_lock(topic, topic_params, actor.user) do
-        {:ok, topic} ->
-          ModerationLogs.create_moderation_log(
-            actor,
-            "Topic.Lock:create",
-            Paths.topic_path(forum, topic),
-            "Locked topic '#{topic.title}' (#{topic.lock_reason}) in #{forum.name}"
-          )
+         {:ok, forum} <- load_forum(actor, forum_slug, :show),
+         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :lock) do
+      topic_changeset = Topic.lock_changeset(topic, params, user)
 
+      Multi.new()
+      |> Multi.update(:topic, topic_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{topic: topic} ->
+          {
+            "Topic.Lock:create",
+            Paths.topic_path(topic),
+            "Locked topic '#{topic.title}' (#{topic.lock_reason}) in #{forum.name}"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{topic: topic}} ->
           {:ok, {forum, topic}}
 
         _error ->
@@ -729,168 +836,22 @@ defmodule Philomena.Topics do
           | {:error, :ban | :unauthorized | :not_found}
   def unlock_topic(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :unlock) do
-      case unlock_topic(topic) do
-        {:ok, topic} ->
-          ModerationLogs.create_moderation_log(
-            actor,
-            "Topic.Lock:delete",
-            Paths.topic_path(forum, topic),
-            "Unlocked topic '#{topic.title}' in #{forum.name}"
-          )
+         {:ok, forum} <- load_forum(actor, forum_slug, :show),
+         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :unlock) do
+      topic_changeset = Topic.unlock_changeset(topic)
 
-          {:ok, {forum, topic}}
-
-        _error ->
-          {:error, forum, topic}
-      end
-    end
-  end
-
-  @doc """
-  Moves the topic named by `topic_slug` within the forum named by `forum_slug`
-  to the forum identified by the `"target_forum_id"` key of `topic_params`, on
-  behalf of `actor`.
-
-  Write access is verified first and the parent-scoped topic is authorized for
-  `:move`. On success the target forum is preloaded (needed for the log body
-  and for the caller to reuse), post/topic counts are updated for both forums, and
-  a moderation log is written.
-
-  Returns `{:ok, {new_forum, topic}}` on success (the target forum is returned
-  for the caller to reuse), `{:error, forum, topic}` carrying the source forum and
-  topic when the move cannot happen, `{:error, :unauthorized}` when the actor may
-  not see the forum/topic or move the topic, or `{:error, :not_found}` when the
-  topic does not exist.
-
-  ## Examples
-
-      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum_id" => "3"})
-      {:ok, {%Forum{}, %Topic{}}}
-
-      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum_id" => "bogus"})
-      {:error, %Forum{}, %Topic{}}
-
-  """
-  @spec move_topic(
-          actor :: Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          topic_params :: map() | nil
-        ) ::
-          {:ok, {Forum.t(), Topic.t()}}
-          | {:error, Forum.t(), Topic.t()}
-          | {:error, :ban | :unauthorized | :not_found}
-  def move_topic(%Actor{} = actor, forum_slug, topic_slug, topic_params) do
-    with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :move) do
-      with {:ok, target_forum} <- load_target_forum(actor, topic_params),
-           {:ok, %{topic: moved_topic}} <- move_topic(topic, target_forum.id) do
-        ModerationLogs.create_moderation_log(
-          actor,
-          "Topic.Move:create",
-          Paths.topic_path(target_forum, moved_topic),
-          "Topic '#{moved_topic.title}' moved to #{target_forum.name}"
-        )
-
-        {:ok, {target_forum, moved_topic}}
-      else
-        _ -> {:error, forum, topic}
-      end
-    end
-  end
-
-  @doc """
-  Hides the topic named by `topic_slug` within the forum named by `forum_slug`,
-  recording `deletion_reason`, on behalf of `actor`.
-
-  Write access is verified first, then the parent-scoped topic is authorized
-  for `:hide`. On success the forum post/topic counts are updated, the topic's
-  posts are reindexed, and a moderation log is written attributing the deletion
-  to the actor.
-
-  Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` when the hide
-  changeset is rejected (e.g. a blank reason, so the caller can still act on it),
-  `{:error, :unauthorized}` when the actor may not see the forum/topic or hide the
-  topic, or `{:error, :not_found}` when the topic does not exist.
-
-  ## Examples
-
-      iex> hide_topic(moderator, "dis", "some-topic", "Rule violation")
-      {:ok, {%Forum{}, %Topic{}}}
-
-      iex> hide_topic(moderator, "dis", "some-topic", "")
-      {:error, %Forum{}, %Topic{}}
-
-  """
-  @spec hide_topic(
-          actor :: Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          deletion_reason :: String.t() | nil
-        ) ::
-          {:ok, {Forum.t(), Topic.t()}}
-          | {:error, Forum.t(), Topic.t()}
-          | {:error, :ban | :unauthorized | :not_found}
-  def hide_topic(%Actor{} = actor, forum_slug, topic_slug, deletion_reason) do
-    with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :hide) do
-      case hide_loaded_topic(topic, deletion_reason, actor.user) do
-        {:ok, topic} ->
-          ModerationLogs.create_moderation_log(
-            actor,
-            "Topic.Hide:create",
-            Paths.topic_path(forum, topic),
-            "Deleted topic '#{topic.title}' (#{topic.deletion_reason}) in #{forum.name}"
-          )
-
-          {:ok, {forum, topic}}
-
-        _error ->
-          {:error, forum, topic}
-      end
-    end
-  end
-
-  @doc """
-  Restores the topic named by `topic_slug` within the forum named by
-  `forum_slug`, on behalf of `actor`.
-
-  Loading and authorization mirror `hide_topic/4` (`:show` on the forum,
-  visibility on the topic, then `:hide` on the topic - a moderator can still
-  see the hidden topic here). On success the forum counts are restored, the
-  topic's posts are reindexed, and a moderation log is written.
-
-  Returns `{:ok, {forum, topic}}` on success, `{:error, forum, topic}` if the
-  restore is rejected (so the caller can act on it),
-  `{:error, :unauthorized}`, or `{:error, :not_found}`.
-
-  ## Examples
-
-      iex> unhide_topic(moderator, "dis", "some-topic")
-      {:ok, {%Forum{}, %Topic{}}}
-
-  """
-  @spec unhide_topic(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
-          {:ok, {Forum.t(), Topic.t()}}
-          | {:error, Forum.t(), Topic.t()}
-          | {:error, :ban | :unauthorized | :not_found}
-  def unhide_topic(%Actor{} = actor, forum_slug, topic_slug) do
-    with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :unhide) do
-      case unhide_loaded_topic(topic) do
-        {:ok, topic} ->
-          ModerationLogs.create_moderation_log(
-            actor,
-            "Topic.Hide:delete",
-            Paths.topic_path(forum, topic),
-            "Restored topic '#{topic.title}' in #{forum.name}"
-          )
-
+      Multi.new()
+      |> Multi.update(:topic, topic_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Topic.Lock:delete",
+        Paths.topic_path(topic),
+        "Unlocked topic '#{topic.title}' in #{forum.name}"
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{topic: topic}} ->
           {:ok, {forum, topic}}
 
         _error ->
@@ -901,12 +862,11 @@ defmodule Philomena.Topics do
 
   @doc """
   Updates the title of the topic named by `topic_slug` within the forum named by
-  `forum_slug` from `topic_params`, on behalf of `actor`.
+  `forum_slug` from `params`, on behalf of `actor`.
 
-  The forum is loaded by short name and authorized for `:show`, the topic is
-  loaded by slug with hidden topics visible only to actors who may `:show` them,
-  and the `:edit` permission on the topic is then checked. Only the title is
-  updated; the slug is left intact.
+  The forum is loaded by short name and authorized for `:show`, and the topic is
+  loaded beneath it and authorized using the `:update_title` action. Only the title
+  is updated; the slug is left intact.
 
   Returns `{:ok, {forum, topic}}` on success (both are returned for the caller to
   reuse), `{:error, forum, topic}` when the title changeset is rejected (carrying
@@ -924,18 +884,21 @@ defmodule Philomena.Topics do
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
-          topic_params :: map()
+          params :: map()
         ) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def update_topic_title(%Actor{} = actor, forum_slug, topic_slug, topic_params) do
+  def update_topic_title(%Actor{} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           load_forum_topic(actor, forum_slug, topic_slug, action: :update_title) do
-      case update_topic_title(topic, topic_params) do
-        {:ok, updated_topic} ->
-          {:ok, {forum, updated_topic}}
+         {:ok, forum} <- load_forum(actor, forum_slug, :show),
+         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :update_title) do
+      topic
+      |> Topic.title_changeset(params)
+      |> Repo.update()
+      |> case do
+        {:ok, topic} ->
+          {:ok, {forum, topic}}
 
         _error ->
           {:error, forum, topic}
@@ -958,9 +921,23 @@ defmodule Philomena.Topics do
 
   """
   @spec erase_topic(Topic.t(), User.t()) ::
-          {:ok, Topic.t()} | {:error, term()}
+          {:ok, Topic.t()} | {:error, Ecto.Changeset.t()} | {:error, :unauthorized | :not_found}
   def erase_topic(%Topic{} = topic, %User{} = moderator) do
-    hide_loaded_topic(topic, "Site abuse", moderator)
+    moderator
+    |> hide_topic_steps(topic.forum.short_name, topic.slug, %{deletion_reason: "Site abuse"})
+    |> Multi.transact()
+    |> case do
+      {:ok, %{topic: topic}} ->
+        {:ok, topic}
+
+      {:error, :topic, %{errors: [hidden_from_users: {"is already hidden", []}]}, _changes} ->
+        # Skips all of the above if the topic was already hidden.
+        # This is the only expected error.
+        {:ok, topic}
+
+      error ->
+        map_lock_errors(error)
+    end
   end
 
   @doc """
@@ -977,29 +954,5 @@ defmodule Philomena.Topics do
     Notifications.clear_forum_post(topic, user)
     Notifications.clear_forum_topic(topic, user)
     :ok
-  end
-
-  @doc """
-  Returns an `m:Ecto.Query` which updates the last post for the given topic.
-
-  ## Examples
-
-      iex> update_topic_last_post_query(1)
-      #Ecto.Query<...>
-
-  """
-  @spec update_topic_last_post_query(integer()) :: Ecto.Query.t()
-  def update_topic_last_post_query(topic_id) do
-    Topic
-    |> where(id: ^topic_id)
-    |> update(
-      set: [
-        last_post_id:
-          fragment(
-            "SELECT max(id) FROM posts WHERE topic_id = ? AND hidden_from_users IS FALSE",
-            ^topic_id
-          )
-      ]
-    )
   end
 end

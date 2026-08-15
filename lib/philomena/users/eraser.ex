@@ -30,6 +30,7 @@ defmodule Philomena.Users.Eraser do
     # Delete all forum posts
     Post
     |> where(user_id: ^user.id)
+    |> preload(topic: :forum)
     |> Repo.all()
     |> Enum.each(fn post ->
       {:ok, _post} = Posts.erase_post(post, moderator)
@@ -49,6 +50,7 @@ defmodule Philomena.Users.Eraser do
     # Delete all posted topics
     Topic
     |> where(user_id: ^user.id)
+    |> preload(:forum)
     |> Repo.all()
     |> Enum.each(fn topic ->
       {:ok, _topic} = Topics.erase_topic(topic, moderator)

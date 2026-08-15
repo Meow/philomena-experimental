@@ -6,6 +6,7 @@ defmodule PhilomenaWeb.PostControllerTest do
   import Philomena.ForumsFixtures
   import Philomena.PostsFixtures
   import Philomena.TopicsFixtures
+  import Philomena.UsersFixtures
 
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
@@ -17,9 +18,9 @@ defmodule PhilomenaWeb.PostControllerTest do
     :ok
   end
 
-  defp topic_with_post(forum, body) do
+  defp topic_with_post(forum, body, user \\ nil) do
     topic = topic_fixture(forum)
-    post_fixture(topic, nil, %{"body" => body})
+    post_fixture(topic, user, %{"body" => body})
   end
 
   describe "GET /posts" do
@@ -38,7 +39,7 @@ defmodule PhilomenaWeb.PostControllerTest do
 
     test "does not show restricted-forum posts to anonymous users", %{conn: conn} do
       staff_forum = forum_fixture(access_level: "staff")
-      _post = topic_with_post(staff_forum, "Test staff-only post body")
+      _post = topic_with_post(staff_forum, "Test staff-only post body", moderator_user_fixture())
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/posts")
@@ -50,7 +51,7 @@ defmodule PhilomenaWeb.PostControllerTest do
     test "shows restricted-forum posts to moderators", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       staff_forum = forum_fixture(access_level: "staff")
-      _post = topic_with_post(staff_forum, "Test staff-only post body")
+      _post = topic_with_post(staff_forum, "Test staff-only post body", moderator_user_fixture())
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/posts")

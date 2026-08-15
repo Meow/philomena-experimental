@@ -72,7 +72,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
       post =
         staff_forum
         |> topic_fixture()
-        |> post_fixture(nil, %{"body" => "chartreuse vicuna"})
+        |> post_fixture(admin_user_fixture(), %{"body" => "chartreuse vicuna"})
 
       SearchHelpers.reindex_all!(Post)
 
@@ -98,7 +98,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
-          "spam"
+          %{"deletion_reason" => "spam"}
         )
 
       SearchHelpers.reindex_all!(Post)
@@ -124,7 +124,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
-          "spam"
+          %{"deletion_reason" => "spam"}
         )
 
       SearchHelpers.reindex_all!(Post)

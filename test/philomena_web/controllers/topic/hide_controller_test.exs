@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
         Philomena.AttributionFixtures.actor(moderator),
         forum.short_name,
         topic.slug,
-        "Spam"
+        %{"deletion_reason" => "Spam"}
       )
 
     topic

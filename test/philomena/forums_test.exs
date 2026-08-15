@@ -52,7 +52,7 @@ defmodule Philomena.ForumsTest do
           Philomena.AttributionFixtures.actor(moderator),
           public_forum.short_name,
           hidden_topic.slug,
-          "Spam"
+          %{"deletion_reason" => "Spam"}
         )
 
       assert %ForumIndex{forums: user_forums, topic_count: 1} =

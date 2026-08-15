@@ -19,6 +19,7 @@ defmodule Philomena.TopicsTest do
   import Philomena.AttributionFixtures
   import Philomena.ForumsFixtures
   import Philomena.PostsFixtures
+  import Philomena.RulesFixtures
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
@@ -26,11 +27,13 @@ defmodule Philomena.TopicsTest do
   alias Philomena.Notifications
   alias Philomena.Notifications.ForumPostNotification
   alias Philomena.Posts.Post
+  alias Philomena.Reports.Report
   alias Philomena.Repo
   alias Philomena.Topics
   alias Philomena.Topics.Subscription
   alias Philomena.Topics.Topic
   alias Philomena.Topics.TopicPage
+  alias Philomena.Users.User
 
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to verify_write_access
@@ -81,7 +84,9 @@ defmodule Philomena.TopicsTest do
     moderator = moderator_user_fixture()
 
     {:ok, {_forum, hidden}} =
-      Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "Spam")
+      Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+        "deletion_reason" => "Spam"
+      })
 
     {forum, hidden}
   end
@@ -217,7 +222,9 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+          "deletion_reason" => "test hiding"
+        })
 
       assert Topics.subscribe(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
@@ -230,7 +237,9 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+          "deletion_reason" => "test hiding"
+        })
 
       assert {:ok, {_forum, _topic}} =
                Topics.subscribe(actor(moderator), forum.short_name, topic.slug)
@@ -299,7 +308,9 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+          "deletion_reason" => "test hiding"
+        })
 
       assert {:ok, {_forum, _topic}} =
                Topics.unsubscribe(actor(user), forum.short_name, topic.slug)
@@ -366,7 +377,9 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "test hiding")
+        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+          "deletion_reason" => "test hiding"
+        })
 
       assert {:ok, loaded_topic} =
                Topics.mark_topic_read(actor(user), forum.short_name, topic.slug)
@@ -431,7 +444,9 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert Topics.hide_topic(actor(user), forum.short_name, topic.slug, "Spam") ==
+      assert Topics.hide_topic(actor(user), forum.short_name, topic.slug, %{
+               "deletion_reason" => "Spam"
+             }) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(topic).hidden_from_users
@@ -443,7 +458,9 @@ defmodule Philomena.TopicsTest do
       # crash on the nil actor.
       {forum, topic} = visible_topic()
 
-      assert Topics.hide_topic(actor(), forum.short_name, topic.slug, "Spam") ==
+      assert Topics.hide_topic(actor(), forum.short_name, topic.slug, %{
+               "deletion_reason" => "Spam"
+             }) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(topic).hidden_from_users
@@ -461,7 +478,7 @@ defmodule Philomena.TopicsTest do
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic",
-               "Spam"
+               %{"deletion_reason" => "Spam"}
              ) ==
                {:error, :not_found}
     end
@@ -471,7 +488,9 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "Rule violation")
+               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+                 "deletion_reason" => "Rule violation"
+               })
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id
@@ -487,7 +506,9 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, _} =
-               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "Rule violation")
+               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+                 "deletion_reason" => "Rule violation"
+               })
 
       log = latest_moderation_log!()
       assert log.user_id == moderator.id
@@ -496,7 +517,7 @@ defmodule Philomena.TopicsTest do
       assert log.body == "Deleted topic '#{topic.title}' (Rule violation) in #{forum.name}"
     end
 
-    test "a blank or nil reason yields the 3-tuple error and writes no moderation log" do
+    test "a missing reason errors and writes no moderation log" do
       # hide_changeset requires deletion_reason; hide_topic/4 surfaces the
       # normalized changeset failure as {:error, forum, topic} (both the loaded
       # forum and the pre-update topic) so the controller can still redirect.
@@ -505,7 +526,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:error, blank_forum, blank_topic} =
-               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, "")
+               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{})
 
       assert blank_forum.id == forum.id
       assert blank_topic.id == topic.id
@@ -513,7 +534,7 @@ defmodule Philomena.TopicsTest do
       {nil_forum, nil_topic} = visible_topic()
 
       assert {:error, error_forum, error_topic} =
-               Topics.hide_topic(actor(moderator), nil_forum.short_name, nil_topic.slug, nil)
+               Topics.hide_topic(actor(moderator), nil_forum.short_name, nil_topic.slug, %{})
 
       assert error_forum.id == nil_forum.id
       assert error_topic.id == nil_topic.id
@@ -921,17 +942,13 @@ defmodule Philomena.TopicsTest do
   end
 
   describe "move_topic/4" do
-    test "a regular user is unauthorized even with a malformed target, pinning authorize-before-parse" do
-      # The forum/topic load and the :hide authorization run before the target
-      # id is parsed, so an unprivileged actor sending garbage still answers
-      # unauthorized rather than the bespoke parse failure. The topic stays put
-      # and no log row is written.
+    test "a regular user is not found with a malformed target" do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
       assert Topics.move_topic(actor(user), forum.short_name, topic.slug, %{
-               "target_forum_id" => "garbage"
-             }) == {:error, :unauthorized}
+               "target_forum" => "garbage"
+             }) == {:error, :not_found}
 
       assert Repo.reload!(topic).forum_id == forum.id
       assert moderation_log_count() == 0
@@ -944,18 +961,18 @@ defmodule Philomena.TopicsTest do
       target = forum_fixture()
 
       assert Topics.move_topic(actor(), forum.short_name, topic.slug, %{
-               "target_forum_id" => to_string(target.id)
+               "target_forum" => target.short_name
              }) == {:error, :unauthorized}
 
       assert Repo.reload!(topic).forum_id == forum.id
       assert moderation_log_count() == 0
     end
 
-    test "an unknown source forum is unauthorized for a regular user" do
+    test "an unknown source forum is not-found for a regular user" do
       target = forum_fixture()
 
       assert Topics.move_topic(actor(confirmed_user_fixture()), "nonexistent", "whatever", %{
-               "target_forum_id" => to_string(target.id)
+               "target_forum" => target.short_name
              }) == {:error, :not_found}
     end
 
@@ -967,9 +984,7 @@ defmodule Philomena.TopicsTest do
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic",
-               %{
-                 "target_forum_id" => to_string(target.id)
-               }
+               %{"target_forum" => target.short_name}
              ) == {:error, :not_found}
     end
 
@@ -986,7 +1001,7 @@ defmodule Philomena.TopicsTest do
 
       assert {:ok, {new_forum, moved_topic}} =
                Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{
-                 "target_forum_id" => to_string(target.id)
+                 "target_forum" => target.short_name
                })
 
       assert new_forum.id == target.id
@@ -1005,7 +1020,7 @@ defmodule Philomena.TopicsTest do
 
       assert {:ok, _} =
                Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{
-                 "target_forum_id" => to_string(target.id)
+                 "target_forum" => target.short_name
                })
 
       log = latest_moderation_log!()
@@ -1015,53 +1030,25 @@ defmodule Philomena.TopicsTest do
       assert log.body == "Topic '#{topic.title}' moved to #{target.name}"
     end
 
-    test "a moderator with nil topic_params gets the 3-tuple error, no move, no log" do
-      # A missing "topic" param arrives as nil; parse_target_forum_id tolerates
-      # it and funnels to the bespoke failure carrying the SOURCE forum and
-      # topic, so the controller can redirect back.
+    test "a moderator with empty params gets not-found" do
       moderator = moderator_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert {:error, error_forum, error_topic} =
-               Topics.move_topic(actor(moderator), forum.short_name, topic.slug, nil)
-
-      assert error_forum.id == forum.id
-      assert error_topic.id == topic.id
+      assert {:error, :not_found} =
+               Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{})
 
       assert Repo.reload!(topic).forum_id == forum.id
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with a non-integer target id gets the 3-tuple error, no move, no log" do
+    test "a moderator with a nonexistent target forum gets no move and no log" do
       moderator = moderator_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert {:error, error_forum, error_topic} =
+      assert {:error, :not_found} =
                Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{
-                 "target_forum_id" => "not-a-number"
+                 "target_forum" => "nonexistent-forum"
                })
-
-      assert error_forum.id == forum.id
-      assert error_topic.id == topic.id
-
-      assert Repo.reload!(topic).forum_id == forum.id
-      assert moderation_log_count() == 0
-    end
-
-    test "a moderator with a nonexistent target forum id gets the 3-tuple error, no move, no log" do
-      # A well-formed id whose forum does not exist is caught by the
-      # move_changeset FK constraint and normalized to a changeset failure, which
-      # surfaces as the same {:error, source_forum, topic} the parse failures do.
-      moderator = moderator_user_fixture()
-      {forum, topic} = visible_topic()
-
-      assert {:error, error_forum, error_topic} =
-               Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{
-                 "target_forum_id" => "999999999"
-               })
-
-      assert error_forum.id == forum.id
-      assert error_topic.id == topic.id
 
       assert Repo.reload!(topic).forum_id == forum.id
       assert moderation_log_count() == 0
@@ -1240,6 +1227,38 @@ defmodule Philomena.TopicsTest do
 
       assert Repo.get(Topic, topic.id)
       assert Repo.reload!(post).body == "First post body"
+    end
+
+    test "an approved initial post increments the author's posts_count" do
+      forum = forum_fixture()
+      author = confirmed_user_fixture()
+      before = Repo.get!(User, author.id).posts_count
+
+      assert {:ok, %{topic: _topic, post: post}} =
+               Topics.create_topic(actor(author), forum.short_name, @valid_topic_params)
+
+      assert post.approved
+      assert Repo.get!(User, author.id).posts_count == before + 1
+    end
+
+    test "a withheld initial post does not decrement the author's posts_count" do
+      forum = forum_fixture()
+      author = confirmed_user_fixture()
+      before = Repo.get!(User, author.id).posts_count
+
+      rule_fixture()
+      |> Ecto.Changeset.change(name: "Approval")
+      |> Repo.update!()
+
+      params =
+        put_in(@valid_topic_params, ["posts", "0", "body"], "First post https://spam.example/")
+
+      assert {:ok, %{topic: _topic, post: post}} =
+               Topics.create_topic(actor(author), forum.short_name, params)
+
+      refute post.approved
+      assert Repo.get!(User, author.id).posts_count == before
+      assert Repo.aggregate(from(r in Report, where: r.post_id == ^post.id), :count) == 1
     end
 
     test "blank params yield the changeset error carrying the forum" do

@@ -62,15 +62,10 @@ defmodule PhilomenaWeb.TopicController do
         |> assign(:forum, forum)
         |> render("new.html", changeset: changeset)
 
-      {:error, :creation_failed, forum} ->
-        conn
-        |> put_flash(:error, "There was an error with your submission. Please try again.")
-        |> redirect(to: ~p"/forums/#{forum}/topics/new")
-
       {:error, :rate_limited} ->
         RateLimitedResponse.call(conn, "You may only make a new topic once every 5 minutes.")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -87,7 +82,7 @@ defmodule PhilomenaWeb.TopicController do
         |> put_flash(:error, "There was an error with your submission. Please try again.")
         |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

@@ -14,6 +14,7 @@ defmodule Philomena.Multi do
 
   @type name :: Ecto.Multi.name()
   @type changes :: Ecto.Multi.changes()
+  @type failure :: Ecto.Multi.failure()
 
   @doc """
   Runs a query and stores all results in the Multi.
@@ -461,7 +462,7 @@ defmodule Philomena.Multi do
 
   """
   @spec run(t(), Ecto.Multi.name(), Ecto.Multi.run()) :: t()
-  def run(%__MODULE__{} = multi, name, run) do
+  def run(%__MODULE__{} = multi, name, run) when is_function(run, 2) do
     update_in(multi.multi, &Ecto.Multi.run(&1, name, run))
   end
 
@@ -550,7 +551,9 @@ defmodule Philomena.Multi do
   Locks a query result for update, or aborts the transaction if it was not found.
 
   The locked result is available under `name` to later Multi steps. This is
-  useful before making a change that depends on the row's current state.
+  useful before making a change that depends on the row's current state. The
+  query may be a function of earlier Multi changes and is evaluated inside the
+  transaction.
 
   ## Example
 
@@ -558,12 +561,33 @@ defmodule Philomena.Multi do
       |> Multi.lock_one(:user, from(u in User, where: u.id == ^user_id))
       |> Multi.transact()
 
+      Multi.new()
+      |> Multi.lock_one(:topic, topic_query)
+      |> Multi.lock_one(:forum, fn %{topic: topic} ->
+        from(forum in Forum, where: forum.id == ^topic.forum_id)
+      end)
+      |> Multi.transact()
+
   """
-  @spec lock_one(t(), Ecto.Multi.name(), Ecto.Queryable.t()) :: t()
-  def lock_one(%__MODULE__{} = multi, name, queryable) do
+  @spec lock_one(
+          t(),
+          Ecto.Multi.name(),
+          Ecto.Queryable.t() | (Ecto.Multi.changes() -> Ecto.Queryable.t())
+        ) :: t()
+  def lock_one(%__MODULE__{} = multi, name, queryable_or_fun) do
     lock_fn =
-      fn repo, _changes ->
-        case repo.one(lock(queryable, "FOR UPDATE")) do
+      fn repo, changes ->
+        queryable =
+          if is_function(queryable_or_fun, 1) do
+            queryable_or_fun.(changes)
+          else
+            queryable_or_fun
+          end
+
+        queryable
+        |> lock("FOR UPDATE")
+        |> repo.one()
+        |> case do
           nil -> {:error, :not_found}
           result -> {:ok, result}
         end

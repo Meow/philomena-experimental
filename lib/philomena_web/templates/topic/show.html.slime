@@ -147,7 +147,7 @@ h1 = @topic.title
 
               = form_for :topic, ~p"/forums/#{@forum}/topics/#{@topic}/move", [method: :post, class: "hform"], fn f ->
                 .field
-                  = select f, :target_forum_id, Enum.map(@conn.assigns.forums, &{&1.name, &1.id}), class: "input hform__text"
+                  = select f, :target_forum, Enum.map(@conn.assigns.forums, &{&1.name, &1.short_name}), class: "input hform__text"
                   = submit class: "hform__button button" do
                     i.fas.fa-truck>
                     ' Move

@@ -33,7 +33,7 @@ defmodule PhilomenaWeb.Topic.PollController do
           changeset: form.changeset
         )
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

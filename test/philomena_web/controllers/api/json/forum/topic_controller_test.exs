@@ -63,7 +63,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
-          "spam"
+          %{"deletion_reason" => "spam"}
         )
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics")
@@ -81,7 +81,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
-          "spam"
+          %{"deletion_reason" => "spam"}
         )
 
       conn =
@@ -164,7 +164,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
-          "spam"
+          %{"deletion_reason" => "spam"}
         )
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}")

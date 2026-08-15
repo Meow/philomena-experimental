@@ -78,6 +78,7 @@ defmodule Philomena.Comments.Comment do
   def approve_changeset(comment) do
     comment
     |> change()
+    |> validate_undestroyed()
     |> Approval.approve_changeset()
   end
 

@@ -209,7 +209,9 @@ defmodule Philomena.ActivitiesTest do
       hidden = topic_fixture(forum)
 
       {:ok, {_forum, hidden}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, hidden.slug, "Rule #0")
+        Topics.hide_topic(actor(moderator), forum.short_name, hidden.slug, %{
+          "deletion_reason" => "Rule #0"
+        })
 
       staff_topic = topic_fixture(forum_fixture(%{access_level: "staff"}))
 

@@ -65,7 +65,7 @@ defmodule PhilomenaWeb.Topic.ReadControllerTest do
         Philomena.AttributionFixtures.actor(moderator),
         forum.short_name,
         topic.slug,
-        "test hiding"
+        %{"deletion_reason" => "test hiding"}
       )
 
     conn = post(conn, ~p"/forums/#{forum}/topics/#{topic}/read")

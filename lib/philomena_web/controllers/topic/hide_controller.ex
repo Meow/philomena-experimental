@@ -5,12 +5,12 @@ defmodule PhilomenaWeb.Topic.HideController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, %{"topic" => topic_params} = params) do
+  def create(conn, params) do
     case Topics.hide_topic(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],
-           topic_params["deletion_reason"]
+           params["topic"] || %{}
          ) do
       {:ok, {forum, topic}} ->
         conn
@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.Topic.HideController do
         |> put_flash(:error, "Unable to delete the topic!")
         |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -43,7 +43,7 @@ defmodule PhilomenaWeb.Topic.HideController do
         |> put_flash(:error, "Unable to restore the topic!")
         |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

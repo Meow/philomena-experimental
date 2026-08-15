@@ -570,9 +570,9 @@ defmodule Philomena.Reports do
 
   """
   @spec put_close_reports(Multi.t(), Multi.name(), User.t(), keyword()) :: Multi.t()
-  def put_close_reports(%Multi{} = multi, step, %User{} = closing_user, target) do
+  def put_close_reports(%Multi{} = multi, step, closing_user, target) do
     multi
-    |> Multi.update_all(step, close_report_query(closing_user, target), [])
+    |> Multi.update_all(step, fn _ -> close_report_query(closing_user, target) end, [])
     |> Multi.on_commit(fn %{^step => {_count, report_ids}} ->
       reindex_closed_reports(report_ids)
     end)

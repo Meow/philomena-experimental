@@ -99,7 +99,7 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
-          "spam"
+          %{"deletion_reason" => "spam"}
         )
 
       conn = get(conn, ~p"/api/v1/json/posts/#{post.id}")
@@ -110,7 +110,7 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
     test "returns 404 for a post in a restricted forum", %{conn: conn} do
       forum = forum_fixture(access_level: "staff")
       topic = topic_fixture(forum)
-      post = post_fixture(topic, nil)
+      post = post_fixture(topic, moderator_user_fixture())
 
       conn = get(conn, ~p"/api/v1/json/posts/#{post.id}")
 

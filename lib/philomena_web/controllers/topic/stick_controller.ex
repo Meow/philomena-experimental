@@ -21,7 +21,7 @@ defmodule PhilomenaWeb.Topic.StickController do
         |> put_flash(:error, "Unable to stick the topic!")
         |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.Topic.StickController do
         |> put_flash(:error, "Unable to unstick the topic!")
         |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

@@ -71,7 +71,7 @@ defmodule PhilomenaWeb.Topic.SubscriptionControllerTest do
         Philomena.AttributionFixtures.actor(moderator),
         forum.short_name,
         topic.slug,
-        "test hiding"
+        %{"deletion_reason" => "test hiding"}
       )
 
     conn2 = post(conn, ~p"/forums/#{forum}/topics/#{topic}/subscription")

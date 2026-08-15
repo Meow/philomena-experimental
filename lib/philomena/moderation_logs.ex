@@ -104,7 +104,7 @@ defmodule Philomena.ModerationLogs do
           callback :: (Ecto.Multi.changes() -> {String.t(), String.t(), String.t()})
         ) ::
           Multi.t()
-  def put_log(%Multi{} = multi, step, %Actor{user: %User{} = user}, callback)
+  def put_log(%Multi{} = multi, step, %Actor{user: user}, callback)
       when is_function(callback, 1) do
     Multi.run(multi, step, fn repo, changes ->
       {type, subject_path, body} = callback.(changes)

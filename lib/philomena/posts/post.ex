@@ -81,7 +81,9 @@ defmodule Philomena.Posts.Post do
   end
 
   def destroy_changeset(post) do
-    change(post)
+    post
+    |> change()
+    |> validate_undestroyed()
     |> put_change(:destroyed_content, true)
     |> put_change(:body, "")
   end
@@ -90,6 +92,15 @@ defmodule Philomena.Posts.Post do
   def approve_changeset(post) do
     post
     |> change()
+    |> validate_undestroyed()
     |> Approval.approve_changeset()
+  end
+
+  defp validate_undestroyed(changeset) do
+    if get_field(changeset, :destroyed_content) do
+      add_error(changeset, :destroyed_content, "has already been destroyed")
+    else
+      changeset
+    end
   end
 end

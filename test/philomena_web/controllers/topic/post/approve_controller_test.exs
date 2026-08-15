@@ -5,6 +5,7 @@ defmodule PhilomenaWeb.Topic.Post.ApproveControllerTest do
   import Philomena.PostsFixtures
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
+  import Philomena.RulesFixtures
 
   alias Philomena.Repo
 
@@ -15,9 +16,17 @@ defmodule PhilomenaWeb.Topic.Post.ApproveControllerTest do
     %{forum: forum, topic: topic}
   end
 
+  defp approval_rule! do
+    rule_fixture()
+    |> Ecto.Changeset.change(name: "Approval")
+    |> Repo.update!()
+  end
+
   # A post authored by a fresh (untrusted) user containing an external link is
   # not auto-approved on creation (see Philomena.Schema.Approval).
   defp unapproved_post(topic) do
+    approval_rule!()
+
     post =
       post_fixture(topic, confirmed_user_fixture(), %{
         "body" => "check this out https://spam.example/"

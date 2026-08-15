@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Topic.MoveController do
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],
-           params["topic"]
+           params["topic"] || %{}
          ) do
       {:ok, {forum, topic}} ->
         conn
@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.Topic.MoveController do
         |> put_flash(:error, "Unable to move the topic!")
         |> redirect(to: ~p"/forums/#{forum}/topics/#{topic}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

@@ -42,7 +42,7 @@ defmodule Philomena.Polls do
           {:ok, TopicPoll.t()} | {:error, :not_found | :unauthorized}
   def load_topic_poll(%Actor{} = actor, forum_slug, topic_slug, action) do
     with {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           Topics.load_forum_topic(actor, forum_slug, topic_slug),
+           Topics.load_forum_topic_struct(actor, forum_slug, topic_slug),
          {:ok, poll} <-
            Poll
            |> where([poll], poll.topic_id == ^topic.id)

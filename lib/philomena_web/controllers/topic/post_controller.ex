@@ -25,7 +25,7 @@ defmodule PhilomenaWeb.Topic.PostController do
       {:error, :rate_limited} ->
         RateLimitedResponse.call(conn, "You may only make a post once every 15 seconds.")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -51,7 +51,7 @@ defmodule PhilomenaWeb.Topic.PostController do
       {:error, {post, changeset}} ->
         render(conn, "edit.html", post: post, changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
