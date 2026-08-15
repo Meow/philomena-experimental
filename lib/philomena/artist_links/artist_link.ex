@@ -105,4 +105,12 @@ defmodule Philomena.ArtistLinks.ArtistLink do
 
     change(changeset, next_check_at: time)
   end
+
+  def states do
+    ~w(unverified link_verified contacted verified rejected)
+  end
+
+  def pending_states do
+    ~w(unverified link_verified contacted)
+  end
 end

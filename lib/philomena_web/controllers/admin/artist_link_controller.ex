@@ -6,13 +6,17 @@ defmodule PhilomenaWeb.Admin.ArtistLinkController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, artist_links} <-
+    with {:ok, artist_links, changeset} <-
            ArtistLinks.load_artist_links_index(
              conn.assigns.actor,
-             params,
+             params["lq"] || %{},
              conn.assigns.scrivener
            ) do
-      render(conn, "index.html", title: "Admin - Artist Links", artist_links: artist_links)
+      render(conn, "index.html",
+        title: "Admin - Artist Links",
+        artist_links: artist_links,
+        changeset: changeset
+      )
     end
   end
 end

@@ -8,7 +8,14 @@ defmodule Philomena.ArtistLinks do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
-  alias Philomena.ArtistLinks.{ArtistLink, AutomaticVerifier, BadgeAwarder}
+  alias Philomena.ArtistLinks.{
+    ArtistLink,
+    AutomaticVerifier,
+    BadgeAwarder,
+    QueryBuilder,
+    QueryForm
+  }
+
   alias Philomena.Attribution.Actor
   alias Philomena.Authorization
   alias Philomena.Loader
@@ -39,24 +46,6 @@ defmodule Philomena.ArtistLinks do
 
   defp load_artist_link(%Actor{} = actor, action, id) do
     Loader.fetch_and_authorize(ArtistLink, actor, action, id, @artist_link_preloads)
-  end
-
-  # TODO: manual parameter parsing. Move to changeset.
-
-  defp index_query(%{"all" => _value}) do
-    ArtistLink
-  end
-
-  defp index_query(%{"lq" => query}) do
-    query = "%#{query}%"
-
-    ArtistLink
-    |> join(:inner, [ul], _ in assoc(ul, :user))
-    |> where([ul, u], ilike(u.name, ^query) or ilike(ul.uri, ^query))
-  end
-
-  defp index_query(_params) do
-    where(ArtistLink, [ul], ul.aasm_state in ^["unverified", "link_verified", "contacted"])
   end
 
   @doc """
@@ -104,39 +93,43 @@ defmodule Philomena.ArtistLinks do
   Returns paginated artist links for the admin listing, on behalf of
   `actor`, newest first, with the moderation associations preloaded.
 
-  `params` selects the listing mode:
-  - Key `"all"` (value doesn't matter) lists every link
-  - Key `"lq"` filters by `%term%` match on the profile user name or the link uri
-
-  Otherwise, only links awaiting moderation
-  (`unverified`/`link_verified`/`contacted`) are listed.
+  The query form filters by artist-link states and `%term%` matches on the
+  profile user name or link URI. By default, it lists only links awaiting
+  moderation (`unverified`/`link_verified`/`contacted`).
 
   ## Examples
 
       iex> load_artist_links_index(admin, params, pagination)
-      {:ok, %Scrivener.Page{}}
+      {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
       iex> load_artist_links_index(user, params, pagination)
       {:error, :unauthorized}
 
   """
   @spec load_artist_links_index(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(ArtistLink.t())} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(ArtistLink.t()), Ecto.Changeset.t()} | {:error, :unauthorized}
   def load_artist_links_index(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, ArtistLink) do
-      artist_links =
-        params
-        |> index_query()
-        |> order_by(desc: :created_at)
-        |> preload([
-          :tag,
-          :verified_by_user,
-          :contacted_by_user,
-          user: [:linked_tags, awards: :badge]
-        ])
-        |> Repo.paginate(pagination)
+      {artist_links, changeset} =
+        case QueryBuilder.build_query(params) do
+          {:ok, query, query_form} ->
+            page =
+              query
+              |> preload([
+                :tag,
+                :verified_by_user,
+                :contacted_by_user,
+                user: [:linked_tags, awards: :badge]
+              ])
+              |> Repo.paginate(pagination)
 
-      {:ok, artist_links}
+            {page, QueryForm.changeset(query_form)}
+
+          {:error, changeset} ->
+            {Repo.paginate(where(ArtistLink, false), pagination), changeset}
+        end
+
+      {:ok, artist_links, changeset}
     end
   end
 

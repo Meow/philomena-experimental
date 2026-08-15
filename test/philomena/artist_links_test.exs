@@ -329,14 +329,14 @@ defmodule Philomena.ArtistLinksTest do
     @pagination %{page_number: 1, page_size: 25}
 
     test "a moderator and an admin may list, an anonymous viewer and a regular user may not" do
-      assert {:ok, %Scrivener.Page{}} =
+      assert {:ok, %Scrivener.Page{}, %Ecto.Changeset{}} =
                ArtistLinks.load_artist_links_index(
                  actor(moderator_user_fixture()),
                  %{},
                  @pagination
                )
 
-      assert {:ok, %Scrivener.Page{}} =
+      assert {:ok, %Scrivener.Page{}, %Ecto.Changeset{}} =
                ArtistLinks.load_artist_links_index(actor(admin_user_fixture()), %{}, @pagination)
 
       assert ArtistLinks.load_artist_links_index(actor(), %{}, @pagination) ==
@@ -360,28 +360,51 @@ defmodule Philomena.ArtistLinksTest do
       pending = artist_link_fixture(user, artist_tag_fixture())
       verified = verified_artist_link_fixture(user, artist_tag_fixture())
 
-      assert {:ok, page} = ArtistLinks.load_artist_links_index(actor(moderator), %{}, @pagination)
+      assert {:ok, page, _changeset} =
+               ArtistLinks.load_artist_links_index(actor(moderator), %{}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
       assert pending.id in ids
       refute verified.id in ids
     end
 
-    test "the all mode lists every link regardless of state" do
+    test "an explicit state list includes every link regardless of state" do
       moderator = moderator_user_fixture()
       user = confirmed_user_fixture()
       pending = artist_link_fixture(user, artist_tag_fixture())
       verified = verified_artist_link_fixture(user, artist_tag_fixture())
 
-      assert {:ok, page} =
-               ArtistLinks.load_artist_links_index(actor(moderator), %{"all" => "1"}, @pagination)
+      assert {:ok, page, _changeset} =
+               ArtistLinks.load_artist_links_index(
+                 actor(moderator),
+                 %{"states" => ArtistLink.states()},
+                 @pagination
+               )
 
       ids = Enum.map(page.entries, & &1.id)
       assert pending.id in ids
       assert verified.id in ids
     end
 
-    test "the lq mode filters by a match on the link uri" do
+    test "an empty state list does not filter links" do
+      moderator = moderator_user_fixture()
+      user = confirmed_user_fixture()
+      pending = artist_link_fixture(user, artist_tag_fixture())
+      verified = verified_artist_link_fixture(user, artist_tag_fixture())
+
+      assert {:ok, page, _changeset} =
+               ArtistLinks.load_artist_links_index(
+                 actor(moderator),
+                 %{"states" => []},
+                 @pagination
+               )
+
+      ids = Enum.map(page.entries, & &1.id)
+      assert pending.id in ids
+      assert verified.id in ids
+    end
+
+    test "the text filter matches the link uri" do
       moderator = moderator_user_fixture()
       user = confirmed_user_fixture()
 
@@ -395,17 +418,17 @@ defmodule Philomena.ArtistLinksTest do
           "uri" => "https://other.example.com/haystack"
         })
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                ArtistLinks.load_artist_links_index(
                  actor(moderator),
-                 %{"lq" => "needle"},
+                 %{"text" => "needle"},
                  @pagination
                )
 
       assert Enum.map(page.entries, & &1.id) == [wanted.id]
     end
 
-    test "the lq mode filters by a match on the profile user name" do
+    test "the text filter matches the profile user name" do
       moderator = moderator_user_fixture()
 
       wanted_user =
@@ -415,10 +438,10 @@ defmodule Philomena.ArtistLinksTest do
       wanted = artist_link_fixture(wanted_user, artist_tag_fixture())
       _other = artist_link_fixture(other_user, artist_tag_fixture())
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                ArtistLinks.load_artist_links_index(
                  actor(moderator),
-                 %{"lq" => wanted_user.name},
+                 %{"text" => wanted_user.name},
                  @pagination
                )
 
