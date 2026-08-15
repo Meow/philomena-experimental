@@ -14,65 +14,20 @@ defmodule Philomena.PollOptions do
   alias Philomena.Polls.Poll
   alias Philomena.Repo
 
-  defp parse_unique_ids(option_ids) when is_list(option_ids) and option_ids != [] do
-    ids =
-      option_ids
-      |> Enum.map(&IntegerId.parse/1)
-      |> Enum.map(fn
-        {:ok, id} -> id
-        _ -> :error
-      end)
-
-    cond do
-      :error in ids ->
-        {:error, :not_found}
-
-      Enum.uniq(ids) != ids ->
-        {:error, :duplicate}
-
-      true ->
-        {:ok, ids}
-    end
-  end
-
-  defp parse_unique_ids(_option_ids), do: {:error, :not_found}
-
   @doc """
-  Loads every selected option under `poll` while preserving input order.
-
-  Empty, malformed, duplicate, missing, and wrong-poll IDs reject the entire
-  selection. No user-controlled option ID can raise.
+  Loads every option belonging to `poll`.
 
   ## Examples
 
-      iex> load_selected_options(poll, ["1", "2"])
-      {:ok, [%PollOption{}, %PollOption{}]}
-
-      iex> load_selected_options(poll, ["1", "1"])
-      {:error, :duplicate}
+      iex> load_options(poll)
+      [%PollOption{}, %PollOption{}]
 
   """
-  @spec load_selected_options(Poll.t(), [IntegerId.integer_id()]) ::
-          {:ok, [PollOption.t()]} | {:error, :duplicate | :not_found}
-  def load_selected_options(%Poll{} = poll, option_ids) do
-    with {:ok, ids} <- parse_unique_ids(option_ids) do
-      options =
-        PollOption
-        |> where([option], option.poll_id == ^poll.id and option.id in ^ids)
-        |> Repo.all()
-        |> Map.new(&{&1.id, &1})
-
-      ids
-      |> Enum.map(&Map.get(options, &1))
-      |> Enum.reject(&is_nil/1)
-      |> case do
-        results when map_size(options) == length(ids) ->
-          {:ok, results}
-
-        _results ->
-          {:error, :not_found}
-      end
-    end
+  @spec load_options(Poll.t()) :: [PollOption.t()]
+  def load_options(%Poll{} = poll) do
+    poll
+    |> Repo.preload(:options)
+    |> Map.fetch!(:options)
   end
 
   @doc """

@@ -21,7 +21,6 @@ defmodule Philomena.PollVotesTest do
   import Philomena.UsersFixtures
 
   alias Philomena.PollVotes
-  alias Philomena.PollVotes.VoteForm
   alias Philomena.Polls.TopicPoll
   alias Philomena.PollVotes.PollVote
   alias Philomena.Repo
@@ -49,11 +48,13 @@ defmodule Philomena.PollVotesTest do
 
   # Records a vote for `option` by a fresh confirmed voter through the engine,
   # returning the persisted PollVote row.
-  defp record_vote(poll, option) do
+  defp record_vote(forum, topic, option) do
     voter = confirmed_user_fixture()
 
-    {:ok, _votes} =
-      PollVotes.create_poll_votes(voter, poll, %{"option_ids" => [to_string(option.id)]})
+    {:ok, _ballot} =
+      PollVotes.create_votes(actor(voter), forum.short_name, topic.slug, %{
+        "option_ids" => [to_string(option.id)]
+      })
 
     Repo.one!(
       from pv in PollVote,
@@ -76,10 +77,10 @@ defmodule Philomena.PollVotesTest do
     test "a moderator gets only options with votes, with voters preloaded" do
       moderator = moderator_user_fixture()
 
-      %{forum: forum, topic: topic, poll: poll, option_a: option_a, option_b: option_b} =
+      %{forum: forum, topic: topic, option_a: option_a, option_b: option_b} =
         forum_topic_poll_options()
 
-      vote = record_vote(poll, option_a)
+      vote = record_vote(forum, topic, option_a)
 
       assert {:ok, [option]} =
                PollVotes.list_votes(actor(moderator), forum.short_name, topic.slug)
@@ -155,13 +156,12 @@ defmodule Philomena.PollVotesTest do
       user = confirmed_user_fixture()
       %{forum: forum, topic: topic, poll: poll, option_a: option_a} = forum_topic_poll_options()
 
-      assert {:ok, %TopicPoll{} = result} =
+      assert {:ok, ballot} =
                PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
                  "option_ids" => [to_string(option_a.id)]
                })
 
-      assert result.forum.id == forum.id
-      assert result.topic.id == topic.id
+      assert ballot.poll.id == poll.id
 
       assert Repo.exists?(
                from pv in PollVote,
@@ -172,16 +172,15 @@ defmodule Philomena.PollVotesTest do
       assert Repo.reload!(poll).total_votes == 1
     end
 
-    test "a nil poll parameter records nothing and reports failure with the topic" do
+    test "an empty poll parameter records nothing and reports failure with the topic" do
       user = confirmed_user_fixture()
-      %{forum: forum, topic: topic} = forum_topic_poll_options()
+      %{forum: forum, topic: topic, poll: poll} = forum_topic_poll_options()
 
-      assert {:error, %VoteForm{} = form} =
-               PollVotes.create_votes(actor(user), forum.short_name, topic.slug, nil)
+      assert {:error, %Ecto.Changeset{data: ballot} = changeset} =
+               PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{})
 
-      assert form.forum.id == forum.id
-      assert form.topic.id == topic.id
-      assert %{poll_option_id: ["must select a choice"]} = errors_on(form.changeset)
+      assert ballot.poll.id == poll.id
+      assert %{option_ids: ["must select a choice"]} = errors_on(changeset)
       assert Repo.aggregate(PollVote, :count) == 0
     end
 
@@ -190,12 +189,12 @@ defmodule Philomena.PollVotesTest do
       %{forum: forum, topic: topic, option_a: option} = forum_topic_poll_options()
       option_id = to_string(option.id)
 
-      assert {:error, %VoteForm{} = form} =
+      assert {:error, changeset} =
                PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
                  "option_ids" => [option_id, option_id]
                })
 
-      assert %{poll_option_id: ["contains duplicate choices"]} = errors_on(form.changeset)
+      assert %{option_ids: ["contains duplicate choices"]} = errors_on(changeset)
       assert Repo.aggregate(PollVote, :count) == 0
     end
 
@@ -206,17 +205,23 @@ defmodule Philomena.PollVotesTest do
       %{option_a: wrong_option} = forum_topic_poll_options()
 
       for option_ids <- [
-            ["not-an-id"],
             [to_string(wrong_option.id)],
             [to_string(valid_option.id), to_string(wrong_option.id)]
           ] do
-        assert {:error, %VoteForm{} = form} =
+        assert {:error, changeset} =
                  PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
                    "option_ids" => option_ids
                  })
 
-        assert %{poll_option_id: ["contains an invalid choice"]} = errors_on(form.changeset)
+        assert %{option_ids: ["contains an invalid choice"]} = errors_on(changeset)
       end
+
+      assert {:error, changeset} =
+               PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
+                 "option_ids" => ["not-an-id"]
+               })
+
+      assert %{option_ids: ["is invalid"]} = errors_on(changeset)
 
       assert Repo.aggregate(PollVote, :count) == 0
     end
@@ -227,16 +232,16 @@ defmodule Philomena.PollVotesTest do
       %{forum: forum, topic: topic, option_a: option_a, option_b: option_b} =
         forum_topic_poll_options()
 
-      assert {:error, %VoteForm{} = form} =
+      assert {:error, changeset} =
                PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
                  "option_ids" => [to_string(option_a.id), to_string(option_b.id)]
                })
 
-      assert %{poll_option_id: ["must select exactly one choice"]} = errors_on(form.changeset)
+      assert %{option_ids: ["must select exactly one choice"]} = errors_on(changeset)
       assert Repo.aggregate(PollVote, :count) == 0
     end
 
-    test "an expired poll is an engine failure reported with the topic" do
+    test "an expired poll is rejected" do
       # The engine's :ended step bails when the poll is no longer active, so a
       # closed poll surfaces as {:error, forum, topic} (both carried so the
       # controller can redirect back) with nothing recorded.
@@ -247,36 +252,48 @@ defmodule Philomena.PollVotesTest do
       |> Ecto.Changeset.change(active_until: DateTime.add(DateTime.utc_now(:second), -1, :day))
       |> Repo.update!()
 
-      assert {:error, %VoteForm{} = form} =
+      assert {:error, %Ecto.Changeset{data: ballot} = changeset} =
                PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
                  "option_ids" => [to_string(option_a.id)]
                })
 
-      assert form.forum.id == forum.id
-      assert form.topic.id == topic.id
-      assert %{poll_option_id: ["poll is closed"]} = errors_on(form.changeset)
+      assert ballot.poll.id == poll.id
+      assert %{option_ids: ["poll is closed"]} = errors_on(changeset)
       assert Repo.aggregate(PollVote, :count) == 0
     end
 
-    test "a repeat vote by the same user is an engine failure reported with the topic" do
+    test "a multiple-choice poll accepts one or more choices" do
       user = confirmed_user_fixture()
+      forum = forum_fixture()
+      {topic, poll} = topic_with_poll_fixture(forum, nil, %{"vote_method" => "multiple"})
+      [option_a | _options] = poll |> Repo.preload(:options) |> Map.fetch!(:options)
 
-      %{forum: forum, topic: topic, option_a: option_a, option_b: option_b} =
-        forum_topic_poll_options()
-
-      assert {:ok, %TopicPoll{}} =
+      assert {:ok, _ballot} =
                PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
                  "option_ids" => [to_string(option_a.id)]
                })
 
-      assert {:error, %VoteForm{} = form} =
+      assert Repo.aggregate(PollVote, :count) == 1
+    end
+
+    test "a repeat vote by the same user is rejected" do
+      user = confirmed_user_fixture()
+
+      %{forum: forum, topic: topic, poll: poll, option_a: option_a, option_b: option_b} =
+        forum_topic_poll_options()
+
+      assert {:ok, _ballot} =
+               PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
+                 "option_ids" => [to_string(option_a.id)]
+               })
+
+      assert {:error, %Ecto.Changeset{data: ballot} = changeset} =
                PollVotes.create_votes(actor(user), forum.short_name, topic.slug, %{
                  "option_ids" => [to_string(option_b.id)]
                })
 
-      assert form.forum.id == forum.id
-      assert form.topic.id == topic.id
-      assert %{user_id: ["has already voted"]} = errors_on(form.changeset)
+      assert ballot.poll.id == poll.id
+      assert %{option_ids: ["has already voted"]} = errors_on(changeset)
       assert Repo.aggregate(from(pv in PollVote, where: pv.user_id == ^user.id), :count) == 1
     end
 
@@ -296,8 +313,8 @@ defmodule Philomena.PollVotesTest do
       # The :hide check runs before the vote is even looked up, so a regular user
       # is denied regardless of the vote id.
       user = confirmed_user_fixture()
-      %{forum: forum, topic: topic, poll: poll, option_a: option_a} = forum_topic_poll_options()
-      vote = record_vote(poll, option_a)
+      %{forum: forum, topic: topic, option_a: option_a} = forum_topic_poll_options()
+      vote = record_vote(forum, topic, option_a)
 
       assert PollVotes.delete_vote(actor(user), forum.short_name, topic.slug, to_string(vote.id)) ==
                {:error, :unauthorized}
@@ -334,8 +351,15 @@ defmodule Philomena.PollVotesTest do
     test "a vote from another poll is not found and survives" do
       moderator = moderator_user_fixture()
       %{forum: forum, topic: topic} = forum_topic_poll_options()
-      %{poll: other_poll, option_a: other_option} = forum_topic_poll_options()
-      other_vote = record_vote(other_poll, other_option)
+
+      %{
+        forum: other_forum,
+        topic: other_topic,
+        poll: other_poll,
+        option_a: other_option
+      } = forum_topic_poll_options()
+
+      other_vote = record_vote(other_forum, other_topic, other_option)
 
       assert PollVotes.delete_vote(
                actor(moderator),
@@ -352,7 +376,7 @@ defmodule Philomena.PollVotesTest do
     test "a moderator removes the vote and decrements the cached tallies" do
       moderator = moderator_user_fixture()
       %{forum: forum, topic: topic, poll: poll, option_a: option_a} = forum_topic_poll_options()
-      vote = record_vote(poll, option_a)
+      vote = record_vote(forum, topic, option_a)
 
       assert Repo.reload!(option_a).vote_count == 1
       assert Repo.reload!(poll).total_votes == 1

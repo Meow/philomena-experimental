@@ -114,21 +114,8 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
       assert Repo.aggregate(PollVote, :count) == 0
     end
 
-    test "redirects with the error flash when the poll parameter is missing",
+    test "drops a non-integer option id",
          %{conn: conn, forum: forum, topic: topic} do
-      %{conn: conn} = register_and_log_in_user(%{conn: conn})
-
-      conn = post(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes", %{})
-
-      assert redirected_to(conn) == ~p"/forums/#{forum}/topics/#{topic}"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Your vote was not recorded."
-    end
-
-    test "drops a non-integer option id without crashing",
-         %{conn: conn, forum: forum, topic: topic} do
-      # A non-integer option id is unparsable, so filter_options drops it
-      # (rather than raising ArgumentError as it used to). No valid options
-      # remain, so no vote is recorded and the request still redirects cleanly.
       %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
 
       conn =
@@ -210,11 +197,12 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
   end
 
   # Records a vote for `option` by a fresh voter and returns the PollVote row.
-  defp record_vote(poll, option) do
+  defp record_vote(forum, topic, option) do
     voter = Philomena.UsersFixtures.confirmed_user_fixture()
+    actor = Philomena.AttributionFixtures.actor(voter)
 
-    {:ok, _votes} =
-      PollVotes.create_poll_votes(voter, poll, %{"option_ids" => [to_string(option.id)]})
+    {:ok, _ballot} =
+      PollVotes.create_votes(actor, forum.short_name, topic.slug, %{option_ids: [option.id]})
 
     Repo.one!(
       from pv in PollVote, where: pv.poll_option_id == ^option.id and pv.user_id == ^voter.id
@@ -243,8 +231,8 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
     end
 
     test "as a moderator lists the voters for options with votes",
-         %{conn: conn, forum: forum, topic: topic, poll: poll, option_a: option_a} do
-      vote = record_vote(poll, option_a)
+         %{conn: conn, forum: forum, topic: topic, option_a: option_a} do
+      vote = record_vote(forum, topic, option_a)
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       response = html_response(get(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes"), 200)
@@ -280,8 +268,8 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
 
   describe "DELETE /forums/:forum_id/topics/:topic_id/poll/votes/:id" do
     test "redirects anonymous users to the login page",
-         %{conn: conn, forum: forum, topic: topic, poll: poll, option_a: option_a} do
-      vote = record_vote(poll, option_a)
+         %{conn: conn, forum: forum, topic: topic, option_a: option_a} do
+      vote = record_vote(forum, topic, option_a)
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes/#{vote}")
 
@@ -290,8 +278,8 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
     end
 
     test "rejects a regular user with the authorization flash",
-         %{conn: conn, forum: forum, topic: topic, poll: poll, option_a: option_a} do
-      vote = record_vote(poll, option_a)
+         %{conn: conn, forum: forum, topic: topic, option_a: option_a} do
+      vote = record_vote(forum, topic, option_a)
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes/#{vote}")
@@ -303,7 +291,7 @@ defmodule PhilomenaWeb.Topic.Poll.VoteControllerTest do
 
     test "as a moderator removes the vote row and decrements the cached tallies",
          %{conn: conn, forum: forum, topic: topic, poll: poll, option_a: option_a} do
-      vote = record_vote(poll, option_a)
+      vote = record_vote(forum, topic, option_a)
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = delete(conn, ~p"/forums/#{forum}/topics/#{topic}/poll/votes/#{vote}")

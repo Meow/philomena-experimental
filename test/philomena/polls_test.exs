@@ -177,8 +177,8 @@ defmodule Philomena.PollsTest do
       {forum, topic, poll} = forum_topic_poll()
       [option_a, option_b] = poll |> Repo.preload(:options) |> Map.fetch!(:options)
 
-      assert {:ok, [_vote]} =
-               PollVotes.create_poll_votes(voter, poll, %{
+      assert {:ok, _ballot} =
+               PollVotes.create_votes(actor(voter), forum.short_name, topic.slug, %{
                  "option_ids" => [to_string(option_a.id)]
                })
 
