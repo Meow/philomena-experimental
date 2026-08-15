@@ -9,24 +9,9 @@ defmodule Philomena.Polls do
   alias Philomena.Attribution.Actor
   alias Philomena.Loader
   alias Philomena.Polls.{Poll, PollForm, TopicPoll}
-  alias Philomena.Repo
+  alias Philomena.Multi
   alias Philomena.Topics
   alias Philomena.Topics.ForumTopic
-
-  defp persist_poll_update(%Poll{} = poll, attrs) do
-    Repo.transact(fn ->
-      with {:ok, locked_poll} <-
-             Poll
-             |> where(id: ^poll.id)
-             |> preload(:options)
-             |> lock("FOR UPDATE")
-             |> Loader.one() do
-        locked_poll
-        |> Poll.changeset(attrs)
-        |> Repo.update()
-      end
-    end)
-  end
 
   defp poll_form(%TopicPoll{} = result, changeset \\ nil) do
     %PollForm{
@@ -113,9 +98,21 @@ defmodule Philomena.Polls do
   def update_poll(%Actor{} = actor, forum_slug, topic_slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, result} <- load_topic_poll(actor, forum_slug, topic_slug, :update_poll) do
-      case persist_poll_update(result.poll, attrs) do
-        {:ok, poll} -> {:ok, %{result | poll: poll}}
-        {:error, changeset} -> {:error, poll_form(result, changeset)}
+      poll_query =
+        Poll
+        |> where(id: ^result.poll.id)
+        |> preload(:options)
+
+      Multi.new()
+      |> Multi.lock_one(:locked_poll, poll_query)
+      |> Multi.update(:poll, fn %{locked_poll: poll} -> Poll.changeset(poll, attrs) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{poll: poll}} ->
+          {:ok, %{result | poll: poll}}
+
+        {:error, :poll, changeset, _changes} ->
+          {:error, poll_form(result, changeset)}
       end
     end
   end
@@ -123,8 +120,7 @@ defmodule Philomena.Polls do
   @doc """
   Returns whether a loaded poll is accepting votes at `now`.
 
-  The close instant itself is inactive. This pure service avoids a second,
-  potentially stale database read inside the vote transaction.
+  The close instant itself is inactive.
 
   ## Examples
 

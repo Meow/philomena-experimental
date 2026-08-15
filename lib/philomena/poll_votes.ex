@@ -94,15 +94,10 @@ defmodule Philomena.PollVotes do
         |> Ballot.validate_not_voted(user_voted?(poll, user))
         |> Ecto.Changeset.apply_action(:create)
       end)
-      |> Multi.run(:vote_count, fn repo, %{ballot: ballot} ->
+      |> Multi.insert_all(:poll_votes, PollVote, fn %{ballot: ballot} ->
         now = DateTime.utc_now(:second)
 
-        {count, nil} =
-          ballot.option_ids
-          |> Enum.map(&%{poll_option_id: &1, user_id: user.id, created_at: now})
-          |> then(&repo.insert_all(PollVote, &1))
-
-        {:ok, count}
+        Enum.map(ballot.option_ids, &%{poll_option_id: &1, user_id: user.id, created_at: now})
       end)
       |> Multi.run(:update_options, fn repo, %{ballot: ballot, poll: poll} ->
         {count, nil} =
@@ -112,8 +107,8 @@ defmodule Philomena.PollVotes do
 
         {:ok, count}
       end)
-      |> Multi.run(:update_poll, fn repo, %{vote_count: vote_count} ->
-        {count, nil} = repo.update_all(poll_query, inc: [total_votes: vote_count])
+      |> Multi.run(:update_poll, fn repo, %{poll_votes: {count, _}} ->
+        {count, nil} = repo.update_all(poll_query, inc: [total_votes: count])
 
         {:ok, count}
       end)
@@ -149,6 +144,7 @@ defmodule Philomena.PollVotes do
       poll_option_query = where(PollOption, id: ^poll_vote.poll_option_id)
       poll_query = where(Poll, id: ^result.poll.id)
 
+      # TODO: gracefully handle Ecto.StaleEntryError
       {:ok, _changes} =
         Multi.new()
         |> Multi.delete(:poll_vote, poll_vote)
