@@ -87,7 +87,7 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
       ban = user_ban_fixture()
 
-      assert {:ok, page} = Bans.admin_user_bans(actor(moderator), %{}, @pagination)
+      assert {:ok, page, _changeset} = Bans.admin_user_bans(actor(moderator), %{}, @pagination)
       assert %Scrivener.Page{} = page
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
@@ -96,7 +96,7 @@ defmodule Philomena.BansTest do
       admin = admin_user_fixture()
       ban = user_ban_fixture()
 
-      assert {:ok, page} = Bans.admin_user_bans(actor(admin), %{}, @pagination)
+      assert {:ok, page, _changeset} = Bans.admin_user_bans(actor(admin), %{}, @pagination)
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
 
@@ -114,7 +114,7 @@ defmodule Philomena.BansTest do
       ban = user_ban_fixture()
       _other = user_ban_fixture()
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Bans.admin_user_bans(
                  actor(moderator),
                  %{"bq" => ban.generated_ban_id},
@@ -129,7 +129,7 @@ defmodule Philomena.BansTest do
       target = confirmed_user_fixture(%{name: "bantargetname"})
       ban = user_ban_fixture(target)
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Bans.admin_user_bans(actor(moderator), %{"bq" => "bantargetname"}, @pagination)
 
       assert ban.id in Enum.map(page.entries, & &1.id)
@@ -141,18 +141,19 @@ defmodule Philomena.BansTest do
       ban = user_ban_fixture(target)
       _other = user_ban_fixture()
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Bans.admin_user_bans(actor(moderator), %{"user_id" => "#{target.id}"}, @pagination)
 
       assert Enum.map(page.entries, & &1.id) == [ban.id]
     end
 
-    test "a non-integer user_id filter raises Ecto.Query.CastError" do
+    test "a non-integer user_id filter returns a changeset error" do
       moderator = moderator_user_fixture()
 
-      assert_raise Ecto.Query.CastError, fn ->
-        Bans.admin_user_bans(actor(moderator), %{"user_id" => "abc"}, @pagination)
-      end
+      assert {:error, changeset} =
+               Bans.admin_user_bans(actor(moderator), %{"user_id" => "abc"}, @pagination)
+
+      assert {"is invalid", _opts} = changeset.errors[:user_id]
     end
   end
 
@@ -452,7 +453,7 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
       ban = subnet_ban_fixture()
 
-      assert {:ok, page} = Bans.admin_subnet_bans(actor(moderator), %{}, @pagination)
+      assert {:ok, page, _changeset} = Bans.admin_subnet_bans(actor(moderator), %{}, @pagination)
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
 
@@ -461,7 +462,7 @@ defmodule Philomena.BansTest do
       ban = subnet_ban_fixture()
       _other = subnet_ban_fixture()
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Bans.admin_subnet_bans(
                  actor(moderator),
                  %{"bq" => ban.generated_ban_id},
@@ -475,17 +476,19 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
       ban = subnet_ban_fixture(%{"specification" => "203.0.113.0/24"})
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Bans.admin_subnet_bans(actor(moderator), %{"ip" => "203.0.113.50"}, @pagination)
 
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
 
-    test "an invalid ip in the ip branch returns the invalid-ip error" do
+    test "an invalid ip in the ip branch returns a changeset error" do
       moderator = moderator_user_fixture()
 
-      assert Bans.admin_subnet_bans(actor(moderator), %{"ip" => "not-an-ip"}, @pagination) ==
-               {:error, {:invalid_ip, "not-an-ip"}}
+      assert {:error, changeset} =
+               Bans.admin_subnet_bans(actor(moderator), %{"ip" => "not-an-ip"}, @pagination)
+
+      assert {"is invalid", _opts} = changeset.errors[:ip]
     end
 
     test "a regular user is not authorized" do
@@ -515,16 +518,16 @@ defmodule Philomena.BansTest do
       refute is_nil(Ecto.Changeset.get_field(changeset, :specification))
     end
 
-    test "an invalid specification returns the invalid-ip error" do
+    test "an invalid specification is returned in the changeset" do
       moderator = moderator_user_fixture()
 
-      assert Bans.new_subnet_ban(actor(moderator), "not-an-ip") ==
-               {:error, {:invalid_ip, "not-an-ip"}}
+      assert {:ok, changeset} = Bans.new_subnet_ban(actor(moderator), "not-an-ip")
+      assert {"is invalid", _opts} = changeset.errors[:specification]
     end
 
     test "a regular user is not authorized even with an invalid specification" do
-      # Authorization runs ahead of specification parsing, so an unprivileged
-      # actor gets the unauthorized error rather than the invalid-ip one.
+      # Authorization runs ahead of validation, so an unprivileged actor gets
+      # the unauthorized error rather than a changeset.
       assert Bans.new_subnet_ban(actor(confirmed_user_fixture()), "not-an-ip") ==
                {:error, :unauthorized}
     end
@@ -695,7 +698,9 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
       ban = fingerprint_ban_fixture()
 
-      assert {:ok, page} = Bans.admin_fingerprint_bans(actor(moderator), %{}, @pagination)
+      assert {:ok, page, _changeset} =
+               Bans.admin_fingerprint_bans(actor(moderator), %{}, @pagination)
+
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
 
@@ -704,7 +709,7 @@ defmodule Philomena.BansTest do
       ban = fingerprint_ban_fixture()
       _other = fingerprint_ban_fixture()
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Bans.admin_fingerprint_bans(
                  actor(moderator),
                  %{"bq" => ban.generated_ban_id},
@@ -719,7 +724,7 @@ defmodule Philomena.BansTest do
       ban = fingerprint_ban_fixture(%{"fingerprint" => "c0ffee1234"})
       _other = fingerprint_ban_fixture(%{"fingerprint" => "deadbeef"})
 
-      assert {:ok, page} =
+      assert {:ok, page, _changeset} =
                Bans.admin_fingerprint_bans(
                  actor(moderator),
                  %{"fingerprint" => "c0ffee1234"},

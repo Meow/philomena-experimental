@@ -14,9 +14,15 @@ defmodule Philomena.Bans do
   alias Philomena.Authorization
   alias Philomena.Bans.Finder
   alias Philomena.Bans.Fingerprint
+  alias Philomena.Bans.FingerprintQueryBuilder
+  alias Philomena.Bans.FingerprintQueryForm
   alias Philomena.Bans.SubnetCreator
   alias Philomena.Bans.Subnet
+  alias Philomena.Bans.SubnetQueryBuilder
+  alias Philomena.Bans.SubnetQueryForm
   alias Philomena.Bans.User
+  alias Philomena.Bans.UserQueryBuilder
+  alias Philomena.Bans.UserQueryForm
   alias Philomena.ModerationLogs
   alias Philomena.Multi
   alias Philomena.Users
@@ -29,25 +35,6 @@ defmodule Philomena.Bans do
       {:ok, ban}
     end
   end
-
-  # TODO: manual parameter parsing. Move to changeset.
-
-  defp fingerprint_bans_query(%{"bq" => q}) when is_binary(q) do
-    where(
-      Fingerprint,
-      [fb],
-      ilike(fb.fingerprint, ^"%#{q}%") or
-        fb.generated_ban_id == ^q or
-        fragment("to_tsvector(?) @@ plainto_tsquery(?)", fb.reason, ^q) or
-        fragment("to_tsvector(?) @@ plainto_tsquery(?)", fb.note, ^q)
-    )
-  end
-
-  defp fingerprint_bans_query(%{"fingerprint" => fingerprint}) when is_binary(fingerprint) do
-    where(Fingerprint, fingerprint: ^fingerprint)
-  end
-
-  defp fingerprint_bans_query(_params), do: Fingerprint
 
   @doc """
   Returns the fingerprint bans matching `fingerprint`, newest first.
@@ -77,17 +64,18 @@ defmodule Philomena.Bans do
 
   """
   @spec admin_fingerprint_bans(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(Fingerprint.t())} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(Fingerprint.t()), Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :unauthorized}
   def admin_fingerprint_bans(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, Fingerprint) do
+    with :ok <- authorize(actor, :index, Fingerprint),
+         {:ok, query, form} <- FingerprintQueryBuilder.build_query(params) do
       fingerprint_bans =
-        params
-        |> fingerprint_bans_query()
-        |> order_by(desc: :created_at)
+        query
         |> preload(:banning_user)
         |> Repo.paginate(pagination)
 
-      {:ok, fingerprint_bans}
+      {:ok, fingerprint_bans, FingerprintQueryForm.changeset(form)}
     end
   end
 
@@ -290,42 +278,6 @@ defmodule Philomena.Bans do
     end
   end
 
-  defp new_subnet_from_specification(ip) when is_binary(ip) do
-    case EctoNetwork.INET.cast(ip) do
-      {:ok, ip} -> {:ok, %Subnet{specification: ip}}
-      _error -> {:error, {:invalid_ip, ip}}
-    end
-  end
-
-  defp new_subnet_from_specification(_specification), do: {:ok, %Subnet{}}
-
-  # TODO: manual parameter parsing. Move to changeset.
-
-  defp subnet_bans_query(%{"bq" => q}) when is_binary(q) do
-    query =
-      where(
-        Subnet,
-        [sb],
-        sb.generated_ban_id == ^q or
-          fragment("to_tsvector(?) @@ plainto_tsquery(?)", sb.reason, ^q) or
-          fragment("to_tsvector(?) @@ plainto_tsquery(?)", sb.note, ^q)
-      )
-
-    {:ok, query}
-  end
-
-  defp subnet_bans_query(%{"ip" => ip}) when is_binary(ip) do
-    case EctoNetwork.INET.cast(ip) do
-      {:ok, ip} ->
-        {:ok, where(Subnet, [sb], fragment("? >>= ?", sb.specification, ^ip))}
-
-      _error ->
-        {:error, {:invalid_ip, ip}}
-    end
-  end
-
-  defp subnet_bans_query(_params), do: {:ok, Subnet}
-
   @doc """
   Returns the subnet bans whose specification contains `ip`, newest first.
   """
@@ -357,18 +309,18 @@ defmodule Philomena.Bans do
 
   """
   @spec admin_subnet_bans(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(Subnet.t())}
-          | {:error, :unauthorized | {:invalid_ip, String.t()}}
+          {:ok, Scrivener.Page.t(Subnet.t()), Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :unauthorized}
   def admin_subnet_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Subnet),
-         {:ok, query} <- subnet_bans_query(params) do
+         {:ok, query, form} <- SubnetQueryBuilder.build_query(params) do
       subnet_bans =
         query
-        |> order_by(desc: :created_at)
         |> preload(:banning_user)
         |> Repo.paginate(pagination)
 
-      {:ok, subnet_bans}
+      {:ok, subnet_bans, SubnetQueryForm.changeset(form)}
     end
   end
 
@@ -382,7 +334,7 @@ defmodule Philomena.Bans do
       {:ok, %Ecto.Changeset{}}
 
       iex> new_subnet_ban(admin, "512.512.512.512")
-      {:error, {:invalid_ip, "512.512.512.512"}}
+      {:error, %Ecto.Changeset{}}
 
       iex> new_subnet_ban(user, ip_or_cidr)
       {:error, :unauthorized}
@@ -390,14 +342,11 @@ defmodule Philomena.Bans do
   """
   @spec new_subnet_ban(Actor.t(), String.t() | nil) ::
           {:ok, Ecto.Changeset.t()}
-          | {:error, Authorization.write_error_reason() | {:invalid_ip, String.t()}}
+          | {:error, Authorization.write_error_reason()}
   def new_subnet_ban(%Actor{} = actor, specification) do
     with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, :new, Subnet),
-         {:ok, subnet} <- new_subnet_from_specification(specification) do
-      # TODO: I suspect this can just be a new changeset function on Subnet?
-      # No need for an :invalid_ip return.
-      {:ok, Subnet.changeset(subnet)}
+         :ok <- authorize(actor, :new, Subnet) do
+      {:ok, Subnet.changeset(%Subnet{}, %{specification: specification})}
     end
   end
 
@@ -608,28 +557,6 @@ defmodule Philomena.Bans do
     Map.get(attrs, "user_id") || Map.get(attrs, :user_id)
   end
 
-  # TODO: manual parameter parsing. Move to changeset.
-
-  defp user_bans_query(%{"bq" => q}) when is_binary(q) do
-    like_q = "%#{q}%"
-
-    User
-    |> join(:inner, [ub], _ in assoc(ub, :user))
-    |> where(
-      [ub, u],
-      ilike(u.name, ^like_q) or
-        ub.generated_ban_id == ^q or
-        fragment("to_tsvector(?) @@ plainto_tsquery(?)", ub.reason, ^q) or
-        fragment("to_tsvector(?) @@ plainto_tsquery(?)", ub.note, ^q)
-    )
-  end
-
-  defp user_bans_query(%{"user_id" => user_id}) when is_binary(user_id) do
-    where(User, user_id: ^user_id)
-  end
-
-  defp user_bans_query(_params), do: User
-
   @doc """
   Creates a user ban for a trusted, already-authorized system workflow.
 
@@ -672,17 +599,18 @@ defmodule Philomena.Bans do
 
   """
   @spec admin_user_bans(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(User.t())} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(User.t()), Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :unauthorized}
   def admin_user_bans(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, User) do
+    with :ok <- authorize(actor, :index, User),
+         {:ok, query, form} <- UserQueryBuilder.build_query(params) do
       user_bans =
-        params
-        |> user_bans_query()
-        |> order_by(desc: :created_at)
+        query
         |> preload([:user, :banning_user])
         |> Repo.paginate(pagination)
 
-      {:ok, user_bans}
+      {:ok, user_bans, UserQueryForm.changeset(form)}
     end
   end
 

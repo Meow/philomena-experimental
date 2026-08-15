@@ -6,13 +6,25 @@ defmodule PhilomenaWeb.Admin.UserBanController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, user_bans} <-
-           Bans.admin_user_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
-      render(conn, "index.html",
-        title: "Admin - User Bans",
-        layout_class: "layout--wide",
-        user_bans: user_bans
-      )
+    case Bans.admin_user_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
+      {:ok, user_bans, changeset} ->
+        render(conn, "index.html",
+          title: "Admin - User Bans",
+          layout_class: "layout--wide",
+          user_bans: user_bans,
+          changeset: changeset
+        )
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "index.html",
+          title: "Admin - User Bans",
+          layout_class: "layout--wide",
+          user_bans: nil,
+          changeset: changeset
+        )
+
+      error ->
+        error
     end
   end
 
@@ -24,7 +36,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
       {:error, :not_found} ->
         no_target_user(conn)
 
-      {:error, reason} = error when reason in [:unauthorized, :ban] ->
+      error ->
         error
     end
   end
@@ -48,14 +60,14 @@ defmodule PhilomenaWeb.Admin.UserBanController do
           {:error, :not_found} ->
             no_target_user(conn)
 
-          {:error, _} = error ->
+          error ->
             error
         end
 
       {:error, :not_found} ->
         no_target_user(conn)
 
-      {:error, reason} = error when reason in [:unauthorized, :ban] ->
+      error ->
         error
     end
   end
@@ -77,7 +89,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html", user: changeset.data, changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

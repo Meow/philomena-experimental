@@ -6,13 +6,25 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, fingerprint_bans} <-
-           Bans.admin_fingerprint_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
-      render(conn, "index.html",
-        title: "Admin - Fingerprint Bans",
-        layout_class: "layout--wide",
-        fingerprint_bans: fingerprint_bans
-      )
+    case Bans.admin_fingerprint_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
+      {:ok, fingerprint_bans, changeset} ->
+        render(conn, "index.html",
+          title: "Admin - Fingerprint Bans",
+          layout_class: "layout--wide",
+          fingerprint_bans: fingerprint_bans,
+          changeset: changeset
+        )
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "index.html",
+          title: "Admin - Fingerprint Bans",
+          layout_class: "layout--wide",
+          fingerprint_bans: nil,
+          changeset: changeset
+        )
+
+      error ->
+        error
     end
   end
 
@@ -33,7 +45,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
 
-      {:error, reason} = error when reason in [:unauthorized, :ban] ->
+      error ->
         error
     end
   end
@@ -59,7 +71,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html", fingerprint_ban: changeset.data, changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

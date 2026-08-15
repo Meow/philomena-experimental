@@ -7,19 +7,23 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
 
   def index(conn, params) do
     case Bans.admin_subnet_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
-      {:ok, subnet_bans} ->
+      {:ok, subnet_bans, changeset} ->
         render(conn, "index.html",
           title: "Admin - Subnet Bans",
           layout_class: "layout--wide",
-          subnet_bans: subnet_bans
+          subnet_bans: subnet_bans,
+          changeset: changeset
         )
 
-      {:error, {:invalid_ip, ip}} ->
-        conn
-        |> put_flash(:error, "`#{ip}' is not a valid IP address or CIDR range.")
-        |> redirect(to: ~p"/admin/subnet_bans")
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "index.html",
+          title: "Admin - Subnet Bans",
+          layout_class: "layout--wide",
+          subnet_bans: nil,
+          changeset: changeset
+        )
 
-      {:error, reason} = error when reason in [:unauthorized, :ban] ->
+      error ->
         error
     end
   end
@@ -29,14 +33,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
       {:ok, changeset} ->
         render_new(conn, changeset)
 
-      {:error, {:invalid_ip, ip}} ->
-        {:ok, changeset} = Bans.new_subnet_ban(conn.assigns.actor, nil)
-
-        conn
-        |> put_flash(:error, "`#{ip}' is not a valid IP address or CIDR range.")
-        |> render_new(changeset)
-
-      {:error, reason} = error when reason in [:unauthorized, :ban] ->
+      error ->
         error
     end
   end
@@ -55,7 +52,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
 
-      {:error, :unauthorized} = error ->
+      error ->
         error
     end
   end
@@ -77,7 +74,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html", subnet: changeset.data, changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
