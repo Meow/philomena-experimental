@@ -25,47 +25,11 @@ defmodule Philomena.PollVotes do
     |> Repo.exists?()
   end
 
-  defp voted_options(poll) do
-    PollOption
-    |> where(poll_id: ^poll.id)
-    |> where([option], option.vote_count > 0)
-    |> preload(poll_votes: :user)
-    |> Repo.all()
-  end
-
   defp load_poll_vote(poll, vote_id) do
-    case IntegerId.parse(vote_id) do
-      {:ok, vote_id} ->
-        PollVote
-        |> join(:inner, [vote], option in assoc(vote, :poll_option))
-        |> where([vote, option], vote.id == ^vote_id and option.poll_id == ^poll.id)
-        |> Loader.one()
-
-      :error ->
-        {:error, :not_found}
-    end
-  end
-
-  defp delete_poll_vote(%PollVote{} = poll_vote, %Poll{} = poll) do
-    Repo.transact(fn ->
-      with {:ok, poll_vote} <-
-             PollVote
-             |> where(id: ^poll_vote.id)
-             |> lock("FOR UPDATE")
-             |> Loader.one(),
-           {:ok, option} <- PollOptions.load_option(poll, poll_vote.poll_option_id),
-           {:ok, _vote} <- Repo.delete(poll_vote) do
-        PollOption
-        |> where(id: ^option.id)
-        |> Repo.update_all(inc: [vote_count: -1])
-
-        Poll
-        |> where(id: ^poll.id)
-        |> Repo.update_all(inc: [total_votes: -1])
-
-        {:ok, poll_vote}
-      end
-    end)
+    PollVote
+    |> join(:inner, [vote], option in assoc(vote, :poll_option))
+    |> where([_vote, option], option.poll_id == ^poll.id)
+    |> Loader.fetch(vote_id)
   end
 
   @doc """
@@ -84,7 +48,12 @@ defmodule Philomena.PollVotes do
   def list_votes(%Actor{} = actor, forum_slug, topic_slug) do
     with {:ok, result} <-
            Polls.load_topic_poll(actor, forum_slug, topic_slug, :list_poll_votes) do
-      {:ok, voted_options(result.poll)}
+      {:ok,
+       PollOption
+       |> where(poll_id: ^result.poll.id)
+       |> where([option], option.vote_count > 0)
+       |> preload(poll_votes: :user)
+       |> Repo.all()}
     end
   end
 
@@ -160,7 +129,7 @@ defmodule Philomena.PollVotes do
   end
 
   @doc """
-  Removes one vote only when it belongs to the parent-scoped poll.
+  Removes one vote belonging to the parent-scoped poll.
 
   Cached option and poll totals are decremented in the same transaction.
 
@@ -176,8 +145,17 @@ defmodule Philomena.PollVotes do
     with :ok <- verify_write_access(actor),
          {:ok, result} <-
            Polls.load_topic_poll(actor, forum_slug, topic_slug, :delete_poll_vote),
-         {:ok, poll_vote} <- load_poll_vote(result.poll, vote_id),
-         {:ok, _poll_vote} <- delete_poll_vote(poll_vote, result.poll) do
+         {:ok, poll_vote} <- load_poll_vote(result.poll, vote_id) do
+      poll_option_query = where(PollOption, id: ^poll_vote.poll_option_id)
+      poll_query = where(Poll, id: ^result.poll.id)
+
+      {:ok, _changes} =
+        Multi.new()
+        |> Multi.delete(:poll_vote, poll_vote)
+        |> Multi.update_all(:update_options, poll_option_query, inc: [vote_count: -1])
+        |> Multi.update_all(:update_poll, poll_query, inc: [total_votes: -1])
+        |> Multi.transact()
+
       {:ok, result}
     end
   end
