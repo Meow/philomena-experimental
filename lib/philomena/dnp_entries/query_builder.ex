@@ -12,10 +12,9 @@ defmodule Philomena.DnpEntries.QueryBuilder do
 
     * params - Map of optional search parameters:
       * states - Filter by entry states
-      * eq - Search requesting users, tags, reasons, conditions, and instructions
+      * text - Search requesting users, tags, reasons, conditions, and instructions
 
-  A `states` filter takes precedence over `eq`. When neither filter is present,
-  only active DNP entries are returned.
+  When neither filter is present, only active DNP entries are returned.
 
   Returns `{:ok, query, query_form}` with a queryable that can be used with
   `Repo.paginate/2`, or `{:error, changeset}` if the provided parameters are
@@ -47,7 +46,7 @@ defmodule Philomena.DnpEntries.QueryBuilder do
 
   defp maybe_filter_text(query, %QueryForm{text: text}) do
     if text do
-      pattern = "%#{text}%"
+      pattern = "%#{unsanitized_like(text)}%"
 
       query
       |> join(:inner, [d], _ in assoc(d, :tag))
@@ -60,5 +59,9 @@ defmodule Philomena.DnpEntries.QueryBuilder do
     else
       query
     end
+  end
+
+  defp unsanitized_like(query_string) do
+    query_string
   end
 end
