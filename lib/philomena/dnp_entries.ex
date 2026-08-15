@@ -26,20 +26,6 @@ defmodule Philomena.DnpEntries do
     }
   end
 
-  defp dnp_entry_page(actor, dnp_entry, collection_renderer) do
-    mod_notes =
-      case ModNotes.list_for_target(
-             actor,
-             {:dnp_entry, dnp_entry.id},
-             collection_renderer
-           ) do
-        {:ok, notes} -> notes
-        {:error, _reason} -> nil
-      end
-
-    %DnpEntryPage{dnp_entry: dnp_entry, mod_notes: mod_notes}
-  end
-
   defp linked_tags(%User{} = user) do
     user
     |> Repo.preload(:linked_tags)
@@ -170,7 +156,17 @@ defmodule Philomena.DnpEntries do
           {:ok, DnpEntryPage.t()} | {:error, :not_found | :unauthorized}
   def load_dnp_entry_page(%Actor{} = actor, id, collection_renderer) do
     with {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :show) do
-      {:ok, dnp_entry_page(actor, dnp_entry, collection_renderer)}
+      mod_notes =
+        case ModNotes.list_for_target(
+               actor,
+               {:dnp_entry, dnp_entry.id},
+               collection_renderer
+             ) do
+          {:ok, notes} -> notes
+          {:error, _reason} -> nil
+        end
+
+      {:ok, %DnpEntryPage{dnp_entry: dnp_entry, mod_notes: mod_notes}}
     end
   end
 
