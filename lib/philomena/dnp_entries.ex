@@ -13,6 +13,7 @@ defmodule Philomena.DnpEntries do
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.ModNotes
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Tags.Tag
   alias Philomena.Users.User
@@ -39,31 +40,6 @@ defmodule Philomena.DnpEntries do
     %DnpEntryPage{dnp_entry: dnp_entry, mod_notes: mod_notes}
   end
 
-  defp dnp_entry_attrs(%{"dnp_entry" => attrs}) when is_map(attrs), do: attrs
-  defp dnp_entry_attrs(_params), do: %{}
-
-  defp insert_dnp_entry(%User{} = user, tags, attrs) do
-    tag = Enum.find(tags, &(to_string(&1.id) == attrs["tag_id"]))
-
-    %DnpEntry{}
-    |> DnpEntry.creation_changeset(attrs, tag, user)
-    |> Repo.insert()
-  end
-
-  defp persist_dnp_entry_update(%DnpEntry{} = dnp_entry, tags, attrs) do
-    tag = Enum.find(tags, &(to_string(&1.id) == attrs["tag_id"]))
-
-    dnp_entry
-    |> DnpEntry.update_changeset(attrs, tag)
-    |> Repo.update()
-  end
-
-  defp transition_loaded_dnp_entry(%DnpEntry{} = dnp_entry, %User{} = user, new_state) do
-    dnp_entry
-    |> DnpEntry.transition_changeset(user, new_state)
-    |> Repo.update()
-  end
-
   defp linked_tags(%User{} = user) do
     user
     |> Repo.preload(:linked_tags)
@@ -72,59 +48,34 @@ defmodule Philomena.DnpEntries do
 
   defp linked_tags(_user), do: []
 
-  defp nonempty_tags([]), do: {:error, :unauthorized}
-  defp nonempty_tags(tags), do: {:ok, tags}
-
-  defp present?(value), do: value not in [nil, ""]
+  defp get_tag_from_params(params) do
+    with {:ok, tag_id} <- DnpEntry.fetch_tag_id(params),
+         {:ok, tag} <- Loader.fetch(Tag, tag_id) do
+      tag
+    else
+      _ -> nil
+    end
+  end
 
   defp may_select_any_tag?(actor) do
     authorize(actor, :select_any_tag, DnpEntry) == :ok
   end
 
-  defp selectable_tags(%Actor{} = actor, params, default_tag \\ nil) do
-    requested_tag_id = if is_map(params), do: params["tag_id"]
+  defp nonempty_tags([]), do: {:error, :unauthorized}
+  defp nonempty_tags(tags), do: {:ok, tags}
 
-    cond do
-      present?(requested_tag_id) and may_select_any_tag?(actor) ->
-        with {:ok, tag} <- Loader.fetch(Tag, requested_tag_id) do
-          {:ok, [tag]}
-        end
-
-      not is_nil(default_tag) and may_select_any_tag?(actor) ->
-        {:ok, [default_tag]}
-
-      true ->
-        actor.user
-        |> linked_tags()
-        |> nonempty_tags()
+  defp selectable_tags(%Actor{user: user} = actor, default_tag) do
+    if not is_nil(default_tag) and may_select_any_tag?(actor) do
+      {:ok, [default_tag]}
+    else
+      user
+      |> linked_tags()
+      |> nonempty_tags()
     end
   end
 
   defp load_authorized_dnp_entry(actor, id, action) do
     Loader.fetch_and_authorize(DnpEntry, actor, action, id, [:tag])
-  end
-
-  defp lock_and_authorize_dnp_entry(actor, id, action) do
-    DnpEntry
-    |> lock("FOR UPDATE")
-    |> Loader.fetch_and_authorize(actor, action, id, [:tag])
-  end
-
-  defp transition_dnp_entry_transaction(actor, id, new_state) do
-    Repo.transact(fn ->
-      with {:ok, dnp_entry} <- lock_and_authorize_dnp_entry(actor, id, :transition),
-           {:ok, dnp_entry} <-
-             transition_loaded_dnp_entry(dnp_entry, actor.user, new_state),
-           {:ok, _log} <-
-             ModerationLogs.create_moderation_log(
-               actor,
-               "Admin.DnpEntry.Transition:create",
-               Paths.dnp_entry_path(dnp_entry),
-               "#{String.capitalize(dnp_entry.aasm_state)} DNP entry #{dnp_entry.id} on #{dnp_entry.tag.name}"
-             ) do
-        {:ok, dnp_entry}
-      end
-    end)
   end
 
   @doc """
@@ -244,7 +195,8 @@ defmodule Philomena.DnpEntries do
   def load_new_dnp_entry(%Actor{} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, DnpEntry),
-         {:ok, tags} <- selectable_tags(actor, params) do
+         default_tag = get_tag_from_params(params),
+         {:ok, tags} <- selectable_tags(actor, default_tag) do
       {:ok, dnp_entry_form(%DnpEntry{}, tags)}
     end
   end
@@ -255,10 +207,10 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> create_dnp_entry(actor, %{"dnp_entry" => attrs})
+      iex> create_dnp_entry(actor, attrs)
       {:ok, %DnpEntry{}}
 
-      iex> create_dnp_entry(actor, %{"dnp_entry" => invalid_attrs})
+      iex> create_dnp_entry(actor, invalid_attrs)
       {:error, %DnpEntryForm{}}
 
   """
@@ -266,15 +218,20 @@ defmodule Philomena.DnpEntries do
           {:ok, DnpEntry.t()}
           | {:error, DnpEntryForm.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def create_dnp_entry(%Actor{} = actor, params) do
+  def create_dnp_entry(%Actor{user: user} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, DnpEntry),
-         {:ok, tags} <- selectable_tags(actor, params) do
-      attrs = dnp_entry_attrs(params)
+         default_tag = get_tag_from_params(params),
+         {:ok, selectable_tags} <- selectable_tags(actor, default_tag) do
+      %DnpEntry{}
+      |> DnpEntry.creation_changeset(params, user, Enum.map(selectable_tags, & &1.id))
+      |> Repo.insert()
+      |> case do
+        {:ok, dnp_entry} ->
+          {:ok, dnp_entry}
 
-      case insert_dnp_entry(actor.user, tags, attrs) do
-        {:ok, dnp_entry} -> {:ok, dnp_entry}
-        {:error, changeset} -> {:error, dnp_entry_form(changeset.data, tags, changeset)}
+        {:error, changeset} ->
+          {:error, dnp_entry_form(changeset.data, selectable_tags, changeset)}
       end
     end
   end
@@ -288,19 +245,19 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> load_dnp_entry_for_edit(moderator, "1", %{})
+      iex> load_dnp_entry_for_edit(moderator, "1")
       {:ok, %DnpEntryForm{}}
 
-      iex> load_dnp_entry_for_edit(user, "1", %{})
+      iex> load_dnp_entry_for_edit(user, "1")
       {:error, :unauthorized}
 
   """
-  @spec load_dnp_entry_for_edit(Actor.t(), Loader.integer_id(), map()) ::
+  @spec load_dnp_entry_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, DnpEntryForm.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_dnp_entry_for_edit(%Actor{} = actor, id, params) do
+  def load_dnp_entry_for_edit(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :edit),
-         {:ok, tags} <- selectable_tags(actor, params, dnp_entry.tag) do
+         {:ok, tags} <- selectable_tags(actor, dnp_entry.tag) do
       {:ok, dnp_entry_form(dnp_entry, tags)}
     end
   end
@@ -311,10 +268,10 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> update_dnp_entry(moderator, "1", %{"dnp_entry" => attrs})
+      iex> update_dnp_entry(moderator, "1", attrs)
       {:ok, %DnpEntry{}}
 
-      iex> update_dnp_entry(moderator, "1", %{"dnp_entry" => invalid_attrs})
+      iex> update_dnp_entry(moderator, "1", invalid_attrs)
       {:error, %DnpEntryForm{}}
 
   """
@@ -325,12 +282,16 @@ defmodule Philomena.DnpEntries do
   def update_dnp_entry(%Actor{} = actor, id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :update),
-         {:ok, tags} <- selectable_tags(actor, params, dnp_entry.tag) do
-      attrs = dnp_entry_attrs(params)
+         {:ok, selectable_tags} <- selectable_tags(actor, dnp_entry.tag) do
+      dnp_entry
+      |> DnpEntry.update_changeset(params, Enum.map(selectable_tags, & &1.id))
+      |> Repo.update()
+      |> case do
+        {:ok, dnp_entry} ->
+          {:ok, dnp_entry}
 
-      case persist_dnp_entry_update(dnp_entry, tags, attrs) do
-        {:ok, dnp_entry} -> {:ok, dnp_entry}
-        {:error, changeset} -> {:error, dnp_entry_form(dnp_entry, tags, changeset)}
+        {:error, changeset} ->
+          {:error, dnp_entry_form(dnp_entry, selectable_tags, changeset)}
       end
     end
   end
@@ -353,9 +314,32 @@ defmodule Philomena.DnpEntries do
   @spec transition_dnp_entry(Actor.t(), Loader.integer_id(), String.t() | nil) ::
           {:ok, DnpEntry.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def transition_dnp_entry(%Actor{} = actor, id, new_state) do
-    with :ok <- verify_write_access(actor) do
-      transition_dnp_entry_transaction(actor, id, new_state)
+  def transition_dnp_entry(%Actor{user: user} = actor, id, new_state) do
+    with :ok <- verify_write_access(actor),
+         {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :transition) do
+      dnp_entry_changeset = DnpEntry.transition_changeset(dnp_entry, user, new_state)
+
+      Multi.new()
+      |> Multi.update(:dnp_entry, dnp_entry_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{dnp_entry: dnp_entry} ->
+          {
+            "Admin.DnpEntry.Transition:create",
+            Paths.dnp_entry_path(dnp_entry),
+            "#{String.capitalize(dnp_entry.aasm_state)} DNP entry #{dnp_entry.id} on #{dnp_entry.tag.name}"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{dnp_entry: dnp_entry}} ->
+          {:ok, dnp_entry}
+
+        {:error, :dnp_entry, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -378,7 +362,7 @@ defmodule Philomena.DnpEntries do
       :ok ->
         DnpEntry
         |> where([dnp], dnp.aasm_state in ["requested", "claimed", "acknowledged"])
-        |> Repo.aggregate(:count, :id)
+        |> Repo.aggregate(:count)
 
       {:error, :unauthorized} ->
         nil

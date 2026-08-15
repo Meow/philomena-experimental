@@ -270,17 +270,6 @@ defmodule PhilomenaWeb.DnpEntryControllerTest do
       assert response =~ "Editing DNP Listing - Derpibooru"
       assert response =~ "Edit DNP Request"
     end
-
-    test "redirects a malformed privileged tag ID with the not-found flash", %{conn: conn} do
-      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
-      tag = tag_fixture(name: "artist:test-mod-malformed-artist")
-      entry = dnp_entry_fixture(confirmed_user_fixture(), tag)
-
-      conn = get(conn, ~p"/dnp/#{entry}/edit?#{[tag_id: "not-a-number"]}")
-
-      assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
-    end
   end
 
   describe "PATCH /dnp/:id" do

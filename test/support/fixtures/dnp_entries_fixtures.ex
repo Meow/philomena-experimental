@@ -29,7 +29,7 @@ defmodule Philomena.DnpEntriesFixtures do
 
     dnp_entry =
       %DnpEntry{}
-      |> DnpEntry.creation_changeset(attrs, tag, user)
+      |> DnpEntry.creation_changeset(attrs, user, [tag.id])
       |> Repo.insert!()
 
     case state do

@@ -68,7 +68,7 @@ defmodule PhilomenaWeb.DnpEntryController do
   end
 
   def create(conn, params) do
-    case DnpEntries.create_dnp_entry(conn.assigns.actor, params) do
+    case DnpEntries.create_dnp_entry(conn.assigns.actor, params["dnp_entry"]) do
       {:ok, dnp_entry} ->
         conn
         |> put_flash(:info, "Successfully submitted DNP request.")
@@ -82,14 +82,14 @@ defmodule PhilomenaWeb.DnpEntryController do
     end
   end
 
-  def edit(conn, %{"id" => id} = params) do
+  def edit(conn, %{"id" => id}) do
     with {:ok,
           %DnpEntryForm{
             dnp_entry: dnp_entry,
             changeset: changeset,
             selectable_tags: selectable_tags
           }} <-
-           DnpEntries.load_dnp_entry_for_edit(conn.assigns.actor, id, params) do
+           DnpEntries.load_dnp_entry_for_edit(conn.assigns.actor, id) do
       render(conn, "edit.html",
         title: "Editing DNP Listing",
         dnp_entry: dnp_entry,
@@ -100,7 +100,7 @@ defmodule PhilomenaWeb.DnpEntryController do
   end
 
   def update(conn, %{"id" => id} = params) do
-    case DnpEntries.update_dnp_entry(conn.assigns.actor, id, params) do
+    case DnpEntries.update_dnp_entry(conn.assigns.actor, id, params["dnp_entry"]) do
       {:ok, dnp_entry} ->
         conn
         |> put_flash(:info, "Successfully updated DNP request.")

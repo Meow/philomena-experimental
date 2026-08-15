@@ -218,6 +218,16 @@ defmodule Philomena.DnpEntriesTest do
       assert tag.id in Enum.map(tags, & &1.id)
     end
 
+    test "a user cannot select arbitrary tags" do
+      {user, _tag} = linked_user()
+      unlinked_tag = tag_fixture()
+
+      assert {:ok, %DnpEntryForm{selectable_tags: tags}} =
+               DnpEntries.load_new_dnp_entry(actor(user), %{"tag_id" => unlinked_tag.id})
+
+      refute unlinked_tag.id in Enum.map(tags, & &1.id)
+    end
+
     test "a banned actor is rejected before the tag check" do
       {user, _tag} = linked_user()
 
@@ -234,14 +244,14 @@ defmodule Philomena.DnpEntriesTest do
                {:error, :unauthorized}
     end
 
-    test "a moderator's malformed or missing privileged tag is not-found" do
+    test "a moderator can select any tag" do
       moderator = actor(moderator_user_fixture())
+      tag = tag_fixture()
 
-      assert DnpEntries.load_new_dnp_entry(moderator, %{"tag_id" => "not-a-number"}) ==
-               {:error, :not_found}
+      assert {:ok, %DnpEntryForm{selectable_tags: tags}} =
+               DnpEntries.load_new_dnp_entry(moderator, %{"tag_id" => tag.id})
 
-      assert DnpEntries.load_new_dnp_entry(moderator, %{"tag_id" => "2147483647"}) ==
-               {:error, :not_found}
+      assert tag.id in Enum.map(tags, & &1.id)
     end
   end
 
@@ -250,21 +260,18 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
 
       assert {:ok, %DnpEntry{} = entry} =
-               DnpEntries.create_dnp_entry(actor(user), %{"dnp_entry" => dnp_entry_attrs(tag)})
+               DnpEntries.create_dnp_entry(actor(user), dnp_entry_attrs(tag))
 
       assert entry.tag_id == tag.id
       assert entry.requesting_user_id == user.id
     end
 
-    test "a staff member files against the top-level tag_id" do
+    test "a staff member files against arbitrary tags" do
       moderator = moderator_user_fixture()
       tag = artist_tag()
 
       assert {:ok, %DnpEntry{} = entry} =
-               DnpEntries.create_dnp_entry(actor(moderator), %{
-                 "tag_id" => to_string(tag.id),
-                 "dnp_entry" => dnp_entry_attrs(tag)
-               })
+               DnpEntries.create_dnp_entry(actor(moderator), dnp_entry_attrs(tag))
 
       assert entry.tag_id == tag.id
       assert entry.requesting_user_id == moderator.id
@@ -273,21 +280,19 @@ defmodule Philomena.DnpEntriesTest do
     test "a banned actor is rejected" do
       {user, tag} = linked_user()
 
-      assert DnpEntries.create_dnp_entry(actor(user, ban: @ban), %{
-               "dnp_entry" => dnp_entry_attrs(tag)
-             }) == {:error, :ban}
+      assert DnpEntries.create_dnp_entry(actor(user, ban: @ban), dnp_entry_attrs(tag)) ==
+               {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized" do
       {user, tag} = linked_user()
 
-      assert DnpEntries.create_dnp_entry(actor(user, fingerprint: nil), %{
-               "dnp_entry" => dnp_entry_attrs(tag)
-             }) == {:error, :unauthorized}
+      assert DnpEntries.create_dnp_entry(actor(user, fingerprint: nil), dnp_entry_attrs(tag)) ==
+               {:error, :unauthorized}
     end
 
     test "an actor with no selectable tag is unauthorized" do
-      assert DnpEntries.create_dnp_entry(actor(confirmed_user_fixture()), %{"dnp_entry" => %{}}) ==
+      assert DnpEntries.create_dnp_entry(actor(confirmed_user_fixture()), %{}) ==
                {:error, :unauthorized}
     end
 
@@ -300,9 +305,7 @@ defmodule Philomena.DnpEntriesTest do
                 changeset: %Ecto.Changeset{} = changeset,
                 selectable_tags: tags
               }} =
-               DnpEntries.create_dnp_entry(actor(user), %{
-                 "dnp_entry" => dnp_entry_attrs(tag, %{"reason" => ""})
-               })
+               DnpEntries.create_dnp_entry(actor(user), dnp_entry_attrs(tag, %{"reason" => ""}))
 
       refute changeset.valid?
       assert tag.id in Enum.map(tags, & &1.id)
@@ -313,23 +316,21 @@ defmodule Philomena.DnpEntriesTest do
       other_tag = artist_tag()
 
       assert {:error, %DnpEntryForm{changeset: changeset, selectable_tags: [selected]}} =
-               DnpEntries.create_dnp_entry(actor(user), %{
-                 "dnp_entry" => dnp_entry_attrs(other_tag)
-               })
+               DnpEntries.create_dnp_entry(actor(user), dnp_entry_attrs(other_tag))
 
       assert selected.id == tag.id
       assert %{tag_id: ["must be one of your linked tags"]} = errors_on(changeset)
     end
 
-    test "a moderator's malformed privileged tag is not-found instead of raising" do
-      assert DnpEntries.create_dnp_entry(actor(moderator_user_fixture()), %{
-               "tag_id" => "not-a-number",
-               "dnp_entry" => %{}
-             }) == {:error, :not_found}
+    test "a moderator's malformed tag is unauthorized" do
+      assert {:error, :unauthorized} =
+               DnpEntries.create_dnp_entry(actor(moderator_user_fixture()), %{
+                 "tag_id" => "not-a-number"
+               })
     end
   end
 
-  describe "load_dnp_entry_for_edit/3" do
+  describe "load_dnp_entry_for_edit/2" do
     test "a moderator loads the entry, a changeset, and the selectable tags" do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
@@ -342,8 +343,7 @@ defmodule Philomena.DnpEntriesTest do
               }} =
                DnpEntries.load_dnp_entry_for_edit(
                  actor(moderator_user_fixture()),
-                 to_string(entry.id),
-                 %{"tag_id" => to_string(tag.id)}
+                 to_string(entry.id)
                )
 
       assert loaded.id == entry.id
@@ -356,22 +356,10 @@ defmodule Philomena.DnpEntriesTest do
       assert {:ok, %DnpEntryForm{selectable_tags: [selected]}} =
                DnpEntries.load_dnp_entry_for_edit(
                  actor(moderator_user_fixture()),
-                 entry.id,
-                 %{}
+                 entry.id
                )
 
       assert selected.id == tag.id
-    end
-
-    test "a malformed privileged tag is not-found" do
-      {user, tag} = linked_user()
-      entry = dnp_entry_fixture(user, tag)
-
-      assert DnpEntries.load_dnp_entry_for_edit(
-               actor(moderator_user_fixture()),
-               entry.id,
-               %{"tag_id" => "not-a-number"}
-             ) == {:error, :not_found}
     end
 
     test "a banned moderator cannot load the form" do
@@ -380,8 +368,7 @@ defmodule Philomena.DnpEntriesTest do
 
       assert DnpEntries.load_dnp_entry_for_edit(
                actor(moderator_user_fixture(), ban: @ban),
-               entry.id,
-               %{}
+               entry.id
              ) == {:error, :ban}
     end
 
@@ -389,20 +376,14 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.load_dnp_entry_for_edit(actor(user), to_string(entry.id), %{
-               "tag_id" => to_string(tag.id)
-             }) == {:error, :unauthorized}
+      assert DnpEntries.load_dnp_entry_for_edit(actor(user), to_string(entry.id)) ==
+               {:error, :unauthorized}
     end
 
     test "a non-integer id is not-found" do
-      tag = artist_tag()
-
       assert DnpEntries.load_dnp_entry_for_edit(
                actor(moderator_user_fixture()),
-               "not-a-number",
-               %{
-                 "tag_id" => to_string(tag.id)
-               }
+               "not-a-number"
              ) == {:error, :not_found}
     end
   end
@@ -416,10 +397,7 @@ defmodule Philomena.DnpEntriesTest do
                DnpEntries.update_dnp_entry(
                  actor(moderator_user_fixture()),
                  to_string(entry.id),
-                 %{
-                   "tag_id" => to_string(tag.id),
-                   "dnp_entry" => dnp_entry_attrs(tag, %{"reason" => "Updated reason"})
-                 }
+                 dnp_entry_attrs(tag, %{"reason" => "Updated reason"})
                )
 
       assert Repo.reload!(entry).reason == "Updated reason"
@@ -438,10 +416,7 @@ defmodule Philomena.DnpEntriesTest do
                DnpEntries.update_dnp_entry(
                  actor(moderator_user_fixture()),
                  to_string(entry.id),
-                 %{
-                   "tag_id" => to_string(tag.id),
-                   "dnp_entry" => dnp_entry_attrs(tag, %{"reason" => ""})
-                 }
+                 dnp_entry_attrs(tag, %{"reason" => ""})
                )
 
       refute changeset.valid?
@@ -451,19 +426,18 @@ defmodule Philomena.DnpEntriesTest do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
 
-      assert DnpEntries.update_dnp_entry(actor(user), to_string(entry.id), %{
-               "tag_id" => to_string(tag.id),
-               "dnp_entry" => dnp_entry_attrs(tag)
-             }) == {:error, :unauthorized}
+      assert DnpEntries.update_dnp_entry(actor(user), to_string(entry.id), dnp_entry_attrs(tag)) ==
+               {:error, :unauthorized}
     end
 
     test "a non-integer id is not-found" do
       tag = artist_tag()
 
-      assert DnpEntries.update_dnp_entry(actor(moderator_user_fixture()), "not-a-number", %{
-               "tag_id" => to_string(tag.id),
-               "dnp_entry" => dnp_entry_attrs(tag)
-             }) == {:error, :not_found}
+      assert DnpEntries.update_dnp_entry(
+               actor(moderator_user_fixture()),
+               "not-a-number",
+               dnp_entry_attrs(tag)
+             ) == {:error, :not_found}
     end
 
     test "an unoffered replacement tag is preserved as a form changeset error" do
@@ -472,23 +446,15 @@ defmodule Philomena.DnpEntriesTest do
       other_tag = artist_tag()
 
       assert {:error, %DnpEntryForm{changeset: changeset, selectable_tags: [selected]}} =
-               DnpEntries.update_dnp_entry(actor(moderator_user_fixture()), entry.id, %{
-                 "dnp_entry" => dnp_entry_attrs(other_tag)
-               })
+               DnpEntries.update_dnp_entry(
+                 actor(moderator_user_fixture()),
+                 entry.id,
+                 dnp_entry_attrs(other_tag)
+               )
 
       assert selected.id == tag.id
       assert %{tag_id: ["must be one of your linked tags"]} = errors_on(changeset)
       assert Repo.reload!(entry).tag_id == tag.id
-    end
-
-    test "a malformed privileged tag is not-found instead of raising" do
-      {user, tag} = linked_user()
-      entry = dnp_entry_fixture(user, tag)
-
-      assert DnpEntries.update_dnp_entry(actor(moderator_user_fixture()), entry.id, %{
-               "tag_id" => "not-a-number",
-               "dnp_entry" => dnp_entry_attrs(tag)
-             }) == {:error, :not_found}
     end
 
     test "a banned moderator cannot update" do
