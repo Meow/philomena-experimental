@@ -5,6 +5,8 @@ defmodule Philomena.Filters do
 
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
+
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Loader
 
@@ -54,16 +56,8 @@ defmodule Philomena.Filters do
     |> Repo.all()
   end
 
-  defp reindex_after_update(result) do
-    case result do
-      {:ok, filter} ->
-        reindex_filter(filter)
-
-        {:ok, filter}
-
-      error ->
-        error
-    end
+  defp put_reindex_filter(multi, step) do
+    Multi.on_commit(multi, fn %{^step => filter} -> reindex_filter(filter) end)
   end
 
   @doc """
@@ -441,10 +435,21 @@ defmodule Philomena.Filters do
   def create_filter(%Actor{user: user} = actor, attrs \\ %{}) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Filter) do
-      %Filter{user_id: user.id}
-      |> Filter.creation_changeset(attrs)
-      |> Repo.insert()
-      |> reindex_after_update()
+      filter_changeset =
+        %Filter{user_id: user.id}
+        |> Filter.creation_changeset(attrs)
+
+      Multi.new()
+      |> Multi.insert(:filter, filter_changeset)
+      |> put_reindex_filter(:filter)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
+          {:ok, filter}
+
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -476,10 +481,19 @@ defmodule Philomena.Filters do
   def update_filter(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :update) do
-      filter
-      |> Filter.update_changeset(attrs)
-      |> Repo.update()
-      |> reindex_after_update()
+      filter_changeset = Filter.update_changeset(filter, attrs)
+
+      Multi.new()
+      |> Multi.update(:filter, filter_changeset)
+      |> put_reindex_filter(:filter)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
+          {:ok, filter}
+
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -509,10 +523,19 @@ defmodule Philomena.Filters do
   def make_filter_public(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :publish) do
-      filter
-      |> Filter.public_changeset()
-      |> Repo.update()
-      |> reindex_after_update()
+      filter_changeset = Filter.public_changeset(filter)
+
+      Multi.new()
+      |> Multi.update(:filter, filter_changeset)
+      |> put_reindex_filter(:filter)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
+          {:ok, filter}
+
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -542,17 +565,18 @@ defmodule Philomena.Filters do
   def delete_filter(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :delete) do
-      filter
-      |> Filter.deletion_changeset()
-      |> Repo.delete()
-      |> case do
-        {:ok, filter} ->
-          Search.delete_document(filter.id, Filter)
+      filter_changeset = Filter.deletion_changeset(filter)
 
+      Multi.new()
+      |> Multi.delete(:filter, filter_changeset)
+      |> Multi.on_commit(fn %{filter: filter} -> Search.delete_document(filter.id, Filter) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
           {:ok, filter}
 
-        error ->
-          error
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -641,11 +665,19 @@ defmodule Philomena.Filters do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :hide_tag, filter, tag_slug) do
       hidden_tag_ids = Enum.uniq([tag.id | filter.hidden_tag_ids])
+      filter_changeset = Filter.hidden_tags_changeset(filter, hidden_tag_ids)
 
-      filter
-      |> Filter.hidden_tags_changeset(hidden_tag_ids)
-      |> Repo.update()
-      |> reindex_after_update()
+      Multi.new()
+      |> Multi.update(:filter, filter_changeset)
+      |> put_reindex_filter(:filter)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
+          {:ok, filter}
+
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -680,11 +712,19 @@ defmodule Philomena.Filters do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :unhide_tag, filter, tag_slug) do
       hidden_tag_ids = filter.hidden_tag_ids -- [tag.id]
+      filter_changeset = Filter.hidden_tags_changeset(filter, hidden_tag_ids)
 
-      filter
-      |> Filter.hidden_tags_changeset(hidden_tag_ids)
-      |> Repo.update()
-      |> reindex_after_update()
+      Multi.new()
+      |> Multi.update(:filter, filter_changeset)
+      |> put_reindex_filter(:filter)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
+          {:ok, filter}
+
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -719,11 +759,19 @@ defmodule Philomena.Filters do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :spoiler_tag, filter, tag_slug) do
       spoilered_tag_ids = Enum.uniq([tag.id | filter.spoilered_tag_ids])
+      filter_changeset = Filter.spoilered_tags_changeset(filter, spoilered_tag_ids)
 
-      filter
-      |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
-      |> Repo.update()
-      |> reindex_after_update()
+      Multi.new()
+      |> Multi.update(:filter, filter_changeset)
+      |> put_reindex_filter(:filter)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
+          {:ok, filter}
+
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -758,11 +806,19 @@ defmodule Philomena.Filters do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :unspoiler_tag, filter, tag_slug) do
       spoilered_tag_ids = filter.spoilered_tag_ids -- [tag.id]
+      filter_changeset = Filter.spoilered_tags_changeset(filter, spoilered_tag_ids)
 
-      filter
-      |> Filter.spoilered_tags_changeset(spoilered_tag_ids)
-      |> Repo.update()
-      |> reindex_after_update()
+      Multi.new()
+      |> Multi.update(:filter, filter_changeset)
+      |> put_reindex_filter(:filter)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{filter: filter}} ->
+          {:ok, filter}
+
+        {:error, :filter, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
