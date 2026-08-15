@@ -82,7 +82,9 @@ defmodule Philomena.Filters.Filter do
   end
 
   def update_changeset(filter, attrs) do
-    changeset(filter, strip_name_if_default(filter, attrs))
+    filter
+    |> changeset(attrs)
+    |> validate_default_filter_name()
   end
 
   def deletion_changeset(filter) do
@@ -108,15 +110,19 @@ defmodule Philomena.Filters.Filter do
     value = get_field(changeset, field) || ""
 
     if String.match?(value, ~r/my:downvotes/i) do
-      changeset
-      |> add_error(field, "cannot contain my:downvotes")
+      add_error(changeset, field, "cannot contain my:downvotes")
     else
       changeset
     end
   end
 
-  defp strip_name_if_default(%{system: true, name: "Default"}, attrs),
-    do: Map.delete(attrs, "name")
+  defp validate_default_filter_name(%{data: %{system: true, name: "Default"}} = changeset) do
+    if get_change(changeset, :name) do
+      add_error(changeset, :name, "cannot be changed for the system-wide default filter")
+    else
+      changeset
+    end
+  end
 
-  defp strip_name_if_default(_filter, attrs), do: attrs
+  defp validate_default_filter_name(changeset), do: changeset
 end

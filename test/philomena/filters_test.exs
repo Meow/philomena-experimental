@@ -284,6 +284,31 @@ defmodule Philomena.FiltersTest do
       assert Repo.reload!(filter).name == "Admin Renamed"
     end
 
+    test "an admin cannot rename the Default system filter" do
+      default = system_filter_fixture(%{name: "Default"})
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Filters.update_filter(actor(admin_user_fixture()), "#{default.id}", %{
+                 "name" => "Renamed Default"
+               })
+
+      refute changeset.valid?
+      assert {"cannot be changed for the system-wide default filter", _} = changeset.errors[:name]
+      assert Repo.reload!(default).name == "Default"
+    end
+
+    test "an admin can update the Default system filter without renaming it" do
+      default = system_filter_fixture(%{name: "Default"})
+
+      assert {:ok, %Filter{} = updated} =
+               Filters.update_filter(actor(admin_user_fixture()), "#{default.id}", %{
+                 "description" => "Updated default filter"
+               })
+
+      assert updated.name == "Default"
+      assert updated.description == "Updated default filter"
+    end
+
     test "an invalid name is a rejected changeset" do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)
