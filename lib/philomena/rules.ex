@@ -160,14 +160,10 @@ defmodule Philomena.Rules do
   end
 
   defp load_authorized_rule(actor, position, action) do
-    case IntegerId.parse(position) do
-      {:ok, position} ->
-        Rule
-        |> where(position: ^position)
-        |> Loader.one_and_authorize(actor, action)
-
-      :error ->
-        {:error, :not_found}
+    with {:ok, position} <- Loader.parse_id(position) do
+      Rule
+      |> where(position: ^position)
+      |> Loader.one_and_authorize(actor, action)
     end
   end
 

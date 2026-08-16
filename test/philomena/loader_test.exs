@@ -9,6 +9,13 @@ defmodule Philomena.LoaderTest do
   alias Philomena.Loader
   alias Philomena.SiteNotices.SiteNotice
 
+  describe "parse_id/1" do
+    test "normalizes malformed IDs to not found" do
+      assert Loader.parse_id("42") == {:ok, 42}
+      assert Loader.parse_id("not-an-id") == {:error, :not_found}
+    end
+  end
+
   describe "fetch_and_authorize/5" do
     setup do
       notice = site_notice_fixture()

@@ -11,6 +11,7 @@ defmodule Philomena.TagChanges do
   alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
   alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.TagChangeRevertWorker
@@ -369,19 +370,15 @@ defmodule Philomena.TagChanges do
           | {:error, :unauthorized | :not_found}
           | {:error, Ecto.Changeset.t()}
   def delete_tag_change(%Actor{} = actor, id) do
-    case IntegerId.parse(id) do
-      {:ok, id} ->
-        tag_change =
-          TagChange
-          |> preload([:user, :image, tags: [:tag]])
-          |> Repo.get(id)
+    with {:ok, id} <- Loader.parse_id(id) do
+      tag_change =
+        TagChange
+        |> preload([:user, :image, tags: [:tag]])
+        |> Repo.get(id)
 
-        with :ok <- authorize(actor, :delete, tag_change) do
-          delete_loaded_tag_change(actor, tag_change)
-        end
-
-      :error ->
-        {:error, :not_found}
+      with :ok <- authorize(actor, :delete, tag_change) do
+        delete_loaded_tag_change(actor, tag_change)
+      end
     end
   end
 

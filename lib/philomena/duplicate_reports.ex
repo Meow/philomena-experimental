@@ -11,6 +11,7 @@ defmodule Philomena.DuplicateReports do
   alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.IntegerId
+  alias Philomena.Loader
 
   alias Philomena.Attribution.Actor
   alias Philomena.DuplicateReports.DuplicateReport
@@ -167,7 +168,7 @@ defmodule Philomena.DuplicateReports do
   @spec show_duplicate_report(String.t() | integer()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found}
   def show_duplicate_report(id) do
-    with {:ok, report_id} <- IntegerId.parse(id),
+    with {:ok, report_id} <- Loader.parse_id(id),
          %DuplicateReport{} = report <-
            Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id) do
       {:ok, report}
@@ -330,7 +331,7 @@ defmodule Philomena.DuplicateReports do
   @spec image_duplicate_reports(Actor.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), [DuplicateReport.t()]}} | {:error, :unauthorized | :not_found}
   def image_duplicate_reports(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(preload(Image, [:sources, tags: :aliases]), id),
          :ok <- authorize(actor, :show, image),
          %Image{} <- image do
@@ -348,7 +349,7 @@ defmodule Philomena.DuplicateReports do
       {:ok, {image, dupe_reports}}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -457,7 +458,7 @@ defmodule Philomena.DuplicateReports do
   @spec accept_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
   def accept_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- IntegerId.parse(id),
+    with {:ok, report_id} <- Loader.parse_id(id),
          report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report,
@@ -473,7 +474,7 @@ defmodule Philomena.DuplicateReports do
 
       {:ok, results}
     else
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       _ -> {:error, :report_failed}
     end
@@ -507,7 +508,7 @@ defmodule Philomena.DuplicateReports do
   @spec accept_reverse_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
   def accept_reverse_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- IntegerId.parse(id),
+    with {:ok, report_id} <- Loader.parse_id(id),
          report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report,
@@ -523,7 +524,7 @@ defmodule Philomena.DuplicateReports do
 
       {:ok, results}
     else
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       _ -> {:error, :report_failed}
     end
@@ -554,7 +555,7 @@ defmodule Philomena.DuplicateReports do
   @spec claim_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
   def claim_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- IntegerId.parse(id),
+    with {:ok, report_id} <- Loader.parse_id(id),
          report = Repo.get(DuplicateReport, report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report do
@@ -569,7 +570,7 @@ defmodule Philomena.DuplicateReports do
 
       {:ok, report}
     else
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -600,7 +601,7 @@ defmodule Philomena.DuplicateReports do
   @spec unclaim_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
   def unclaim_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- IntegerId.parse(id),
+    with {:ok, report_id} <- Loader.parse_id(id),
          report = Repo.get(DuplicateReport, report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report do
@@ -615,7 +616,7 @@ defmodule Philomena.DuplicateReports do
 
       {:ok, report}
     else
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -644,7 +645,7 @@ defmodule Philomena.DuplicateReports do
   @spec reject_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
   def reject_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- IntegerId.parse(id),
+    with {:ok, report_id} <- Loader.parse_id(id),
          report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
          :ok <- authorize(actor, :edit, report),
          %DuplicateReport{} <- report do
@@ -659,7 +660,7 @@ defmodule Philomena.DuplicateReports do
 
       {:ok, report}
     else
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end

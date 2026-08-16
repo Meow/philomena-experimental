@@ -241,16 +241,12 @@ defmodule Philomena.Posts do
   end
 
   defp load_post_in_topic(%Actor{} = actor, topic, post_id, action, opts \\ []) do
-    case IntegerId.parse(post_id) do
-      {:ok, post_id} ->
-        Post
-        |> where(topic_id: ^topic.id, id: ^post_id)
-        |> maybe_exclude_destroyed(Keyword.get(opts, :exclude_destroyed, false))
-        |> preload(topic: :forum, user: [awards: :badge])
-        |> Loader.one_and_authorize(actor, action)
-
-      :error ->
-        {:error, :not_found}
+    with {:ok, post_id} <- Loader.parse_id(post_id) do
+      Post
+      |> where(topic_id: ^topic.id, id: ^post_id)
+      |> maybe_exclude_destroyed(Keyword.get(opts, :exclude_destroyed, false))
+      |> preload(topic: :forum, user: [awards: :badge])
+      |> Loader.one_and_authorize(actor, action)
     end
   end
 
@@ -333,7 +329,7 @@ defmodule Philomena.Posts do
   @spec load_post(Actor.t(), Loader.integer_id()) ::
           {:ok, Post.t()} | {:error, :not_found | :unauthorized}
   def load_post(%Actor{} = actor, post_id) do
-    with {:ok, post_id} <- IntegerId.parse(post_id),
+    with {:ok, post_id} <- Loader.parse_id(post_id),
          {:ok, post} <-
            Post
            |> where([post], post.id == ^post_id and post.destroyed_content == false)
@@ -344,7 +340,7 @@ defmodule Philomena.Posts do
          :ok <- authorize(actor, :show, post) do
       {:ok, post}
     else
-      :error -> {:error, :not_found}
+      {:error, :not_found} -> {:error, :not_found}
       error -> error
     end
   end

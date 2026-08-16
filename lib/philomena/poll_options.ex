@@ -42,14 +42,10 @@ defmodule Philomena.PollOptions do
   @spec load_option(Poll.t(), IntegerId.integer_id()) ::
           {:ok, PollOption.t()} | {:error, :not_found}
   def load_option(%Poll{} = poll, id) do
-    case IntegerId.parse(id) do
-      {:ok, id} ->
-        PollOption
-        |> where([option], option.poll_id == ^poll.id and option.id == ^id)
-        |> Loader.one()
-
-      :error ->
-        {:error, :not_found}
+    with {:ok, id} <- Loader.parse_id(id) do
+      PollOption
+      |> where([option], option.poll_id == ^poll.id and option.id == ^id)
+      |> Loader.one()
     end
   end
 end

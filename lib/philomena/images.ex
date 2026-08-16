@@ -1047,7 +1047,7 @@ defmodule Philomena.Images do
   def load_public_image(nil), do: {:error, :not_found}
 
   def load_public_image(id) when is_binary(id) do
-    with {:ok, id} <- IntegerId.parse(id),
+    with {:ok, id} <- Loader.parse_id(id),
          %Image{} = image <-
            Image
            |> where(id: ^id, hidden_from_users: false)
@@ -1109,9 +1109,8 @@ defmodule Philomena.Images do
           | {:duplicate_of, Image.t()}
           | {:error, :not_found}
   def load_image_for_show(%Actor{user: user}, id) do
-    case IntegerId.parse(id) do
-      {:ok, id} -> fetch_image_for_show(user, id)
-      :error -> {:error, :not_found}
+    with {:ok, id} <- Loader.parse_id(id) do
+      fetch_image_for_show(user, id)
     end
   end
 
@@ -1466,7 +1465,7 @@ defmodule Philomena.Images do
   end
 
   defp load_image_for_navigation(user, image_id, preloads \\ []) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(preload(Image, ^preloads), id),
          :ok <- authorize(user, :show, image),
          %Image{} <- image do
@@ -1474,7 +1473,7 @@ defmodule Philomena.Images do
     else
       {:error, :unauthorized} -> {:error, :unauthorized}
       # Non-castable id, or a `nil` load the viewer was permitted to see.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
     end
   end
 
@@ -1496,14 +1495,10 @@ defmodule Philomena.Images do
   @spec load_visible_image(Actor.t(), IntegerId.integer_id(), list()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def load_visible_image(actor, image_id, preloads \\ []) do
-    case IntegerId.parse(image_id) do
-      {:ok, id} ->
-        image = Image |> preload(^preloads) |> Repo.get(id)
+    with {:ok, id} <- Loader.parse_id(image_id) do
+      image = Image |> preload(^preloads) |> Repo.get(id)
 
-        with :ok <- authorize(actor, :show, image), do: {:ok, image}
-
-      :error ->
-        {:error, :not_found}
+      with :ok <- authorize(actor, :show, image), do: {:ok, image}
     end
   end
 
@@ -1617,7 +1612,7 @@ defmodule Philomena.Images do
   @spec approve_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found | :already_approved}
   def approve_image(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :approve, image),
          %Image{approved: false} <- image do
@@ -1633,7 +1628,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       %Image{approved: true} -> {:error, :already_approved}
     end
@@ -1714,7 +1709,7 @@ defmodule Philomena.Images do
   @spec feature_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, ImageFeature.t()} | {:error, :unauthorized | :not_found | :deleted}
   def feature_image(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{hidden_from_users: false} <- image,
@@ -1729,7 +1724,7 @@ defmodule Philomena.Images do
       {:ok, feature}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       %Image{hidden_from_users: true} -> {:error, :deleted}
     end
@@ -1760,7 +1755,7 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
   def destroy_image(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :destroy, image),
          %Image{hidden_from_users: true} <- image,
@@ -1775,7 +1770,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       %Image{hidden_from_users: false} -> {:error, :not_deleted}
       {:error, %Ecto.Changeset{}} = error -> error
@@ -1804,7 +1799,7 @@ defmodule Philomena.Images do
   @spec set_comment_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def set_comment_locked(%Actor{} = actor, image_id, locked?) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -1821,7 +1816,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -1848,7 +1843,7 @@ defmodule Philomena.Images do
   @spec set_description_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def set_description_locked(%Actor{} = actor, image_id, locked?) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -1865,7 +1860,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -1892,7 +1887,7 @@ defmodule Philomena.Images do
   @spec set_tag_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def set_tag_locked(%Actor{} = actor, image_id, locked?) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -1909,7 +1904,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -1936,7 +1931,7 @@ defmodule Philomena.Images do
   @spec remove_image_hash(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def remove_image_hash(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -1951,7 +1946,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -1976,14 +1971,14 @@ defmodule Philomena.Images do
   @spec load_hidable_image(Actor.t(), IntegerId.integer_id(), Keyword.t()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def load_hidable_image(%Actor{} = actor, image_id, opts \\ []) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image do
       {:ok, Repo.preload(image, Keyword.get(opts, :preload, []))}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -2010,7 +2005,7 @@ defmodule Philomena.Images do
   @spec update_scratchpad(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def update_scratchpad(%Actor{} = actor, image_id, attrs) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -2025,7 +2020,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -2052,7 +2047,7 @@ defmodule Philomena.Images do
   @spec remove_source_history(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def remove_source_history(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -2069,7 +2064,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -2096,7 +2091,7 @@ defmodule Philomena.Images do
   @spec repair_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def repair_image(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image do
@@ -2113,7 +2108,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -2171,7 +2166,7 @@ defmodule Philomena.Images do
   @spec update_file(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found | :deleted | Ecto.Changeset.t()}
   def update_file(%Actor{} = actor, image_id, attrs) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{hidden_from_users: false} <- image,
@@ -2186,7 +2181,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       %Image{hidden_from_users: true} -> {:error, :deleted}
       {:error, %Ecto.Changeset{}} = error -> error
@@ -2222,7 +2217,7 @@ defmodule Philomena.Images do
   def update_description(%Actor{} = actor, image_id, attrs) do
     # FIXME: we call broadcast elsewhere in Philomena namespace but not here? Why was it not moved?
     with :ok <- verify_write_access(actor),
-         {:ok, id} <- IntegerId.parse(image_id),
+         {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(preload(Image, [:user, :sources, tags: :aliases]), id),
          :ok <- authorize(actor, :edit_description, image),
          %Image{description: old_description} <- image,
@@ -2232,7 +2227,7 @@ defmodule Philomena.Images do
       {:error, :ban} -> {:error, :ban}
       {:error, :unauthorized} -> {:error, :unauthorized}
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, %Ecto.Changeset{}} = error -> error
     end
   end
@@ -2278,7 +2273,7 @@ defmodule Philomena.Images do
     # FIXME: we call broadcast elsewhere in Philomena namespace but not here? Why was it not moved?
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :source_update),
-         {:ok, id} <- IntegerId.parse(image_id),
+         {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(preload(Image, [:user, :sources, tags: :aliases]), id),
          :ok <- authorize(actor, :edit_metadata, image),
          %Image{} <- image,
@@ -2303,7 +2298,7 @@ defmodule Philomena.Images do
       {:error, :unauthorized} -> {:error, :unauthorized}
       {:error, :rate_limited} -> {:error, :rate_limited}
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :image, changeset, _changes} -> {:error, changeset}
     end
   end
@@ -2330,7 +2325,7 @@ defmodule Philomena.Images do
   @spec update_locked_tags(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def update_locked_tags(%Actor{} = actor, image_id, attrs) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -2345,7 +2340,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -2411,7 +2406,7 @@ defmodule Philomena.Images do
     # FIXME: we call broadcast elsewhere in Philomena namespace but not here? Why was it not moved?
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :tag_update),
-         {:ok, id} <- IntegerId.parse(image_id),
+         {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(preload(Image, [:user, :locked_tags, :sources, tags: :aliases]), id),
          :ok <- authorize(actor, :edit_metadata, image),
          %Image{} <- image,
@@ -2444,7 +2439,7 @@ defmodule Philomena.Images do
       # rollback below.
       {:error, :rate_limited} -> {:error, :rate_limited}
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :image, changeset, _changes} -> {:error, changeset}
       {:error, :check_limits, _value, _changes} -> {:error, :rate_limited}
       _other -> {:error, :update_failed}
@@ -2483,7 +2478,7 @@ defmodule Philomena.Images do
           | {:error, :unauthorized | :not_found | :invalid_params | Ecto.Changeset.t()}
   def update_uploader(%Actor{} = actor, image_id, image_params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
-         {:ok, id} <- IntegerId.parse(image_id),
+         {:ok, id} <- Loader.parse_id(image_id),
          %Image{} = image <- Repo.get(Image, id),
          true <- is_map(image_params),
          {:ok, image} <- update_uploader(image, image_params) do
@@ -2502,7 +2497,7 @@ defmodule Philomena.Images do
       {:error, :unauthorized} -> {:error, :unauthorized}
       # Non-castable/out-of-range id, or an unknown id (loaded with no per-image
       # authorization, so it is a plain not-found rather than unauthorized).
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       false -> {:error, :invalid_params}
       {:error, %Ecto.Changeset{}} = error -> error
     end
@@ -2533,7 +2528,7 @@ defmodule Philomena.Images do
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def update_anonymous(%Actor{} = actor, image_id, anonymous?) do
     with :ok <- authorize(actor, :show, :identity_metadata),
-         {:ok, id} <- IntegerId.parse(image_id),
+         {:ok, id} <- Loader.parse_id(image_id),
          %Image{} = image <- Repo.get(Image, id),
          {:ok, image} <- update_anonymous(image, %{"anonymous" => anonymous?}) do
       reindex_image(image)
@@ -2552,7 +2547,7 @@ defmodule Philomena.Images do
       {:error, :unauthorized} -> {:error, :unauthorized}
       # Non-castable/out-of-range id, or an unknown id (loaded with no per-image
       # authorization, so it is a plain not-found rather than unauthorized).
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
     end
   end
 
@@ -2581,7 +2576,7 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
   def update_hide_reason(%Actor{} = actor, image_id, attrs) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{hidden_from_users: true} <- image,
@@ -2596,7 +2591,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       %Image{hidden_from_users: false} -> {:error, :not_deleted}
       {:error, %Ecto.Changeset{}} = error -> error
@@ -2639,7 +2634,7 @@ defmodule Philomena.Images do
   @spec hide_image(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found | :hide_failed}
   def hide_image(%Actor{} = actor, image_id, attrs) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -2654,7 +2649,7 @@ defmodule Philomena.Images do
       {:ok, hidden}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       {:error, _op, _changeset, _changes} -> {:error, :hide_failed}
     end
@@ -2683,7 +2678,7 @@ defmodule Philomena.Images do
   @spec unhide_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def unhide_image(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :hide, image),
          %Image{} <- image,
@@ -2698,7 +2693,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -3038,7 +3033,7 @@ defmodule Philomena.Images do
         ) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def delete_user_vote(%Actor{} = actor, image_id, user_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :tamper, image),
          %Image{} <- image,
@@ -3068,8 +3063,7 @@ defmodule Philomena.Images do
     else
       # Non-castable image id, an unknown image `nil` load the actor could act
       # on, or an unknown/non-castable user id.
-      shape when shape in [:error, nil] -> {:error, :not_found}
-      {:error, :not_found} -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -3077,7 +3071,7 @@ defmodule Philomena.Images do
   # The target user is loaded with no authorization: an unknown or non-castable
   # id is a plain not-found.
   defp load_vote_user(user_id) do
-    with {:ok, id} <- IntegerId.parse(user_id),
+    with {:ok, id} <- Loader.parse_id(user_id),
          %User{} = user <- Repo.get(User, id) do
       {:ok, user}
     else
@@ -3312,7 +3306,7 @@ defmodule Philomena.Images do
   @spec subscribe_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def subscribe_image(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :show, image),
          %Image{} <- image,
@@ -3320,7 +3314,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
       {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
     end
@@ -3343,7 +3337,7 @@ defmodule Philomena.Images do
   @spec unsubscribe_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def unsubscribe_image(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :show, image),
          %Image{} <- image do
@@ -3352,7 +3346,7 @@ defmodule Philomena.Images do
       {:ok, image}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -3418,7 +3412,7 @@ defmodule Philomena.Images do
   # first, then the image is loaded by id and authorized for `:vote`.
   defp load_image_for_hide(actor, image_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, id} <- IntegerId.parse(image_id),
+         {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :vote, image),
          %Image{} <- image do
@@ -3427,7 +3421,7 @@ defmodule Philomena.Images do
       {:error, :ban} -> {:error, :ban}
       {:error, :unauthorized} -> {:error, :unauthorized}
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
     end
   end
 
@@ -3440,7 +3434,7 @@ defmodule Philomena.Images do
 
   defp load_image_for_interaction(actor, image_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, id} <- IntegerId.parse(image_id),
+         {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(preload(Image, [:sources, tags: :aliases]), id),
          :ok <- authorize(actor, :vote, image),
          %Image{} <- image,
@@ -3451,7 +3445,7 @@ defmodule Philomena.Images do
       {:error, :unauthorized} -> {:error, :unauthorized}
       {:error, :forced_filter} -> {:error, :forced_filter}
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
     end
   end
 
@@ -3613,7 +3607,7 @@ defmodule Philomena.Images do
   @spec image_fave_list(Actor.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), boolean()}} | {:error, :unauthorized | :not_found}
   def image_fave_list(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :index, image),
          %Image{} <- image do
@@ -3628,7 +3622,7 @@ defmodule Philomena.Images do
       end
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
@@ -3655,7 +3649,7 @@ defmodule Philomena.Images do
   @spec mark_image_read(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :not_found}
   def mark_image_read(%Actor{} = actor, image_id) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          %Image{} = image <- Repo.get(Image, id) do
       clear_image_notification(image, actor.user)
       {:ok, image}

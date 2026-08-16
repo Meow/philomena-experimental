@@ -3,6 +3,7 @@ defmodule Philomena.ModNotes.Target do
   Staff note target helper type, parser, and utilities.
   """
   alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.DnpEntries.DnpEntry
   alias Philomena.Reports.Report
   alias Philomena.Users.User
@@ -59,7 +60,7 @@ defmodule Philomena.ModNotes.Target do
   @spec from_type_and_id(atom(), IntegerId.integer_id()) :: {:ok, t()} | {:error, :not_found}
   def from_type_and_id(type, id) do
     with {:ok, {schema, column}} <- Keyword.fetch(@target_definitions, type),
-         {:ok, id} <- IntegerId.parse(id) do
+         {:ok, id} <- Loader.parse_id(id) do
       {:ok, %__MODULE__{type: type, value: id, schema: schema, column: column}}
     else
       _ ->

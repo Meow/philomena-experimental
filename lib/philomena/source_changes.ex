@@ -10,6 +10,7 @@ defmodule Philomena.SourceChanges do
   alias Philomena.Repo
   alias Philomena.Attribution.Actor
   alias Philomena.IntegerId
+  alias Philomena.Loader
   alias Philomena.Images.Image
   alias Philomena.Users.User
   alias Philomena.SourceChanges.SourceChange
@@ -53,7 +54,7 @@ defmodule Philomena.SourceChanges do
           {:ok, {Image.t(), Scrivener.Page.t()}}
           | {:error, :unauthorized | :not_found}
   def image_source_changes(%Actor{} = actor, image_id, pagination) do
-    with {:ok, id} <- IntegerId.parse(image_id),
+    with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(Image, id),
          :ok <- authorize(actor, :show, image),
          %Image{} <- image do
@@ -67,7 +68,7 @@ defmodule Philomena.SourceChanges do
       {:ok, {image, source_changes}}
     else
       # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [:error, nil] -> {:error, :not_found}
+      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
       {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end

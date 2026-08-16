@@ -32,6 +32,30 @@ defmodule Philomena.Loader do
   @type load_error :: :unauthorized | :not_found
 
   @doc """
+  Parses an integer ID, normalizing malformed or out-of-range values to
+  `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> parse_id("1234")
+      {:ok, 1234}
+
+      iex> parse_id("NaN")
+      {:error, :not_found}
+
+  """
+  @spec parse_id(integer_id()) :: {:ok, integer()} | {:error, :not_found}
+  def parse_id(id) do
+    case IntegerId.parse(id) do
+      {:ok, id} ->
+        {:ok, id}
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
   Loads the `queryable` record named by `id`, applying `preloads`, and authorizes
   `actor` for `action` on it.
 
@@ -89,21 +113,17 @@ defmodule Philomena.Loader do
         ) ::
           fetch_result(struct())
   def fetch(queryable, id, preloads \\ []) do
-    case IntegerId.parse(id) do
-      {:ok, id} ->
-        queryable
-        |> preload(^preloads)
-        |> Repo.get(id)
-        |> case do
-          nil ->
-            {:error, :not_found}
+    with {:ok, id} <- parse_id(id) do
+      queryable
+      |> preload(^preloads)
+      |> Repo.get(id)
+      |> case do
+        nil ->
+          {:error, :not_found}
 
-          record ->
-            {:ok, record}
-        end
-
-      :error ->
-        {:error, :not_found}
+        record ->
+          {:ok, record}
+      end
     end
   end
 
