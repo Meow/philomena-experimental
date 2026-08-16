@@ -21,11 +21,16 @@ defmodule PhilomenaWeb.Topic.Post.HideControllerTest do
   end
 
   defp hidden_post(post) do
+    post = Philomena.Repo.preload(post, topic: :forum)
+    moderator = Philomena.UsersFixtures.moderator_user_fixture()
+
     {:ok, post} =
-      Posts.hide_post_for_fixture(
-        post,
-        %{"deletion_reason" => "Spam"},
-        Philomena.UsersFixtures.moderator_user_fixture()
+      Posts.hide_post(
+        Philomena.AttributionFixtures.actor(moderator),
+        post.topic.forum.short_name,
+        post.topic.slug,
+        post.id,
+        %{"deletion_reason" => "Spam"}
       )
 
     post

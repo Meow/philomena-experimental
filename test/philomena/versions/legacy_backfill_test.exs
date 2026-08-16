@@ -28,6 +28,11 @@ defmodule Philomena.Versions.LegacyBackfillTest do
   alias Philomena.Versions
   alias Philomena.Versions.LegacyBackfill
 
+  defp update_post(post, actor, attrs) do
+    post = Repo.preload(post, topic: :forum)
+    Posts.update_post(actor, post.topic.forum.short_name, post.topic.slug, post.id, attrs)
+  end
+
   # Insert a paper_trail-shaped row into versions_legacy. `object` is a JSON
   # string (or nil for a 'create' event), `whodunnit` is a string id (or nil),
   # and `created_at` is a NaiveDateTime.
@@ -337,13 +342,12 @@ defmodule Philomena.Versions.LegacyBackfillTest do
     test "raises when a target table already contains rows" do
       forum = forum_fixture()
       author = confirmed_user_fixture()
-      editor = confirmed_user_fixture()
       topic = topic_fixture(forum, author, %{"posts" => %{"0" => %{"body" => "original"}}})
       [post] = topic.posts
 
       # A real edit populates post_versions through the normal path.
       {:ok, _} =
-        Posts.update_post_for_fixture(post, actor(editor), %{
+        update_post(post, actor(author), %{
           "body" => "edited",
           "edit_reason" => "x"
         })

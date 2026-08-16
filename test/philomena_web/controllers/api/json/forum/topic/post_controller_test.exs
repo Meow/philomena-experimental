@@ -34,7 +34,14 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       topic = topic_fixture(forum, user)
       reply = post_fixture(topic, user, %{"body" => "Rule-breaking reply"})
 
-      {:ok, _} = Posts.hide_post_for_fixture(reply, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} =
+        Posts.hide_post(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          reply.id,
+          %{"deletion_reason" => "spam"}
+        )
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts")
 
@@ -51,7 +58,14 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       topic = topic_fixture(forum)
       reply = post_fixture(topic, nil, %{"body" => "Rule-breaking reply"})
 
-      {:ok, _} = Posts.hide_post_for_fixture(reply, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} =
+        Posts.hide_post(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          reply.id,
+          %{"deletion_reason" => "spam"}
+        )
 
       conn =
         get(
@@ -67,7 +81,12 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       user = confirmed_user_fixture()
       forum = forum_fixture()
       topic = topic_fixture(forum, user)
-      for n <- 1..25, do: post_fixture(topic, user, %{"body" => "Reply number #{n}"})
+
+      for n <- 1..25,
+          do:
+            post_fixture(topic, confirmed_user_fixture(), %{
+              "body" => "Reply number #{n}"
+            })
 
       conn2 = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts?page=2")
 
@@ -159,7 +178,13 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       topic = topic_fixture(forum)
       post = post_fixture(topic, nil)
 
-      {:ok, _} = Posts.destroy_post_for_fixture(post)
+      {:ok, _} =
+        Posts.destroy_post(
+          Philomena.AttributionFixtures.actor(moderator_user_fixture()),
+          forum.short_name,
+          topic.slug,
+          post.id
+        )
 
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics/#{topic}/posts/#{post.id}")
 

@@ -56,7 +56,14 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
       topic = topic_fixture(forum)
       post = post_fixture(topic, user, %{"body" => "Rule-breaking post"})
 
-      {:ok, _} = Posts.hide_post_for_fixture(post, %{"deletion_reason" => "spam"}, moderator)
+      {:ok, _} =
+        Posts.hide_post(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          post.id,
+          %{"deletion_reason" => "spam"}
+        )
 
       conn = get(conn, ~p"/api/v1/json/posts/#{post.id}")
 
@@ -68,7 +75,13 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
       topic = topic_fixture(forum)
       post = post_fixture(topic, nil)
 
-      {:ok, _} = Posts.destroy_post_for_fixture(post)
+      {:ok, _} =
+        Posts.destroy_post(
+          Philomena.AttributionFixtures.actor(moderator_user_fixture()),
+          forum.short_name,
+          topic.slug,
+          post.id
+        )
 
       conn = get(conn, ~p"/api/v1/json/posts/#{post.id}")
 

@@ -270,27 +270,6 @@ defmodule Philomena.Posts do
 
   defp normalize_multi_error(result), do: result
 
-  @doc false
-  @spec create_post_for_fixture(Topic.t(), Actor.t(), map()) ::
-          {:ok, map()} | {:error, Ecto.Multi.name(), term(), map()}
-  def create_post_for_fixture(topic, %Actor{} = actor, params \\ %{}),
-    do: persist_post(topic, actor, params)
-
-  @doc false
-  @spec update_post_for_fixture(Post.t(), Actor.t(), map()) ::
-          {:ok, map()} | {:error, Ecto.Multi.name(), term(), map()}
-  def update_post_for_fixture(%Post{} = post, %Actor{} = actor, attrs),
-    do: persist_post_update(post, actor, attrs)
-
-  @doc false
-  @spec hide_post_for_fixture(Post.t(), map(), User.t()) ::
-          {:ok, Post.t()} | {:error, term()}
-  def hide_post_for_fixture(%Post{} = post, attrs, user), do: hide_loaded_post(post, attrs, user)
-
-  @doc false
-  @spec destroy_post_for_fixture(Post.t()) :: {:ok, Post.t()} | {:error, term()}
-  def destroy_post_for_fixture(%Post{} = post), do: destroy_loaded_post(post)
-
   @doc """
   Returns an `%Ecto.Changeset{}` for tracking post changes.
 

@@ -47,7 +47,16 @@ defmodule PhilomenaWeb.Api.Json.Search.PostControllerTest do
         topic_fixture(staff_forum, nil, %{"posts" => %{"0" => %{"body" => "chartreuse vicuna"}}})
 
       hidden = post_fixture(topic, nil, %{"body" => "chartreuse guanaco"})
-      {:ok, _} = Posts.hide_post_for_fixture(hidden, %{"deletion_reason" => "spam"}, moderator)
+
+      {:ok, _} =
+        Posts.hide_post(
+          Philomena.AttributionFixtures.actor(moderator),
+          forum.short_name,
+          topic.slug,
+          hidden.id,
+          %{"deletion_reason" => "spam"}
+        )
+
       SearchHelpers.reindex_all!(Post)
 
       conn = get(conn, ~p"/api/v1/json/search/posts?q=chartreuse")

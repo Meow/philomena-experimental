@@ -19,7 +19,7 @@ defmodule PhilomenaWeb.Topic.Post.HistoryControllerTest do
       [post] = topic.posts
 
       {:ok, _} =
-        Posts.update_post_for_fixture(post, actor(author), %{
+        Posts.update_post(actor(author), forum.short_name, topic.slug, post.id, %{
           "body" => "Original post body plus an edit",
           "edit_reason" => "typo fix"
         })

@@ -231,12 +231,12 @@ defmodule Philomena.PostsTest do
   # An already-hidden reply, set up through the auth-free/log-free engine so no
   # moderation log exists before the restore under test runs.
   defp already_hidden_post(topic) do
+    moderator = moderator_user_fixture()
+
     {:ok, hidden} =
-      Posts.hide_post_for_fixture(
-        visible_post(topic),
-        %{"deletion_reason" => "Spam"},
-        moderator_user_fixture()
-      )
+      hide_post(actor(moderator), visible_post(topic).id, %{"deletion_reason" => "Spam"})
+
+    Repo.delete_all(ModerationLog)
 
     hidden
   end
@@ -582,7 +582,7 @@ defmodule Philomena.PostsTest do
       post = post_fixture(topic, author, %{"body" => "Original post body"})
 
       {:ok, _} =
-        Posts.update_post_for_fixture(post, actor(author), %{
+        Posts.update_post(actor(author), forum.short_name, topic.slug, post.id, %{
           "body" => "Original post body plus an edit",
           "edit_reason" => "typo fix"
         })
@@ -605,8 +605,10 @@ defmodule Philomena.PostsTest do
       # query limits the result to 25. Database ids break same-second timestamp
       # ties, so the most recently serialized edit is first.
       Enum.reduce(1..26, post, fn n, current ->
-        {:ok, %{post: updated}} =
-          Posts.update_post_for_fixture(current, actor(author), %{"body" => "edit #{n}"})
+        {:ok, updated} =
+          Posts.update_post(actor(author), forum.short_name, topic.slug, current.id, %{
+            "body" => "edit #{n}"
+          })
 
         updated
       end)

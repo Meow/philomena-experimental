@@ -16,6 +16,11 @@ defmodule Philomena.VersionsTest do
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
+  defp update_post(post, actor, attrs) do
+    post = Repo.preload(post, topic: :forum)
+    Posts.update_post(actor, post.topic.forum.short_name, post.topic.slug, post.id, attrs)
+  end
+
   defp post_versions(post) do
     PostVersion
     |> where(post_id: ^post.id)
@@ -41,10 +46,10 @@ defmodule Philomena.VersionsTest do
   describe "record_edit/5 for posts" do
     test "first edit creates an attributed initial row and edited snapshot" do
       {post, author} = post_fixture_with_body("Original body")
-      editor = confirmed_user_fixture()
+      editor = moderator_user_fixture()
 
       {:ok, _result} =
-        Posts.update_post_for_fixture(post, actor(editor), %{
+        update_post(post, actor(editor), %{
           "body" => "Edited body",
           "edit_reason" => "typo fix"
         })
@@ -64,16 +69,16 @@ defmodule Philomena.VersionsTest do
 
     test "later edits add one snapshot and same-second ids preserve their order" do
       {post, _author} = post_fixture_with_body("v0")
-      editor = confirmed_user_fixture()
+      editor = moderator_user_fixture()
 
-      {:ok, %{post: post}} =
-        Posts.update_post_for_fixture(post, actor(editor), %{
+      {:ok, post} =
+        update_post(post, actor(editor), %{
           "body" => "v1",
           "edit_reason" => "r1"
         })
 
       {:ok, _result} =
-        Posts.update_post_for_fixture(post, actor(editor), %{
+        update_post(post, actor(editor), %{
           "body" => "v2",
           "edit_reason" => "r2"
         })
@@ -88,16 +93,16 @@ defmodule Philomena.VersionsTest do
 
     test "a stale caller snapshots the locked row rather than stale unchanged fields" do
       {stale_post, _author} = post_fixture_with_body("v0")
-      editor = confirmed_user_fixture()
+      editor = moderator_user_fixture()
 
       assert {:ok, _result} =
-               Posts.update_post_for_fixture(stale_post, actor(editor), %{
+               update_post(stale_post, actor(editor), %{
                  "body" => "v1",
                  "edit_reason" => "first reason"
                })
 
       assert {:ok, _result} =
-               Posts.update_post_for_fixture(stale_post, actor(editor), %{"body" => "v2"})
+               update_post(stale_post, actor(editor), %{"body" => "v2"})
 
       assert [_initial, _first_edit, second_edit] = post_versions(stale_post)
       assert second_edit.body == "v2"
@@ -106,10 +111,10 @@ defmodule Philomena.VersionsTest do
     end
 
     test "an update with unchanged body and edit reason creates no history" do
-      {post, _author} = post_fixture_with_body("same body")
+      {post, author} = post_fixture_with_body("same body")
 
-      assert {:ok, %{version: nil}} =
-               Posts.update_post_for_fixture(post, actor(confirmed_user_fixture()), %{
+      assert {:ok, %Post{}} =
+               update_post(post, actor(author), %{
                  "body" => post.body,
                  "edit_reason" => post.edit_reason
                })
@@ -141,7 +146,7 @@ defmodule Philomena.VersionsTest do
 
     test "concurrent first edits create one initial row and ordered snapshots" do
       {post, _author} = post_fixture_with_body("v0")
-      editor = confirmed_user_fixture()
+      editor = moderator_user_fixture()
       parent = self()
 
       tasks =
@@ -151,7 +156,7 @@ defmodule Philomena.VersionsTest do
             send(parent, {:ready, self()})
 
             receive do
-              :edit -> Posts.update_post_for_fixture(original, actor(editor), %{"body" => body})
+              :edit -> update_post(original, actor(editor), %{"body" => body})
             end
           end)
         end
@@ -219,16 +224,16 @@ defmodule Philomena.VersionsTest do
   describe "loaded-parent history services" do
     test "post history is newest-first and pairs previous bodies" do
       {post, _author} = post_fixture_with_body("v0")
-      editor = confirmed_user_fixture()
+      editor = moderator_user_fixture()
 
-      {:ok, %{post: post}} =
-        Posts.update_post_for_fixture(post, actor(editor), %{
+      {:ok, post} =
+        update_post(post, actor(editor), %{
           "body" => "v1",
           "edit_reason" => "r1"
         })
 
       {:ok, _result} =
-        Posts.update_post_for_fixture(post, actor(editor), %{
+        update_post(post, actor(editor), %{
           "body" => "v2",
           "edit_reason" => "r2"
         })
