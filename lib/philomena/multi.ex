@@ -5,12 +5,11 @@ defmodule Philomena.Multi do
 
   import Ecto.Query, only: [lock: 2]
 
-  @enforce_keys [:multi, :on_commit]
-  defstruct [:multi, on_commit: []]
+  @enforce_keys [:multi]
+  defstruct [:multi]
 
   @type t :: %__MODULE__{
-          multi: Ecto.Multi.t(),
-          on_commit: list((Ecto.Multi.changes() -> any()))
+          multi: Ecto.Multi.t()
         }
 
   @type name :: Ecto.Multi.name()
@@ -59,10 +58,7 @@ defmodule Philomena.Multi do
   """
   @spec append(t(), t()) :: t()
   def append(%__MODULE__{} = lhs, %__MODULE__{} = rhs) do
-    multi = Ecto.Multi.append(lhs.multi, rhs.multi)
-    on_commit = lhs.on_commit ++ rhs.on_commit
-
-    %__MODULE__{multi: multi, on_commit: on_commit}
+    update_in(lhs.multi, &Ecto.Multi.append(&1, rhs.multi))
   end
 
   @doc """
@@ -302,6 +298,38 @@ defmodule Philomena.Multi do
   end
 
   @doc """
+  Merges a Multi returned dynamically by an anonymous function.
+
+  This function is useful when the Multi to be merged requires information
+  from the original Multi. The second argument is an anonymous function
+  that receives the Multi changes so far. The anonymous function must return
+  another Multi.
+
+  If you would prefer to simply merge two Multis together, see `append/2` or
+  `prepend/2`.
+
+  Duplicated operations are not allowed.
+
+  ## Example
+
+      multi =
+        Multi.new()
+        |> Multi.insert(:post, %Post{title: "first"})
+
+      multi
+      |> Multi.merge(fn %{post: post} ->
+        Multi.new()
+        |> Multi.insert(:comment, Ecto.build_assoc(post, :comments))
+      end)
+      |> Multi.transact()
+
+  """
+  @spec merge(t(), (Ecto.Multi.changes() -> t())) :: t()
+  def merge(%__MODULE__{} = multi, merge) when is_function(merge, 1) do
+    update_in(multi.multi, &Ecto.Multi.merge(&1, fn changes -> merge.(changes).multi end))
+  end
+
+  @doc """
   Inspects results from a Multi.
 
   By default, the name is shown as a label to the inspect. Custom labels are
@@ -353,7 +381,7 @@ defmodule Philomena.Multi do
   """
   @spec new() :: t()
   def new do
-    %__MODULE__{multi: Ecto.Multi.new(), on_commit: []}
+    %__MODULE__{multi: Ecto.Multi.new()}
   end
 
   @doc """
@@ -556,9 +584,14 @@ defmodule Philomena.Multi do
     |> case do
       {:ok, changes} ->
         :ok =
-          multi.on_commit
-          |> Enum.reverse()
-          |> Enum.each(& &1.(changes))
+          changes
+          |> Enum.each(fn
+            {{:on_commit, _ref}, callback} ->
+              callback.(changes)
+
+            _ ->
+              :ok
+          end)
 
         {:ok, changes}
 
@@ -571,8 +604,9 @@ defmodule Philomena.Multi do
   Registers a callback to occur after the Multi commits.
 
   The callback receives the transaction changes and runs only after a
-  successful transaction, in registration order. Use it for side effects that
-  must occur after transaction completion, like object storage or indexing.
+  successful transaction. There is no ordering guarantee of post-commit
+  callback execution. Use this for side effects that must occur after
+  transaction completion, like object storage or indexing.
 
   ## Example
 
@@ -583,7 +617,7 @@ defmodule Philomena.Multi do
 
   """
   @spec on_commit(t(), (Ecto.Multi.changes() -> any())) :: t()
-  def on_commit(%__MODULE__{} = multi, fun) when is_function(fun, 1) do
-    update_in(multi.on_commit, &([fun] ++ &1))
+  def on_commit(%__MODULE__{} = multi, callback) when is_function(callback, 1) do
+    update_in(multi.multi, &Ecto.Multi.put(&1, {:on_commit, make_ref()}, callback))
   end
 end

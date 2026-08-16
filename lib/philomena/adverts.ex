@@ -192,8 +192,7 @@ defmodule Philomena.Adverts do
 
       Multi.new()
       |> Multi.insert(:advert, advert_changeset)
-      |> Uploader.put_persist_upload(:advert)
-      |> Uploader.put_unpersist_old_upload(:advert)
+      |> Uploader.put_persist_upload_and_unpersist_old(:advert)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -380,8 +379,7 @@ defmodule Philomena.Adverts do
 
       Multi.new()
       |> Multi.update(:advert, advert_changeset)
-      |> Uploader.put_persist_upload(:advert)
-      |> Uploader.put_unpersist_old_upload(:advert)
+      |> Uploader.put_persist_upload_and_unpersist_old(:advert)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,

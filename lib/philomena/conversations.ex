@@ -43,17 +43,23 @@ defmodule Philomena.Conversations do
     |> Loader.fetch_and_authorize(actor, action, message_id)
   end
 
-  defp put_approval_report(%Multi{} = multi, true), do: multi
+  defp put_approval_report(%Multi{} = multi, message_callback)
+       when is_function(message_callback, 1) do
+    Multi.merge(multi, fn %{conversation: conversation} = changes ->
+      message = message_callback.(changes)
 
-  defp put_approval_report(%Multi{} = multi, _approved?) do
-    Reports.put_create_system_report(
-      multi,
-      :report,
-      "Approval",
-      "PM contains externally-embedded images",
-      :conversation,
-      :conversation_id
-    )
+      if message.approved do
+        Multi.new()
+      else
+        Reports.put_create_system_report(
+          Multi.new(),
+          "Approval",
+          "PM contains externally-embedded images",
+          :conversation_id,
+          conversation.id
+        )
+      end
+    end)
   end
 
   @doc """
@@ -222,14 +228,11 @@ defmodule Philomena.Conversations do
         end
 
       conversation_changeset =
-        %Conversation{}
-        |> Conversation.creation_changeset(user, recipient, params)
-
-      approved? = Conversation.approved?(conversation_changeset)
+        Conversation.creation_changeset(%Conversation{}, user, recipient, params)
 
       Multi.new()
       |> Multi.insert(:conversation, conversation_changeset)
-      |> put_approval_report(approved?)
+      |> put_approval_report(fn %{conversation: %{messages: [message]}} -> message end)
       |> Multi.transact()
       |> case do
         {:ok, %{conversation: conversation}} ->
@@ -311,13 +314,12 @@ defmodule Philomena.Conversations do
         |> Message.creation_changeset(params, user)
 
       conversation_changeset = Conversation.new_message_changeset(conversation)
-      approved? = Message.approved?(message_changeset)
 
       Multi.new()
       |> Multi.insert(:message, message_changeset)
       |> Multi.update(:conversation, conversation_changeset)
       |> Multi.one(:message_count, message_count_query)
-      |> put_approval_report(approved?)
+      |> put_approval_report(fn %{message: message} -> message end)
       |> Multi.transact()
       |> case do
         {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->

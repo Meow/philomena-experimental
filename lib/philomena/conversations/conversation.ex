@@ -84,11 +84,6 @@ defmodule Philomena.Conversations.Conversation do
     |> set_last_message()
   end
 
-  @doc false
-  def approved?(changeset) do
-    Enum.all?(get_assoc(changeset, :messages), &Message.approved?/1)
-  end
-
   defp set_last_message(changeset) do
     change(changeset, last_message_at: DateTime.utc_now(:second))
   end

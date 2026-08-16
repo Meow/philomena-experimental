@@ -11,9 +11,10 @@ defmodule Philomena.Badges.Uploader do
     Uploader.analyze_upload(badge, "image", params["image"], &Badge.image_changeset/2)
   end
 
-  def put_persist_upload(multi, step) do
+  def put_persist_upload_and_unpersist_old(multi, step) do
     Multi.on_commit(multi, fn %{^step => badge} ->
       Uploader.persist_upload(badge, badge_file_root(), "image")
+      Uploader.unpersist_old_upload(badge, badge_file_root(), "image")
     end)
   end
 

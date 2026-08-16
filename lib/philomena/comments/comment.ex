@@ -25,7 +25,7 @@ defmodule Philomena.Comments.Comment do
     field :edited_at, :utc_datetime
     field :deletion_reason, :string, default: ""
     field :destroyed_content, :boolean, default: false
-    field :approved, :boolean, default: true
+    field :approved, :boolean
 
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
@@ -48,11 +48,6 @@ defmodule Philomena.Comments.Comment do
     |> validate_length(:body, min: 1, max: 300_000, count: :bytes)
     |> validate_length(:edit_reason, max: 70, count: :bytes)
     |> Approval.maybe_put_approval(comment.user, :external_links)
-  end
-
-  @doc false
-  def approved?(changeset) do
-    fetch_field!(changeset, :approved)
   end
 
   def hide_changeset(comment, attrs, user) do

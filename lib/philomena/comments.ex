@@ -47,27 +47,34 @@ defmodule Philomena.Comments do
     Notifications.broadcast_image_comment(comment.user, image, comment)
   end
 
-  defp put_reindex_comment(%Multi{} = multi, step) do
+  defp put_reindex_comment(%Multi{} = multi, step \\ :comment) do
     Multi.on_commit(multi, fn %{^step => comment} -> reindex_comment(comment) end)
   end
 
-  defp put_increment_comment_count(%Multi{} = multi, _user, false), do: multi
-
-  defp put_increment_comment_count(%Multi{} = multi, user, _approved?) do
-    UserStatistics.put_increment(multi, user, :comments_count)
+  defp put_increment_comment_count(%Multi{} = multi) do
+    Multi.merge(multi, fn %{comment: comment} ->
+      if comment.approved do
+        UserStatistics.put_increment(Multi.new(), comment.user_id, :comments_count)
+      else
+        Multi.new()
+      end
+    end)
   end
 
-  defp put_approval_report(%Multi{} = multi, true), do: multi
-
-  defp put_approval_report(%Multi{} = multi, _approved?) do
-    Reports.put_create_system_report(
-      multi,
-      :report,
-      "Approval",
-      "Comment contains external links",
-      :comment,
-      :comment_id
-    )
+  defp put_approval_report(%Multi{} = multi) do
+    Multi.merge(multi, fn %{comment: comment} ->
+      if comment.approved do
+        Multi.new()
+      else
+        Reports.put_create_system_report(
+          Multi.new(),
+          "Approval",
+          "Comment contains external links",
+          :comment_id,
+          comment.id
+        )
+      end
+    end)
   end
 
   defp broadcast_comment(event, %Comment{} = comment) do
@@ -363,8 +370,6 @@ defmodule Philomena.Comments do
         |> Ecto.build_assoc(:comments)
         |> Comment.creation_changeset(attrs, actor)
 
-      approved? = Comment.approved?(comment_changeset)
-
       Multi.new()
       |> Multi.lock_one(:image, image_query)
       |> Multi.insert(:comment, comment_changeset)
@@ -372,9 +377,9 @@ defmodule Philomena.Comments do
       |> Multi.run(:notification, &notify_comment/2)
       |> Images.maybe_subscribe_on(:image, creator, :watch_on_reply)
       |> Images.put_reindex_image(:image)
-      |> put_approval_report(approved?)
-      |> put_increment_comment_count(creator, approved?)
-      |> put_reindex_comment(:comment)
+      |> put_approval_report()
+      |> put_increment_comment_count()
+      |> put_reindex_comment()
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
@@ -478,7 +483,6 @@ defmodule Philomena.Comments do
          {:ok, comment} <- load_image_comment(actor, image, comment_id, :update, @preloads) do
       now = DateTime.utc_now(:second)
       comment_changeset = Comment.changeset(comment, attrs, now)
-      approved? = Comment.approved?(comment_changeset)
 
       comment_query =
         Comment
@@ -489,8 +493,8 @@ defmodule Philomena.Comments do
       |> Multi.lock_one(:original_comment, comment_query)
       |> Multi.update(:comment, comment_changeset)
       |> Versions.record_edit(:version, :original_comment, :comment, actor)
-      |> put_approval_report(approved?)
-      |> put_reindex_comment(:comment)
+      |> put_approval_report()
+      |> put_reindex_comment()
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
@@ -582,7 +586,7 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Deleted comment on image #{comment.image_id} (#{reason})"
       )
-      |> put_reindex_comment(:comment)
+      |> put_reindex_comment()
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
@@ -619,7 +623,7 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Restored comment on image #{comment.image_id}"
       )
-      |> put_reindex_comment(:comment)
+      |> put_reindex_comment()
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
@@ -667,7 +671,7 @@ defmodule Philomena.Comments do
       )
       |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
       |> Images.put_reindex_image(:image)
-      |> put_reindex_comment(:comment)
+      |> put_reindex_comment()
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
@@ -712,7 +716,7 @@ defmodule Philomena.Comments do
         "Approved comment on image #{comment.image_id}"
       )
       |> UserStatistics.put_increment(comment.user_id, :comments_count, 1)
-      |> put_reindex_comment(:comment)
+      |> put_reindex_comment()
       |> Multi.transact()
       |> case do
         {:ok, %{comment: comment}} ->
@@ -754,7 +758,7 @@ defmodule Philomena.Comments do
     |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
     |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
     |> Images.put_reindex_image(:image)
-    |> put_reindex_comment(:comment)
+    |> put_reindex_comment()
     |> Multi.transact()
     |> case do
       {:ok, %{comment: comment}} ->

@@ -73,9 +73,15 @@ defmodule Philomena.UserStatistics do
       %Multi{}
 
   """
-  @spec put_increment(Multi.t(), User.t() | integer() | nil, statistic(), integer()) ::
+  @spec put_increment(
+          multi :: Multi.t(),
+          user_or_id_or_nil_or_callback ::
+            User.t() | integer() | nil | (Multi.changes() -> User.t() | integer() | nil),
+          statistic :: statistic(),
+          amount :: integer()
+        ) ::
           Multi.t()
-  def put_increment(multi, user_or_id, statistic, amount \\ 1)
+  def put_increment(multi, user_or_id_or_nil_or_callback, statistic, amount \\ 1)
 
   def put_increment(multi, nil, statistic, amount)
       when statistic in @permitted_actions and is_integer(amount),
@@ -84,6 +90,13 @@ defmodule Philomena.UserStatistics do
   def put_increment(multi, %User{} = user, statistic, amount)
       when statistic in @permitted_actions and is_integer(amount),
       do: put_increment(multi, user.id, statistic, amount)
+
+  def put_increment(multi, callback, statistic, amount)
+      when is_function(callback, 1) and statistic in @permitted_actions and is_integer(amount) do
+    Multi.merge(multi, fn changes ->
+      put_increment(Multi.new(), callback.(changes), statistic, amount)
+    end)
+  end
 
   def put_increment(multi, user_id, statistic, amount)
       when is_integer(user_id) and statistic in @permitted_actions and is_integer(amount) do

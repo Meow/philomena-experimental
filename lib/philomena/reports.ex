@@ -647,25 +647,23 @@ defmodule Philomena.Reports do
 
       iex> put_create_system_report(
       ...>   multi,
-      ...>   :report,
       ...>   "Approval",
       ...>   "Needs review",
-      ...>   :comment,
-      ...>   :comment_id
+      ...>   :comment_id,
+      ...>   comment.id
       ...> )
       %Multi{}
 
   """
   @spec put_create_system_report(
           multi :: Multi.t(),
-          step :: Multi.name(),
           rule_name :: String.t(),
           reason :: String.t(),
           target_column :: atom(),
-          target_id_step :: atom()
+          target_id :: integer()
         ) ::
           Multi.t()
-  def put_create_system_report(multi, step, rule_name, reason, target_id_step, target_column) do
+  def put_create_system_report(multi, rule_name, reason, target_column, target_id) do
     {:ok, rule} = Rules.fetch_rule_by_name(rule_name)
 
     attrs = %{reason: reason, user_agent: "system"}
@@ -675,14 +673,14 @@ defmodule Philomena.Reports do
       fingerprint: "ffff"
     }
 
-    multi
-    |> Multi.run(step, fn repo, %{^target_id_step => %{id: target_id}} ->
+    report_changeset =
       Report
       |> struct([{target_column, target_id}])
       |> Report.system_creation_changeset(attrs, actor, rule)
-      |> repo.insert()
-    end)
-    |> Multi.on_commit(fn %{^step => report} ->
+
+    multi
+    |> Multi.insert(:report, report_changeset)
+    |> Multi.on_commit(fn %{report: report} ->
       reindex_report(report)
     end)
   end

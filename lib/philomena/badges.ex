@@ -95,8 +95,7 @@ defmodule Philomena.Badges do
 
       Multi.new()
       |> Multi.insert(:badge, badge_changeset)
-      |> Uploader.put_persist_upload(:badge)
-      |> Uploader.put_unpersist_old_upload(:badge)
+      |> Uploader.put_persist_upload_and_unpersist_old(:badge)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -240,8 +239,7 @@ defmodule Philomena.Badges do
 
       Multi.new()
       |> Multi.update(:badge, badge_changeset)
-      |> Uploader.put_persist_upload(:badge)
-      |> Uploader.put_unpersist_old_upload(:badge)
+      |> Uploader.put_persist_upload_and_unpersist_old(:badge)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
