@@ -75,6 +75,7 @@ defmodule Philomena.Posts.Post do
 
   def unhide_changeset(post) do
     change(post)
+    |> validate_undestroyed()
     |> put_change(:hidden_from_users, false)
     |> put_change(:deleted_by_id, nil)
     |> put_change(:deletion_reason, "")
@@ -83,6 +84,7 @@ defmodule Philomena.Posts.Post do
   def destroy_changeset(post) do
     post
     |> change()
+    |> validate_hidden()
     |> validate_undestroyed()
     |> put_change(:destroyed_content, true)
     |> put_change(:body, "")
@@ -94,6 +96,14 @@ defmodule Philomena.Posts.Post do
     |> change()
     |> validate_undestroyed()
     |> Approval.approve_changeset()
+  end
+
+  defp validate_hidden(changeset) do
+    if not get_field(changeset, :hidden_from_users) do
+      add_error(changeset, :destroyed_content, "cannot be set while post is visible")
+    else
+      changeset
+    end
   end
 
   defp validate_undestroyed(changeset) do

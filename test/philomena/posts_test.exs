@@ -416,7 +416,7 @@ defmodule Philomena.PostsTest do
 
   describe "destroy_post/2" do
     test "denies an anonymous actor, leaving the body intact", %{topic: topic} do
-      post = visible_post(topic)
+      post = already_hidden_post(topic)
 
       assert destroy_post(actor(), "#{post.id}") == {:error, :unauthorized}
 
@@ -427,7 +427,7 @@ defmodule Philomena.PostsTest do
     end
 
     test "denies a regular user, leaving the body intact", %{topic: topic} do
-      post = visible_post(topic)
+      post = already_hidden_post(topic)
 
       assert destroy_post(actor(confirmed_user_fixture()), "#{post.id}") ==
                {:error, :unauthorized}
@@ -440,7 +440,7 @@ defmodule Philomena.PostsTest do
 
     test "a moderator destroys the post, which is returned with topic and forum preloaded",
          %{forum: forum, topic: topic} do
-      post = visible_post(topic)
+      post = already_hidden_post(topic)
       moderator = moderator_user_fixture()
 
       assert {:ok, %Post{} = destroyed} = destroy_post(actor(moderator), "#{post.id}")
@@ -450,14 +450,13 @@ defmodule Philomena.PostsTest do
       assert destroyed.topic.id == topic.id
       assert destroyed.topic.forum.id == forum.id
 
-      # The destroy engine blanks the body and marks the content destroyed; it
-      # does not touch the post's hidden/deletion_reason fields, so a visible
-      # post stays visible while its text is wiped.
+      # The destroy engine blanks the body and marks the content destroyed. It
+      # requires the post to already be hidden and preserves its hidden state.
       reloaded = Repo.reload!(post)
       assert reloaded.body == ""
       assert reloaded.destroyed_content
-      refute reloaded.hidden_from_users
-      assert reloaded.deletion_reason == ""
+      assert reloaded.hidden_from_users
+      assert reloaded.deletion_reason == "Spam"
     end
 
     # The engine authorizes :hide and never inspects hidden_from_users, so an
@@ -521,7 +520,7 @@ defmodule Philomena.PostsTest do
 
     test "the moderation log names the post and topic byte-for-byte",
          %{forum: forum, topic: topic} do
-      post = visible_post(topic)
+      post = already_hidden_post(topic)
       moderator = moderator_user_fixture()
 
       assert {:ok, _} = destroy_post(actor(moderator), "#{post.id}")

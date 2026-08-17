@@ -179,6 +179,15 @@ defmodule PhilomenaWeb.Api.Json.Forum.Topic.PostControllerTest do
       post = post_fixture(topic, nil)
 
       {:ok, _} =
+        Posts.hide_post(
+          Philomena.AttributionFixtures.actor(moderator_user_fixture()),
+          forum.short_name,
+          topic.slug,
+          post.id,
+          %{deletion_reason: "Spam"}
+        )
+
+      {:ok, _} =
         Posts.destroy_post(
           Philomena.AttributionFixtures.actor(moderator_user_fixture()),
           forum.short_name,

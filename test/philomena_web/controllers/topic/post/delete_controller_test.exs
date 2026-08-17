@@ -7,13 +7,24 @@ defmodule PhilomenaWeb.Topic.Post.DeleteControllerTest do
   import Philomena.ForumsFixtures
   import Philomena.PostsFixtures
   import Philomena.TopicsFixtures
+  import Philomena.UsersFixtures
 
+  alias Philomena.Posts
   alias Philomena.Repo
 
   setup do
     forum = forum_fixture()
     topic = topic_fixture(forum)
     post = post_fixture(topic, nil, %{"body" => "Original post body"})
+
+    {:ok, post} =
+      Posts.hide_post(
+        Philomena.AttributionFixtures.actor(moderator_user_fixture()),
+        forum.short_name,
+        topic.slug,
+        post.id,
+        %{deletion_reason: "Spam"}
+      )
 
     %{forum: forum, topic: topic, post: post}
   end
