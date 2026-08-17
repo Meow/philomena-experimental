@@ -15,7 +15,7 @@ defmodule PhilomenaWeb.Topic.Post.ApproveController do
 
       {:error, %Post{} = post} ->
         conn
-        |> put_flash(:error, "Unable to approve post!")
+        |> put_flash(:info, "Post has already been approved.")
         |> redirect(to: post_anchor(post))
 
       error ->

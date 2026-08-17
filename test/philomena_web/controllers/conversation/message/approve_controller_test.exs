@@ -68,7 +68,7 @@ defmodule PhilomenaWeb.Conversation.Message.ApproveControllerTest do
       assert Repo.reload!(message).approved
     end
 
-    test "approving an already-approved message is idempotent", %{conn: conn} do
+    test "approving an already-approved still succeeds", %{conn: conn} do
       from = confirmed_user_fixture()
       to = confirmed_user_fixture()
       conversation = conversation_fixture(from, to)
@@ -81,7 +81,10 @@ defmodule PhilomenaWeb.Conversation.Message.ApproveControllerTest do
       conn = post(conn, ~p"/conversations/#{conversation}/messages/#{message}/approve")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Conversation message approved."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Conversation message has already been approved."
+
       assert Repo.reload!(message).approved
     end
 

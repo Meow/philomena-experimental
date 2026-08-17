@@ -26,7 +26,8 @@ defmodule Philomena.Posts.Post do
     field :edited_at, :utc_datetime
     field :deletion_reason, :string, default: ""
     field :destroyed_content, :boolean, default: false
-    field :approved, :boolean, default: false
+    field :approved, :boolean, default: true
+    field :became_unapproved?, :boolean, virtual: true, default: false
 
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
@@ -85,8 +86,10 @@ defmodule Philomena.Posts.Post do
     |> put_change(:body, "")
   end
 
+  @doc false
   def approve_changeset(post) do
-    change(post)
-    |> put_change(:approved, true)
+    post
+    |> change()
+    |> Approval.approve_changeset()
   end
 end

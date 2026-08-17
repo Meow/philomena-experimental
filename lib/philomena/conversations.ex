@@ -48,9 +48,7 @@ defmodule Philomena.Conversations do
     Multi.merge(multi, fn %{conversation: conversation} = changes ->
       message = message_callback.(changes)
 
-      if message.approved do
-        Multi.new()
-      else
+      if message.became_unapproved? do
         Reports.put_create_system_report(
           Multi.new(),
           "Approval",
@@ -58,6 +56,8 @@ defmodule Philomena.Conversations do
           :conversation_id,
           conversation.id
         )
+      else
+        Multi.new()
       end
     end)
   end

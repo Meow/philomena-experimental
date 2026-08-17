@@ -14,6 +14,7 @@ defmodule Philomena.CommentsTest do
 
   @moduletag :search
 
+  import Ecto.Query
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
   import Philomena.FiltersFixtures
@@ -251,7 +252,7 @@ defmodule Philomena.CommentsTest do
   # is not auto-approved on creation (see Philomena.Schema.Approval); returns the
   # comment together with its author so the comments_count bump can be checked.
   defp unapproved_comment(image) do
-    _rule = rule_fixture(name: "Approval")
+    approval_rule!()
     author = confirmed_user_fixture()
 
     comment =
@@ -259,6 +260,12 @@ defmodule Philomena.CommentsTest do
 
     refute comment.approved
     {comment, author}
+  end
+
+  defp approval_rule! do
+    rule_fixture()
+    |> Ecto.Changeset.change(name: "Approval")
+    |> Repo.update!()
   end
 
   defp no_moderation_logs! do
@@ -538,6 +545,27 @@ defmodule Philomena.CommentsTest do
                Comments.destroy_comment(actor(moderator_user_fixture()), image.id, comment.id)
 
       assert Repo.get!(User, author.id).comments_count == before - 1
+    end
+
+    test "destroying a withheld comment does not decrement the author's comments_count",
+         %{image: image} do
+      {comment, author} = unapproved_comment(image)
+      before = Repo.get!(User, author.id).comments_count
+
+      refute comment.approved
+
+      assert {:ok, _} =
+               Comments.hide_comment(
+                 actor(moderator_user_fixture()),
+                 image.id,
+                 comment.id,
+                 %{"deletion_reason" => "Spam"}
+               )
+
+      assert {:ok, _} =
+               Comments.destroy_comment(actor(moderator_user_fixture()), image.id, comment.id)
+
+      assert Repo.get!(User, author.id).comments_count == before
     end
 
     test "a well-formed id naming no row is not found", %{image: image} do
@@ -1004,6 +1032,16 @@ defmodule Philomena.CommentsTest do
       assert Repo.get!(User, author.id).comments_count == before + 1
     end
 
+    test "a withheld comment does not increment the author's comments_count and is reported",
+         %{image: image} do
+      {comment, author} = unapproved_comment(image)
+      before = Repo.get!(User, author.id).comments_count
+
+      refute comment.approved
+      assert Repo.get!(User, author.id).comments_count == before
+      assert Repo.aggregate(from(r in Report, where: r.comment_id == ^comment.id), :count) == 1
+    end
+
     test "an over-limit actor is rate limited and no comment is created", %{image: image} do
       # The :comment_create counter is primed past the limit, so the rate check
       # (after write-access, before the insert) refuses the write.
@@ -1175,6 +1213,39 @@ defmodule Philomena.CommentsTest do
       assert reloaded.body == "Original comment body plus an edit"
       assert reloaded.edited_at != nil
       no_moderation_logs!()
+    end
+
+    test "editing an approved comment into a withheld one decrements its count once and reports it",
+         %{image: image} do
+      author = confirmed_user_fixture()
+      comment = comment_fixture(image, author, %{"body" => "An ordinary comment"})
+      before = Repo.get!(User, author.id).comments_count
+      approval_rule!()
+
+      assert {:ok, {_image, %Comment{approved: false}}} =
+               Comments.update_comment(actor(author), image.id, comment.id, %{
+                 "body" => "Now containing https://spam.example/"
+               })
+
+      assert Repo.get!(User, author.id).comments_count == before - 1
+      assert Repo.aggregate(from(r in Report, where: r.comment_id == ^comment.id), :count) == 1
+
+      assert {:ok, {_image, %Comment{approved: false}}} =
+               Comments.update_comment(actor(author), image.id, comment.id, %{
+                 "body" => "Still containing https://spam.example/"
+               })
+
+      assert Repo.get!(User, author.id).comments_count == before - 1
+      assert Repo.aggregate(from(r in Report, where: r.comment_id == ^comment.id), :count) == 1
+
+      assert {:ok, %Comment{approved: true}} =
+               Comments.approve_comment(
+                 actor(moderator_user_fixture()),
+                 image.id,
+                 comment.id
+               )
+
+      assert Repo.get!(User, author.id).comments_count == before
     end
 
     test "a forced-filter match prevents an update", %{image: image} do

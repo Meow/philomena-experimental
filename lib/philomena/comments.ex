@@ -51,28 +51,19 @@ defmodule Philomena.Comments do
     Multi.on_commit(multi, fn %{^step => comment} -> reindex_comment(comment) end)
   end
 
-  defp put_increment_comment_count(%Multi{} = multi) do
-    Multi.merge(multi, fn %{comment: comment} ->
-      if comment.approved do
-        UserStatistics.put_increment(Multi.new(), comment.user_id, :comments_count)
-      else
-        Multi.new()
-      end
-    end)
-  end
-
   defp put_approval_report(%Multi{} = multi) do
     Multi.merge(multi, fn %{comment: comment} ->
-      if comment.approved do
+      if comment.became_unapproved? do
         Multi.new()
-      else
-        Reports.put_create_system_report(
-          Multi.new(),
+        |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
+        |> Reports.put_create_system_report(
           "Approval",
           "Comment contains external links",
           :comment_id,
           comment.id
         )
+      else
+        Multi.new()
       end
     end)
   end
@@ -377,8 +368,8 @@ defmodule Philomena.Comments do
       |> Multi.run(:notification, &notify_comment/2)
       |> Images.maybe_subscribe_on(:image, creator, :watch_on_reply)
       |> Images.put_reindex_image(:image)
+      |> UserStatistics.put_increment(creator, :comments_count)
       |> put_approval_report()
-      |> put_increment_comment_count()
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
@@ -669,7 +660,13 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Destroyed comment on image #{comment.image_id}"
       )
-      |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
+      |> UserStatistics.put_increment(
+        fn %{comment: comment} ->
+          if comment.approved, do: comment.user_id
+        end,
+        :comments_count,
+        -1
+      )
       |> Images.put_reindex_image(:image)
       |> put_reindex_comment()
       |> Multi.transact()
@@ -715,7 +712,7 @@ defmodule Philomena.Comments do
         Paths.image_comment_path(comment.image_id, comment.id),
         "Approved comment on image #{comment.image_id}"
       )
-      |> UserStatistics.put_increment(comment.user_id, :comments_count, 1)
+      |> UserStatistics.put_increment(comment.user_id, :comments_count)
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do

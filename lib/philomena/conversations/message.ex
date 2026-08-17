@@ -13,7 +13,8 @@ defmodule Philomena.Conversations.Message do
     belongs_to :from, User
 
     field :body, :string
-    field :approved, :boolean
+    field :approved, :boolean, default: true
+    field :became_unapproved?, :boolean, virtual: true, default: false
 
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
@@ -37,6 +38,8 @@ defmodule Philomena.Conversations.Message do
 
   @doc false
   def approve_changeset(message) do
-    change(message, approved: true)
+    message
+    |> change()
+    |> Approval.approve_changeset()
   end
 end

@@ -101,7 +101,7 @@ defmodule Philomena.UserStatistics do
   def put_increment(multi, user_id, statistic, amount)
       when is_integer(user_id) and statistic in @permitted_actions and is_integer(amount) do
     multi
-    |> Multi.run({:put_increment, user_id}, fn _repo, _changes ->
+    |> Multi.run({:put_increment, make_ref()}, fn _repo, _changes ->
       persist_increment(user_id, statistic, amount)
     end)
     |> Multi.on_commit(fn _changes ->

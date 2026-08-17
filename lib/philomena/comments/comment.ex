@@ -25,7 +25,8 @@ defmodule Philomena.Comments.Comment do
     field :edited_at, :utc_datetime
     field :deletion_reason, :string, default: ""
     field :destroyed_content, :boolean, default: false
-    field :approved, :boolean
+    field :approved, :boolean, default: true
+    field :became_unapproved?, :boolean, virtual: true, default: false
 
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
@@ -73,19 +74,11 @@ defmodule Philomena.Comments.Comment do
     |> put_change(:body, "")
   end
 
+  @doc false
   def approve_changeset(comment) do
     comment
     |> change()
-    |> validate_unapproved()
-    |> put_change(:approved, true)
-  end
-
-  defp validate_unapproved(changeset) do
-    if get_field(changeset, :approved) do
-      add_error(changeset, :approved, "is already approved")
-    else
-      changeset
-    end
+    |> Approval.approve_changeset()
   end
 
   defp validate_hidden(changeset) do

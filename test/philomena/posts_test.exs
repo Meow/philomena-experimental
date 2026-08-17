@@ -16,6 +16,7 @@ defmodule Philomena.PostsTest do
   import Philomena.AttributionFixtures
   import Philomena.ForumsFixtures
   import Philomena.PostsFixtures
+  import Philomena.RulesFixtures
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
@@ -23,6 +24,7 @@ defmodule Philomena.PostsTest do
   alias Philomena.Posts
   alias Philomena.Posts.Post
   alias Philomena.Posts.PostVersion
+  alias Philomena.Reports.Report
   alias Philomena.Forums.Forum
   alias Philomena.Repo
   alias Philomena.Topics.Topic
@@ -49,6 +51,7 @@ defmodule Philomena.PostsTest do
   # not auto-approved on creation (see Philomena.Schema.Approval); returns the
   # post together with its author so the posts_count bump can be checked.
   defp unapproved_post(topic) do
+    approval_rule!()
     author = confirmed_user_fixture()
 
     post =
@@ -58,6 +61,12 @@ defmodule Philomena.PostsTest do
 
     refute post.approved
     {post, author}
+  end
+
+  defp approval_rule! do
+    rule_fixture()
+    |> Ecto.Changeset.change(name: "Approval")
+    |> Repo.update!()
   end
 
   defp no_moderation_logs! do
@@ -469,6 +478,47 @@ defmodule Philomena.PostsTest do
       assert reloaded.deletion_reason == "Spam"
     end
 
+    test "destroying an approved post decrements the author's posts_count",
+         %{topic: topic} do
+      author = confirmed_user_fixture()
+      post = post_fixture(topic, author, %{"body" => "An approved post"})
+      before = Repo.get!(User, author.id).posts_count
+
+      assert post.approved
+
+      assert {:ok, _} =
+               Posts.hide_post(
+                 actor(moderator_user_fixture()),
+                 topic.forum.short_name,
+                 topic.slug,
+                 post.id,
+                 %{"deletion_reason" => "Spam"}
+               )
+
+      assert {:ok, _} = destroy_post(actor(moderator_user_fixture()), "#{post.id}")
+      assert Repo.get!(User, author.id).posts_count == before - 1
+    end
+
+    test "destroying a withheld post does not decrement the author's posts_count",
+         %{topic: topic} do
+      {post, author} = unapproved_post(topic)
+      before = Repo.get!(User, author.id).posts_count
+
+      refute post.approved
+
+      assert {:ok, _} =
+               Posts.hide_post(
+                 actor(moderator_user_fixture()),
+                 topic.forum.short_name,
+                 topic.slug,
+                 post.id,
+                 %{"deletion_reason" => "Spam"}
+               )
+
+      assert {:ok, _} = destroy_post(actor(moderator_user_fixture()), "#{post.id}")
+      assert Repo.get!(User, author.id).posts_count == before
+    end
+
     test "the moderation log names the post and topic byte-for-byte",
          %{forum: forum, topic: topic} do
       post = visible_post(topic)
@@ -797,6 +847,22 @@ defmodule Philomena.PostsTest do
       assert Repo.get!(User, author.id).posts_count == before + 1
     end
 
+    test "a withheld post does not increment the author's forum posts_count and is reported",
+         %{forum: forum, topic: topic} do
+      author = confirmed_user_fixture()
+      before = Repo.get!(User, author.id).posts_count
+      approval_rule!()
+
+      assert {:ok, %{post: post}} =
+               Posts.create_post(actor(author), forum.short_name, topic.slug, %{
+                 "body" => "A reply containing https://spam.example/"
+               })
+
+      refute post.approved
+      assert Repo.get!(User, author.id).posts_count == before
+      assert Repo.aggregate(from(r in Report, where: r.post_id == ^post.id), :count) == 1
+    end
+
     test "an over-limit actor is rate limited and no post is created",
          %{forum: forum, topic: topic} do
       # The :post_create counter is primed past the limit, so the rate check
@@ -934,6 +1000,40 @@ defmodule Philomena.PostsTest do
                Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
       assert version.previous_body == "Original reply body"
+    end
+
+    test "editing an approved post into a withheld one decrements its count once and reports it",
+         %{forum: forum, topic: topic} do
+      approval_rule!()
+      author = confirmed_user_fixture()
+      post = post_fixture(topic, author, %{"body" => "An ordinary reply"})
+      before = Repo.get!(User, author.id).posts_count
+
+      assert {:ok, %Post{approved: false}} =
+               Posts.update_post(actor(author), forum.short_name, topic.slug, post.id, %{
+                 "body" => "Now containing https://spam.example/"
+               })
+
+      assert Repo.get!(User, author.id).posts_count == before - 1
+      assert Repo.aggregate(from(r in Report, where: r.post_id == ^post.id), :count) == 1
+
+      assert {:ok, %Post{approved: false}} =
+               Posts.update_post(actor(author), forum.short_name, topic.slug, post.id, %{
+                 "body" => "Still containing https://spam.example/"
+               })
+
+      assert Repo.get!(User, author.id).posts_count == before - 1
+      assert Repo.aggregate(from(r in Report, where: r.post_id == ^post.id), :count) == 1
+
+      assert {:ok, %Post{approved: true}} =
+               Posts.approve_post(
+                 actor(moderator_user_fixture()),
+                 forum.short_name,
+                 topic.slug,
+                 post.id
+               )
+
+      assert Repo.get!(User, author.id).posts_count == before
     end
 
     test "another regular user cannot edit, leaving the body unchanged",

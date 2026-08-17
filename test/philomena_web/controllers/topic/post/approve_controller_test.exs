@@ -66,8 +66,6 @@ defmodule PhilomenaWeb.Topic.Post.ApproveControllerTest do
       assert Repo.reload!(post).approved
     end
 
-    # Approving an already-approved post still reports success (approve_changeset
-    # sets the column unconditionally; there is no verify_not_approved guard).
     test "approving an already-approved post still succeeds",
          %{conn: conn, forum: forum, topic: topic} do
       post = post_fixture(topic)
@@ -76,7 +74,7 @@ defmodule PhilomenaWeb.Topic.Post.ApproveControllerTest do
 
       conn = post(conn, ~p"/forums/#{forum}/topics/#{topic}/posts/#{post}/approve")
 
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Post successfully approved."
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Post has already been approved."
       assert Repo.reload!(post).approved
     end
 

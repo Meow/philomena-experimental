@@ -15,7 +15,6 @@ defmodule Philomena.Posts do
   alias Philomena.Topics.{ForumTopic, Topic}
   alias Philomena.Topics
   alias Philomena.Forums
-  alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
@@ -176,7 +175,9 @@ defmodule Philomena.Posts do
     |> Multi.transact()
     |> case do
       {:ok, %{post: post}} ->
-        UserStatistics.increment(post.user_id, :posts_count, -1)
+        if post.approved do
+          UserStatistics.increment(post.user_id, :posts_count, -1)
+        end
 
         {:ok, post}
 
@@ -200,11 +201,6 @@ defmodule Philomena.Posts do
   end
 
   defp broadcast_post_creation(result), do: result
-
-  defp record_post_creation(%Actor{user: user}, %Post{approved: true}),
-    do: UserStatistics.increment(user, :posts_count)
-
-  defp record_post_creation(_actor, post), do: report_non_approved(post)
 
   defp load_editable_post(%Actor{} = actor, forum_slug, topic_slug, post_id, action) do
     with {:ok, %ForumTopic{topic: topic}} <-
@@ -447,7 +443,8 @@ defmodule Philomena.Posts do
       case persist_post(topic, actor, post_params || %{}) do
         {:ok, %{post: post}} ->
           RateLimiter.record_action(actor, :post_create, @post_create_window)
-          record_post_creation(actor, post)
+          UserStatistics.increment(actor.user, :posts_count)
+          report_non_approved(post)
           # The firehose representation includes the topic author.
           result = %{post: post, topic: Repo.preload(topic, :user), forum: forum}
 
@@ -477,9 +474,11 @@ defmodule Philomena.Posts do
 
   """
   @spec report_non_approved(Post.t()) :: false | {:ok, Philomena.Reports.Report.t()}
-  def report_non_approved(%Post{approved: true}), do: false
+  def report_non_approved(%Post{became_unapproved?: false}), do: false
 
   def report_non_approved(post) do
+    UserStatistics.increment(post.user_id, :posts_count, -1)
+
     Reports.create_system_report(
       "Approval",
       "Post contains external links",
