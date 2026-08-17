@@ -14,7 +14,7 @@ defmodule Philomena.Posts do
   alias Philomena.Repo
 
   alias PhilomenaQuery.Search
-  alias Philomena.Topics.{ForumTopic, Topic}
+  alias Philomena.Topics.Topic
   alias Philomena.Topics
   alias Philomena.Loader
   alias Philomena.ModerationLogs
@@ -24,6 +24,7 @@ defmodule Philomena.Posts do
   alias Philomena.Posts.{Post, PostVersion}
   alias Philomena.Posts
   alias Philomena.IndexWorker
+  alias Philomena.Forums
   alias Philomena.Forums.{Forum, Visibility}
   alias Philomena.Notifications
   alias Philomena.Reports
@@ -32,6 +33,15 @@ defmodule Philomena.Posts do
   alias Philomena.Attribution.Actor
 
   @post_create_window 15
+
+  defp load_post_in_topic(%Actor{} = actor, topic, post_id, action) do
+    with {:ok, post_id} <- Loader.parse_id(post_id) do
+      Post
+      |> where(topic_id: ^topic.id, id: ^post_id)
+      |> preload(topic: :forum, user: [awards: :badge])
+      |> Loader.one_and_authorize(actor, action)
+    end
+  end
 
   defp notify_post(_repo, %{post: post, locked_topic: topic}) do
     Notifications.broadcast_forum_post(post.user, topic, post)
@@ -48,35 +58,6 @@ defmodule Philomena.Posts do
   end
 
   defp broadcast_post_creation(result), do: result
-
-  defp load_editable_post(%Actor{} = actor, forum_slug, topic_slug, post_id, action) do
-    with {:ok, %ForumTopic{topic: topic}} <-
-           Topics.load_forum_topic_struct(actor, forum_slug, topic_slug),
-         :ok <- authorize(actor, :create_post, topic) do
-      load_post_in_topic(actor, topic, post_id, action)
-    end
-  end
-
-  defp load_post_in_topic(%Actor{} = actor, topic, post_id, action, opts \\ []) do
-    with {:ok, post_id} <- Loader.parse_id(post_id) do
-      Post
-      |> where(topic_id: ^topic.id, id: ^post_id)
-      |> maybe_exclude_destroyed(Keyword.get(opts, :exclude_destroyed, false))
-      |> preload(topic: :forum, user: [awards: :badge])
-      |> Loader.one_and_authorize(actor, action)
-    end
-  end
-
-  defp maybe_exclude_destroyed(query, true), do: where(query, destroyed_content: false)
-  defp maybe_exclude_destroyed(query, false), do: query
-
-  defp load_reportable_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, %ForumTopic{topic: topic}} <-
-           Topics.load_forum_topic_struct(actor, forum_slug, topic_slug),
-         {:ok, post} <- load_post_in_topic(actor, topic, post_id, :show) do
-      {:ok, {post.topic, post}}
-    end
-  end
 
   defp put_reindex_post(%Multi{} = multi, step \\ :post) do
     Multi.on_commit(multi, fn %{^step => post} -> reindex_post(post) end)
@@ -172,9 +153,9 @@ defmodule Philomena.Posts do
         ) ::
           {:ok, Post.t()} | {:error, :not_found | :unauthorized}
   def load_topic_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, %ForumTopic{topic: topic}} <-
-           Topics.load_forum_topic_struct(actor, forum_slug, topic_slug) do
-      load_post_in_topic(actor, topic, post_id, :show, exclude_destroyed: true)
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show) do
+      load_post_in_topic(actor, topic, post_id, :show)
     end
   end
 
@@ -197,19 +178,11 @@ defmodule Philomena.Posts do
   @spec load_post(Actor.t(), Loader.integer_id()) ::
           {:ok, Post.t()} | {:error, :not_found | :unauthorized}
   def load_post(%Actor{} = actor, post_id) do
-    with {:ok, post_id} <- Loader.parse_id(post_id),
-         {:ok, post} <-
-           Post
-           |> where([post], post.id == ^post_id and post.destroyed_content == false)
-           |> preload([:user, topic: :forum])
-           |> Loader.one(),
+    with {:ok, post} <- Loader.fetch(Post, post_id, [:user, topic: :forum]),
          :ok <- authorize(actor, :show, post.topic.forum),
          :ok <- authorize(actor, :show, post.topic),
          :ok <- authorize(actor, :show, post) do
       {:ok, post}
-    else
-      {:error, :not_found} -> {:error, :not_found}
-      error -> error
     end
   end
 
@@ -237,30 +210,26 @@ defmodule Philomena.Posts do
   @spec search_posts(Actor.t(), String.t() | nil, Search.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
   def search_posts(%Actor{user: user} = actor, query_string, pagination) do
-    case Posts.Query.compile(query_string, user: user) do
-      {:ok, query} ->
-        results =
-          Post
-          |> Search.search_definition(
-            %{
-              query: %{
-                bool: %{
-                  must: query,
-                  filter: Visibility.search_filters(actor)
-                }
-              },
-              sort: %{created_at: :desc}
+    with {:ok, query} <- Posts.Query.compile(query_string, user: user) do
+      results =
+        Post
+        |> Search.search_definition(
+          %{
+            query: %{
+              bool: %{
+                must: query,
+                filter: Visibility.search_filters(actor)
+              }
             },
-            pagination
-          )
-          |> Search.search_records(
-            preload(Post, [:deleted_by, topic: :forum, user: [awards: :badge]])
-          )
+            sort: %{created_at: :desc}
+          },
+          pagination
+        )
+        |> Search.search_records(
+          preload(Post, [:deleted_by, topic: :forum, user: [awards: :badge]])
+        )
 
-        {:ok, results}
-
-      {:error, msg} ->
-        {:error, msg}
+      {:ok, results}
     end
   end
 
@@ -337,40 +306,13 @@ defmodule Philomena.Posts do
           {:ok, broadcast_post_creation(result)}
 
         {:error, :post, _changeset, %{locked_forum: forum, locked_topic: topic}} ->
+          # TODO: return the changeset
           {:error, forum, topic}
 
         error ->
           map_lock_errors(error)
       end
     end
-  end
-
-  @doc """
-  Creates a system report for non-approved posts containing external images.
-  Returns false for already approved posts.
-
-  ## Returns
-  - `false`: If the post is already approved
-  - `{:ok, %Report{}}`: If a system report was created
-
-  ## Examples
-
-      iex> report_non_approved(approved_post)
-      false
-
-      iex> report_non_approved(unapproved_post)
-      {:ok, %Report{}}
-
-  """
-  @spec report_non_approved(Post.t()) :: false | {:ok, Philomena.Reports.Report.t()}
-  def report_non_approved(%Post{approved: true}), do: false
-
-  def report_non_approved(post) do
-    Reports.create_system_report(
-      "Approval",
-      "Post contains external links",
-      post_id: post.id
-    )
   end
 
   @doc """
@@ -403,7 +345,10 @@ defmodule Philomena.Posts do
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_edit(actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, post} <- load_editable_post(actor, forum_slug, topic_slug, post_id, :edit) do
+         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :create_post),
+         {:ok, post} <- load_post_in_topic(actor, topic, post_id, :edit) do
+      # TODO: caller can just use changeset.data
       {:ok, {post, change_post(post)}}
     end
   end
@@ -470,6 +415,8 @@ defmodule Philomena.Posts do
           {:ok, post}
 
         {:error, :post, changeset, _changes} ->
+          # The public API returns the loaded post so callers can render it.
+          # TODO: caller can just use changeset.data
           {:error, {changeset.data, changeset}}
 
         error ->
@@ -546,7 +493,7 @@ defmodule Philomena.Posts do
 
         {:error, :post, _changeset, %{locked_post: post}} ->
           # The public API returns the loaded post so callers can render it.
-          # TODO: return the changeset?
+          # TODO: caller can just use changeset.data
           {:error, post}
 
         error ->
@@ -872,8 +819,8 @@ defmodule Philomena.Posts do
           {:ok, {Topic.t(), Post.t(), [PostVersion.t()]}}
           | {:error, :unauthorized | :not_found}
   def post_history(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, %ForumTopic{topic: topic}} <-
-           Topics.load_forum_topic_struct(actor, forum_slug, topic_slug),
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show),
          {:ok, post} <- load_post_in_topic(actor, topic, post_id, :show) do
       {:ok, {topic, post, Versions.for_post(post)}}
     end
@@ -899,8 +846,9 @@ defmodule Philomena.Posts do
         ) ::
           {:ok, Post.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, {_topic, post}} <-
-           load_reportable_post(actor, forum_slug, topic_slug, post_id) do
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show),
+         {:ok, post} <- load_post_in_topic(actor, topic, post_id, :show) do
       {:ok, post}
     end
   end
