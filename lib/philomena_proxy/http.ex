@@ -82,7 +82,7 @@ defmodule PhilomenaProxy.Http do
     request(:post, url, body, headers)
   end
 
-  @spec request(atom(), String.t(), iodata(), header_list()) :: result()
+  @spec request(atom(), String.t(), iodata() | nil, header_list()) :: result()
   defp request(method, url, body, headers) do
     [
       method: method,
