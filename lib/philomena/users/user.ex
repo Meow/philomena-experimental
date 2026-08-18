@@ -108,7 +108,7 @@ defmodule Philomena.Users.User do
     field :uploaded_avatar, :string, virtual: true
     field :removed_avatar, :string, virtual: true
 
-    # For mod stuff
+    # For authorization
     field :role_map, :any, virtual: true
 
     timestamps(inserted_at: :created_at, type: :utc_datetime)
@@ -250,7 +250,7 @@ defmodule Philomena.Users.User do
     change(user, locked_at: nil, failed_attempts: 0)
   end
 
-  def changeset(user, attrs) do
+  def changeset(user, attrs \\ %{}) do
     cast(user, attrs, [])
   end
 

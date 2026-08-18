@@ -23,9 +23,6 @@ defmodule PhilomenaWeb.UserAttributionPlug do
     user = conn.assigns.current_user
     fingerprint = fingerprint(conn, conn.path_info)
 
-    # Unfortunately, Elixir has no support for annotating a type of variable, so
-    # just make sure the shape of this keyword list satisfies the type
-    # `Philomena.Users.principal`
     principal = [
       ip: remote_ip,
       fingerprint: fingerprint,

@@ -60,16 +60,6 @@ defmodule Philomena.Users do
   alias Philomena.UserUnvoteWorker
   alias Philomena.UserWipeWorker
 
-  @typedoc """
-  Describes the entity performing the action.
-  The term `principal` was borrowed from AWS IAM terminology.
-  """
-  @type principal :: [
-          ip: EctoNetwork.INET.t(),
-          fingerprint: String.t(),
-          user: %User{} | nil
-        ]
-
   # Shared forms, locators, and staff transaction composition.
 
   defp user_form(%User{} = user, changeset \\ nil) do
@@ -156,7 +146,10 @@ defmodule Philomena.Users do
   end
 
   defp user_email_multi(user, email, context) do
-    changeset = user |> User.email_changeset(%{email: email}) |> User.confirm_changeset()
+    changeset =
+      user
+      |> User.email_changeset(%{email: email})
+      |> User.confirm_changeset()
 
     Multi.new()
     |> Multi.update(:user, changeset)
@@ -178,10 +171,6 @@ defmodule Philomena.Users do
   end
 
   # Settings, role assignment, and user searches.
-
-  defp change_user(%User{} = user) do
-    User.changeset(user, %{})
-  end
 
   defp update_user_changeset(user, attrs) do
     with {:ok, role_ids} <- parse_role_ids(attrs["roles"]),
@@ -1231,7 +1220,7 @@ defmodule Philomena.Users do
 
   """
   @spec settings_changeset(User.t()) :: Ecto.Changeset.t()
-  def settings_changeset(%User{} = user), do: change_user(user)
+  def settings_changeset(%User{} = user), do: User.changeset(user)
 
   @doc """
   Returns the filter-selection changeset for a loaded user.
@@ -1243,7 +1232,7 @@ defmodule Philomena.Users do
 
   """
   @spec filter_selection_changeset(User.t()) :: Ecto.Changeset.t()
-  def filter_selection_changeset(%User{} = user), do: change_user(user)
+  def filter_selection_changeset(%User{} = user), do: User.changeset(user)
 
   @doc """
   Returns the TOTP form changeset for a loaded user.
@@ -1255,7 +1244,7 @@ defmodule Philomena.Users do
 
   """
   @spec totp_changeset(User.t()) :: Ecto.Changeset.t()
-  def totp_changeset(%User{} = user), do: change_user(user)
+  def totp_changeset(%User{} = user), do: User.changeset(user)
 
   ## Administration
 
