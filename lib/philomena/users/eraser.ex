@@ -15,6 +15,7 @@ defmodule Philomena.Users.Eraser do
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.Reports
   alias Philomena.Users
+  alias Philomena.Multi
 
   @reason "Site abuse"
   @wipe_ip %Postgrex.INET{address: {127, 0, 1, 1}, netmask: 32}
@@ -87,7 +88,10 @@ defmodule Philomena.Users.Eraser do
       )
 
     # Close all reports against the user
-    {:ok, _} = Reports.close_reports(moderator, reported_user_id: user.id)
+    {:ok, _changes} =
+      Multi.new()
+      |> Reports.put_close_reports(:close_reports, moderator, reported_user_id: user.id)
+      |> Multi.transact()
 
     # We succeeded
     :ok

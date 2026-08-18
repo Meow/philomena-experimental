@@ -23,6 +23,7 @@ defmodule Philomena.ReportsTest do
   alias Philomena.Images.Image
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Posts.Post
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Reports
   alias Philomena.Reports.Report
@@ -422,8 +423,11 @@ defmodule Philomena.ReportsTest do
       report = report_fixture(image_id: image.id)
       moderator = moderator_user_fixture()
 
-      assert {:ok, {1, [report_id]}} = Reports.close_reports(moderator, image_id: image.id)
-      assert report_id == report.id
+      {:ok, _} =
+        Multi.new()
+        |> Reports.put_close_reports(:reports, moderator, image_id: image.id)
+        |> Multi.transact()
+
       closed = Repo.get!(Report, report.id)
       refute closed.open
       assert closed.admin_id == moderator.id
@@ -433,11 +437,18 @@ defmodule Philomena.ReportsTest do
       image = image_fixture()
       rule = rule_fixture()
 
-      assert {:ok, %Report{system: true}} =
-               Reports.create_system_report(rule.name, "Automated review", image_id: image.id)
+      {:ok, _} =
+        Multi.new()
+        |> Reports.put_create_system_report(rule.name, "Automated review", :image_id, image.id)
+        |> Multi.transact()
 
-      assert Reports.create_system_report("missing rule", "reason", image_id: image.id) ==
-               {:error, :not_found}
+      assert Repo.aggregate(where(Report, system: true), :count) == 1
+
+      assert_raise(MatchError, fn ->
+        Multi.new()
+        |> Reports.put_create_system_report("missing rule", "reason", :image_id, image.id)
+        |> Multi.transact()
+      end)
     end
   end
 

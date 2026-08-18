@@ -580,65 +580,6 @@ defmodule Philomena.Reports do
   end
 
   @doc """
-  Closes and reindexes reports for one trusted, already loaded target.
-
-  This service is reserved for non-controller erasure workflows that cannot
-  compose the close into a larger `Ecto.Multi`.
-
-  ## Examples
-
-      iex> close_reports(moderator, reported_user_id: user.id)
-      {:ok, {2, [1, 2]}}
-
-  """
-  @spec close_reports(User.t(), keyword()) :: {:ok, {non_neg_integer(), [integer()]}}
-  def close_reports(%User{} = closing_user, target) do
-    result = Repo.update_all(close_report_query(closing_user, target), [])
-    {_count, report_ids} = result
-    reindex_closed_reports(report_ids)
-    {:ok, result}
-  end
-
-  @doc """
-  Creates and indexes an internal system report for an already loaded target.
-
-  The rule name must identify a reportable rule. This trusted service is used by
-  owning contexts after their target has been created or moderated.
-
-  ## Examples
-
-      iex> create_system_report("Approval", "Needs review", comment_id: comment.id)
-      {:ok, %Report{system: true}}
-
-      iex> create_system_report("Missing", "Needs review", comment_id: comment.id)
-      {:error, :not_found}
-
-  """
-  @spec create_system_report(String.t(), String.t(), keyword()) ::
-          {:ok, Report.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def create_system_report(rule_name, reason, target) do
-    with {:ok, rule} <- Rules.fetch_rule_by_name(rule_name) do
-      attrs = %{reason: reason, user_agent: "system"}
-
-      actor = %Actor{
-        ip: %Postgrex.INET{address: {127, 0, 0, 1}, netmask: 32},
-        fingerprint: "ffff"
-      }
-
-      result =
-        target
-        |> then(&struct(Report, &1))
-        |> Report.system_creation_changeset(attrs, actor, rule)
-        |> Repo.insert()
-
-      case result do
-        {:ok, report} -> {:ok, reindex_report(report)}
-        error -> error
-      end
-    end
-  end
-
-  @doc """
   Creates an internal system report within the transaction described by `multi`.
 
   The rule name must identify a reportable rule. This trusted service is used by

@@ -6,6 +6,7 @@ defmodule Philomena.ConversationsFixtures do
 
   alias Philomena.Conversations.Conversation
   alias Philomena.Conversations.Message
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Reports
 
@@ -68,11 +69,14 @@ defmodule Philomena.ConversationsFixtures do
   defp report_non_approved_message(%Message{approved: true}), do: :ok
 
   defp report_non_approved_message(%Message{} = message) do
-    Reports.create_system_report(
+    Multi.new()
+    |> Reports.put_create_system_report(
       "Approval",
       "PM contains externally-embedded images",
-      conversation_id: message.conversation_id
+      :conversation_id,
+      message.conversation_id
     )
+    |> Multi.transact()
 
     :ok
   end

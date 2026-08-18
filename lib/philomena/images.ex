@@ -1647,12 +1647,15 @@ defmodule Philomena.Images do
     UserStatistics.increment(user, :images_count)
   end
 
-  defp maybe_suggest_user_verification(%User{id: id, images_count: 5, verified: false}) do
-    Reports.create_system_report(
+  defp maybe_suggest_user_verification(%User{id: user_id, images_count: 5, verified: false}) do
+    Multi.new()
+    |> Reports.put_create_system_report(
       "Verification",
       "User has uploaded enough approved images to be considered for verification.",
-      reported_user_id: id
+      :reported_user_id,
+      user_id
     )
+    |> Multi.transact()
   end
 
   defp maybe_suggest_user_verification(_user), do: false
