@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Topic.Post.ApproveController do
         |> put_flash(:info, "Post successfully approved.")
         |> redirect(to: post_anchor(post))
 
-      {:error, %Post{} = post} ->
+      {:error, %Ecto.Changeset{data: %Post{} = post}} ->
         conn
         |> put_flash(:info, "Post has already been approved.")
         |> redirect(to: post_anchor(post))

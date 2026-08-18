@@ -18,7 +18,7 @@ defmodule PhilomenaWeb.Topic.Post.HideController do
         |> put_flash(:info, "Post successfully deleted.")
         |> redirect(to: post_anchor(post))
 
-      {:error, %Post{} = post} ->
+      {:error, %Ecto.Changeset{data: %Post{} = post}} ->
         conn
         |> put_flash(:error, "Unable to delete post!")
         |> redirect(to: post_anchor(post))
@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.Topic.Post.HideController do
         |> put_flash(:info, "Post successfully restored.")
         |> redirect(to: post_anchor(post))
 
-      {:error, %Post{} = post} ->
+      {:error, %Ecto.Changeset{data: %Post{} = post}} ->
         conn
         |> put_flash(:error, "Unable to restore post!")
         |> redirect(to: post_anchor(post))

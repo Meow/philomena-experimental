@@ -25,7 +25,7 @@ defmodule Philomena.PostsFixtures do
         {admin_user_fixture(), Map.put(attrs, "anonymous", "true")}
       end
 
-    {:ok, %{post: post}} =
+    {:ok, post} =
       Posts.create_post(
         actor(actor_user, ip: random_ip()),
         topic.forum.short_name,

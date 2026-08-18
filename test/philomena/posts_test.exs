@@ -27,7 +27,6 @@ defmodule Philomena.PostsTest do
   alias Philomena.Reports.Report
   alias Philomena.Forums.Forum
   alias Philomena.Repo
-  alias Philomena.Topics.Topic
   alias Philomena.Users.User
 
   # A truthy ban value in the shape production passes (the result of
@@ -316,7 +315,7 @@ defmodule Philomena.PostsTest do
          %{topic: topic} do
       post = visible_post(topic)
 
-      assert {:error, %Post{} = returned} =
+      assert {:error, %Ecto.Changeset{data: %Post{} = returned}} =
                hide_post(actor(moderator_user_fixture()), "#{post.id}", %{
                  "deletion_reason" => ""
                })
@@ -760,25 +759,25 @@ defmodule Philomena.PostsTest do
       # actor(nil) carries the shared fingerprint, so it clears verify_write_access
       # and reaches the public forum/topic create; the engine records the post
       # with a nil user (anonymous attribution).
-      assert {:ok, %{post: %Post{} = post, topic: returned_topic, forum: returned_forum}} =
+      assert {:ok, %Post{} = post} =
                Posts.create_post(actor(nil), forum.short_name, topic.slug, %{
                  "body" => "An anonymous reply"
                })
 
       assert post.user_id == nil
       assert post.body == "An anonymous reply"
-      assert returned_topic.id == topic.id
-      assert returned_forum.id == forum.id
+      assert post.topic.id == topic.id
+      assert post.topic.forum.id == forum.id
 
       # The topic carries its author preloaded for the firehose broadcast.
-      assert %{user: _} = returned_topic
+      assert %{user: _} = post.topic
     end
 
     test "a signed-in actor creates a post attributed to the user",
          %{forum: forum, topic: topic} do
       user = confirmed_user_fixture()
 
-      assert {:ok, %{post: %Post{} = post}} =
+      assert {:ok, %Post{} = post} =
                Posts.create_post(actor(user), forum.short_name, topic.slug, %{
                  "body" => "A logged-in reply"
                })
@@ -818,13 +817,13 @@ defmodule Philomena.PostsTest do
 
     test "a blank body is a rejected insert carrying the forum and topic",
          %{forum: forum, topic: topic} do
-      assert {:error, %Forum{} = returned_forum, %Topic{} = returned_topic} =
+      assert {:error, %Ecto.Changeset{data: %Post{} = returned}} =
                Posts.create_post(actor(confirmed_user_fixture()), forum.short_name, topic.slug, %{
                  "body" => ""
                })
 
-      assert returned_forum.id == forum.id
-      assert returned_topic.id == topic.id
+      assert returned.topic.id == topic.id
+      assert returned.topic.forum.id == forum.id
 
       # No reply was inserted beyond the topic's own first post.
       assert Repo.aggregate(from(p in Post, where: p.topic_id == ^topic.id), :count) == 1
@@ -837,7 +836,7 @@ defmodule Philomena.PostsTest do
       author = confirmed_user_fixture()
       before = Repo.get!(User, author.id).posts_count
 
-      assert {:ok, %{post: post}} =
+      assert {:ok, post} =
                Posts.create_post(actor(author), forum.short_name, topic.slug, %{
                  "body" => "A trustworthy reply"
                })
@@ -852,7 +851,7 @@ defmodule Philomena.PostsTest do
       before = Repo.get!(User, author.id).posts_count
       approval_rule!()
 
-      assert {:ok, %{post: post}} =
+      assert {:ok, post} =
                Posts.create_post(actor(author), forum.short_name, topic.slug, %{
                  "body" => "A reply containing https://spam.example/"
                })
@@ -880,7 +879,7 @@ defmodule Philomena.PostsTest do
       actor = actor(confirmed_user_fixture())
       track_rate_limit(actor, :post_create)
 
-      assert {:ok, %{post: %Post{}}} =
+      assert {:ok, %Post{}} =
                Posts.create_post(actor, forum.short_name, topic.slug, %{"body" => "A reply"})
 
       assert rate_limit_count(actor, :post_create) == "1"
@@ -921,7 +920,7 @@ defmodule Philomena.PostsTest do
       author = confirmed_user_fixture()
       post = post_fixture(topic, author)
 
-      assert {:ok, {%Post{} = loaded, %Ecto.Changeset{} = changeset}} =
+      assert {:ok, %Ecto.Changeset{data: %Post{} = loaded} = changeset} =
                Posts.load_post_for_edit(actor(author), forum.short_name, topic.slug, "#{post.id}")
 
       assert loaded.id == post.id
@@ -946,7 +945,7 @@ defmodule Philomena.PostsTest do
     test "a moderator loads the form", %{forum: forum, topic: topic} do
       post = post_fixture(topic, confirmed_user_fixture())
 
-      assert {:ok, {%Post{} = loaded, %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: %Post{} = loaded}} =
                Posts.load_post_for_edit(
                  actor(moderator_user_fixture()),
                  forum.short_name,
@@ -1056,7 +1055,7 @@ defmodule Philomena.PostsTest do
       author = confirmed_user_fixture()
       post = post_fixture(topic, author, %{"body" => "Original reply body"})
 
-      assert {:error, {%Post{} = returned, %Ecto.Changeset{}}} =
+      assert {:error, %Ecto.Changeset{data: %Post{} = returned}} =
                Posts.update_post(actor(author), forum.short_name, topic.slug, "#{post.id}", %{
                  "body" => ""
                })

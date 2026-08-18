@@ -125,7 +125,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
 
     results = concurrently(functions)
 
-    assert Enum.all?(results, &match?({:ok, %{post: %Post{}}}, &1))
+    assert Enum.all?(results, &match?({:ok, %Post{}}, &1))
     assert_topic_caches(topic)
     assert_forum_caches(forum)
   end
@@ -319,7 +319,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
 
     assert match?({:ok, %Post{}}, destroy_result)
 
-    assert match?({:error, %Post{}}, approval_result) or
+    assert match?({:error, %Ecto.Changeset{}}, approval_result) or
              match?({:ok, %Post{}}, approval_result)
 
     reloaded_post = Repo.reload!(post)
@@ -353,8 +353,12 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
       ])
 
     assert Enum.count([destroy_result, unhide_result], &match?({:ok, %Post{}}, &1)) == 1
-    assert match?({:ok, %Post{}}, destroy_result) or match?({:error, %Post{}}, destroy_result)
-    assert match?({:ok, %Post{}}, unhide_result) or match?({:error, %Post{}}, unhide_result)
+
+    assert match?({:ok, %Post{}}, destroy_result) or
+             match?({:error, %Ecto.Changeset{}}, destroy_result)
+
+    assert match?({:ok, %Post{}}, unhide_result) or
+             match?({:error, %Ecto.Changeset{}}, unhide_result)
 
     reloaded_post = Repo.reload!(post)
 

@@ -142,7 +142,8 @@ defmodule Philomena.Forums.TransactionWorkflow do
           exists(
             from forum in forum_query,
               where: parent_as(:topic).forum_id == forum.id
-          )
+          ),
+        preload: :forum
 
     multi
     |> Multi.lock_one(:locked_forum, forum_query)

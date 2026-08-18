@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Topic.Post.DeleteController do
         |> put_flash(:info, "Post successfully destroyed!")
         |> redirect(to: post_anchor(post))
 
-      {:error, %Post{} = post} ->
+      {:error, %Ecto.Changeset{data: %Post{} = post}} ->
         conn
         |> put_flash(:error, "Unable to destroy post!")
         |> redirect(to: post_anchor(post))

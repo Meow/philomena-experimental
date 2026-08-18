@@ -25,7 +25,7 @@ defmodule Philomena.Posts do
   alias Philomena.Posts
   alias Philomena.IndexWorker
   alias Philomena.Forums
-  alias Philomena.Forums.{Forum, Visibility}
+  alias Philomena.Forums.Visibility
   alias Philomena.Notifications
   alias Philomena.Reports
   alias Philomena.Versions
@@ -250,8 +250,8 @@ defmodule Philomena.Posts do
 
   ## Return shapes
 
-  - `{:ok, %{post: post, topic: topic, forum: forum}}` on success
-  - `{:error, forum, topic}` when the insert is rejected (both carry the topic for the caller to reuse)
+  - `{:ok, post}` on success (the post carries its topic and forum)
+  - `{:error, changeset}` when the insert is rejected
   - `{:error, :ban}` or `{:error, :unauthorized}` from the write-access check
   - `{:error, :unauthorized}` when the forum or topic is not visible or the topic may not be posted in
   - `{:error, :not_found}` when the topic does not exist
@@ -260,10 +260,10 @@ defmodule Philomena.Posts do
   ## Examples
 
       iex> create_post(actor, "dis", "some-topic", %{"body" => "Hi"})
-      {:ok, %{post: %Post{}, topic: %Topic{}, forum: %Forum{}}}
+      {:ok, %Post{}}
 
       iex> create_post(actor, "dis", "some-topic", %{"body" => ""})
-      {:error, %Forum{}, %Topic{}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec create_post(
@@ -272,8 +272,8 @@ defmodule Philomena.Posts do
           topic_slug :: String.t(),
           params :: map()
         ) ::
-          {:ok, %{post: Post.t(), topic: Topic.t(), forum: Forum.t()}}
-          | {:error, Forum.t(), Topic.t()}
+          {:ok, Post.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited}
   def create_post(%Actor{user: creator} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
@@ -284,6 +284,7 @@ defmodule Philomena.Posts do
       |> Multi.insert(:post, fn %{max_topic_position: max_topic_position, locked_topic: topic} ->
         topic
         |> Ecto.build_assoc(:posts, topic_position: (max_topic_position || -1) + 1)
+        |> Map.put(:topic, topic)
         |> Post.creation_changeset(params, actor)
       end)
       |> put_post_topic_visibility_counters(visible?: true)
@@ -297,17 +298,20 @@ defmodule Philomena.Posts do
       |> put_reindex_post()
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_forum: forum, locked_topic: topic, post: post}} ->
+        {:ok, %{locked_forum: forum, post: post}} ->
           RateLimiter.record_action(actor, :post_create, @post_create_window)
 
           # The firehose representation includes the topic author.
-          result = %{post: post, topic: Repo.preload(topic, :user), forum: forum}
+          broadcast_post_creation(%{
+            post: post,
+            topic: Repo.preload(post.topic, :user),
+            forum: forum
+          })
 
-          {:ok, broadcast_post_creation(result)}
+          {:ok, post}
 
-        {:error, :post, _changeset, %{locked_forum: forum, locked_topic: topic}} ->
-          # TODO: return the changeset
-          {:error, forum, topic}
+        {:error, :post, changeset, _changes} ->
+          {:error, changeset}
 
         error ->
           map_lock_errors(error)
@@ -323,8 +327,8 @@ defmodule Philomena.Posts do
   The same full write-access check used by update runs first. The forum, topic,
   and post are then parent-scoped and authorized for `:edit`.
 
-  Returns `{:ok, {post, changeset}}` - the post (with its topic, forum, and
-  author preloaded) and a change-tracking changeset for it -
+  Returns `{:ok, changeset}` - the changeset's data is the post with its topic,
+  forum, and author preloaded -
   `{:error, :ban}` for a banned actor, `{:error, :unauthorized}` when the forum,
   topic, or post is not visible or may not be edited, or `{:error, :not_found}`
   when the topic or post does not exist.
@@ -332,7 +336,7 @@ defmodule Philomena.Posts do
   ## Examples
 
       iex> load_post_for_edit(actor, "dis", "some-topic", "1")
-      {:ok, {%Post{}, %Ecto.Changeset{}}}
+      {:ok, %Ecto.Changeset{}}
 
   """
   @spec load_post_for_edit(
@@ -341,15 +345,14 @@ defmodule Philomena.Posts do
           topic_slug :: String.t(),
           Loader.integer_id()
         ) ::
-          {:ok, {Post.t(), Ecto.Changeset.t()}}
+          {:ok, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
   def load_post_for_edit(actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
          {:ok, forum} <- Forums.load_forum(actor, forum_slug),
          {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :create_post),
          {:ok, post} <- load_post_in_topic(actor, topic, post_id, :edit) do
-      # TODO: caller can just use changeset.data
-      {:ok, {post, change_post(post)}}
+      {:ok, change_post(post)}
     end
   end
 
@@ -366,7 +369,7 @@ defmodule Philomena.Posts do
   ## Return shapes
 
   - `{:ok, post}` on success (the post carries its topic and forum for the caller to reuse)
-  - `{:error, {post, changeset}}` when the edit is rejected
+  - `{:error, changeset}` when the edit is rejected; `changeset.data` is the loaded post
   - `{:error, :ban}` or `{:error, :unauthorized}` from the write-access check
   - `{:error, :unauthorized}` when the forum, topic, or post is not visible or may not be edited
   - `{:error, :not_found}` when the topic or post does not exist
@@ -377,7 +380,7 @@ defmodule Philomena.Posts do
       {:ok, %Post{}}
 
       iex> update_post(actor, "dis", "some-topic", "1", %{"body" => ""})
-      {:error, {%Post{}, %Ecto.Changeset{}}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec update_post(
@@ -388,7 +391,7 @@ defmodule Philomena.Posts do
           params :: map()
         ) ::
           {:ok, Post.t()}
-          | {:error, {Post.t(), Ecto.Changeset.t()}}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
   def update_post(%Actor{} = actor, forum_slug, topic_slug, post_id, params) do
     with :ok <- verify_write_access(actor),
@@ -415,9 +418,7 @@ defmodule Philomena.Posts do
           {:ok, post}
 
         {:error, :post, changeset, _changes} ->
-          # The public API returns the loaded post so callers can render it.
-          # TODO: caller can just use changeset.data
-          {:error, {changeset.data, changeset}}
+          {:error, changeset}
 
         error ->
           map_lock_errors(error)
@@ -437,7 +438,7 @@ defmodule Philomena.Posts do
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
   preloaded so the caller can reuse them for either outcome.
   A rejected hide changeset (e.g. a blank deletion reason) returns
-  `{:error, %Post{}}` carrying the loaded post.
+  `{:error, changeset}` carrying the loaded post in `changeset.data`.
 
   ## Examples
 
@@ -445,7 +446,7 @@ defmodule Philomena.Posts do
       {:ok, %Post{}}
 
       iex> hide_post(moderator_actor, "dis", "some-topic", "1", %{"deletion_reason" => ""})
-      {:error, %Post{}}
+      {:error, %Ecto.Changeset{}}
 
       iex> hide_post(user_actor, "dis", "some-topic", "1", %{"deletion_reason" => "Spam"})
       {:error, :unauthorized}
@@ -454,7 +455,7 @@ defmodule Philomena.Posts do
   @spec hide_post(Actor.t(), String.t(), String.t(), Loader.integer_id(), map()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
-          | {:error, Post.t()}
+          | {:error, Ecto.Changeset.t()}
   def hide_post(%Actor{user: user} = actor, forum_slug, topic_slug, post_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
@@ -491,10 +492,8 @@ defmodule Philomena.Posts do
         {:ok, %{post: post}} ->
           {:ok, post}
 
-        {:error, :post, _changeset, %{locked_post: post}} ->
-          # The public API returns the loaded post so callers can render it.
-          # TODO: caller can just use changeset.data
-          {:error, post}
+        {:error, :post, changeset, _changes} ->
+          {:error, changeset}
 
         error ->
           map_lock_errors(error)
@@ -511,7 +510,7 @@ defmodule Philomena.Posts do
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
   preloaded so the caller can reuse them. A rejected restore
-  returns `{:error, %Post{}}` carrying the loaded post.
+  returns `{:error, changeset}` carrying the loaded post in `changeset.data`.
 
   ## Examples
 
@@ -525,7 +524,7 @@ defmodule Philomena.Posts do
   @spec unhide_post(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
-          | {:error, Post.t()}
+          | {:error, Ecto.Changeset.t()}
   def unhide_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
@@ -559,10 +558,8 @@ defmodule Philomena.Posts do
         {:ok, %{post: post}} ->
           {:ok, post}
 
-        {:error, :post, _changeset, %{locked_post: post}} ->
-          # The public API returns the loaded post so callers can render it.
-          # TODO: return the changeset?
-          {:error, post}
+        {:error, :post, changeset, _changes} ->
+          {:error, changeset}
 
         error ->
           map_lock_errors(error)
@@ -581,7 +578,8 @@ defmodule Philomena.Posts do
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
   preloaded so the caller can reuse them for either outcome.
-  A failed destroy returns `{:error, %Post{}}` carrying the loaded post.
+  A failed destroy returns `{:error, changeset}` carrying the loaded post in
+  `changeset.data`.
 
   ## Examples
 
@@ -598,7 +596,7 @@ defmodule Philomena.Posts do
   @spec destroy_post(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
-          | {:error, Post.t()}
+          | {:error, Ecto.Changeset.t()}
   def destroy_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
@@ -639,10 +637,8 @@ defmodule Philomena.Posts do
         {:ok, %{post: post}} ->
           {:ok, post}
 
-        {:error, :post, _changeset, %{locked_post: post}} ->
-          # The public API returns the loaded post so callers can render it.
-          # TODO: return the changeset?
-          {:error, post}
+        {:error, :post, changeset, _changes} ->
+          {:error, changeset}
 
         error ->
           map_lock_errors(error)
@@ -719,7 +715,8 @@ defmodule Philomena.Posts do
 
   The post is loaded (and returned) with its `:topic` and the topic's `:forum`
   preloaded so the caller can reuse them for either outcome. A failed approval
-  changeset returns `{:error, %Post{}}` carrying the loaded post.
+  changeset returns `{:error, changeset}` carrying the loaded post in
+  `changeset.data`.
 
   ## Examples
 
@@ -736,7 +733,7 @@ defmodule Philomena.Posts do
   @spec approve_post(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
-          | {:error, Post.t()}
+          | {:error, Ecto.Changeset.t()}
   def approve_post(%Actor{user: user} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
@@ -770,10 +767,8 @@ defmodule Philomena.Posts do
         {:ok, %{post: post}} ->
           {:ok, post}
 
-        {:error, :post, _changeset, %{locked_post: post}} ->
-          # The public API returns the loaded post so callers can render it.
-          # TODO: return the changeset?
-          {:error, post}
+        {:error, :post, changeset, _changes} ->
+          {:error, changeset}
 
         error ->
           map_lock_errors(error)
@@ -842,7 +837,7 @@ defmodule Philomena.Posts do
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
-          Loader.integer_id()
+          post_id :: Loader.integer_id()
         ) ::
           {:ok, Post.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, forum_slug, topic_slug, post_id) do
