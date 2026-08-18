@@ -638,7 +638,7 @@ defmodule PhilomenaQuery.Search do
   @doc ~S"""
   Search the index named by the module.
 
-  `GET /#{index_name}/_search`
+  `POST /#{index_name}/_search`
 
   Given a query body, this returns the raw query results.
 
@@ -670,7 +670,7 @@ defmodule PhilomenaQuery.Search do
   @doc ~S"""
   Given maps of module and body, searches each index with the respective body.
 
-  `GET /_all/_search`
+  `POST /_msearch`
 
   This is more efficient than performing a `search/1` for each index individually.
   Like `search/1`, this returns the raw query results.
