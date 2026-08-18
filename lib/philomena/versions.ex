@@ -23,26 +23,9 @@ defmodule Philomena.Versions do
   alias Philomena.Repo
   alias Philomena.Users.User
 
-  defp load_versions(schema, foreign_key, parent) do
-    schema
-    |> where([version], field(version, ^foreign_key) == ^parent.id)
-    |> order_by(desc: :created_at, desc: :id)
-    |> limit(26)
-    |> preload(user: [awards: :badge])
-    |> Repo.all()
-    |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.map(fn [version, previous] ->
-      %{version | parent: parent, previous_body: previous.body}
-    end)
-  end
-
   defp meaningful_edit?(original, updated) do
-    normalized_text(original.body) != normalized_text(updated.body) or
-      original.edit_reason != updated.edit_reason
+    original.body != updated.body or original.edit_reason != updated.edit_reason
   end
-
-  defp normalized_text(nil), do: ""
-  defp normalized_text(text), do: text
 
   defp maybe_insert_initial(repo, schema, foreign_key, original) do
     if repo.exists?(where(schema, [version], field(version, ^foreign_key) == ^original.id)) do
@@ -52,7 +35,7 @@ defmodule Philomena.Versions do
       |> struct([
         {foreign_key, original.id},
         {:user_id, original.user_id},
-        {:body, normalized_text(original.body)},
+        {:body, original.body},
         {:created_at, original.created_at}
       ])
       |> repo.insert()
@@ -68,7 +51,7 @@ defmodule Philomena.Versions do
     |> struct([
       {foreign_key, updated.id},
       {:user_id, editor_id},
-      {:body, normalized_text(updated.body)},
+      {:body, updated.body},
       {:edit_reason, updated.edit_reason}
     ])
     |> repo.insert()
@@ -82,6 +65,19 @@ defmodule Philomena.Versions do
     else
       {:ok, nil}
     end
+  end
+
+  defp load_versions(schema, foreign_key, parent) do
+    schema
+    |> where([version], field(version, ^foreign_key) == ^parent.id)
+    |> order_by(desc: :created_at, desc: :id)
+    |> limit(26)
+    |> preload(user: [awards: :badge])
+    |> Repo.all()
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.map(fn [version, previous] ->
+      %{version | parent: parent, previous_body: previous.body}
+    end)
   end
 
   @doc """
