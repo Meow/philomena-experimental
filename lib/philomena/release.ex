@@ -76,7 +76,7 @@ defmodule Philomena.Release do
 
   def convert_reports do
     start_app()
-    Philomena.Reports.convert_reports!()
+    Philomena.Reports.LegacyConverter.convert_reports!()
   end
 
   def backfill_versions do
