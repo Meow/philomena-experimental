@@ -204,9 +204,9 @@ defmodule Philomena.ImageInteractionsTest do
 
     assert %{
              interaction_hides: 1,
-             interaction_faves: 1,
-             interaction_upvotes: 1,
-             interaction_downvotes: 1,
+             interaction_faves: {1, _},
+             interaction_upvotes: {1, _},
+             interaction_downvotes: {1, _},
              interaction_image: 1
            } =
              Multi.new()

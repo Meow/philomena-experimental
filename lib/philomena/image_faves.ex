@@ -27,10 +27,10 @@ defmodule Philomena.ImageFaves do
     |> Multi.delete_all(:unfave, fave_query)
     |> Multi.run(:dec_faves_count, fn repo, %{unfave: {faves, nil}} ->
       {count, nil} = repo.update_all(image_query, inc: [faves_count: -faves])
-
-      with {:ok, _statistic} <- UserStatistics.increment(user, :image_faves_count, -faves) do
-        {:ok, count}
-      end
+      {:ok, count}
+    end)
+    |> Multi.merge(fn %{unfave: {faves, nil}} ->
+      UserStatistics.put_increment(Multi.new(), user, :image_faves_count, -faves)
     end)
   end
 
@@ -64,9 +64,7 @@ defmodule Philomena.ImageFaves do
     |> delete_fave_steps(image, user)
     |> Multi.insert(:fave, fave)
     |> Multi.update_all(:inc_faves_count, image_query, inc: [faves_count: 1])
-    |> Multi.run(:inc_fave_stat, fn _repo, _changes ->
-      UserStatistics.increment(user, :image_faves_count, 1)
-    end)
+    |> UserStatistics.put_increment(user, :image_faves_count, 1)
   end
 
   @doc """

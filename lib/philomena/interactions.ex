@@ -104,14 +104,6 @@ defmodule Philomena.Interactions do
     Enum.map(voters, &%{image_id: target.id, user_id: &1.id, created_at: created_at, up: up})
   end
 
-  defp increment_user_statistics([], _statistic), do: {:ok, nil}
-
-  defp increment_user_statistics([%{user_id: user_id} | rest], statistic) do
-    with {:ok, nil} <- UserStatistics.increment(user_id, statistic, 1) do
-      increment_user_statistics(rest, statistic)
-    end
-  end
-
   @doc """
   Lists `actor`'s interactions with all supplied images.
 
@@ -152,7 +144,8 @@ defmodule Philomena.Interactions do
   The added changes are named `:interaction_source`, `:interaction_hides`,
   `:interaction_faves`, `:interaction_upvotes`, `:interaction_downvotes`, and
   `:interaction_image`, keeping all copies and counter changes in the owner's
-  transaction.
+  transaction. The fave and vote changes retain the inserted rows so their
+  user statistics can be incremented in bulk.
 
   ## Examples
 
@@ -179,9 +172,14 @@ defmodule Philomena.Interactions do
           returning: [:user_id]
         )
 
-      with {:ok, nil} <- increment_user_statistics(rows, :image_faves_count) do
-        {:ok, count}
-      end
+      {:ok, {count, rows}}
+    end)
+    |> Multi.merge(fn %{interaction_faves: {_count, rows}} ->
+      UserStatistics.put_bulk_increment(
+        Multi.new(),
+        Enum.map(rows, & &1.user_id),
+        :image_faves_count
+      )
     end)
     |> Multi.run(:interaction_upvotes, fn repo, %{interaction_source: interactions} ->
       {count, rows} =
@@ -190,9 +188,14 @@ defmodule Philomena.Interactions do
           returning: [:user_id]
         )
 
-      with {:ok, nil} <- increment_user_statistics(rows, :image_votes_count) do
-        {:ok, count}
-      end
+      {:ok, {count, rows}}
+    end)
+    |> Multi.merge(fn %{interaction_upvotes: {_count, rows}} ->
+      UserStatistics.put_bulk_increment(
+        Multi.new(),
+        Enum.map(rows, & &1.user_id),
+        :image_votes_count
+      )
     end)
     |> Multi.run(:interaction_downvotes, fn repo, %{interaction_source: interactions} ->
       {count, rows} =
@@ -201,16 +204,21 @@ defmodule Philomena.Interactions do
           returning: [:user_id]
         )
 
-      with {:ok, nil} <- increment_user_statistics(rows, :image_votes_count) do
-        {:ok, count}
-      end
+      {:ok, {count, rows}}
+    end)
+    |> Multi.merge(fn %{interaction_downvotes: {_count, rows}} ->
+      UserStatistics.put_bulk_increment(
+        Multi.new(),
+        Enum.map(rows, & &1.user_id),
+        :image_votes_count
+      )
     end)
     |> Multi.run(:interaction_image, fn repo,
                                         %{
                                           interaction_hides: hides,
-                                          interaction_faves: faves,
-                                          interaction_upvotes: upvotes,
-                                          interaction_downvotes: downvotes
+                                          interaction_faves: {faves, _},
+                                          interaction_upvotes: {upvotes, _},
+                                          interaction_downvotes: {downvotes, _}
                                         } ->
       {count, nil} =
         repo.update_all(where(Image, id: ^target.id),

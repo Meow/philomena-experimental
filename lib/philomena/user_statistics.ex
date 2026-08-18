@@ -60,6 +60,29 @@ defmodule Philomena.UserStatistics do
 
   defp reindex_result(error, _user_id), do: error
 
+  defp persist_bulk_increment(repo, user_ids, statistic, amount) do
+    user_query = where(User, [user], user.id in ^user_ids)
+
+    case repo.update_all(user_query, inc: [{statistic, amount}]) do
+      {count, nil} when count == length(user_ids) ->
+        entries =
+          Enum.map(user_ids, fn user_id ->
+            %{day: Date.utc_today(), user_id: user_id}
+            |> Map.put(statistic, amount)
+          end)
+
+        repo.insert_all(UserStatistic, entries,
+          on_conflict: [inc: [{statistic, amount}]],
+          conflict_target: [:day, :user_id]
+        )
+
+        {:ok, nil}
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
   @doc """
   Adds an atomic statistic increment to `multi`.
 
@@ -106,6 +129,51 @@ defmodule Philomena.UserStatistics do
     end)
     |> Multi.on_commit(fn _changes ->
       Users.reindex_user(%User{id: user_id})
+    end)
+  end
+
+  @doc """
+  Adds atomic increments for multiple users to `multi`.
+
+  Every distinct user in `users_or_ids` receives the same lifetime and current
+  UTC-daily increment. The updates use one query per table, and users are
+  reindexed only after the owning Multi commits. An empty list leaves the Multi
+  unchanged.
+
+  ## Example
+
+      iex> Multi.new() |> put_bulk_increment([user_a, user_b], :image_votes_count)
+      %Multi{}
+
+  """
+  @spec put_bulk_increment(
+          multi :: Multi.t(),
+          users_or_ids :: [User.t() | integer()],
+          statistic :: statistic(),
+          amount :: integer()
+        ) :: Multi.t()
+  def put_bulk_increment(multi, users_or_ids, statistic, amount \\ 1)
+
+  def put_bulk_increment(multi, [], statistic, amount)
+      when statistic in @permitted_actions and is_integer(amount),
+      do: multi
+
+  def put_bulk_increment(multi, users_or_ids, statistic, amount)
+      when is_list(users_or_ids) and statistic in @permitted_actions and is_integer(amount) do
+    user_ids =
+      users_or_ids
+      |> Enum.map(fn
+        %User{id: user_id} -> user_id
+        user_id when is_integer(user_id) -> user_id
+      end)
+      |> Enum.uniq()
+
+    multi
+    |> Multi.run({:put_bulk_increment, make_ref()}, fn repo, _changes ->
+      persist_bulk_increment(repo, user_ids, statistic, amount)
+    end)
+    |> Multi.on_commit(fn _changes ->
+      Enum.each(user_ids, &Users.reindex_user(%User{id: &1}))
     end)
   end
 

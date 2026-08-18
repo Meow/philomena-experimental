@@ -3,6 +3,7 @@ defmodule Philomena.UserStatisticsTest do
 
   import Philomena.UsersFixtures
 
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Users.User
   alias Philomena.UserStatistics
@@ -64,6 +65,34 @@ defmodule Philomena.UserStatisticsTest do
            end) == {:error, :forced_rollback}
 
     assert Repo.get!(User, user.id).topics_count == 0
+    refute Repo.get_by(UserStatistic, user_id: user.id)
+  end
+
+  test "bulk increments update each distinct user in an owning Multi" do
+    first = confirmed_user_fixture()
+    second = confirmed_user_fixture()
+
+    assert {:ok, _changes} =
+             Multi.new()
+             |> UserStatistics.put_bulk_increment([first, second, first.id], :image_votes_count)
+             |> Multi.transact()
+
+    for user <- [first, second] do
+      assert Repo.get!(User, user.id).image_votes_count == 1
+      assert Repo.get_by!(UserStatistic, user_id: user.id).image_votes_count == 1
+    end
+  end
+
+  test "bulk increments roll back with their owning Multi" do
+    user = confirmed_user_fixture()
+
+    assert {:error, :rollback, :forced_rollback, _changes} =
+             Multi.new()
+             |> UserStatistics.put_bulk_increment([user], :posts_count)
+             |> Multi.run(:rollback, fn _repo, _changes -> {:error, :forced_rollback} end)
+             |> Multi.transact()
+
+    assert Repo.get!(User, user.id).posts_count == 0
     refute Repo.get_by(UserStatistic, user_id: user.id)
   end
 
