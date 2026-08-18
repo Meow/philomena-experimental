@@ -842,9 +842,8 @@ defmodule Philomena.Posts do
           {:ok, Post.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show),
-         {:ok, post} <- load_post_in_topic(actor, topic, post_id, :show) do
-      {:ok, post}
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show) do
+      load_post_in_topic(actor, topic, post_id, :show)
     end
   end
 

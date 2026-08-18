@@ -10,8 +10,8 @@ defmodule Philomena.Polls do
   alias Philomena.Loader
   alias Philomena.Polls.{Poll, PollForm, TopicPoll}
   alias Philomena.Multi
+  alias Philomena.Forums
   alias Philomena.Topics
-  alias Philomena.Topics.ForumTopic
 
   defp poll_form(%TopicPoll{} = result, changeset \\ nil) do
     %PollForm{
@@ -41,8 +41,8 @@ defmodule Philomena.Polls do
   @spec load_topic_poll(Actor.t(), String.t(), String.t(), atom()) ::
           {:ok, TopicPoll.t()} | {:error, :not_found | :unauthorized}
   def load_topic_poll(%Actor{} = actor, forum_slug, topic_slug, action) do
-    with {:ok, %ForumTopic{forum: forum, topic: topic}} <-
-           Topics.load_forum_topic_struct(actor, forum_slug, topic_slug),
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show),
          {:ok, poll} <-
            Poll
            |> where([poll], poll.topic_id == ^topic.id)

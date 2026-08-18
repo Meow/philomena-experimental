@@ -13,7 +13,7 @@ defmodule Philomena.Topics do
   alias Philomena.Multi
   alias Philomena.Repo
 
-  alias Philomena.Topics.{ForumTopic, Topic, TopicPage}
+  alias Philomena.Topics.{MoveForm, Topic, TopicPage}
   alias Philomena.Forums
   alias Philomena.Forums.Forum
   alias Philomena.Forums.Visibility
@@ -26,7 +26,6 @@ defmodule Philomena.Topics do
   alias Philomena.Notifications
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
-  alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
@@ -55,23 +54,17 @@ defmodule Philomena.Topics do
     Notifications.broadcast_forum_topic(topic.user, topic)
   end
 
-  def load_forum_topic(%Actor{} = actor, %Forum{} = forum, topic_slug, action) do
-    Topic
-    |> where(forum_id: ^forum.id, slug: ^topic_slug)
-    |> preload([:user, :forum])
-    |> Loader.one_and_authorize(actor, action)
-  end
-
-  defp topic_pagination(%Topic{} = topic, post_id_param, pagination) do
+  defp topic_pagination(%Actor{} = actor, %Topic{} = topic, post_id, pagination) do
     page_number =
-      with {:ok, post_id} <- IntegerId.parse(post_id_param),
-           [post] <-
-             Post
-             |> where(id: ^post_id, topic_id: ^topic.id)
-             |> Repo.all() do
-        div(post.topic_position, pagination.page_size) + 1
-      else
-        _ -> pagination.page_number
+      Post
+      |> where(topic_id: ^topic.id)
+      |> Loader.fetch_and_authorize(actor, :show, post_id)
+      |> case do
+        {:ok, post} ->
+          div(post.topic_position, pagination.page_size) + 1
+
+        _ ->
+          pagination.page_number
       end
 
     %{pagination | page_number: page_number}
@@ -94,18 +87,6 @@ defmodule Philomena.Topics do
       total_entries: topic.post_count,
       total_pages: div(topic.post_count + page_size - 1, page_size)
     }
-  end
-
-  defp fetch_target_forum(attrs) do
-    # TODO: move this out
-    {%{}, %{target_forum: :string}}
-    |> Ecto.Changeset.cast(attrs, [:target_forum])
-    |> Ecto.Changeset.validate_required(:target_forum)
-    |> Ecto.Changeset.apply_action(:create)
-    |> case do
-      {:ok, %{target_forum: target_forum}} -> {:ok, target_forum}
-      _ -> {:error, :not_found}
-    end
   end
 
   defp hide_topic_steps(user, forum_slug, topic_slug, params) do
@@ -209,43 +190,24 @@ defmodule Philomena.Topics do
   end
 
   @doc """
-  Loads the forum named by `forum_slug` and, within it, the topic named by
-  `topic_slug`, on behalf of `actor`.
+  Loads the the topic named by `topic_slug` within `forum`, for `action`,
+  on behalf of `actor`.
 
-  The forum is loaded by short name and authorized for `:show`, then the topic
-  is queried by slug and `forum.id` before authorization. Callers may select an
-  action and preloads with `:action` and `:preloads`; the default action is
-  `:show`. Malformed or missing route members are not-found, while a loaded
-  member forbidden for that action is unauthorized.
-
-  This is the loader that `Philomena.Polls` reuses so poll editing shares the
-  exact forum/topic visibility semantics used when loading topics.
+  The topic is queried by slug and `forum.id` before authorization. Malformed or
+  missing route members are not-found, while a loaded member forbidden for that
+  action is unauthorized.
 
   ## Examples
 
-      iex> load_forum_topic_struct(moderator_actor, "dis", "some-topic", action: :show)
-      {:ok, %ForumTopic{}}
+      iex> load_forum_topic(moderator_actor, forum, "some-topic", :show)
+      {:ok, %Topic{}}
 
   """
-  @spec load_forum_topic_struct(
-          actor :: Actor.t(),
-          forum_slug :: String.t(),
-          topic_slug :: String.t(),
-          opts :: keyword()
-        ) ::
-          {:ok, ForumTopic.t()} | {:error, :unauthorized | :not_found}
-  def load_forum_topic_struct(%Actor{} = actor, forum_slug, topic_slug, opts \\ []) do
-    action = Keyword.get(opts, :action, :show)
-    preloads = Keyword.get(opts, :preloads, [])
-
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <-
-           Topic
-           |> where(forum_id: ^forum.id, slug: ^topic_slug)
-           |> preload(^preloads)
-           |> Loader.one_and_authorize(actor, action) do
-      {:ok, %ForumTopic{forum: forum, topic: topic}}
-    end
+  def load_forum_topic(%Actor{} = actor, %Forum{} = forum, topic_slug, action) do
+    Topic
+    |> where(forum_id: ^forum.id, slug: ^topic_slug)
+    |> preload([:user, :forum])
+    |> Loader.one_and_authorize(actor, action)
   end
 
   @doc """
@@ -309,15 +271,15 @@ defmodule Philomena.Topics do
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
-          post_id_param :: String.t() | nil,
+          post_id :: String.t() | nil,
           pagination :: Repo.pagination_params()
         ) ::
           {:ok, TopicPage.t()} | {:error, :unauthorized | :not_found}
-  def load_topic_page(%Actor{} = actor, forum_slug, topic_slug, post_id_param, pagination) do
+  def load_topic_page(%Actor{} = actor, forum_slug, topic_slug, post_id, pagination) do
     with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
          {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :show) do
       topic = Repo.preload(topic, [:user, :forum, :deleted_by, :locked_by, poll: :options])
-      pagination = topic_pagination(topic, post_id_param, pagination)
+      pagination = topic_pagination(actor, topic, post_id, pagination)
 
       clear_topic_notification(topic, actor.user)
 
@@ -341,18 +303,17 @@ defmodule Philomena.Topics do
   ## Examples
 
       iex> load_topic(actor, "dis", "some-topic")
-      {:ok, %ForumTopic{}}
+      {:ok, %Topic{}}
 
       iex> load_topic(actor, "dis", "nonexistent")
       {:error, :not_found}
 
   """
   @spec load_topic(Actor.t(), String.t(), String.t()) ::
-          {:ok, ForumTopic.t()} | {:error, :not_found | :unauthorized}
+          {:ok, Topic.t()} | {:error, :not_found | :unauthorized}
   def load_topic(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :show) do
-      {:ok, %ForumTopic{forum: forum, topic: topic}}
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug) do
+      load_forum_topic(actor, forum, topic_slug, :show)
     end
   end
 
@@ -609,7 +570,7 @@ defmodule Philomena.Topics do
           | {:error, :ban | :unauthorized | :not_found}
   def move_topic(%Actor{} = actor, source_forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, target_forum_slug} <- fetch_target_forum(params) do
+         {:ok, target_forum_slug} <- MoveForm.fetch_target_forum_short_name(params) do
       Multi.new()
       |> put_source_and_target_forum_and_topic_locks(
         actor,
