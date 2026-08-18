@@ -42,6 +42,11 @@ structs that only rename its steps.
   envelopes and pass the domain attribute map, for example
   `params["dnp_entry"]`, rather than making a context understand the whole
   controller parameter tree.
+- Do not recover a route locator or target identity from `attrs`. Load it from
+  its separate argument, then seed the newly built schema with the trusted
+  association or foreign key before applying the changeset. The changeset may
+  still cast an independently editable reference, but a route-selected parent
+  is not caller-editable input.
 - Use `attrs` for mutation attributes and `params` for search or pagination
   input. Both are caller inputs, not HTTP-only data structures. Names such as
   `creator`, `recipient`, and `closing_user` are preferable to an ambiguous
@@ -132,6 +137,11 @@ Do not measure abstraction quality by line count or brevity. Some duplication
 in adjacent public operations is preferable when it keeps each mutation's
 authorization, write, audit log, and result contract visible.
 
+Keep transitional conversions and one-off maintenance work out of the active
+domain context. Give it a focused, independently invocable module with the
+smallest public surface needed, so the normal context remains about current
+workflows and the legacy code has a clear later-deletion boundary.
+
 ## Let changesets own caller input and state rules
 
 Use changesets as the canonical representation of caller-supplied domain
@@ -147,11 +157,20 @@ input, including non-persisted input:
 - For state owned by one participant or role, expose a named changeset such as
   `read_changeset/3`, `hidden_changeset/3`, or `transition_changeset/3` rather
   than building a conditional update map in the context.
+- When later transaction steps depend on whether a changeset changed a
+  meaningful state, calculate that fact while constructing the changeset and
+  expose it as a clearly named virtual field (for example,
+  `became_unapproved?`). This lets the committed record drive counters,
+  reports, and other coupled work; do not re-infer the transition from a stale
+  pre-update record or duplicate its predicate in the context.
 - Set schema defaults to the real domain default. If transaction composition
   depends on the proposed value, expose a narrow helper that reads it from the
   changeset with `fetch_field!/2` or `get_assoc/2`.
 - Use `Ecto.Changeset.apply_action/2` to validate embedded forms that are not
   persisted.
+- A rejected state transition is a validation failure, not a successful no-op.
+  Put an error on the relevant field (such as already closed, unclaimed, or
+  already approved) and return that changeset.
 
 Return the rejected `%Ecto.Changeset{}` for expected validation failures. Keep
 its `data`, associations, and submitted values intact so the controller can
@@ -222,14 +241,31 @@ end
   commit or roll back together.
 - Lock mutable rows with `Multi.lock_one/3` when a decision, transition, or
   counter depends on their current value.
+- Treat locks as a documented protocol, not an incidental query option. Lock
+  parents before children, scope every child under its locked parent, and use a
+  stable order for multiple peer rows so opposite-direction operations cannot
+  deadlock. Read denormalized counters and cached pointers only from rows
+  protected by that protocol, and update them in the mutation's same Multi.
 - Cross-context transaction helpers take a Multi, add clearly named steps, and
   return the Multi. Prefix them with `put_*` when they add work to the pipeline.
+- When a later step conditionally adds database work based on earlier Multi
+  changes, use `Multi.merge/2` to compose that work into the same transaction.
+  Do not replace it with a second transaction or a success callback that needs
+  rollback semantics.
+- Do not add a direct-`Repo` convenience write alongside a composable
+  transaction helper merely for one trusted caller. The owning workflow should
+  compose the `put_*` helper into its existing Multi, preserving rollback and
+  post-commit behavior. Reserve separately named trusted service APIs for
+  workflows that genuinely cannot compose.
 - Use step references rather than passing partly persisted records between
   context helpers.
 - Register indexing, object storage, job enqueueing, and similar external work
   with `Multi.on_commit/2` when it belongs to a composable workflow. Never run
   it before the database commit or as an irreversible action inside the
   database transaction.
+- Treat separate `on_commit` callbacks as unordered. If side effects depend on
+  one another, express that ordering in one callback or one explicit
+  success-path action rather than relying on registration order.
 - Perform rate-limit recording, firehose broadcasts, and other explicitly
   local success actions only after `Multi.transact/1` succeeds.
 - Translate the expected primary changeset failure by its exact step name. Do
@@ -282,6 +318,12 @@ work. For implementation and refactor tests:
   state, associations needed by callers, and important side effects.
 - Test rollback coupling for multi-step writes and prove post-commit work does
   not run on a rejected primary changeset where practical.
+- Add an `async: false` concurrency test whenever a workflow maintains a
+  counter, cached pointer, uniqueness-dependent choice, or state transition
+  that can race. Start competing calls together through the SQL sandbox, then
+  assert the persisted invariant from base records rather than merely asserting
+  that each call returned an expected tuple. Include opposite-order operations
+  when a workflow locks multiple peer rows.
 - Pin desired domain behavior with a regression test when correcting an
   accidental or unsafe behavior; do not preserve an accident merely because an
   old test described it.
@@ -302,11 +344,15 @@ Before considering a context change complete, check:
   or transaction helpers?
 - Can a controller and a non-web caller use the same operation with the direct
   attribute map appropriate to their boundary?
+- Are route-selected identities passed and loaded separately rather than taken
+  from caller attributes?
 - Does the changeset own casting, validation, and transition rules?
 - Does the controller pass domain attrs rather than its whole parameter tree?
 - Are IDs loaded safely and nested children constrained by their parents before
   authorization?
 - Are related database changes and audit records in one `Philomena.Multi`?
+- When current state, counters, or cache pointers can race, are the required
+  rows locked in a stable order and the invariant covered by a concurrency test?
 - Are external side effects guaranteed to happen only after commit?
 - Does an expected validation failure return the actual changeset without
   losing loaded data?
