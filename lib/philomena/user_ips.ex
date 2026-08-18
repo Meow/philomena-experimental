@@ -14,19 +14,22 @@ defmodule Philomena.UserIps do
   alias Philomena.UserIps.IpProfile
   alias Philomena.Users.User
 
+  defp cast_ip(ip) do
+    case EctoNetwork.INET.cast(ip) do
+      {:ok, ip} ->
+        {:ok, ip}
+
+      _error ->
+        {:error, :not_found}
+    end
+  end
+
   defp user_ips_for(ip) do
     UserIp
     |> where(fragment("? >>= ip", ^ip))
     |> order_by(desc: :updated_at)
     |> preload(:user)
     |> Repo.all()
-  end
-
-  defp cast_ip(ip) do
-    case EctoNetwork.INET.cast(ip) do
-      {:ok, ip} -> {:ok, ip}
-      _error -> {:error, :not_found}
-    end
   end
 
   defp history_query(%User{id: user_id}) do

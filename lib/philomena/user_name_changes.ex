@@ -22,10 +22,6 @@ defmodule Philomena.UserNameChanges do
     |> order_by(desc: :id)
   end
 
-  defp change_for_user(%User{} = user) do
-    UserNameChange.changeset(%UserNameChange{user_id: user.id}, user.name)
-  end
-
   @doc """
   Records a name change entry for `user` to `multi` under `step`.
 
@@ -40,9 +36,11 @@ defmodule Philomena.UserNameChanges do
       %Multi{}
 
   """
-  @spec record_rename(Multi.t(), atom(), User.t()) :: Multi.t()
-  def record_rename(%Multi{} = multi, step, %User{} = user) when is_atom(step) do
-    Multi.insert(multi, step, change_for_user(user))
+  @spec record_rename(Multi.t(), Multi.name(), User.t()) :: Multi.t()
+  def record_rename(%Multi{} = multi, step, %User{} = user) do
+    changeset = UserNameChange.changeset(%UserNameChange{user_id: user.id}, user.name)
+
+    Multi.insert(multi, step, changeset)
   end
 
   @doc """
@@ -64,7 +62,10 @@ defmodule Philomena.UserNameChanges do
           {:ok, Scrivener.Page.t(UserNameChange.t())} | {:error, :unauthorized}
   def load_history(%Actor{} = actor, %User{} = user, pagination) do
     with :ok <- authorize(actor, :index, UserNameChange) do
-      {:ok, user.id |> history_query() |> Repo.paginate(pagination)}
+      {:ok,
+       user.id
+       |> history_query()
+       |> Repo.paginate(pagination)}
     end
   end
 end

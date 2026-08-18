@@ -21,7 +21,7 @@ defmodule Philomena.SiteNotices.SiteNotice do
   end
 
   @doc false
-  def changeset(site_notice, attrs) do
+  def changeset(site_notice, attrs \\ %{}) do
     site_notice
     |> cast(attrs, [:title, :text, :link, :link_text, :live, :start_date, :finish_date])
     |> validate_required([:title, :text, :live, :start_date, :finish_date])

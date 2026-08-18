@@ -17,23 +17,6 @@ defmodule Philomena.SiteNotices do
   alias Philomena.Repo
   alias Philomena.SiteNotices.SiteNotice
 
-  # Updates a site notice.
-  defp update_site_notice(%SiteNotice{} = site_notice, attrs) do
-    site_notice
-    |> SiteNotice.changeset(attrs)
-    |> Repo.update()
-  end
-
-  # Deletes a site notice.
-  defp delete_site_notice(%SiteNotice{} = site_notice) do
-    Repo.delete(site_notice)
-  end
-
-  # Returns an `%Ecto.Changeset{}` for tracking site notice changes.
-  defp change_site_notice(%SiteNotice{} = site_notice) do
-    SiteNotice.changeset(site_notice, %{})
-  end
-
   defp load_site_notice(actor, id, action) do
     Loader.fetch_and_authorize(SiteNotice, actor, action, id)
   end
@@ -109,7 +92,7 @@ defmodule Philomena.SiteNotices do
   def new_site_notice(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, SiteNotice) do
-      {:ok, change_site_notice(%SiteNotice{})}
+      {:ok, SiteNotice.changeset(%SiteNotice{})}
     end
   end
 
@@ -163,7 +146,7 @@ defmodule Philomena.SiteNotices do
   def load_site_notice_for_edit(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, site_notice} <- load_site_notice(actor, id, :edit) do
-      {:ok, {site_notice, change_site_notice(site_notice)}}
+      {:ok, {site_notice, SiteNotice.changeset(site_notice)}}
     end
   end
 
@@ -185,10 +168,12 @@ defmodule Philomena.SiteNotices do
   @spec update_site_notice(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, SiteNotice.t()}
           | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
-  def update_site_notice(%Actor{} = actor, id, attrs) do
+  def update_site_notice(%Actor{} = actor, id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, site_notice} <- load_site_notice(actor, id, :update) do
-      update_site_notice(site_notice, attrs)
+      site_notice
+      |> SiteNotice.changeset(params)
+      |> Repo.update()
     end
   end
 
@@ -213,7 +198,7 @@ defmodule Philomena.SiteNotices do
   def delete_site_notice(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, site_notice} <- load_site_notice(actor, id, :delete) do
-      delete_site_notice(site_notice)
+      Repo.delete(site_notice)
     end
   end
 end

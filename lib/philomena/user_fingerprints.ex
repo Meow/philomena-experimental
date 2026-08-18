@@ -14,6 +14,21 @@ defmodule Philomena.UserFingerprints do
   alias Philomena.UserFingerprints.FingerprintProfile
   alias Philomena.Users.User
 
+  defp cast_fingerprint(fingerprint) when is_binary(fingerprint) do
+    fingerprint =
+      fingerprint
+      |> String.trim()
+      |> String.downcase()
+
+    if valid_format?(fingerprint) do
+      {:ok, fingerprint}
+    else
+      {:error, :not_found}
+    end
+  end
+
+  defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
+
   defp user_fingerprints_for(fingerprint) do
     UserFingerprint
     |> where(fingerprint: ^fingerprint)
@@ -21,14 +36,6 @@ defmodule Philomena.UserFingerprints do
     |> preload(:user)
     |> Repo.all()
   end
-
-  defp cast_fingerprint(fingerprint) when is_binary(fingerprint) do
-    fingerprint = fingerprint |> String.trim() |> String.downcase()
-
-    if valid_format?(fingerprint), do: {:ok, fingerprint}, else: {:error, :not_found}
-  end
-
-  defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
 
   defp history_query(%User{id: user_id}) do
     UserFingerprint
