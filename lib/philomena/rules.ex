@@ -54,19 +54,16 @@ defmodule Philomena.Rules do
 
   ## Examples
 
-      iex> find_rule(123)
-      %Rule{}
+      iex> fetch_rule(123)
+      {:ok, %Rule{}}
 
-      iex> find_rule(456)
-      nil
+      iex> fetch_rule(456)
+      {:error, not_found}
 
   """
-  @spec find_rule(Loader.integer_id()) :: Rule.t() | nil
-  def find_rule(id) do
-    case Loader.fetch(Rule, id) do
-      {:ok, rule} -> rule
-      {:error, :not_found} -> nil
-    end
+  @spec fetch_rule(Loader.integer_id()) :: {:ok, Rule.t()} | {:error, :not_found}
+  def fetch_rule(id) do
+    Loader.fetch(Rule, id)
   end
 
   @doc """

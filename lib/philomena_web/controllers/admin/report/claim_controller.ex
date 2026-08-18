@@ -12,21 +12,30 @@ defmodule PhilomenaWeb.Admin.Report.ClaimController do
         |> put_flash(:info, "Successfully marked report as in progress")
         |> redirect(to: ~p"/admin/reports")
 
-      {:error, %Ecto.Changeset{} = changeset} ->
+      {:error, %Ecto.Changeset{data: report}} ->
         conn
         |> put_flash(:error, "Couldn't claim that report!")
-        |> redirect(to: ~p"/admin/reports/#{changeset.data}")
+        |> redirect(to: ~p"/admin/reports/#{report}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
 
   def delete(conn, %{"report_id" => report_id}) do
-    with {:ok, report} <- Reports.unclaim_report(conn.assigns.actor, report_id) do
-      conn
-      |> put_flash(:info, "Successfully released report.")
-      |> redirect(to: ~p"/admin/reports/#{report}")
+    case Reports.unclaim_report(conn.assigns.actor, report_id) do
+      {:ok, report} ->
+        conn
+        |> put_flash(:info, "Successfully released report.")
+        |> redirect(to: ~p"/admin/reports/#{report}")
+
+      {:error, %Ecto.Changeset{data: report}} ->
+        conn
+        |> put_flash(:error, "Report was not claimed!")
+        |> redirect(to: ~p"/admin/reports/#{report}")
+
+      error ->
+        error
     end
   end
 end

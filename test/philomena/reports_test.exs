@@ -329,7 +329,7 @@ defmodule Philomena.ReportsTest do
       assert claimed.errors[:admin_id] == {"has already been claimed", []}
     end
 
-    test "unclaim requires an open report and is unchanged when already unclaimed" do
+    test "unclaim requires an open report and errors when not claimed" do
       moderator = moderator_user_fixture()
 
       closed = Report.unclaim_changeset(%Report{open: false, admin_id: moderator.id}, moderator)
@@ -337,17 +337,16 @@ defmodule Philomena.ReportsTest do
 
       refute closed.valid?
       assert closed.errors[:state] == {"must be open", []}
-      assert unclaimed.valid?
-      assert unclaimed.changes == %{}
+      refute unclaimed.valid?
+      assert unclaimed.errors[:admin_id] == {"was not claimed", []}
     end
 
-    test "close is unchanged when the report is already closed" do
+    test "close is invalid when the report is already closed" do
       report = %Report{open: false, state: "closed", admin_id: moderator_user_fixture().id}
 
       changeset = Report.close_changeset(report, moderator_user_fixture())
 
-      assert changeset.valid?
-      assert changeset.changes == %{}
+      refute changeset.valid?
     end
   end
 
@@ -368,24 +367,22 @@ defmodule Philomena.ReportsTest do
       assert log.subject_path == "/admin/reports/#{report.id}"
     end
 
-    test "unclaim releases a claim and is then idempotent", %{report: report} do
+    test "unclaim releases a claim", %{report: report} do
       moderator = actor(moderator_user_fixture())
       assert {:ok, _claimed} = Reports.claim_report(moderator, report.id)
       assert {:ok, released} = Reports.unclaim_report(moderator, report.id)
       assert released.state == "open"
       assert is_nil(released.admin_id)
-      assert {:ok, repeated} = Reports.unclaim_report(moderator, report.id)
-      assert repeated.id == report.id
+      assert {:error, %Ecto.Changeset{}} = Reports.unclaim_report(moderator, report.id)
       assert Repo.aggregate(ModerationLog, :count) == 2
     end
 
-    test "close is idempotent and cannot be undone by unclaim", %{report: report} do
+    test "close cannot be undone by unclaim", %{report: report} do
       moderator = actor(moderator_user_fixture())
       assert {:ok, closed} = Reports.close_report(moderator, report.id)
       refute closed.open
       assert closed.state == "closed"
-      assert {:ok, repeated} = Reports.close_report(moderator, report.id)
-      assert repeated.id == closed.id
+      assert {:error, %Ecto.Changeset{}} = Reports.close_report(moderator, report.id)
       assert Repo.aggregate(ModerationLog, :count) == 1
 
       assert {:error, changeset} = Reports.unclaim_report(moderator, report.id)

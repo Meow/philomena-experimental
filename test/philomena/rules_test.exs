@@ -21,7 +21,7 @@ defmodule Philomena.RulesTest do
 
   describe "safe rule service lookups" do
     test "malformed IDs and absent names do not raise" do
-      assert Rules.find_rule("not-an-id") == nil
+      assert Rules.fetch_rule("not-an-id") == {:error, :not_found}
       assert Rules.fetch_rule_by_name("No such rule") == {:error, :not_found}
     end
 
@@ -133,7 +133,7 @@ defmodule Philomena.RulesTest do
                  position: unique
                })
 
-      assert Rules.find_rule(rule.id)
+      assert {:ok, %Rule{}} = Rules.fetch_rule(rule.id)
     end
 
     test "invalid attrs are a rejected changeset" do
@@ -185,7 +185,7 @@ defmodule Philomena.RulesTest do
                })
 
       assert updated.title == "Updated Title"
-      assert Rules.find_rule(rule.id).title == "Updated Title"
+      assert {:ok, %Rule{title: "Updated Title"}} = Rules.fetch_rule(rule.id)
     end
 
     test "an invalid update carries the unchanged rule for re-rendering" do

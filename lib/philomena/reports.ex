@@ -51,9 +51,6 @@ defmodule Philomena.Reports do
           | {:conversation, String.t()}
           | {:gallery, Loader.integer_id()}
 
-  @type request_error :: :ban | :unauthorized | :not_found
-  @type transition_error :: :unauthorized | :not_found | Ecto.Changeset.t()
-
   defp report_query(preloads) do
     Report
     |> preload(^preloads)
@@ -151,14 +148,13 @@ defmodule Philomena.Reports do
     end
   end
 
-  defp change_report(target) do
-    target
-    |> Ecto.build_assoc(:reports)
-    |> Report.changeset(%{})
-  end
+  defp report_form(target) do
+    changeset =
+      target
+      |> Ecto.build_assoc(:reports)
+      |> Report.changeset()
 
-  defp report_form(target, changeset \\ nil) do
-    %ReportForm{target: target, changeset: changeset || change_report(target)}
+    %ReportForm{target: target, changeset: changeset}
   end
 
   defp ensure_report_limit(%Actor{user: user, ip: ip} = actor) do
@@ -184,24 +180,6 @@ defmodule Philomena.Reports do
     |> Repo.aggregate(:count)
   end
 
-  defp create_loaded_report(actor, attrs, target) do
-    attrs = if is_map(attrs), do: attrs, else: %{}
-    rule = Rules.find_rule(attrs["rule_id"])
-
-    target
-    |> Ecto.build_assoc(:reports)
-    |> Report.user_creation_changeset(attrs, actor, rule)
-    |> Repo.insert()
-    |> case do
-      {:ok, report} ->
-        reindex_report(report)
-        {:ok, report}
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:error, report_form(target, changeset)}
-    end
-  end
-
   defp close_report_query(%User{id: user_id}, [{column, id}])
        when column in [
               :image_id,
@@ -222,41 +200,34 @@ defmodule Philomena.Reports do
       ]
   end
 
-  defp lock_and_authorize_report(actor, action, id) do
-    Report
-    |> lock("FOR UPDATE")
-    |> Loader.fetch_and_authorize(actor, action, id)
-  end
-
-  defp transition_report(actor, id, action, transition, log_type, log_body) do
-    Repo.transact(fn ->
-      with {:ok, report} <- lock_and_authorize_report(actor, action, id) do
-        report
-        |> transition.(actor.user)
-        |> apply_transition(report, actor, log_type, log_body)
+  defp put_lock_report(%Multi{} = multi, %Actor{} = actor, action, report_id) do
+    multi
+    |> Multi.lock_one(:locked_report, where(Report, id: ^report_id))
+    |> Multi.run(:authorize, fn _repo, %{locked_report: report} ->
+      with :ok <- authorize(actor, action, report) do
+        {:ok, nil}
       end
     end)
-    |> case do
-      {:ok, report} ->
-        reindex_report(report)
-        {:ok, report}
+  end
 
-      error ->
-        error
+  defp map_lock_errors(result) do
+    case result do
+      {:error, _step, :unauthorized, _changes} ->
+        {:error, :unauthorized}
+
+      {:error, _step, :not_found, _changes} ->
+        {:error, :not_found}
     end
   end
 
-  defp apply_transition(changeset, report, actor, log_type, log_body) do
-    if map_size(changeset.changes) > 0 do
-      path = Paths.admin_report_path(report.id)
+  @spec reindex_closed_reports([integer()]) :: [integer()]
+  defp reindex_closed_reports(report_ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", report_ids])
+    report_ids
+  end
 
-      with {:ok, report} <- Repo.update(changeset),
-           {:ok, _log} <- ModerationLogs.create_moderation_log(actor, log_type, path, log_body) do
-        {:ok, report}
-      end
-    else
-      {:ok, report}
-    end
+  defp put_reindex_report(%Multi{} = multi, report_step \\ :report) do
+    Multi.on_commit(multi, fn %{^report_step => report} -> reindex_report(report) end)
   end
 
   defp reindex_report(%Report{id: id} = report) do
@@ -437,7 +408,7 @@ defmodule Philomena.Reports do
 
   """
   @spec new_report(Actor.t(), target_locator()) ::
-          {:ok, ReportForm.t()} | {:error, request_error()}
+          {:ok, ReportForm.t()} | {:error, :ban | :unauthorized | :not_found}
   def new_report(%Actor{} = actor, locator) do
     with :ok <- verify_write_access(actor),
          {:ok, target} <- load_report_target(actor, locator) do
@@ -468,13 +439,30 @@ defmodule Philomena.Reports do
   """
   @spec create_report(Actor.t(), target_locator(), map() | nil) ::
           {:ok, Report.t()}
-          | {:error, :too_many_reports | request_error()}
+          | {:error, :too_many_reports | :ban | :unauthorized | :not_found}
           | {:error, ReportForm.t()}
-  def create_report(%Actor{} = actor, locator, attrs) do
+  def create_report(%Actor{} = actor, locator, params) do
     with :ok <- verify_write_access(actor),
          {:ok, target} <- load_report_target(actor, locator),
+         {:ok, rule_id} <- Report.fetch_rule_id(params),
+         {:ok, rule} <- Rules.fetch_rule(rule_id),
          :ok <- ensure_report_limit(actor) do
-      create_loaded_report(actor, attrs, target)
+      report_changeset =
+        target
+        |> Ecto.build_assoc(:reports)
+        |> Report.user_creation_changeset(params, actor, rule)
+
+      Multi.new()
+      |> Multi.insert(:report, report_changeset)
+      |> put_reindex_report()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{report: report}} ->
+          {:ok, report}
+
+        {:error, :report, changeset, _changes} ->
+          {:error, %ReportForm{target: target, changeset: changeset}}
+      end
     end
   end
 
@@ -495,23 +483,44 @@ defmodule Philomena.Reports do
 
   """
   @spec claim_report(Actor.t(), Loader.integer_id()) ::
-          {:ok, Report.t()} | {:error, transition_error()}
-  def claim_report(%Actor{} = actor, id) do
-    transition_report(
-      actor,
-      id,
-      :claim,
-      &Report.claim_changeset/2,
-      "Report.Claim:create",
-      "Claimed report"
-    )
+          {:ok, Report.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def claim_report(%Actor{user: user} = actor, report_id) do
+    with {:ok, report_id} <- Loader.parse_id(report_id) do
+      Multi.new()
+      |> put_lock_report(actor, :claim, report_id)
+      |> Multi.update(:report, fn %{locked_report: report} ->
+        Report.claim_changeset(report, user)
+      end)
+      |> put_reindex_report()
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{report: report} ->
+          {
+            "Report.Claim:create",
+            Paths.admin_report_path(report.id),
+            "Claimed report"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{report: report}} ->
+          {:ok, report}
+
+        {:error, :report, changeset, _changes} ->
+          {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
+      end
+    end
   end
 
   @doc """
   Releases the claim on an open report.
 
-  The report is locked and authorized with `:unclaim`. Releasing an already
-  unclaimed report is an idempotent success.
+  The report is locked and authorized with `:unclaim`.
 
   ## Examples
 
@@ -520,23 +529,44 @@ defmodule Philomena.Reports do
 
   """
   @spec unclaim_report(Actor.t(), Loader.integer_id()) ::
-          {:ok, Report.t()} | {:error, transition_error()}
-  def unclaim_report(%Actor{} = actor, id) do
-    transition_report(
-      actor,
-      id,
-      :unclaim,
-      &Report.unclaim_changeset/2,
-      "Report.Claim:delete",
-      "Released report"
-    )
+          {:ok, Report.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def unclaim_report(%Actor{user: user} = actor, report_id) do
+    with {:ok, report_id} <- Loader.parse_id(report_id) do
+      Multi.new()
+      |> put_lock_report(actor, :unclaim, report_id)
+      |> Multi.update(:report, fn %{locked_report: report} ->
+        Report.unclaim_changeset(report, user)
+      end)
+      |> put_reindex_report()
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{report: report} ->
+          {
+            "Report.Claim:delete",
+            Paths.admin_report_path(report.id),
+            "Released report"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{report: report}} ->
+          {:ok, report}
+
+        {:error, :report, changeset, _changes} ->
+          {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
+      end
+    end
   end
 
   @doc """
   Closes a report on behalf of the acting staff member.
 
-  The report is locked and authorized with `:close`. Closing an already
-  closed report is an idempotent success.
+  The report is locked and authorized with `:close`.
 
   ## Examples
 
@@ -545,16 +575,38 @@ defmodule Philomena.Reports do
 
   """
   @spec close_report(Actor.t(), Loader.integer_id()) ::
-          {:ok, Report.t()} | {:error, transition_error()}
-  def close_report(%Actor{} = actor, id) do
-    transition_report(
-      actor,
-      id,
-      :close,
-      &Report.close_changeset/2,
-      "Report.Close:create",
-      "Closed report"
-    )
+          {:ok, Report.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def close_report(%Actor{user: user} = actor, report_id) do
+    with {:ok, report_id} <- Loader.parse_id(report_id) do
+      Multi.new()
+      |> put_lock_report(actor, :close, report_id)
+      |> Multi.update(:report, fn %{locked_report: report} ->
+        Report.close_changeset(report, user)
+      end)
+      |> put_reindex_report()
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn %{report: report} ->
+          {
+            "Report.Close:create",
+            Paths.admin_report_path(report.id),
+            "Closed report"
+          }
+        end
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, %{report: report}} ->
+          {:ok, report}
+
+        {:error, :report, changeset, _changes} ->
+          {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
+      end
+    end
   end
 
   @doc """
@@ -683,12 +735,6 @@ defmodule Philomena.Reports do
     |> Multi.on_commit(fn %{report: report} ->
       reindex_report(report)
     end)
-  end
-
-  @spec reindex_closed_reports([integer()]) :: [integer()]
-  defp reindex_closed_reports(report_ids) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", report_ids])
-    report_ids
   end
 
   @doc """

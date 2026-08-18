@@ -79,7 +79,14 @@ defmodule PhilomenaWeb.Admin.Report.ClaimControllerTest do
   describe "DELETE /admin/reports/:report_id/claim (delete)" do
     setup [:register_and_log_in_moderator, :report_fixture!]
 
-    test "releases the report and redirects to the report", %{conn: conn, report: report} do
+    test "releases the report and redirects to the report", %{
+      conn: conn,
+      report: report,
+      user: mod
+    } do
+      {:ok, _report} =
+        Philomena.Reports.claim_report(Philomena.AttributionFixtures.actor(mod), report.id)
+
       conn = delete(conn, ~p"/admin/reports/#{report}/claim")
       assert redirected_to(conn) == ~p"/admin/reports/#{report}"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "released"
