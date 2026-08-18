@@ -81,15 +81,6 @@ defmodule Philomena.Reports do
     end
   end
 
-  defp report_form(target) do
-    changeset =
-      target
-      |> Ecto.build_assoc(:reports)
-      |> Report.changeset()
-
-    %ReportForm{target: target, changeset: changeset}
-  end
-
   defp open_report_count(query) do
     query
     |> where([report], report.state in ["open", "in_progress"])
@@ -113,26 +104,6 @@ defmodule Philomena.Reports do
     end
   end
 
-  defp close_report_query(%User{id: user_id}, [{column, id}])
-       when column in [
-              :image_id,
-              :comment_id,
-              :post_id,
-              :reported_user_id,
-              :commission_id,
-              :conversation_id,
-              :gallery_id
-            ] do
-    now = DateTime.utc_now(:second)
-
-    from report in Report,
-      where: field(report, ^column) == ^id and report.open == true,
-      select: report.id,
-      update: [
-        set: [open: false, state: "closed", admin_id: ^user_id, updated_at: ^now]
-      ]
-  end
-
   defp put_lock_report(%Multi{} = multi, %Actor{} = actor, action, report_id) do
     multi
     |> Multi.lock_one(:locked_report, where(Report, id: ^report_id))
@@ -153,19 +124,34 @@ defmodule Philomena.Reports do
     end
   end
 
-  @spec reindex_closed_reports([integer()]) :: [integer()]
+  defp close_report_query(%User{id: user_id}, [{column, id}])
+       when column in [
+              :image_id,
+              :comment_id,
+              :post_id,
+              :reported_user_id,
+              :commission_id,
+              :conversation_id,
+              :gallery_id
+            ] do
+    now = DateTime.utc_now(:second)
+
+    from report in Report,
+      where: field(report, ^column) == ^id and report.open == true,
+      select: report.id,
+      update: [
+        set: [open: false, state: "closed", admin_id: ^user_id, updated_at: ^now]
+      ]
+  end
+
   defp reindex_closed_reports(report_ids) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", report_ids])
-    report_ids
   end
 
   defp put_reindex_report(%Multi{} = multi, report_step \\ :report) do
-    Multi.on_commit(multi, fn %{^report_step => report} -> reindex_report(report) end)
-  end
-
-  defp reindex_report(%Report{id: id} = report) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", [id]])
-    report
+    Multi.on_commit(multi, fn %{^report_step => report} ->
+      Exq.enqueue(Exq, "indexing", IndexWorker, ["Reports", "id", [report.id]])
+    end)
   end
 
   @doc """
@@ -361,7 +347,12 @@ defmodule Philomena.Reports do
   def new_report(%Actor{} = actor, locator) do
     with :ok <- verify_write_access(actor),
          {:ok, target} <- load_report_target(actor, locator) do
-      {:ok, report_form(target)}
+      changeset =
+        target
+        |> Ecto.build_assoc(:reports)
+        |> Report.changeset()
+
+      {:ok, %ReportForm{target: target, changeset: changeset}}
     end
   end
 
@@ -622,9 +613,7 @@ defmodule Philomena.Reports do
 
     multi
     |> Multi.insert(:report, report_changeset)
-    |> Multi.on_commit(fn %{report: report} ->
-      reindex_report(report)
-    end)
+    |> put_reindex_report()
   end
 
   @doc """
