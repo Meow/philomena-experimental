@@ -148,16 +148,19 @@ defmodule Philomena.PollVotes do
       poll_option_query = where(PollOption, id: ^poll_vote.poll_option_id)
       poll_query = where(Poll, id: ^poll.id)
 
-      # TODO: gracefully handle Ecto.StaleEntryError
-      {:ok, _changes} =
-        Multi.new()
-        |> Multi.lock_one(:poll, poll_query)
-        |> Multi.delete(:poll_vote, poll_vote)
-        |> Multi.update_all(:update_options, poll_option_query, inc: [vote_count: -1])
-        |> Multi.update_all(:update_poll, poll_query, inc: [total_votes: -1])
-        |> Multi.transact()
+      try do
+        {:ok, _changes} =
+          Multi.new()
+          |> Multi.lock_one(:poll, poll_query)
+          |> Multi.delete(:poll_vote, poll_vote)
+          |> Multi.update_all(:update_options, poll_option_query, inc: [vote_count: -1])
+          |> Multi.update_all(:update_poll, poll_query, inc: [total_votes: -1])
+          |> Multi.transact()
 
-      {:ok, poll}
+        {:ok, poll}
+      rescue
+        Ecto.StaleEntryError -> {:error, :not_found}
+      end
     end
   end
 
