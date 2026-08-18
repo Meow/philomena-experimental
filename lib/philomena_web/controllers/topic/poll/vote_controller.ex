@@ -33,14 +33,10 @@ defmodule PhilomenaWeb.Topic.Poll.VoteController do
   end
 
   def delete(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug, "id" => vote_id}) do
-    case PollVotes.delete_vote(conn.assigns.actor, forum_slug, topic_slug, vote_id) do
-      {:ok, result} ->
-        conn
-        |> put_flash(:info, "Vote successfully removed.")
-        |> redirect(to: ~p"/forums/#{result.forum}/topics/#{result.topic}")
-
-      error ->
-        error
+    with {:ok, poll} <- PollVotes.delete_vote(conn.assigns.actor, forum_slug, topic_slug, vote_id) do
+      conn
+      |> put_flash(:info, "Vote successfully removed.")
+      |> redirect(to: ~p"/forums/#{poll.topic.forum}/topics/#{poll.topic}")
     end
   end
 end

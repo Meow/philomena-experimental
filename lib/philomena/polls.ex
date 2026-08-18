@@ -4,53 +4,38 @@ defmodule Philomena.Polls do
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
+  import Philomena.Authorization, only: [verify_write_access: 1]
 
   alias Philomena.Attribution.Actor
   alias Philomena.Loader
-  alias Philomena.Polls.{Poll, PollForm, TopicPoll}
+  alias Philomena.Polls.Poll
   alias Philomena.Multi
   alias Philomena.Forums
   alias Philomena.Topics
-
-  defp poll_form(%TopicPoll{} = result, changeset \\ nil) do
-    %PollForm{
-      forum: result.forum,
-      topic: result.topic,
-      poll: result.poll,
-      changeset: changeset || Poll.changeset(result.poll)
-    }
-  end
+  alias Philomena.Topics.Topic
 
   @doc """
-  Loads a poll through its route forum and topic and authorizes `action` on the
-  topic before returning it.
+  Loads a poll through its topic.
 
   This service is shared with `Philomena.PollVotes`; callers cannot load
   a poll independently of an authorized parent chain.
 
   ## Examples
 
-      iex> load_topic_poll(actor, "dis", "favorite-pony", :vote)
-      {:ok, %TopicPoll{}}
+      iex> load_topic_poll(topic_with_poll)
+      {:ok, %Poll{}}
 
-      iex> load_topic_poll(actor, "dis", "topic-without-poll", :vote)
+      iex> load_topic_poll(topic_without_poll)
       {:error, :not_found}
 
   """
-  @spec load_topic_poll(Actor.t(), String.t(), String.t(), atom()) ::
-          {:ok, TopicPoll.t()} | {:error, :not_found | :unauthorized}
-  def load_topic_poll(%Actor{} = actor, forum_slug, topic_slug, action) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show),
-         {:ok, poll} <-
-           Poll
-           |> where([poll], poll.topic_id == ^topic.id)
-           |> preload(:options)
-           |> Loader.one(),
-         :ok <- authorize(actor, action, topic) do
-      {:ok, %TopicPoll{forum: forum, topic: topic, poll: poll}}
-    end
+  @spec load_topic_poll(Topic.t()) ::
+          {:ok, Poll.t()} | {:error, :not_found}
+  def load_topic_poll(%Topic{} = topic) do
+    Poll
+    |> where([poll], poll.topic_id == ^topic.id)
+    |> preload([:options, topic: :forum])
+    |> Loader.one()
   end
 
   @doc """
@@ -61,15 +46,17 @@ defmodule Philomena.Polls do
   ## Examples
 
       iex> load_poll_for_edit(moderator_actor, "dis", "favorite-pony")
-      {:ok, %PollForm{}}
+      {:ok, %Ecto.Changeset{}}
 
   """
   @spec load_poll_for_edit(Actor.t(), String.t(), String.t()) ::
-          {:ok, PollForm.t()} | {:error, :ban | :not_found | :unauthorized}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :not_found | :unauthorized}
   def load_poll_for_edit(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, result} <- load_topic_poll(actor, forum_slug, topic_slug, :edit_poll) do
-      {:ok, poll_form(result)}
+         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :edit_poll),
+         {:ok, poll} <- load_topic_poll(topic) do
+      {:ok, Poll.changeset(poll)}
     end
   end
 
@@ -85,23 +72,25 @@ defmodule Philomena.Polls do
   ## Examples
 
       iex> update_poll(moderator_actor, "dis", "favorite-pony", attrs)
-      {:ok, %TopicPoll{}}
+      {:ok, %Poll{}}
 
       iex> update_poll(moderator_actor, "dis", "favorite-pony", invalid_attrs)
-      {:error, %PollForm{}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec update_poll(Actor.t(), String.t(), String.t(), map()) ::
-          {:ok, TopicPoll.t()}
-          | {:error, PollForm.t()}
+          {:ok, Poll.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
   def update_poll(%Actor{} = actor, forum_slug, topic_slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, result} <- load_topic_poll(actor, forum_slug, topic_slug, :update_poll) do
+         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :update_poll),
+         {:ok, poll} <- load_topic_poll(topic) do
       poll_query =
         Poll
-        |> where(id: ^result.poll.id)
-        |> preload(:options)
+        |> where(id: ^poll.id)
+        |> preload([:options, topic: :forum])
 
       Multi.new()
       |> Multi.lock_one(:locked_poll, poll_query)
@@ -109,10 +98,10 @@ defmodule Philomena.Polls do
       |> Multi.transact()
       |> case do
         {:ok, %{poll: poll}} ->
-          {:ok, %{result | poll: poll}}
+          {:ok, poll}
 
         {:error, :poll, changeset, _changes} ->
-          {:error, poll_form(result, changeset)}
+          {:error, changeset}
       end
     end
   end

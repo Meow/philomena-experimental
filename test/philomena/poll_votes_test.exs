@@ -21,7 +21,6 @@ defmodule Philomena.PollVotesTest do
   import Philomena.UsersFixtures
 
   alias Philomena.PollVotes
-  alias Philomena.Polls.TopicPoll
   alias Philomena.PollVotes.PollVote
   alias Philomena.Repo
 
@@ -381,7 +380,7 @@ defmodule Philomena.PollVotesTest do
       assert Repo.reload!(option_a).vote_count == 1
       assert Repo.reload!(poll).total_votes == 1
 
-      assert {:ok, %TopicPoll{} = result} =
+      assert {:ok, poll} =
                PollVotes.delete_vote(
                  actor(moderator),
                  forum.short_name,
@@ -389,8 +388,8 @@ defmodule Philomena.PollVotesTest do
                  to_string(vote.id)
                )
 
-      assert result.forum.id == forum.id
-      assert result.topic.id == topic.id
+      assert poll.topic.id == topic.id
+      assert poll.topic.forum.id == forum.id
       refute Repo.get(PollVote, vote.id)
 
       assert Repo.reload!(option_a).vote_count == 0

@@ -20,7 +20,7 @@ defmodule Philomena.PollsTest do
   import Philomena.UsersFixtures
 
   alias Philomena.Polls
-  alias Philomena.Polls.{PollForm, TopicPoll}
+  alias Philomena.Polls.Poll
   alias Philomena.PollVotes
   alias Philomena.Repo
 
@@ -37,31 +37,27 @@ defmodule Philomena.PollsTest do
       moderator = moderator_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, %PollForm{} = form} =
+      assert {:ok, %Ecto.Changeset{data: loaded_poll}} =
                Polls.load_poll_for_edit(actor(moderator), forum.short_name, topic.slug)
 
-      assert form.forum.id == forum.id
-      assert form.topic.id == topic.id
-      assert form.poll.id == poll.id
+      assert loaded_poll.topic.forum.id == forum.id
+      assert loaded_poll.topic.id == topic.id
+      assert loaded_poll.id == poll.id
 
       # The options are preloaded so the edit form can render existing choices:
       # a loaded list, not an unloaded association.
-      assert is_list(form.poll.options)
-      assert length(form.poll.options) == 2
-
-      # The changeset drives the edit form and is built from the loaded poll.
-      assert %Ecto.Changeset{data: %Philomena.Polls.Poll{}} = form.changeset
-      assert form.changeset.data.id == poll.id
+      assert is_list(loaded_poll.options)
+      assert length(loaded_poll.options) == 2
     end
 
     test "an admin loads the poll" do
       admin = admin_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, %PollForm{} = form} =
+      assert {:ok, %Ecto.Changeset{data: loaded_poll}} =
                Polls.load_poll_for_edit(actor(admin), forum.short_name, topic.slug)
 
-      assert form.poll.id == poll.id
+      assert loaded_poll.id == poll.id
     end
 
     test "a regular user is unauthorized even though the poll exists" do
@@ -113,33 +109,28 @@ defmodule Philomena.PollsTest do
                {:error, :not_found}
     end
 
-    test "a topic without a poll is not found for a regular user, not unauthorized" do
-      # NOTE: pins the ordering of the shared load chain. The poll-existence check
-      # runs BEFORE the topic :hide authorization, so a poll-less topic answers
-      # not-found even for a regular user who would otherwise fail :hide with
-      # unauthorized. Compare the "poll exists" case above, where the same regular
-      # user gets unauthorized.
+    test "a topic without a poll is unauthorized for a regular user" do
       user = confirmed_user_fixture()
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
       assert Polls.load_poll_for_edit(actor(user), forum.short_name, topic.slug) ==
-               {:error, :not_found}
+               {:error, :unauthorized}
     end
   end
 
   describe "update_poll/4" do
-    test "a moderator updates the poll title and redirects data is returned" do
+    test "a moderator updates the poll title and redirect data is returned" do
       moderator = moderator_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, %TopicPoll{} = result} =
+      assert {:ok, %Poll{} = loaded_poll} =
                Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
                  "title" => "Moderator updated title"
                })
 
-      assert result.forum.id == forum.id
-      assert result.topic.id == topic.id
+      assert loaded_poll.topic.forum.id == forum.id
+      assert loaded_poll.topic.id == topic.id
       assert Repo.reload!(poll).title == "Moderator updated title"
     end
 
@@ -147,7 +138,7 @@ defmodule Philomena.PollsTest do
       admin = admin_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:ok, %TopicPoll{}} =
+      assert {:ok, %Poll{}} =
                Polls.update_poll(actor(admin), forum.short_name, topic.slug, %{
                  "title" => "Admin updated title"
                })
@@ -160,7 +151,7 @@ defmodule Philomena.PollsTest do
       {forum, topic, poll} = forum_topic_poll()
       [option_a, option_b] = poll |> Repo.preload(:options) |> Map.fetch!(:options)
 
-      assert {:ok, %TopicPoll{}} =
+      assert {:ok, %Poll{}} =
                Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
                  "options" => %{
                    "0" => %{"id" => option_a.id, "label" => "Renamed option"},
@@ -182,7 +173,7 @@ defmodule Philomena.PollsTest do
                  "option_ids" => [to_string(option_a.id)]
                })
 
-      assert {:error, %PollForm{changeset: changeset}} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
                  "vote_method" => "multiple",
                  "options" => %{
@@ -197,16 +188,16 @@ defmodule Philomena.PollsTest do
       assert Repo.reload!(poll).vote_method == "single"
     end
 
-    test "a rejected changeset yields the 4-tuple error and leaves the poll unchanged" do
+    test "a rejected changeset leaves the poll unchanged" do
       # Poll.changeset requires title; a blank title with another real change
       # (active_until) produces an invalid changeset with non-empty changes, so
-      # it surfaces as {:error, forum, topic, changeset} (both the loaded forum
+      # it surfaces as {:error, changeset} (data containing both the loaded forum
       # and topic so the controller can re-render the edit form) rather than the
       # no-op :ignore path.
       moderator = moderator_user_fixture()
       {forum, topic, poll} = forum_topic_poll()
 
-      assert {:error, %PollForm{} = form} =
+      assert {:error, %Ecto.Changeset{data: loaded_poll} = changeset} =
                Polls.update_poll(actor(moderator), forum.short_name, topic.slug, %{
                  "title" => "",
                  "active_until" =>
@@ -214,9 +205,9 @@ defmodule Philomena.PollsTest do
                  "vote_method" => "single"
                })
 
-      assert form.forum.id == forum.id
-      assert form.topic.id == topic.id
-      assert %Ecto.Changeset{valid?: false} = form.changeset
+      assert loaded_poll.topic.forum.id == forum.id
+      assert loaded_poll.topic.id == topic.id
+      refute changeset.valid?
       assert Repo.reload!(poll).title == "Best test option?"
     end
 
@@ -265,11 +256,7 @@ defmodule Philomena.PollsTest do
              }) == {:error, :not_found}
     end
 
-    test "a topic without a poll is not found for a regular user, not unauthorized" do
-      # NOTE: same ordering quirk as load_poll_for_edit/3. The poll-existence
-      # check precedes the topic :hide authorization, so a regular user on a
-      # poll-less topic gets not-found rather than the unauthorized they get when
-      # the poll exists.
+    test "a topic without a poll is unauthorized for a regular user" do
       user = confirmed_user_fixture()
       forum = forum_fixture()
       topic = topic_fixture(forum)
@@ -277,7 +264,7 @@ defmodule Philomena.PollsTest do
       assert Polls.update_poll(actor(user), forum.short_name, topic.slug, %{
                "title" => "New title"
              }) ==
-               {:error, :not_found}
+               {:error, :unauthorized}
     end
   end
 end

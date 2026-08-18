@@ -7,13 +7,14 @@ defmodule Philomena.PollVotes do
   import Philomena.Authorization, only: [verify_write_access: 1]
 
   alias Philomena.Attribution.Actor
-  alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.PollOptions
   alias Philomena.PollOptions.PollOption
   alias Philomena.Polls
-  alias Philomena.Polls.{Poll, TopicPoll}
+  alias Philomena.Polls.Poll
   alias Philomena.PollVotes.{Ballot, PollVote}
+  alias Philomena.Forums
+  alias Philomena.Topics
   alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Users.User
@@ -46,11 +47,12 @@ defmodule Philomena.PollVotes do
   @spec list_votes(Actor.t(), String.t(), String.t()) ::
           {:ok, [PollOption.t()]} | {:error, :not_found | :unauthorized}
   def list_votes(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, result} <-
-           Polls.load_topic_poll(actor, forum_slug, topic_slug, :list_poll_votes) do
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :list_poll_votes),
+         {:ok, poll} <- Polls.load_topic_poll(topic) do
       {:ok,
        PollOption
-       |> where(poll_id: ^result.poll.id)
+       |> where(poll_id: ^poll.id)
        |> where([option], option.vote_count > 0)
        |> preload(poll_votes: :user)
        |> Repo.all()}
@@ -80,8 +82,9 @@ defmodule Philomena.PollVotes do
           | {:error, :ban | :not_found | :unauthorized}
   def create_votes(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, result} <- Polls.load_topic_poll(actor, forum_slug, topic_slug, :vote) do
-      poll = result.poll
+         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :vote),
+         {:ok, poll} <- Polls.load_topic_poll(topic) do
       options = PollOptions.load_options(poll)
       poll_query = where(Poll, id: ^poll.id)
 
@@ -131,28 +134,30 @@ defmodule Philomena.PollVotes do
   ## Examples
 
       iex> delete_vote(moderator_actor, "dis", "favorite-pony", "1")
-      {:ok, %TopicPoll{}}
+      {:ok, %Poll{}}
 
   """
-  @spec delete_vote(Actor.t(), String.t(), String.t(), IntegerId.integer_id()) ::
-          {:ok, TopicPoll.t()} | {:error, :ban | :not_found | :unauthorized}
+  @spec delete_vote(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
+          {:ok, Poll.t()} | {:error, :ban | :not_found | :unauthorized}
   def delete_vote(%Actor{} = actor, forum_slug, topic_slug, vote_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, result} <-
-           Polls.load_topic_poll(actor, forum_slug, topic_slug, :delete_poll_vote),
-         {:ok, poll_vote} <- load_poll_vote(result.poll, vote_id) do
+         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :delete_poll_vote),
+         {:ok, poll} <- Polls.load_topic_poll(topic),
+         {:ok, poll_vote} <- load_poll_vote(poll, vote_id) do
       poll_option_query = where(PollOption, id: ^poll_vote.poll_option_id)
-      poll_query = where(Poll, id: ^result.poll.id)
+      poll_query = where(Poll, id: ^poll.id)
 
       # TODO: gracefully handle Ecto.StaleEntryError
       {:ok, _changes} =
         Multi.new()
+        |> Multi.lock_one(:poll, poll_query)
         |> Multi.delete(:poll_vote, poll_vote)
         |> Multi.update_all(:update_options, poll_option_query, inc: [vote_count: -1])
         |> Multi.update_all(:update_poll, poll_query, inc: [total_votes: -1])
         |> Multi.transact()
 
-      {:ok, result}
+      {:ok, poll}
     end
   end
 
