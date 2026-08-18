@@ -62,7 +62,7 @@ for image_def <- resources["remote_images"] do
   now = DateTime.utc_now() |> DateTime.to_unix(:microsecond)
 
   IO.puts("Fetching #{image_def["url"]} ...")
-  {:ok, %{body: body}} = PhilomenaProxy.Http.get(image_def["url"])
+  {:ok, %{body: body, status: 200}} = PhilomenaProxy.Http.get(image_def["url"])
 
   File.write!(file, body)
 
@@ -140,7 +140,7 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
             %{"body" => post}
           )
           |> case do
-            {:ok, %{post: post}} ->
+            {:ok, post} ->
               Posts.approve_post(
                 admin_actor,
                 forum.short_name,

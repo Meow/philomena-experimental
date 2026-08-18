@@ -43,17 +43,18 @@ defmodule PhilomenaQuery.Ecto.QueryValidator do
   @spec validate_query(Ecto.Changeset.t(), atom(), Keyword.t()) :: Ecto.Changeset.t()
   def validate_query(changeset, attr, opts) do
     callback = Keyword.fetch!(opts, :with)
+    default = Keyword.get(opts, :default, "")
     into = Keyword.get(opts, :into)
 
     if changed?(changeset, attr) or not is_nil(into) do
-      validate_assuming_changed(changeset, attr, callback, into)
+      validate_assuming_changed(changeset, attr, callback, default, into)
     else
       changeset
     end
   end
 
-  defp validate_assuming_changed(changeset, attr, callback, into) do
-    with value when is_binary(value) <- fetch_field!(changeset, attr) || "",
+  defp validate_assuming_changed(changeset, attr, callback, default, into) do
+    with value when is_binary(value) <- fetch_field!(changeset, attr) || default,
          value <- String.normalize(value),
          {:ok, compiled} <- callback.(value) do
       maybe_persist_compilation(changeset, compiled, into)

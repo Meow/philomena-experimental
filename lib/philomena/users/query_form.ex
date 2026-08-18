@@ -9,7 +9,7 @@ defmodule Philomena.Users.QueryForm do
   @type t :: %__MODULE__{}
 
   embedded_schema do
-    field :query, :string, default: "*"
+    field :query, :string
     field :sf, :string, default: "id"
     field :sd, :string, default: "desc"
 
@@ -37,6 +37,6 @@ defmodule Philomena.Users.QueryForm do
     ))
     |> validate_inclusion(:sd, ~w(asc desc))
     |> validate_required([:sf, :sd])
-    |> validate_query(:query, with: &Query.compile/1, into: :compiled_query)
+    |> validate_query(:query, with: &Query.compile/1, default: "*", into: :compiled_query)
   end
 end

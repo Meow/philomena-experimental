@@ -88,7 +88,7 @@ defmodule PhilomenaWeb.Admin.ReportControllerTest do
       report = open_report_fixture()
       SearchHelpers.reindex_all!(Report)
 
-      conn = get(conn, ~p"/admin/reports?#{[rq: "open:true"]}")
+      conn = get(conn, ~p"/admin/reports?#{[rq: [query: "open:true"]]}")
       response = html_response(conn, 200)
       assert response =~ report.reason
     end

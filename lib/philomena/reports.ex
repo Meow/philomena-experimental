@@ -27,7 +27,8 @@ defmodule Philomena.Reports do
   alias Philomena.Posts.Post
   alias Philomena.Repo
   alias Philomena.Reports
-  alias Philomena.Reports.Query
+  alias Philomena.Reports.QueryBuilder
+  alias Philomena.Reports.QueryForm
   alias Philomena.Reports.Report
   alias Philomena.Reports.ReportForm
   alias Philomena.Reports.ReportPage
@@ -53,72 +54,6 @@ defmodule Philomena.Reports do
     Report
     |> preload(^preloads)
     |> preload(^Report.target_preloads())
-  end
-
-  defp searched_reports(query, pagination) do
-    Report
-    |> Search.search_definition(%{query: query, sort: report_sorts()}, pagination)
-    |> Search.search_records(report_query(@default_preloads))
-  end
-
-  defp own_open_reports(%Actor{user: %User{id: user_id}}) do
-    Report
-    |> where(open: true, admin_id: ^user_id)
-    |> preload(^@default_preloads)
-    |> preload(^Report.target_preloads())
-    |> order_by(desc: :created_at)
-    |> Repo.all()
-  end
-
-  defp open_system_reports do
-    Report
-    |> where(open: true, system: true)
-    |> preload(^@default_preloads)
-    |> preload(^Report.target_preloads())
-    |> order_by(desc: :created_at)
-    |> Repo.all()
-  end
-
-  defp report_sorts do
-    [%{open: :desc}, %{state: :desc}, %{created_at: :desc}]
-  end
-
-  defp build_report_page(_actor, %{"rq" => query_string}, pagination) do
-    case Query.compile(query_string) do
-      {:ok, query} ->
-        {:ok,
-         %ReportPage{
-           reports: searched_reports(query, pagination),
-           my_reports: [],
-           system_reports: []
-         }}
-
-      _error ->
-        {:error, :invalid_query}
-    end
-  end
-
-  defp build_report_page(%Actor{user: %User{id: user_id}} = actor, _params, pagination) do
-    query = %{
-      bool: %{
-        should: [
-          %{term: %{open: false}},
-          %{
-            bool: %{
-              must: %{term: %{open: true}},
-              must_not: [%{term: %{admin_id: user_id}}, %{term: %{system: true}}]
-            }
-          }
-        ]
-      }
-    }
-
-    {:ok,
-     %ReportPage{
-       reports: searched_reports(query, pagination),
-       my_reports: own_open_reports(actor),
-       system_reports: open_system_reports()
-     }}
   end
 
   defp load_report_target(%Actor{} = actor, locator) do
@@ -155,6 +90,12 @@ defmodule Philomena.Reports do
     %ReportForm{target: target, changeset: changeset}
   end
 
+  defp open_report_count(query) do
+    query
+    |> where([report], report.state in ["open", "in_progress"])
+    |> Repo.aggregate(:count)
+  end
+
   defp ensure_report_limit(%Actor{user: user, ip: ip} = actor) do
     cond do
       authorize(actor, :bypass_submission_limit, Report) == :ok ->
@@ -170,12 +111,6 @@ defmodule Philomena.Reports do
       true ->
         :ok
     end
-  end
-
-  defp open_report_count(query) do
-    query
-    |> where([report], report.state in ["open", "in_progress"])
-    |> Repo.aggregate(:count)
   end
 
   defp close_report_query(%User{id: user_id}, [{column, id}])
@@ -306,24 +241,56 @@ defmodule Philomena.Reports do
   @doc """
   Loads the staff report index described by `params` and `pagination`.
 
-  Access is authorized with `:index` before any report query runs. An `"rq"`
+  Access is authorized with `:index` before any report query runs. A `query`
   parameter selects the report search language. Malformed search text returns
-  `{:error, :invalid_query}` instead of raising.
+  `{:error, changeset}` with the error rendered in the query form.
 
   ## Examples
 
-      iex> load_report_index(admin, %{"rq" => "open:true"}, pagination)
-      {:ok, %ReportPage{}}
+      iex> load_report_index(admin, %{"query" => "open:true"}, pagination)
+      {:ok, %ReportPage{}, %Ecto.Changeset{}}
 
       iex> load_report_index(user, %{}, pagination)
       {:error, :unauthorized}
 
   """
   @spec load_report_index(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, ReportPage.t()} | {:error, :unauthorized | :invalid_query}
-  def load_report_index(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, Report) do
-      build_report_page(actor, params, pagination)
+          {:ok, ReportPage.t(), Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :unauthorized}
+  def load_report_index(%Actor{user: user} = actor, params, pagination) do
+    with :ok <- authorize(actor, :index, Report),
+         {:ok, query, query_form} <- QueryBuilder.build_query(params, user) do
+      reports =
+        Report
+        |> Search.search_definition(query, pagination)
+        |> Search.search_records(report_query(@default_preloads))
+
+      {my_reports, system_reports} =
+        if not is_nil(query_form.query) do
+          {[], []}
+        else
+          open_report_query =
+            Report
+            |> where(open: true)
+            |> preload(^@default_preloads)
+            |> preload(^Report.target_preloads())
+            |> order_by(desc: :created_at)
+
+          my_reports = where(open_report_query, admin_id: ^user.id)
+          system_reports = where(open_report_query, system: true)
+
+          {Repo.all(my_reports), Repo.all(system_reports)}
+        end
+
+      page =
+        %ReportPage{
+          reports: reports,
+          my_reports: my_reports,
+          system_reports: system_reports
+        }
+
+      {:ok, page, QueryForm.changeset(query_form, user.id)}
     end
   end
 

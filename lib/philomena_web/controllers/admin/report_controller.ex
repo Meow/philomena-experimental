@@ -7,28 +7,38 @@ defmodule PhilomenaWeb.Admin.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Reports.load_report_index(conn.assigns.actor, params, conn.assigns.pagination) do
-      {:ok, page} ->
+    case Reports.load_report_index(
+           conn.assigns.actor,
+           params["rq"] || %{},
+           conn.assigns.pagination
+         ) do
+      {:ok, page, query_changeset} ->
         render(conn, "index.html",
           title: "Admin - Reports",
           layout_class: "layout--wide",
           reports: page.reports,
           my_reports: page.my_reports,
-          system_reports: page.system_reports
+          system_reports: page.system_reports,
+          changeset: query_changeset
         )
 
-      {:error, :invalid_query} ->
-        conn
-        |> put_flash(:error, "Invalid report search query.")
-        |> redirect(to: ~p"/admin/reports")
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "index.html",
+          title: "Admin - Reports",
+          layout_class: "layout--wide",
+          reports: nil,
+          my_reports: [],
+          system_reports: [],
+          changeset: changeset
+        )
 
-      {:error, _reason} = error ->
+      error ->
         error
     end
   end
 
-  def show(conn, params) do
-    with {:ok, report} <- Reports.load_report(conn.assigns.actor, params["id"]) do
+  def show(conn, %{"id" => report_id}) do
+    with {:ok, report} <- Reports.load_report(conn.assigns.actor, report_id) do
       body = MarkdownRenderer.render_one(%{body: report.reason}, conn)
 
       render(conn, "show.html",

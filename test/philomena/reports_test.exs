@@ -264,7 +264,8 @@ defmodule Philomena.ReportsTest do
       report = report_fixture(image_id: image_fixture().id)
       SearchHelpers.reindex_all!(Report)
 
-      assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []}} =
+      assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []},
+              _query_changeset} =
                Reports.load_report_index(actor(admin_user_fixture()), %{}, @pagination)
 
       assert report.id in Enum.map(reports.entries, & &1.id)
@@ -275,16 +276,17 @@ defmodule Philomena.ReportsTest do
       SearchHelpers.reindex_all!(Report)
       admin = actor(admin_user_fixture())
 
-      assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []}} =
-               Reports.load_report_index(admin, %{"rq" => "*"}, @pagination)
+      assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []},
+              _query_changeset} =
+               Reports.load_report_index(admin, %{"query" => "*"}, @pagination)
 
       assert length(reports.entries) == 1
 
-      assert Reports.load_report_index(admin, %{"rq" => "("}, @pagination) ==
-               {:error, :invalid_query}
+      assert {:error, %Ecto.Changeset{}} =
+               Reports.load_report_index(admin, %{"query" => "("}, @pagination)
 
-      assert Reports.load_report_index(admin, %{"rq" => ["open:true"]}, @pagination) ==
-               {:error, :invalid_query}
+      assert {:error, %Ecto.Changeset{}} =
+               Reports.load_report_index(admin, %{"query" => ["open:true"]}, @pagination)
     end
 
     test "the index is unauthorized for regular users" do

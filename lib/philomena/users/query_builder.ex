@@ -9,7 +9,7 @@ defmodule Philomena.Users.QueryBuilder do
   ## Parameters
 
     * `params` - Map of optional search parameters:
-      * `uq` - Search query
+      * `query` - Search query
       * `sf` - Sort field:
         * `name` - Account name
         * `confirmed_at` - Account confirmation time
