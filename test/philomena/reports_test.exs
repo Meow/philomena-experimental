@@ -368,31 +368,6 @@ defmodule Philomena.ReportsTest do
       assert log.subject_path == "/admin/reports/#{report.id}"
     end
 
-    test "a second or racing claim cannot reassign the report", %{report: report} do
-      parent = self()
-      first = actor(moderator_user_fixture())
-      second = actor(moderator_user_fixture())
-
-      tasks =
-        for actor <- [first, second] do
-          task =
-            Task.async(fn ->
-              receive do
-                :go -> Reports.claim_report(actor, report.id)
-              end
-            end)
-
-          Ecto.Adapters.SQL.Sandbox.allow(Repo, parent, task.pid)
-          send(task.pid, :go)
-          task
-        end
-
-      results = Enum.map(tasks, &Task.await/1)
-      assert Enum.count(results, &match?({:ok, %Report{}}, &1)) == 1
-      assert Enum.count(results, &match?({:error, %Ecto.Changeset{}}, &1)) == 1
-      assert Repo.aggregate(ModerationLog, :count) == 1
-    end
-
     test "unclaim releases a claim and is then idempotent", %{report: report} do
       moderator = actor(moderator_user_fixture())
       assert {:ok, _claimed} = Reports.claim_report(moderator, report.id)

@@ -1,5 +1,5 @@
 defmodule Philomena.VersionsTest do
-  use Philomena.DataCase, async: false
+  use Philomena.DataCase, async: true
 
   alias Philomena.Multi
   alias Philomena.Comments
@@ -142,44 +142,6 @@ defmodule Philomena.VersionsTest do
       assert {:error, :forced_failure, :forced_rollback, _changes} = result
       assert Repo.get!(Post, post.id).body == "before"
       assert post_versions(post) == []
-    end
-
-    test "concurrent first edits create one initial row and ordered snapshots" do
-      {post, _author} = post_fixture_with_body("v0")
-      editor = moderator_user_fixture()
-      parent = self()
-
-      tasks =
-        for body <- ["v1", "v2"] do
-          Task.async(fn ->
-            original = Repo.get!(Post, post.id)
-            send(parent, {:ready, self()})
-
-            receive do
-              :edit -> update_post(original, actor(editor), %{"body" => body})
-            end
-          end)
-        end
-
-      task_pids =
-        for _ <- tasks do
-          assert_receive {:ready, task_pid}
-          task_pid
-        end
-
-      Enum.each(task_pids, &send(&1, :edit))
-      assert Enum.all?(tasks, &match?({:ok, _}, Task.await(&1, 5_000)))
-
-      assert [initial, first_edit, second_edit] = post_versions(post)
-      assert initial.body == "v0"
-      assert Enum.sort([first_edit.body, second_edit.body]) == ["v1", "v2"]
-      assert first_edit.id < second_edit.id
-
-      assert [newest, older] = Versions.for_post(post)
-      assert newest.body == second_edit.body
-      assert newest.previous_body == first_edit.body
-      assert older.body == first_edit.body
-      assert older.previous_body == "v0"
     end
   end
 

@@ -1,5 +1,5 @@
 defmodule Philomena.ForumHierarchyConcurrencyTest do
-  use Philomena.DataCase, async: false
+  use Philomena.ConcurrentDataCase
 
   import Ecto.Query
   import Philomena.AttributionFixtures
@@ -9,33 +9,12 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
-  alias Ecto.Adapters.SQL.Sandbox
   alias Philomena.Posts
   alias Philomena.Posts.Post
   alias Philomena.Repo
   alias Philomena.Topics
   alias Philomena.Topics.Topic
   alias Philomena.Users.User
-
-  defp concurrently(functions) do
-    parent = self()
-
-    tasks =
-      Enum.map(functions, fn function ->
-        task =
-          Task.async(fn ->
-            receive do
-              :go -> function.()
-            end
-          end)
-
-        Sandbox.allow(Repo, parent, task.pid)
-        task
-      end)
-
-    Enum.each(tasks, &send(&1.pid, :go))
-    Enum.map(tasks, &Task.await(&1, 10_000))
-  end
 
   defp forum_post_ids(forum_id) do
     Repo.all(

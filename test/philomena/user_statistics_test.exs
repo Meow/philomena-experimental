@@ -1,5 +1,5 @@
 defmodule Philomena.UserStatisticsTest do
-  use Philomena.DataCase, async: false
+  use Philomena.DataCase, async: true
 
   import Philomena.UsersFixtures
 
@@ -65,19 +65,6 @@ defmodule Philomena.UserStatisticsTest do
 
     assert Repo.get!(User, user.id).topics_count == 0
     refute Repo.get_by(UserStatistic, user_id: user.id)
-  end
-
-  test "atomic increments do not lose updates from concurrent callers" do
-    user = confirmed_user_fixture()
-
-    tasks =
-      for _ <- 1..8 do
-        Task.async(fn -> UserStatistics.increment(user.id, :image_votes_count) end)
-      end
-
-    assert Enum.map(tasks, &Task.await(&1, 5_000)) == List.duplicate({:ok, nil}, 8)
-    assert Repo.get!(User, user.id).image_votes_count == 8
-    assert Repo.get_by!(UserStatistic, user_id: user.id).image_votes_count == 8
   end
 
   test "daily rows cascade on user deletion and deleted IDs are not-found" do

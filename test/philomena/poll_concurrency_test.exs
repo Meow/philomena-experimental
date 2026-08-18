@@ -1,5 +1,5 @@
 defmodule Philomena.PollConcurrencyTest do
-  use Philomena.DataCase, async: false
+  use Philomena.ConcurrentDataCase
 
   import Ecto.Query
   import Philomena.AttributionFixtures
@@ -7,33 +7,12 @@ defmodule Philomena.PollConcurrencyTest do
   import Philomena.TopicsFixtures
   import Philomena.UsersFixtures
 
-  alias Ecto.Adapters.SQL.Sandbox
   alias Philomena.PollOptions.PollOption
   alias Philomena.PollVotes
   alias Philomena.PollVotes.PollVote
   alias Philomena.Polls
   alias Philomena.Polls.Poll
   alias Philomena.Repo
-
-  defp concurrently(functions) do
-    parent = self()
-
-    tasks =
-      Enum.map(functions, fn function ->
-        task =
-          Task.async(fn ->
-            receive do
-              :go -> function.()
-            end
-          end)
-
-        Sandbox.allow(Repo, parent, task.pid)
-        task
-      end)
-
-    Enum.each(tasks, &send(&1.pid, :go))
-    Enum.map(tasks, &Task.await(&1, 10_000))
-  end
 
   defp poll_fixture do
     forum = forum_fixture()
