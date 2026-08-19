@@ -84,6 +84,12 @@ defmodule Philomena.Users do
 
   defp load_user_by_slug(_actor, _action, _slug, _preloads), do: {:error, :not_found}
 
+  defp user_lock_query(%User{id: id}) do
+    User
+    |> where(id: ^id)
+    |> preload([:roles, :settings])
+  end
+
   # Authentication and token transaction composition.
 
   defp user_email_multi(user, email, context) do
@@ -1241,14 +1247,18 @@ defmodule Philomena.Users do
   def update_user_details(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :update, slug, [:roles]) do
-      changeset = update_user_changeset(user, params)
-
       Multi.new()
-      |> Multi.update(:user, changeset)
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        update_user_changeset(user, params)
+      end)
       |> put_unsubscribe_restricted_actors(:unsubscribe_restricted_actors)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: updated_user} ->
-        {"Admin.User:update", Paths.profile_path(updated_user),
-         "Updated user details for #{updated_user.name}"}
+        {
+          "Admin.User:update",
+          Paths.profile_path(updated_user),
+          "Updated user details for #{updated_user.name}"
+        }
       end)
       |> put_reindex_user()
       |> Multi.transact()
@@ -1286,11 +1296,12 @@ defmodule Philomena.Users do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :reactivate, slug) do
       Multi.new()
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} -> User.reactivate_changeset(user) end)
       |> Multi.delete_all(
         :reactivation_tokens,
         UserToken.user_and_contexts_query(user, ["reactivate"])
       )
-      |> Multi.update(:user, User.reactivate_changeset(user))
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
         {
           "Admin.User.Activation:create",
@@ -1334,10 +1345,11 @@ defmodule Philomena.Users do
   def admin_deactivate_user(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :deactivate, slug) do
-      changeset = User.deactivate_changeset(user, actor.user)
-
       Multi.new()
-      |> Multi.update(:user, changeset)
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        User.deactivate_changeset(user, actor.user)
+      end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
         {"Admin.User.Activation:delete", Paths.profile_path(user), "Deactivated #{user.name}"}
       end)
@@ -1936,10 +1948,9 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def update_settings(%Actor{user: %User{} = user} = actor, attrs) do
     with :ok <- verify_write_access(actor) do
-      changeset = User.settings_changeset(user, attrs)
-
       Multi.new()
-      |> Multi.update(:user, changeset)
+      |> Multi.lock_one(:locked_user, preload(user_lock_query(user), :settings))
+      |> Multi.update(:user, fn %{locked_user: user} -> User.settings_changeset(user, attrs) end)
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
@@ -2173,11 +2184,11 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def watch_tag(%Actor{user: %User{} = user} = actor, tag) do
     with :ok <- verify_write_access(actor) do
-      watched_tag_ids = Enum.uniq([tag.id | user.watched_tag_ids])
-      changeset = User.watched_tags_changeset(user, watched_tag_ids)
-
       Multi.new()
-      |> Multi.update(:user, changeset)
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        User.watched_tags_changeset(user, Enum.uniq([tag.id | user.watched_tag_ids]))
+      end)
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
@@ -2205,11 +2216,11 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def unwatch_tag(%Actor{user: %User{} = user} = actor, tag) do
     with :ok <- verify_write_access(actor) do
-      watched_tag_ids = user.watched_tag_ids -- [tag.id]
-      changeset = User.watched_tags_changeset(user, watched_tag_ids)
-
       Multi.new()
-      |> Multi.update(:user, changeset)
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        User.watched_tags_changeset(user, user.watched_tag_ids -- [tag.id])
+      end)
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
@@ -2351,15 +2362,20 @@ defmodule Philomena.Users do
   @spec update_name(Actor.t(), map()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | UserForm.t()}
   def update_name(%Actor{user: user} = actor, user_params) do
-    with :ok <- verify_write_access(actor),
-         :ok <- authorize(user, :change_username, user) do
+    with :ok <- verify_write_access(actor) do
       old_name = user.name
 
-      user_changeset = User.name_changeset(user, user_params)
-
       Multi.new()
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.run(:authorize, fn _repo, %{locked_user: user} ->
+        with :ok <- authorize(user, :change_username, user) do
+          {:ok, nil}
+        end
+      end)
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        User.name_changeset(user, user_params)
+      end)
       |> UserNameChanges.record_rename(:name_change, user)
-      |> Multi.update(:user, user_changeset)
       |> put_reindex_user()
       |> put_rename_user_job(old_name: old_name)
       |> Multi.transact()
@@ -2369,6 +2385,9 @@ defmodule Philomena.Users do
 
         {:error, :user, changeset, _changes} ->
           {:error, user_form(user, changeset)}
+
+        {:error, :authorize, :unauthorized, _changes} ->
+          {:error, :unauthorized}
       end
     end
   end
@@ -2414,14 +2433,23 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def deactivate_account(%Actor{user: %User{} = user} = actor, reactivation_url_fun) do
     with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, :deactivate_account, user),
-         {:ok, %{user: user}} <-
-           Multi.new()
-           |> Multi.update(:user, User.deactivate_changeset(user, user))
-           |> put_reindex_user()
-           |> Multi.transact() do
-      deliver_user_reactivation_instructions(user, reactivation_url_fun)
-      {:ok, user}
+         :ok <- authorize(actor, :deactivate_account, user) do
+      Multi.new()
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        User.deactivate_changeset(user, user)
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          deliver_user_reactivation_instructions(user, reactivation_url_fun)
+
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -2469,10 +2497,9 @@ defmodule Philomena.Users do
   @spec set_current_filter(User.t(), Filter.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def set_current_filter(%User{} = user, %Filter{} = filter) do
-    changeset = User.filter_changeset(user, filter)
-
     Multi.new()
-    |> Multi.update(:user, changeset)
+    |> Multi.lock_one(:locked_user, user_lock_query(user))
+    |> Multi.update(:user, fn %{locked_user: user} -> User.filter_changeset(user, filter) end)
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
@@ -2497,10 +2524,11 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def clear_recent_filters(%Actor{user: %User{} = user} = actor) do
     with :ok <- verify_write_access(actor) do
-      changeset = User.clear_recent_filters_changeset(user)
-
       Multi.new()
-      |> Multi.update(:user, changeset)
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        User.clear_recent_filters_changeset(user)
+      end)
       |> put_reindex_user()
       |> Multi.transact()
       |> case do

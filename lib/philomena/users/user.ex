@@ -379,13 +379,24 @@ defmodule Philomena.Users.User do
   end
 
   def reactivate_changeset(user) do
-    change(user, deleted_at: nil, deleted_by_user_id: nil)
+    changeset = change(user)
+
+    if get_field(changeset, :deleted_at) do
+      change(user, deleted_at: nil, deleted_by_user_id: nil)
+    else
+      add_error(changeset, :deleted_at, "is already active")
+    end
   end
 
   def deactivate_changeset(user, deactivator) do
-    now = DateTime.utc_now(:second)
+    changeset = change(user)
 
-    change(user, deleted_at: now, deleted_by_user_id: deactivator.id)
+    if get_field(changeset, :deleted_at) do
+      add_error(changeset, :deleted_at, "is already deactivated")
+    else
+      now = DateTime.utc_now(:second)
+      change(user, deleted_at: now, deleted_by_user_id: deactivator.id)
+    end
   end
 
   def api_key_changeset(user) do
