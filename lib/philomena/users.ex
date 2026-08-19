@@ -157,45 +157,6 @@ defmodule Philomena.Users do
 
   # Profile, avatar, and rename persistence.
 
-  defp alias_matches(user) do
-    # N.B.: subquery runs faster and is easier to read
-    # than the equivalent join, but Ecto doesn't support
-    # that for some reason (and ActiveRecord does??)
-
-    ip_matches =
-      User
-      |> join(:inner, [u], _ in assoc(u, :user_ips))
-      |> join(:left, [u, ui1], ui2 in UserIp, on: ui1.ip == ui2.ip)
-      |> where([u, _ui1, ui2], u.id != ^user.id and ui2.user_id == ^user.id)
-      |> select([u, _ui1, _ui2], u)
-      |> preload(:bans)
-      |> Repo.all()
-      |> Map.new(&{&1.id, &1})
-
-    fp_matches =
-      User
-      |> join(:inner, [u], _ in assoc(u, :user_fingerprints))
-      |> join(:left, [u, uf1], uf2 in UserFingerprint, on: uf1.fingerprint == uf2.fingerprint)
-      |> where([u, _uf1, uf2], u.id != ^user.id and uf2.user_id == ^user.id)
-      |> select([u, _uf1, _uf2], u)
-      |> preload(:bans)
-      |> Repo.all()
-      |> Map.new(&{&1.id, &1})
-
-    both_matches = Map.take(ip_matches, Map.keys(fp_matches))
-
-    ip_matches = Map.drop(ip_matches, Map.keys(both_matches))
-
-    fp_matches = Map.drop(fp_matches, Map.keys(both_matches))
-
-    %AliasMatches{
-      user: user,
-      both_matches: Map.values(both_matches),
-      ip_matches: Map.values(ip_matches),
-      fp_matches: Map.values(fp_matches)
-    }
-  end
-
   defp update_profile_description(%User{} = user, attrs) do
     changeset = User.description_changeset(user, attrs)
 
@@ -1209,16 +1170,16 @@ defmodule Philomena.Users do
 
   Reading the user listing requires authorization to index users.
 
-  The `"uq"` param supplies the query, and `"sf"`/`"sd"` select the sort field
+  The `query` param supplies the query, and `sf`/`sd` select the sort field
   and direction. Returns a `m:Scrivener.Page` of matching users and a
   changeset for a new search.
 
   ## Examples
 
-      iex> search_users(actor, %{"uq" => "name:somebody"}, pagination)
+      iex> search_users(actor, %{"query" => "name:somebody"}, pagination)
       {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
-      iex> search_users(actor, %{"uq" => "("}, pagination)
+      iex> search_users(actor, %{"query" => "("}, pagination)
       {:error, %Ecto.Changeset{}}
 
   """
@@ -2087,7 +2048,54 @@ defmodule Philomena.Users do
           {:ok, AliasMatches.t()} | {:error, :unauthorized | :not_found}
   def load_alias_matches(%Actor{} = actor, slug) do
     with {:ok, user} <- load_user_by_slug(actor, :show_details, slug) do
-      {:ok, alias_matches(user)}
+      # Select all IPs and fingerprints known from this user
+      user_ips =
+        UserIp
+        |> where(user_id: ^user.id)
+        |> select([ip], ip.ip)
+
+      user_fingerprints =
+        UserFingerprint
+        |> where(user_id: ^user.id)
+        |> select([fingerprint], fingerprint.fingerprint)
+
+      # Select all user IDs that have ever shared those IPs/fingerprints
+      ip_user_ids =
+        UserIp
+        |> where([ip], ip.ip in subquery(user_ips))
+        |> select([ip], ip.user_id)
+
+      fingerprint_user_ids =
+        UserFingerprint
+        |> where([fingerprint], fingerprint.fingerprint in subquery(user_fingerprints))
+        |> select([fingerprint], fingerprint.user_id)
+
+      # Select all users that match those user IDs and are not the target user
+      ip_matches =
+        User
+        |> where([user], user.id != ^user.id and user.id in subquery(ip_user_ids))
+        |> preload(:bans)
+        |> Repo.all()
+        |> Map.new(&{&1.id, &1})
+
+      fingerprint_matches =
+        User
+        |> where([user], user.id != ^user.id and user.id in subquery(fingerprint_user_ids))
+        |> preload(:bans)
+        |> Repo.all()
+        |> Map.new(&{&1.id, &1})
+
+      both_matches = Map.take(ip_matches, Map.keys(fingerprint_matches))
+      ip_matches = Map.drop(ip_matches, Map.keys(both_matches))
+      fingerprint_matches = Map.drop(fingerprint_matches, Map.keys(both_matches))
+
+      {:ok,
+       %AliasMatches{
+         user: user,
+         both_matches: Map.values(both_matches),
+         ip_matches: Map.values(ip_matches),
+         fp_matches: Map.values(fingerprint_matches)
+       }}
     end
   end
 
