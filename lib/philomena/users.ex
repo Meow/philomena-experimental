@@ -88,62 +88,6 @@ defmodule Philomena.Users do
     Multi.on_commit(multi, fn %{^step => user} -> reindex_user(user) end)
   end
 
-  defp managed_user_transaction(
-         actor,
-         slug,
-         action,
-         changeset_fun,
-         log_type,
-         log_body,
-         after_commit \\ nil
-       ) do
-    with :ok <- verify_write_access(actor),
-         {:ok, user} <- load_user_by_slug(actor, action, slug) do
-      changeset = changeset_fun.(user)
-
-      Multi.new()
-      |> Multi.update(:user, changeset)
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
-        {log_type, Paths.profile_path(user), log_body.(user)}
-      end)
-      |> put_reindex_user()
-      |> Multi.on_commit(fn %{user: user} ->
-        if after_commit, do: after_commit.(user)
-      end)
-      |> Multi.transact()
-      |> case do
-        {:ok, %{user: user}} ->
-          {:ok, user}
-
-        {:error, :user, changeset, _changes} ->
-          {:error, changeset}
-
-        error ->
-          error
-      end
-    end
-  end
-
-  defp logged_managed_user(actor, slug, action, log_type, log_body, after_commit) do
-    with :ok <- verify_write_access(actor),
-         {:ok, user} <- load_user_by_slug(actor, action, slug) do
-      Multi.new()
-      |> Multi.put(:user, user)
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
-        {log_type, Paths.profile_path(user), log_body.(user)}
-      end)
-      |> Multi.on_commit(fn %{user: user} -> after_commit.(user) end)
-      |> Multi.transact()
-      |> case do
-        {:ok, %{user: user}} ->
-          {:ok, user}
-
-        error ->
-          error
-      end
-    end
-  end
-
   # Authentication and token transaction composition.
 
   defp maybe_send_unlock_instructions(%{failed_attempts: attempts}, _unlock_url_fun)
@@ -1364,9 +1308,6 @@ defmodule Philomena.Users do
 
         {:error, :user, changeset, _changes} ->
           {:error, admin_user_form(changeset.data, changeset)}
-
-        error ->
-          error
       end
     end
   end
@@ -1415,9 +1356,6 @@ defmodule Philomena.Users do
 
         {:error, :user, changeset, _changes} ->
           {:error, changeset}
-
-        error ->
-          error
       end
     end
   end
@@ -1444,14 +1382,25 @@ defmodule Philomena.Users do
   @spec admin_deactivate_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_deactivate_user(%Actor{} = actor, slug) do
-    managed_user_transaction(
-      actor,
-      slug,
-      :deactivate,
-      &User.deactivate_changeset(&1, actor.user),
-      "Admin.User.Activation:delete",
-      &"Deactivated #{&1.name}"
-    )
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :deactivate, slug) do
+      changeset = User.deactivate_changeset(user, actor.user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Activation:delete", Paths.profile_path(user), "Deactivated #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
+    end
   end
 
   @doc """
@@ -1476,14 +1425,25 @@ defmodule Philomena.Users do
   @spec admin_reset_api_key(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_reset_api_key(%Actor{} = actor, slug) do
-    managed_user_transaction(
-      actor,
-      slug,
-      :reset_api_key,
-      &User.api_key_changeset/1,
-      "Admin.User.ApiKey:delete",
-      &"Reset API key for #{&1.name}"
-    )
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :reset_api_key, slug) do
+      changeset = User.api_key_changeset(user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.ApiKey:delete", Paths.profile_path(user), "Reset API key for #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
+    end
   end
 
   @doc """
@@ -1508,17 +1468,25 @@ defmodule Philomena.Users do
   @spec admin_remove_avatar(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_remove_avatar(%Actor{} = actor, slug) do
-    with {:ok, user} <-
-           managed_user_transaction(
-             actor,
-             slug,
-             :remove_avatar,
-             &User.remove_avatar_changeset/1,
-             "Admin.User.Avatar:delete",
-             &"Removed avatar for #{&1.name}",
-             &Uploader.unpersist_old_upload/1
-           ) do
-      {:ok, user}
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :remove_avatar, slug) do
+      changeset = User.remove_avatar_changeset(user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Avatar:delete", Paths.profile_path(user), "Removed avatar for #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.on_commit(fn %{user: user} -> Uploader.unpersist_old_upload(user) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -1543,16 +1511,22 @@ defmodule Philomena.Users do
   @spec admin_wipe_downvotes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_wipe_downvotes(%Actor{} = actor, slug) do
-    with {:ok, user} <-
-           logged_managed_user(
-             actor,
-             slug,
-             :wipe_downvotes,
-             "Admin.User.Downvote:delete",
-             &"Wiped downvotes for #{&1.name}",
-             fn user -> Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, false]) end
-           ) do
-      {:ok, user}
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :wipe_downvotes, slug) do
+      Multi.new()
+      |> Multi.put(:user, user)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Downvote:delete", Paths.profile_path(user),
+         "Wiped downvotes for #{user.name}"}
+      end)
+      |> Multi.on_commit(fn %{user: user} ->
+        Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, false])
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+      end
     end
   end
 
@@ -1641,9 +1615,6 @@ defmodule Philomena.Users do
 
         {:error, :user, changeset, _changes} ->
           {:error, changeset}
-
-        error ->
-          error
       end
     end
   end
@@ -1697,22 +1668,25 @@ defmodule Philomena.Users do
           {:ok, User.t()}
           | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
   def admin_force_filter(%Actor{} = actor, slug, params) do
-    result =
-      managed_user_transaction(
-        actor,
-        slug,
-        :force_filter,
-        &User.force_filter_changeset(&1, params),
-        "Admin.User.ForceFilter:create",
-        &"Forced filter #{&1.forced_filter_id} for #{&1.name}"
-      )
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :force_filter, slug) do
+      changeset = User.force_filter_changeset(user, params)
 
-    case result do
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:error, user_form(changeset.data, changeset)}
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.ForceFilter:create", Paths.profile_path(user),
+         "Forced filter #{user.forced_filter_id} for #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
 
-      result ->
-        result
+        {:error, :user, changeset, _changes} ->
+          {:error, user_form(changeset.data, changeset)}
+      end
     end
   end
 
@@ -1738,14 +1712,26 @@ defmodule Philomena.Users do
   @spec admin_unforce_filter(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_unforce_filter(%Actor{} = actor, slug) do
-    managed_user_transaction(
-      actor,
-      slug,
-      :unforce_filter,
-      &User.unforce_filter_changeset/1,
-      "Admin.User.ForceFilter:delete",
-      &"Removed forced filter for #{&1.name}"
-    )
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :unforce_filter, slug) do
+      changeset = User.unforce_filter_changeset(user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.ForceFilter:delete", Paths.profile_path(user),
+         "Removed forced filter for #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
+    end
   end
 
   @doc """
@@ -1769,14 +1755,25 @@ defmodule Philomena.Users do
   @spec admin_unlock_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_unlock_user(%Actor{} = actor, slug) do
-    managed_user_transaction(
-      actor,
-      slug,
-      :unlock,
-      &User.unlock_changeset/1,
-      "Admin.User.Unlock:create",
-      &"Unlocked #{&1.name}"
-    )
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :unlock, slug) do
+      changeset = User.unlock_changeset(user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Unlock:create", Paths.profile_path(user), "Unlocked #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
+    end
   end
 
   @doc """
@@ -1800,14 +1797,26 @@ defmodule Philomena.Users do
   @spec admin_verify_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_verify_user(%Actor{} = actor, slug) do
-    managed_user_transaction(
-      actor,
-      slug,
-      :verify,
-      &User.verify_changeset/1,
-      "Admin.User.Verification:create",
-      &"Granted verification to #{&1.name}"
-    )
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :verify, slug) do
+      changeset = User.verify_changeset(user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Verification:create", Paths.profile_path(user),
+         "Granted verification to #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
+    end
   end
 
   @doc """
@@ -1831,14 +1840,26 @@ defmodule Philomena.Users do
   @spec admin_unverify_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_unverify_user(%Actor{} = actor, slug) do
-    managed_user_transaction(
-      actor,
-      slug,
-      :unverify,
-      &User.unverify_changeset/1,
-      "Admin.User.Verification:delete",
-      &"Revoked verification from #{&1.name}"
-    )
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :unverify, slug) do
+      changeset = User.unverify_changeset(user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Verification:delete", Paths.profile_path(user),
+         "Revoked verification from #{user.name}"}
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
+    end
   end
 
   @doc """
@@ -1863,16 +1884,22 @@ defmodule Philomena.Users do
   @spec admin_wipe_votes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_wipe_votes(%Actor{} = actor, slug) do
-    with {:ok, user} <-
-           logged_managed_user(
-             actor,
-             slug,
-             :wipe_votes,
-             "Admin.User.Vote:delete",
-             &"Wiped votes and faves for #{&1.name}",
-             fn user -> Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, true]) end
-           ) do
-      {:ok, user}
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :wipe_votes, slug) do
+      Multi.new()
+      |> Multi.put(:user, user)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Vote:delete", Paths.profile_path(user),
+         "Wiped votes and faves for #{user.name}"}
+      end)
+      |> Multi.on_commit(fn %{user: user} ->
+        Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, true])
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+      end
     end
   end
 
@@ -1897,16 +1924,21 @@ defmodule Philomena.Users do
   @spec admin_wipe_user(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
   def admin_wipe_user(%Actor{} = actor, slug) do
-    with {:ok, user} <-
-           logged_managed_user(
-             actor,
-             slug,
-             :wipe,
-             "Admin.User.Wipe:create",
-             &"Wiped PII for #{&1.name}",
-             fn user -> Exq.enqueue(Exq, "indexing", UserWipeWorker, [user.id]) end
-           ) do
-      {:ok, user}
+    with :ok <- verify_write_access(actor),
+         {:ok, user} <- load_user_by_slug(actor, :wipe, slug) do
+      Multi.new()
+      |> Multi.put(:user, user)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
+        {"Admin.User.Wipe:create", Paths.profile_path(user), "Wiped PII for #{user.name}"}
+      end)
+      |> Multi.on_commit(fn %{user: user} ->
+        Exq.enqueue(Exq, "indexing", UserWipeWorker, [user.id])
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+      end
     end
   end
 
