@@ -368,23 +368,14 @@ defmodule Philomena.Users do
         user
 
       true ->
-        changeset = User.failed_attempt_changeset(user)
+        {:ok, %{user: user}} =
+          Multi.new()
+          |> Multi.update(:user, User.failed_attempt_changeset(user))
+          |> put_reindex_user()
+          |> Multi.transact()
 
-        multi = Multi.new() |> Multi.update(:user, changeset)
-
-        multi =
-          if Ecto.Changeset.get_field(changeset, :failed_attempts) >= 10 do
-            multi
-            |> Multi.update(:locked_user, fn %{user: user} -> User.lock_changeset(user) end)
-            |> put_reindex_user()
-          else
-            put_reindex_user(multi)
-          end
-
-        {:ok, changes} = Multi.transact(multi)
-
-        if locked_user = changes[:locked_user] do
-          deliver_user_unlock_instructions(locked_user, unlock_url_fun)
+        if user.locked_at do
+          deliver_user_unlock_instructions(user, unlock_url_fun)
         end
 
         nil

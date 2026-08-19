@@ -237,10 +237,13 @@ defmodule Philomena.Users.User do
   end
 
   def failed_attempt_changeset(user) do
-    if not is_integer(user.failed_attempts) or user.failed_attempts < 0 do
-      change(user, failed_attempts: 1)
+    failed_attempts = max(0, user.failed_attempts || 0) + 1
+    changeset = change(user, failed_attempts: failed_attempts)
+
+    if failed_attempts >= 10 do
+      lock_changeset(changeset)
     else
-      change(user, failed_attempts: user.failed_attempts + 1)
+      changeset
     end
   end
 
