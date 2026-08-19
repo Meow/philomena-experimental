@@ -357,28 +357,33 @@ defmodule Philomena.Users do
         where: user.email == ^email,
         where: is_nil(user.locked_at)
 
-    with %User{} = user <- Repo.one(user_query) do
-      if User.valid_password?(user, password) do
-        {:ok, %{user: user}} =
-          Multi.new()
-          |> Multi.update(:user, User.successful_attempt_changeset(user))
-          |> put_reindex_user()
-          |> Multi.transact()
-
-        user
+    Multi.new()
+    |> Multi.lock_one(:locked_user, user_query)
+    |> Multi.run(:valid_password?, fn _repo, %{locked_user: user} ->
+      {:ok, User.valid_password?(user, password)}
+    end)
+    |> Multi.update(:user, fn %{valid_password?: valid_password?, locked_user: user} ->
+      if valid_password? do
+        User.successful_attempt_changeset(user)
       else
-        {:ok, %{user: user}} =
-          Multi.new()
-          |> Multi.update(:user, User.failed_attempt_changeset(user))
-          |> put_reindex_user()
-          |> Multi.transact()
+        User.failed_attempt_changeset(user)
+      end
+    end)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{valid_password?: true, user: user}} ->
+        user
 
+      {:ok, %{valid_password?: false, user: user}} ->
         if user.locked_at do
           deliver_user_unlock_instructions(user, unlock_url_fun)
         end
 
         nil
-      end
+
+      {:error, :locked_user, :not_found, _changes} ->
+        nil
     end
   end
 
