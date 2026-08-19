@@ -84,10 +84,6 @@ defmodule Philomena.Users do
 
   defp load_user_by_slug(_actor, _action, _slug, _preloads), do: {:error, :not_found}
 
-  defp put_reindex_user(multi, step \\ :user) do
-    Multi.on_commit(multi, fn %{^step => user} -> reindex_user(user) end)
-  end
-
   # Authentication and token transaction composition.
 
   defp maybe_send_unlock_instructions(%{failed_attempts: attempts}, _unlock_url_fun)
@@ -183,17 +179,7 @@ defmodule Philomena.Users do
 
       {:error, :user, changeset, _changes} ->
         {:error, changeset}
-
-      error ->
-        error
     end
-  end
-
-  defp update_profile_scratchpad(%User{} = user, attrs) do
-    user
-    |> User.scratchpad_changeset(attrs)
-    |> Repo.update()
-    |> reindex_after_update()
   end
 
   defp persist_avatar(%User{} = user, attrs) do
@@ -220,28 +206,6 @@ defmodule Philomena.Users do
     |> Multi.update(:user, changeset)
     |> Uploader.put_unpersist_old_upload(:user)
     |> Multi.on_commit(fn %{user: user} -> reindex_user(user) end)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{user: user}} ->
-        {:ok, user}
-
-      {:error, :user, changeset, _changes} ->
-        {:error, changeset}
-    end
-  end
-
-  defp rename_user(user, user_params) do
-    old_name = user.name
-
-    user_changeset = User.name_changeset(user, user_params)
-
-    Multi.new()
-    |> UserNameChanges.record_rename(:name_change, user)
-    |> Multi.update(:user, user_changeset)
-    |> put_reindex_user()
-    |> Multi.on_commit(fn %{user: user} ->
-      Exq.enqueue(Exq, "indexing", UserRenameWorker, [old_name, user.name])
-    end)
     |> Multi.transact()
     |> case do
       {:ok, %{user: user}} ->
@@ -303,6 +267,10 @@ defmodule Philomena.Users do
   end
 
   # Shared after-commit indexing result handling.
+
+  defp put_reindex_user(multi, step \\ :user) do
+    Multi.on_commit(multi, fn %{^step => user} -> reindex_user(user) end)
+  end
 
   defp reindex_after_update(result) do
     case result do
@@ -2128,7 +2096,7 @@ defmodule Philomena.Users do
 
   @doc """
   Updates the moderation scratchpad of the user named by the profile `slug`, on
-  behalf of `actor`, from `attrs`.
+  behalf of `actor`, from `params`.
 
   Write access is checked before lookup. Missing targets are
   `{:error, :not_found}`. Real targets are authorized for `:edit_scratchpad`.
@@ -2149,12 +2117,19 @@ defmodule Philomena.Users do
   @spec update_scratchpad(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
           | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
-  def update_scratchpad(%Actor{} = actor, slug, attrs) do
+  def update_scratchpad(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
-      case update_profile_scratchpad(user, attrs) do
-        {:ok, user} -> {:ok, user}
-        {:error, changeset} -> {:error, user_form(user, changeset)}
+      user
+      |> User.scratchpad_changeset(params)
+      |> Repo.update()
+      |> reindex_after_update()
+      |> case do
+        {:ok, user} ->
+          {:ok, user}
+
+        {:error, changeset} ->
+          {:error, user_form(user, changeset)}
       end
     end
   end
@@ -2338,9 +2313,24 @@ defmodule Philomena.Users do
   def update_name(%Actor{user: user} = actor, user_params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(user, :change_username, user) do
-      case rename_user(user, user_params) do
-        {:ok, user} -> {:ok, user}
-        {:error, changeset} -> {:error, user_form(user, changeset)}
+      old_name = user.name
+
+      user_changeset = User.name_changeset(user, user_params)
+
+      Multi.new()
+      |> UserNameChanges.record_rename(:name_change, user)
+      |> Multi.update(:user, user_changeset)
+      |> put_reindex_user()
+      |> Multi.on_commit(fn %{user: user} ->
+        Exq.enqueue(Exq, "indexing", UserRenameWorker, [old_name, user.name])
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, user_form(user, changeset)}
       end
     end
   end
