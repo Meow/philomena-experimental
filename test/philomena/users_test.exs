@@ -105,14 +105,17 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "get_user_by_email_and_password/3" do
+  describe "fetch_user_by_email_and_password/3" do
     test "does not return the user if the email does not exist" do
-      refute Users.get_user_by_email_and_password("unknown@example.com", "hello world!", & &1)
+      assert Users.fetch_user_by_email_and_password("unknown@example.com", "hello world!", & &1) ==
+               {:error, :not_found}
     end
 
     test "does not return the user if the password is not valid" do
       user = user_fixture()
-      refute Users.get_user_by_email_and_password(user.email, "invalid", & &1)
+
+      assert Users.fetch_user_by_email_and_password(user.email, "invalid", & &1) ==
+               {:error, :not_found}
 
       user = Users.fetch_user_for_worker!(user.id)
       assert user.failed_attempts == 1
@@ -122,7 +125,8 @@ defmodule Philomena.UsersTest do
       user = user_fixture()
 
       Enum.map(1..10, fn _ ->
-        refute Users.get_user_by_email_and_password(user.email, "invalid", & &1)
+        assert Users.fetch_user_by_email_and_password(user.email, "invalid", & &1) ==
+                 {:error, :not_found}
       end)
 
       user = Users.fetch_user_for_worker!(user.id)
@@ -145,17 +149,19 @@ defmodule Philomena.UsersTest do
       user = user_fixture()
 
       Enum.map(1..10, fn _ ->
-        refute Users.get_user_by_email_and_password(user.email, "invalid", & &1)
+        assert Users.fetch_user_by_email_and_password(user.email, "invalid", & &1) ==
+                 {:error, :not_found}
       end)
 
-      refute Users.get_user_by_email_and_password(user.email, valid_user_password(), & &1)
+      assert Users.fetch_user_by_email_and_password(user.email, valid_user_password(), & &1) ==
+               {:error, :not_found}
     end
 
     test "returns the user if the email and password are valid" do
-      %{id: id} = user = user_fixture()
+      %{id: id} = user = confirmed_user_fixture()
 
-      assert %User{id: ^id} =
-               Users.get_user_by_email_and_password(user.email, valid_user_password(), & &1)
+      assert {:ok, %User{id: ^id}} =
+               Users.fetch_user_by_email_and_password(user.email, valid_user_password(), & &1)
     end
   end
 
@@ -408,7 +414,7 @@ defmodule Philomena.UsersTest do
 
   describe "update_user_password/3" do
     setup do
-      %{user: user_fixture()}
+      %{user: confirmed_user_fixture()}
     end
 
     test "validates password", %{user: user} do
@@ -447,7 +453,9 @@ defmodule Philomena.UsersTest do
         })
 
       assert is_nil(user.password)
-      assert Users.get_user_by_email_and_password(user.email, "new valid password", & &1)
+
+      assert {:ok, _} =
+               Users.fetch_user_by_email_and_password(user.email, "new valid password", & &1)
     end
 
     test "deletes all tokens for the given user", %{user: user} do
@@ -734,7 +742,7 @@ defmodule Philomena.UsersTest do
 
   describe "reset_user_password/3" do
     setup do
-      %{user: user_fixture()}
+      %{user: confirmed_user_fixture()}
     end
 
     test "validates password", %{user: user} do
@@ -759,7 +767,9 @@ defmodule Philomena.UsersTest do
     test "updates the password", %{user: user} do
       {:ok, updated_user} = Users.reset_user_password(user, %{password: "new valid password"})
       assert is_nil(updated_user.password)
-      assert Users.get_user_by_email_and_password(user.email, "new valid password", & &1)
+
+      assert {:ok, _} =
+               Users.fetch_user_by_email_and_password(user.email, "new valid password", & &1)
     end
 
     test "deletes all tokens for the given user", %{user: user} do

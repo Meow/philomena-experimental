@@ -98,6 +98,25 @@ defmodule Philomena.Users do
     |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["confirm"]))
   end
 
+  defp verify_user_for_authentication(user) do
+    if is_nil(user.confirmed_at) do
+      {:error, :unconfirmed}
+    else
+      {:ok, user}
+    end
+  end
+
+  defp verify_user_for_password_authentication(user, password_compromised?) do
+    if password_compromised? do
+      # Immediately delete user sessions to notify the user that a reset is needed.
+      delete_user_sessions(user)
+
+      {:error, :password_compromised}
+    else
+      verify_user_for_authentication(user)
+    end
+  end
+
   ## Settings and role assignment
 
   defp admin_user_form(changeset) do
@@ -483,38 +502,24 @@ defmodule Philomena.Users do
 
   @doc group: "Authentication"
   @doc """
-  Gets a user by name.
-
-  ## Examples
-
-      iex> get_user_by_name("Administrator")
-      %User{}
-
-      iex> get_user_by_name("nonexistent")
-      nil
-
-  """
-  @spec get_user_by_name(String.t()) :: User.t() | nil
-  def get_user_by_name(name) when is_binary(name) do
-    Repo.get_by(User, name: name)
-  end
-
-  @doc group: "Authentication"
-  @doc """
   Gets a user by email and password.
 
+  Users which are locked, unconfirmed, or whose password is valid and matches
+  a password found in a public data breach return an error.
+
   ## Examples
 
-      iex> get_user_by_email_and_password("foo@example.com", "correct_password", &unlock_url/1)
-      %User{}
+      iex> fetch_user_by_email_and_password("foo@example.com", "correct_password", &unlock_url/1)
+      {:ok, %User{}}
 
-      iex> get_user_by_email_and_password("foo@example.com", "invalid_password", &unlock_url/1)
-      nil
+      iex> fetch_user_by_email_and_password("foo@example.com", "invalid_password", &unlock_url/1)
+      {:error, :not_found}
 
   """
-  @spec get_user_by_email_and_password(String.t(), String.t(), (String.t() -> String.t())) ::
-          User.t() | nil
-  def get_user_by_email_and_password(email, password, unlock_url_fun)
+  @spec fetch_user_by_email_and_password(String.t(), String.t(), (String.t() -> String.t())) ::
+          {:ok, User.t()}
+          | {:error, :unconfirmed | :password_compromised | :not_found}
+  def fetch_user_by_email_and_password(email, password, unlock_url_fun)
       when is_binary(email) and is_binary(password) do
     user_query =
       from user in User,
@@ -537,17 +542,17 @@ defmodule Philomena.Users do
     |> Multi.transact()
     |> case do
       {:ok, %{valid_password?: true, user: user}} ->
-        user
+        verify_user_for_password_authentication(user, password_compromised?(password))
 
       {:ok, %{valid_password?: false, user: user}} ->
         if user.locked_at do
           deliver_user_unlock_instructions(user, unlock_url_fun)
         end
 
-        nil
+        {:error, :not_found}
 
       {:error, :locked_user, :not_found, _changes} ->
-        nil
+        {:error, :not_found}
     end
   end
 
@@ -1443,6 +1448,7 @@ defmodule Philomena.Users do
       Multi.new()
       |> Multi.update(:user, changeset)
       |> Multi.merge(fn %{user: user} ->
+        # credo:disable-for-next-line
         if user.became_unapproved? do
           Reports.put_create_system_report(
             Multi.new(),
@@ -1682,6 +1688,7 @@ defmodule Philomena.Users do
       Multi.new()
       |> Multi.lock_one(:locked_user, user_lock_query(user))
       |> Multi.run(:authorize, fn _repo, %{locked_user: user} ->
+        # credo:disable-for-next-line
         with :ok <- authorize(user, :change_username, user) do
           {:ok, nil}
         end

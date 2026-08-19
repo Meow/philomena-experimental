@@ -14,17 +14,13 @@ defmodule PhilomenaWeb.SessionController do
   def create(conn, %{"user" => user_params}) do
     %{"email" => email, "password" => password} = user_params
 
-    user =
-      Users.get_user_by_email_and_password(
-        email,
-        password,
-        &url(~p"/unlocks/#{&1}")
-      )
+    case Users.fetch_user_by_email_and_password(email, password, &url(~p"/unlocks/#{&1}")) do
+      {:ok, user} ->
+        conn
+        |> put_flash(:info, "Successfully logged in.")
+        |> UserAuth.log_in_user(user, user_params)
 
-    cond do
-      not is_nil(user) and Users.password_compromised?(password) ->
-        Users.delete_user_sessions(user)
-
+      {:error, :password_compromised} ->
         conn
         |> put_flash(
           :error,
@@ -32,19 +28,14 @@ defmodule PhilomenaWeb.SessionController do
         )
         |> redirect(to: ~p"/passwords/new")
 
-      not is_nil(user) and is_nil(user.confirmed_at) ->
+      {:error, :unconfirmed} ->
         render(
           conn,
           "new.html",
           error_message: "You must confirm your account before logging in."
         )
 
-      not is_nil(user) ->
-        conn
-        |> put_flash(:info, "Successfully logged in.")
-        |> UserAuth.log_in_user(user, user_params)
-
-      true ->
+      {:error, :not_found} ->
         render(
           conn,
           "new.html",

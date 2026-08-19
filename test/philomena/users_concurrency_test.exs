@@ -29,11 +29,11 @@ defmodule Philomena.UsersConcurrencyTest do
     results =
       concurrently(
         for _ <- 1..20 do
-          fn -> Users.get_user_by_email_and_password(user.email, "invalid", & &1) end
+          fn -> Users.fetch_user_by_email_and_password(user.email, "invalid", & &1) end
         end
       )
 
-    assert results == List.duplicate(nil, 20)
+    assert results == List.duplicate({:error, :not_found}, 20)
 
     user = Repo.get!(User, user.id)
     assert user.failed_attempts == 10
