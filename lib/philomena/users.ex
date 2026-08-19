@@ -352,13 +352,13 @@ defmodule Philomena.Users do
           User.t() | nil
   def get_user_by_email_and_password(email, password, unlock_url_fun)
       when is_binary(email) and is_binary(password) do
-    user = Repo.get_by(User, email: email)
+    user_query =
+      from user in User,
+        where: user.email == ^email,
+        where: is_nil(user.locked_at)
 
-    cond do
-      is_nil(user) or not is_nil(user.locked_at) ->
-        nil
-
-      User.valid_password?(user, password) ->
+    with %User{} = user <- Repo.one(user_query) do
+      if User.valid_password?(user, password) do
         {:ok, %{user: user}} =
           Multi.new()
           |> Multi.update(:user, User.successful_attempt_changeset(user))
@@ -366,8 +366,7 @@ defmodule Philomena.Users do
           |> Multi.transact()
 
         user
-
-      true ->
+      else
         {:ok, %{user: user}} =
           Multi.new()
           |> Multi.update(:user, User.failed_attempt_changeset(user))
@@ -379,6 +378,7 @@ defmodule Philomena.Users do
         end
 
         nil
+      end
     end
   end
 
