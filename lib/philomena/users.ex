@@ -503,20 +503,19 @@ defmodule Philomena.Users do
   def preload_preview_awards(%User{} = user), do: Repo.preload(user, awards: :badge)
 
   @doc """
-  Returns the site staff grouped into categories, as a keyword list of
-  `{category, [%User{}]}` in a fixed order.
+  Returns the site staff grouped into categories, as a map keyed by semantic
+  category names.
 
   Staff are the users whose role is `"admin"`, `"moderator"`, or `"assistant"`,
-  ordered by name. A staff member who hides their default role and carries no
-  distinguishing secondary role matches no category and is omitted.
+  ordered by name.
 
   ## Examples
 
       iex> staff_categories()
-      [Administrators: [%User{}], "Technical Team": [], ...]
+      %{administrators: [%User{}], developers: [], ...}
 
   """
-  @spec staff_categories() :: keyword([User.t()])
+  @spec staff_categories() :: %{atom() => [User.t()]}
   def staff_categories do
     users =
       User
@@ -524,35 +523,22 @@ defmodule Philomena.Users do
       |> order_by(asc: :name)
       |> Repo.all()
 
-    [
-      Administrators: Enum.filter(users, &(&1.role == "admin" and &1.hide_default_role == false)),
-      "Technical Team":
-        Enum.filter(
-          users,
-          &(&1.role != "admin" and &1.secondary_role in ["Site Developer", "Devops"])
-        ),
-      "Public Relations":
-        Enum.filter(users, &(&1.role != "admin" and &1.secondary_role == "Public Relations")),
-      Moderators:
-        Enum.filter(
-          users,
-          &(&1.role == "moderator" and &1.secondary_role in [nil, ""] and
-              &1.hide_default_role == false)
-        ),
-      Assistants:
-        Enum.filter(
-          users,
-          &(&1.role == "assistant" and &1.secondary_role in [nil, ""] and
-              &1.hide_default_role == false)
-        ),
-      Others:
-        Enum.filter(
-          users,
-          &(&1.role != "user" and
-              &1.secondary_role not in [nil, "", "Site Developer", "Devops", "Public Relations"] and
-              &1.hide_default_role == true)
-        )
-    ]
+    {others, staff} = Enum.split_with(users, & &1.hide_default_role)
+
+    {developers, staff} =
+      Enum.split_with(staff, &(&1.secondary_role in ["Site Developer", "Devops"]))
+
+    {public_relations, staff} =
+      Enum.split_with(staff, &(&1.secondary_role == "Public Relations"))
+
+    %{
+      administrators: Enum.filter(staff, &(&1.role == "admin")),
+      moderators: Enum.filter(staff, &(&1.role == "moderator")),
+      assistants: Enum.filter(staff, &(&1.role == "assistant")),
+      developers: developers,
+      public_relations: public_relations,
+      others: others
+    }
   end
 
   ## User registration

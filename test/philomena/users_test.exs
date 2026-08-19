@@ -1019,48 +1019,48 @@ defmodule Philomena.UsersTest do
       admin = staff_user("admin")
 
       categories = Users.staff_categories()
-      assert admin.id in Enum.map(categories[:Administrators], & &1.id)
+      assert admin.id in Enum.map(categories[:administrators], & &1.id)
     end
 
     test "groups a plain moderator under Moderators" do
       mod = staff_user("moderator")
 
       categories = Users.staff_categories()
-      assert mod.id in Enum.map(categories[:Moderators], & &1.id)
-      refute mod.id in Enum.map(categories[:Administrators], & &1.id)
+      assert mod.id in Enum.map(categories[:moderators], & &1.id)
+      refute mod.id in Enum.map(categories[:administrators], & &1.id)
     end
 
     test "groups a plain assistant under Assistants" do
       assistant = staff_user("assistant")
 
       categories = Users.staff_categories()
-      assert assistant.id in Enum.map(categories[:Assistants], & &1.id)
+      assert assistant.id in Enum.map(categories[:assistants], & &1.id)
     end
 
     test "groups a Site Developer under Technical Team by secondary role" do
       dev = staff_user("moderator", secondary_role: "Site Developer")
 
       categories = Users.staff_categories()
-      assert dev.id in Enum.map(categories[:"Technical Team"], & &1.id)
+      assert dev.id in Enum.map(categories[:developers], & &1.id)
       # A distinguishing secondary role takes the user out of Moderators.
-      refute dev.id in Enum.map(categories[:Moderators], & &1.id)
+      refute dev.id in Enum.map(categories[:moderators], & &1.id)
     end
 
     test "groups a Public Relations staffer under Public Relations" do
       pr = staff_user("moderator", secondary_role: "Public Relations")
 
       categories = Users.staff_categories()
-      assert pr.id in Enum.map(categories[:"Public Relations"], & &1.id)
+      assert pr.id in Enum.map(categories[:public_relations], & &1.id)
     end
 
-    test "omits a staff member who hides their default role with no distinguishing secondary role" do
+    test "shows a staff member who hides their default role with no distinguishing secondary role" do
       hidden = staff_user("moderator", hide_default_role: true)
 
       all_listed =
         Users.staff_categories()
         |> Enum.flat_map(fn {_category, users} -> Enum.map(users, & &1.id) end)
 
-      refute hidden.id in all_listed
+      assert hidden.id in all_listed
     end
 
     test "does not list ordinary users" do
