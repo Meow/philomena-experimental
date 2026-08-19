@@ -34,7 +34,7 @@ defmodule PhilomenaWeb.Admin.UserController do
            Users.load_user_for_edit(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing User",
-        user: form.user,
+        user: form.changeset.data,
         changeset: form.changeset,
         roles: form.roles
       )
@@ -49,7 +49,7 @@ defmodule PhilomenaWeb.Admin.UserController do
     else
       {:error, %AdminUserForm{} = form} ->
         render(conn, "edit.html",
-          user: form.user,
+          user: form.changeset.data,
           changeset: form.changeset,
           roles: form.roles
         )

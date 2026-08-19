@@ -29,7 +29,6 @@ defmodule Philomena.Users do
     Settings,
     Uploader,
     User,
-    UserForm,
     UserNotifier,
     UserToken
   }
@@ -59,19 +58,7 @@ defmodule Philomena.Users do
   alias Philomena.UserUnvoteWorker
   alias Philomena.UserWipeWorker
 
-  # Shared forms, locators, and staff transaction composition.
-
-  defp user_form(%User{} = user, changeset \\ nil) do
-    %UserForm{user: user, changeset: changeset || User.changeset(user)}
-  end
-
-  defp admin_user_form(%User{} = user, changeset \\ nil) do
-    %AdminUserForm{
-      user: user,
-      changeset: changeset || User.changeset(user),
-      roles: Repo.all(Role)
-    }
-  end
+  # Shared locators.
 
   defp load_user_by_slug(actor, action, slug, preloads \\ [])
 
@@ -83,12 +70,6 @@ defmodule Philomena.Users do
   end
 
   defp load_user_by_slug(_actor, _action, _slug, _preloads), do: {:error, :not_found}
-
-  defp user_lock_query(%User{id: id}) do
-    User
-    |> where(id: ^id)
-    |> preload([:roles, :settings])
-  end
 
   # Authentication and token transaction composition.
 
@@ -118,6 +99,13 @@ defmodule Philomena.Users do
   end
 
   # Settings and role assignment.
+
+  defp admin_user_form(changeset) do
+    %AdminUserForm{
+      changeset: changeset,
+      roles: Repo.all(Role)
+    }
+  end
 
   defp fetch_roles(role_ids) do
     Role
@@ -179,7 +167,13 @@ defmodule Philomena.Users do
     end
   end
 
-  # Restricted forum cleanup.
+  # Transaction composition.
+
+  defp user_lock_query(%User{id: id}) do
+    User
+    |> where(id: ^id)
+    |> preload([:roles, :settings])
+  end
 
   defp put_unsubscribe_restricted_actors(multi, step) do
     Multi.run(multi, step, fn repo, %{user: user} ->
@@ -1155,7 +1149,7 @@ defmodule Philomena.Users do
   def load_user_for_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit, slug, [:roles]) do
-      {:ok, admin_user_form(user)}
+      {:ok, admin_user_form(User.changeset(user))}
     end
   end
 
@@ -1206,7 +1200,7 @@ defmodule Philomena.Users do
           {:ok, updated_user}
 
         {:error, :user, changeset, _changes} ->
-          {:error, admin_user_form(changeset.data, changeset)}
+          {:error, admin_user_form(changeset)}
       end
     end
   end
@@ -1527,18 +1521,18 @@ defmodule Philomena.Users do
   ## Examples
 
       iex> load_user_for_force_filter(actor, "somebody")
-      {:ok, %UserForm{}}
+      {:ok, %Ecto.Changeset{}}
 
       iex> load_user_for_force_filter(actor, "missing")
       {:error, :not_found}
 
   """
   @spec load_user_for_force_filter(Actor.t(), String.t()) ::
-          {:ok, UserForm.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_user_for_force_filter(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :force_filter, slug) do
-      {:ok, user_form(user)}
+      {:ok, User.changeset(user)}
     end
   end
 
@@ -1563,7 +1557,7 @@ defmodule Philomena.Users do
   """
   @spec admin_force_filter(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
-          | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def admin_force_filter(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :force_filter, slug) do
@@ -1582,7 +1576,7 @@ defmodule Philomena.Users do
           {:ok, user}
 
         {:error, :user, changeset, _changes} ->
-          {:error, user_form(changeset.data, changeset)}
+          {:error, changeset}
       end
     end
   end
@@ -1914,18 +1908,18 @@ defmodule Philomena.Users do
   ## Examples
 
       iex> load_profile_for_description_edit(actor, "somebody")
-      {:ok, %UserForm{}}
+      {:ok, %Ecto.Changeset{}}
 
       iex> load_profile_for_description_edit(actor, "missing")
       {:error, :not_found}
 
   """
   @spec load_profile_for_description_edit(Actor.t(), String.t()) ::
-          {:ok, UserForm.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_profile_for_description_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_description, slug) do
-      {:ok, user_form(user)}
+      {:ok, User.changeset(user)}
     end
   end
 
@@ -1953,7 +1947,7 @@ defmodule Philomena.Users do
   """
   @spec update_description(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
-          | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_description(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_description, slug) do
@@ -1981,7 +1975,7 @@ defmodule Philomena.Users do
           {:ok, user}
 
         {:error, :user, changeset, _changes} ->
-          {:error, user_form(user, changeset)}
+          {:error, changeset}
       end
     end
   end
@@ -2073,18 +2067,18 @@ defmodule Philomena.Users do
   ## Examples
 
       iex> load_profile_for_scratchpad_edit(actor, "somebody")
-      {:ok, %UserForm{}}
+      {:ok, %Ecto.Changeset{}}
 
       iex> load_profile_for_scratchpad_edit(actor, "missing")
       {:error, :not_found}
 
   """
   @spec load_profile_for_scratchpad_edit(Actor.t(), String.t()) ::
-          {:ok, UserForm.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_profile_for_scratchpad_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
-      {:ok, user_form(user)}
+      {:ok, User.changeset(user)}
     end
   end
 
@@ -2110,7 +2104,7 @@ defmodule Philomena.Users do
   """
   @spec update_scratchpad(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
-          | {:error, :ban | :unauthorized | :not_found | UserForm.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_scratchpad(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
@@ -2125,7 +2119,7 @@ defmodule Philomena.Users do
           {:ok, user}
 
         {:error, :user, changeset, _changes} ->
-          {:error, user_form(user, changeset)}
+          {:error, changeset}
       end
     end
   end
@@ -2203,17 +2197,17 @@ defmodule Philomena.Users do
   ## Examples
 
       iex> load_user_for_avatar_edit(actor)
-      {:ok, %UserForm{}}
+      {:ok, %Ecto.Changeset{}}
 
       iex> load_user_for_avatar_edit(banned_actor)
       {:error, :ban}
 
   """
   @spec load_user_for_avatar_edit(Actor.t()) ::
-          {:ok, UserForm.t()} | {:error, :ban | :unauthorized}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def load_user_for_avatar_edit(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor) do
-      {:ok, user_form(user)}
+      {:ok, User.changeset(user)}
     end
   end
 
@@ -2237,7 +2231,7 @@ defmodule Philomena.Users do
 
   """
   @spec update_avatar(Actor.t(), map()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | UserForm.t()}
+          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def update_avatar(%Actor{user: user} = actor, attrs) do
     with :ok <- verify_write_access(actor) do
       changeset = Uploader.analyze_upload(user, attrs)
@@ -2252,7 +2246,7 @@ defmodule Philomena.Users do
           {:ok, user}
 
         {:error, :user, changeset, _changes} ->
-          {:error, user_form(user, changeset)}
+          {:error, changeset}
       end
     end
   end
@@ -2293,18 +2287,18 @@ defmodule Philomena.Users do
   ## Examples
 
       iex> load_user_for_rename(actor)
-      {:ok, %UserForm{}}
+      {:ok, %Ecto.Changeset{}}
 
       iex> load_user_for_rename(recently_renamed_actor)
       {:error, :unauthorized}
 
   """
   @spec load_user_for_rename(Actor.t()) ::
-          {:ok, UserForm.t()} | {:error, :ban | :unauthorized}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def load_user_for_rename(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(user, :change_username, user) do
-      {:ok, user_form(user)}
+      {:ok, User.changeset(user)}
     end
   end
 
@@ -2327,11 +2321,11 @@ defmodule Philomena.Users do
       {:ok, %User{}}
 
       iex> update_name(actor, %{"name" => ""})
-      {:error, %UserForm{}}
+      {:error, %Ecto.Changeset{}}
 
   """
   @spec update_name(Actor.t(), map()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | UserForm.t()}
+          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def update_name(%Actor{user: user} = actor, user_params) do
     with :ok <- verify_write_access(actor) do
       old_name = user.name
@@ -2355,7 +2349,7 @@ defmodule Philomena.Users do
           {:ok, user}
 
         {:error, :user, changeset, _changes} ->
-          {:error, user_form(user, changeset)}
+          {:error, changeset}
 
         {:error, :authorize, :unauthorized, _changes} ->
           {:error, :unauthorized}

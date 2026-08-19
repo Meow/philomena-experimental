@@ -2,7 +2,6 @@ defmodule PhilomenaWeb.AvatarController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Users
-  alias Philomena.Users.UserForm
 
   plug PhilomenaWeb.ScraperPlug,
        [params_name: "user", params_key: "avatar"] when action in [:update]
@@ -10,7 +9,7 @@ defmodule PhilomenaWeb.AvatarController do
   action_fallback PhilomenaWeb.FallbackController
 
   def edit(conn, _params) do
-    with {:ok, %UserForm{changeset: changeset}} <-
+    with {:ok, %Ecto.Changeset{} = changeset} <-
            Users.load_user_for_avatar_edit(conn.assigns.actor) do
       render(conn, "edit.html", title: "Editing Avatar", changeset: changeset)
     end
@@ -23,7 +22,7 @@ defmodule PhilomenaWeb.AvatarController do
         |> put_flash(:info, "Successfully updated avatar.")
         |> redirect(to: ~p"/avatar/edit")
 
-      {:error, %UserForm{changeset: changeset}} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html", changeset: changeset)
 
       {:error, _} = error ->

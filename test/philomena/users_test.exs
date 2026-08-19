@@ -15,7 +15,7 @@ defmodule Philomena.UsersTest do
   alias Philomena.Reports.Report
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
-  alias Philomena.Users.{AdminUserForm, AliasMatches, Settings, User, UserForm, UserToken}
+  alias Philomena.Users.{AdminUserForm, AliasMatches, Settings, User, UserToken}
   alias Philomena.Repo
 
   @png_fixture Path.absname("test/support/fixtures/files/upload-test.png")
@@ -765,7 +765,7 @@ defmodule Philomena.UsersTest do
     test "the profile owner may edit their own description" do
       user = confirmed_user_fixture()
 
-      assert {:ok, %UserForm{user: loaded, changeset: %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: loaded}} =
                Users.load_profile_for_description_edit(actor(user), user.slug)
 
       assert loaded.id == user.id
@@ -774,7 +774,7 @@ defmodule Philomena.UsersTest do
     test "a moderator may edit another user's description" do
       user = confirmed_user_fixture()
 
-      assert {:ok, %UserForm{user: loaded, changeset: %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: loaded}} =
                Users.load_profile_for_description_edit(actor(moderator_user_fixture()), user.slug)
 
       assert loaded.id == user.id
@@ -874,7 +874,7 @@ defmodule Philomena.UsersTest do
     test "a moderator may edit the scratchpad" do
       user = confirmed_user_fixture()
 
-      assert {:ok, %UserForm{user: loaded, changeset: %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: loaded}} =
                Users.load_profile_for_scratchpad_edit(actor(moderator_user_fixture()), user.slug)
 
       assert loaded.id == user.id
@@ -883,7 +883,7 @@ defmodule Philomena.UsersTest do
     test "an assistant may edit the scratchpad" do
       user = confirmed_user_fixture()
 
-      assert {:ok, %UserForm{user: loaded, changeset: %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: loaded}} =
                Users.load_profile_for_scratchpad_edit(actor(assistant_user_fixture()), user.slug)
 
       assert loaded.id == user.id
@@ -1078,7 +1078,7 @@ defmodule Philomena.UsersTest do
     test "returns a changeset for a user whose rename window is open" do
       user = renameable_user()
 
-      assert {:ok, %UserForm{user: loaded, changeset: %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: loaded}} =
                Users.load_user_for_rename(actor(user))
 
       assert loaded.id == user.id
@@ -1143,7 +1143,7 @@ defmodule Philomena.UsersTest do
     test "a blank name is a rejected changeset" do
       user = renameable_user()
 
-      assert {:error, %UserForm{changeset: changeset}} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Users.update_name(actor(user), %{"name" => ""})
 
       assert %{name: ["can't be blank"]} = errors_on(changeset)
@@ -1154,7 +1154,7 @@ defmodule Philomena.UsersTest do
     test "returns the avatar form changeset for a normal actor" do
       user = confirmed_user_fixture()
 
-      assert {:ok, %UserForm{user: loaded, changeset: %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: loaded}} =
                Users.load_user_for_avatar_edit(actor(user))
 
       assert loaded.id == user.id
@@ -1210,7 +1210,7 @@ defmodule Philomena.UsersTest do
     test "a missing avatar file is a rejected changeset" do
       user = confirmed_user_fixture()
 
-      assert {:error, %UserForm{changeset: %Ecto.Changeset{}}} =
+      assert {:error, %Ecto.Changeset{}} =
                Users.update_avatar(actor(user), %{})
     end
   end
@@ -1420,8 +1420,10 @@ defmodule Philomena.UsersTest do
       target = managed_target()
       role = Repo.insert!(%Role{name: "admin", resource_type: "Forum"})
 
-      assert {:ok, %AdminUserForm{user: user, changeset: changeset, roles: roles}} =
+      assert {:ok, %AdminUserForm{changeset: changeset, roles: roles}} =
                Users.load_user_for_edit(actor(admin_user_fixture()), target.slug)
+
+      user = changeset.data
 
       assert user.id == target.id
       assert is_list(user.roles)
@@ -1869,7 +1871,7 @@ defmodule Philomena.UsersTest do
     test "an admin loads the target user" do
       target = managed_target()
 
-      assert {:ok, %UserForm{user: user, changeset: %Ecto.Changeset{}}} =
+      assert {:ok, %Ecto.Changeset{data: user}} =
                Users.load_user_for_force_filter(actor(admin_user_fixture()), target.slug)
 
       assert user.id == target.id
@@ -1910,7 +1912,7 @@ defmodule Philomena.UsersTest do
     test "a nonexistent forced_filter_id returns the typed form error" do
       target = managed_target()
 
-      assert {:error, %UserForm{user: user, changeset: changeset}} =
+      assert {:error, %Ecto.Changeset{data: user} = changeset} =
                Users.admin_force_filter(actor(admin_user_fixture()), target.slug, %{
                  "forced_filter_id" => 2_000_000_000
                })

@@ -2,17 +2,16 @@ defmodule PhilomenaWeb.Profile.ScratchpadController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Users
-  alias Philomena.Users.UserForm
 
   action_fallback PhilomenaWeb.FallbackController
 
   def edit(conn, %{"profile_id" => slug}) do
-    with {:ok, %UserForm{user: user, changeset: changeset}} <-
+    with {:ok, %Ecto.Changeset{} = changeset} <-
            Users.load_profile_for_scratchpad_edit(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing Moderation Scratchpad",
         changeset: changeset,
-        user: user
+        user: changeset.data
       )
     end
   end
@@ -24,8 +23,8 @@ defmodule PhilomenaWeb.Profile.ScratchpadController do
         |> put_flash(:info, "Moderation scratchpad successfully updated.")
         |> redirect(to: ~p"/profiles/#{user}")
 
-      {:error, %UserForm{user: user, changeset: changeset}} ->
-        render(conn, "edit.html", changeset: changeset, user: user)
+      {:error, %Ecto.Changeset{} = changeset} ->
+        render(conn, "edit.html", changeset: changeset, user: changeset.data)
 
       {:error, _} = error ->
         error

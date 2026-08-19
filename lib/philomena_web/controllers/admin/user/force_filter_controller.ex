@@ -2,16 +2,15 @@ defmodule PhilomenaWeb.Admin.User.ForceFilterController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Users
-  alias Philomena.Users.UserForm
 
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"user_id" => slug}) do
-    with {:ok, %UserForm{user: user, changeset: changeset}} <-
+    with {:ok, %Ecto.Changeset{} = changeset} <-
            Users.load_user_for_force_filter(conn.assigns.actor, slug) do
       render(conn, "new.html",
         title: "Forcing filter for user",
-        user: user,
+        user: changeset.data,
         changeset: changeset
       )
     end
@@ -24,10 +23,10 @@ defmodule PhilomenaWeb.Admin.User.ForceFilterController do
         |> put_flash(:info, "Filter was forced.")
         |> redirect(to: ~p"/profiles/#{user}")
 
-      {:error, %UserForm{user: user, changeset: changeset}} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html",
           title: "Forcing filter for user",
-          user: user,
+          user: changeset.data,
           changeset: changeset
         )
 

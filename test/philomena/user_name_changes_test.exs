@@ -9,7 +9,6 @@ defmodule Philomena.UserNameChangesTest do
   alias Philomena.UserNameChanges
   alias Philomena.UserNameChanges.UserNameChange
   alias Philomena.Users
-  alias Philomena.Users.UserForm
 
   @pagination %{page: 1, page_size: 1}
 
@@ -56,7 +55,7 @@ defmodule Philomena.UserNameChangesTest do
       other = confirmed_user_fixture(%{name: "RenameMustRollback"})
       other = Users.fetch_user_for_worker!(other.id)
 
-      assert {:error, %UserForm{changeset: %Ecto.Changeset{}}} =
+      assert {:error, %Ecto.Changeset{}} =
                Users.update_name(actor(other), %{"name" => occupied.name})
 
       refute Repo.get_by(UserNameChange, user_id: other.id)
