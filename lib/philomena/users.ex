@@ -251,8 +251,34 @@ defmodule Philomena.Users do
     end)
   end
 
-  defp put_reindex_user(multi, step \\ :user) do
-    Multi.on_commit(multi, fn %{^step => user} -> reindex_user(user) end)
+  # Post-commit hooks.
+
+  defp put_reindex_user(multi) do
+    Multi.on_commit(multi, fn %{user: user} -> reindex_user(user) end)
+  end
+
+  defp put_wipe_user_votes_job(multi, [{:upvotes_and_faves?, upvotes_and_faves?}]) do
+    Multi.on_commit(multi, fn %{user: user} ->
+      Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, upvotes_and_faves?])
+    end)
+  end
+
+  defp put_wipe_user_job(multi) do
+    Multi.on_commit(multi, fn %{user: user} ->
+      Exq.enqueue(Exq, "indexing", UserWipeWorker, [user.id])
+    end)
+  end
+
+  defp put_rename_user_job(multi, [{:old_name, old_name}]) do
+    Multi.on_commit(multi, fn %{user: user} ->
+      Exq.enqueue(Exq, "indexing", UserRenameWorker, [old_name, user.name])
+    end)
+  end
+
+  defp put_erase_user_job(multi, %Actor{} = actor) do
+    Multi.on_commit(multi, fn %{user: user} ->
+      Exq.enqueue(Exq, "indexing", UserEraseWorker, [user.id, actor.user.id])
+    end)
   end
 
   ## Authentication and user lookup
@@ -350,7 +376,7 @@ defmodule Philomena.Users do
           if Ecto.Changeset.get_field(changeset, :failed_attempts) >= 10 do
             multi
             |> Multi.update(:locked_user, fn %{user: user} -> User.lock_changeset(user) end)
-            |> put_reindex_user(:locked_user)
+            |> put_reindex_user()
           else
             put_reindex_user(multi)
           end
@@ -1406,7 +1432,7 @@ defmodule Philomena.Users do
         {"Admin.User.Avatar:delete", Paths.profile_path(user), "Removed avatar for #{user.name}"}
       end)
       |> put_reindex_user()
-      |> Multi.on_commit(fn %{user: user} -> Uploader.unpersist_old_upload(user) end)
+      |> Uploader.put_unpersist_old_upload(:user)
       |> Multi.transact()
       |> case do
         {:ok, %{user: user}} ->
@@ -1447,9 +1473,7 @@ defmodule Philomena.Users do
         {"Admin.User.Downvote:delete", Paths.profile_path(user),
          "Wiped downvotes for #{user.name}"}
       end)
-      |> Multi.on_commit(fn %{user: user} ->
-        Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, false])
-      end)
+      |> put_wipe_user_votes_job(upvotes_and_faves?: false)
       |> Multi.transact()
       |> case do
         {:ok, %{user: user}} ->
@@ -1533,9 +1557,7 @@ defmodule Philomena.Users do
         {"Admin.User.Erase:create", Paths.profile_path(user), "Erased #{original_name}"}
       end)
       |> put_reindex_user()
-      |> Multi.on_commit(fn %{user: user} ->
-        Exq.enqueue(Exq, "indexing", UserEraseWorker, [user.id, actor.user.id])
-      end)
+      |> put_erase_user_job(actor)
       |> Multi.transact()
       |> case do
         {:ok, %{user: user}} ->
@@ -1820,9 +1842,7 @@ defmodule Philomena.Users do
         {"Admin.User.Vote:delete", Paths.profile_path(user),
          "Wiped votes and faves for #{user.name}"}
       end)
-      |> Multi.on_commit(fn %{user: user} ->
-        Exq.enqueue(Exq, "indexing", UserUnvoteWorker, [user.id, true])
-      end)
+      |> put_wipe_user_votes_job(upvotes_and_faves?: true)
       |> Multi.transact()
       |> case do
         {:ok, %{user: user}} ->
@@ -1859,9 +1879,7 @@ defmodule Philomena.Users do
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{user: user} ->
         {"Admin.User.Wipe:create", Paths.profile_path(user), "Wiped PII for #{user.name}"}
       end)
-      |> Multi.on_commit(fn %{user: user} ->
-        Exq.enqueue(Exq, "indexing", UserWipeWorker, [user.id])
-      end)
+      |> put_wipe_user_job()
       |> Multi.transact()
       |> case do
         {:ok, %{user: user}} ->
@@ -2347,9 +2365,7 @@ defmodule Philomena.Users do
       |> UserNameChanges.record_rename(:name_change, user)
       |> Multi.update(:user, user_changeset)
       |> put_reindex_user()
-      |> Multi.on_commit(fn %{user: user} ->
-        Exq.enqueue(Exq, "indexing", UserRenameWorker, [old_name, user.name])
-      end)
+      |> put_rename_user_job(old_name: old_name)
       |> Multi.transact()
       |> case do
         {:ok, %{user: user}} ->

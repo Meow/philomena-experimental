@@ -11,23 +11,17 @@ defmodule Philomena.Users.Uploader do
     Uploader.analyze_upload(user, "avatar", params["avatar"], &User.avatar_changeset/2)
   end
 
-  def persist_upload(user) do
-    Uploader.persist_upload(user, avatar_file_root(), "avatar")
-  end
-
-  def unpersist_old_upload(user) do
-    Uploader.unpersist_old_upload(user, avatar_file_root(), "avatar")
-  end
-
   def put_persist_upload_and_unpersist_old(multi, step) do
     Multi.on_commit(multi, fn %{^step => user} ->
-      persist_upload(user)
-      unpersist_old_upload(user)
+      Uploader.persist_upload(user, avatar_file_root(), "avatar")
+      Uploader.unpersist_old_upload(user, avatar_file_root(), "avatar")
     end)
   end
 
   def put_unpersist_old_upload(multi, step) do
-    Multi.on_commit(multi, fn %{^step => user} -> unpersist_old_upload(user) end)
+    Multi.on_commit(multi, fn %{^step => user} ->
+      Uploader.unpersist_old_upload(user, avatar_file_root(), "avatar")
+    end)
   end
 
   defp avatar_file_root do
