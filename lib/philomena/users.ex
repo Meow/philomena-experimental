@@ -26,6 +26,7 @@ defmodule Philomena.Users do
     AliasMatches,
     QueryBuilder,
     QueryForm,
+    RoleForm,
     Settings,
     Uploader,
     User,
@@ -53,7 +54,6 @@ defmodule Philomena.Users do
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
   alias Philomena.IndexWorker
-  alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.UserEraseWorker
   alias Philomena.UserRenameWorker
@@ -170,47 +170,29 @@ defmodule Philomena.Users do
     |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["confirm"]))
   end
 
-  # Settings, role assignment, and user searches.
+  # Settings and role assignment.
+
+  defp fetch_roles(role_ids) do
+    Role
+    |> where([role], role.id in ^role_ids)
+    |> Repo.all()
+    |> case do
+      roles when length(roles) == length(role_ids) ->
+        {:ok, roles}
+
+      _roles ->
+        {:error, :not_found}
+    end
+  end
 
   defp update_user_changeset(user, attrs) do
-    with {:ok, role_ids} <- parse_role_ids(attrs["roles"]),
-         {:ok, roles} <- load_roles(role_ids) do
+    with {:ok, role_ids} <- RoleForm.fetch_role_ids(attrs),
+         {:ok, roles} <- fetch_roles(role_ids) do
       User.update_changeset(user, attrs, roles)
     else
-      :error ->
-        user = Repo.preload(user, :roles)
-
-        user
-        |> User.update_changeset(attrs, user.roles)
-        |> Ecto.Changeset.add_error(:roles, "contains an invalid role")
+      {:error, :not_found} ->
+        User.role_error_changeset(user)
     end
-  end
-
-  defp parse_role_ids(nil), do: {:ok, []}
-
-  defp parse_role_ids(roles) when is_list(roles) do
-    roles
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.reduce_while({:ok, []}, fn role_id, {:ok, ids} ->
-      case IntegerId.parse(role_id) do
-        {:ok, id} -> {:cont, {:ok, [id | ids]}}
-        :error -> {:halt, :error}
-      end
-    end)
-    |> case do
-      {:ok, ids} -> {:ok, Enum.uniq(ids)}
-      :error -> :error
-    end
-  end
-
-  defp parse_role_ids(_roles), do: :error
-
-  defp load_roles([]), do: {:ok, []}
-
-  defp load_roles(role_ids) do
-    roles = Role |> where([role], role.id in ^role_ids) |> Repo.all()
-
-    if length(roles) == length(role_ids), do: {:ok, roles}, else: :error
   end
 
   # Profile, avatar, and rename persistence.
@@ -1911,7 +1893,7 @@ defmodule Philomena.Users do
 
   """
   @spec update_spoiler_type(Actor.t(), map()) ::
-          {:ok, %Settings{}} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
+          {:ok, Settings.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def update_spoiler_type(%Actor{user: %User{} = user} = actor, attrs) do
     with :ok <- verify_write_access(actor) do
       user.settings

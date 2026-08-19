@@ -5,6 +5,8 @@ defmodule Philomena.Users.Settings do
 
   alias Philomena.Images.Query
 
+  @type t :: %__MODULE__{}
+
   @primary_key false
   schema "user_settings" do
     belongs_to :user, Philomena.Users.User, primary_key: true

@@ -273,6 +273,12 @@ defmodule Philomena.Users.User do
     |> unique_constraints()
   end
 
+  def role_error_changeset(user) do
+    user
+    |> change()
+    |> add_error(:roles, "contains an invalid role")
+  end
+
   def filter_changeset(user, filter) do
     changeset = change(user)
     user = changeset.data
