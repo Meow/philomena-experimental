@@ -86,21 +86,6 @@ defmodule Philomena.Users do
 
   # Authentication and token transaction composition.
 
-  defp maybe_send_unlock_instructions(%{failed_attempts: attempts}, _unlock_url_fun)
-       when attempts < 10 do
-    nil
-  end
-
-  defp maybe_send_unlock_instructions(%User{} = user, unlock_url_fun) do
-    user
-    |> User.lock_changeset()
-    |> Repo.update!()
-    |> reindex_user()
-    |> deliver_user_unlock_instructions(unlock_url_fun)
-
-    nil
-  end
-
   defp user_email_multi(user, email, context) do
     changeset =
       user
@@ -205,7 +190,7 @@ defmodule Philomena.Users do
     Multi.new()
     |> Multi.update(:user, changeset)
     |> Uploader.put_unpersist_old_upload(:user)
-    |> Multi.on_commit(fn %{user: user} -> reindex_user(user) end)
+    |> put_reindex_user()
     |> Multi.transact()
     |> case do
       {:ok, %{user: user}} ->
@@ -266,22 +251,8 @@ defmodule Philomena.Users do
     end)
   end
 
-  # Shared after-commit indexing result handling.
-
   defp put_reindex_user(multi, step \\ :user) do
     Multi.on_commit(multi, fn %{^step => user} -> reindex_user(user) end)
-  end
-
-  defp reindex_after_update(result) do
-    case result do
-      {:ok, user} ->
-        reindex_user(user)
-
-        {:ok, user}
-
-      error ->
-        error
-    end
   end
 
   ## Authentication and user lookup
@@ -362,17 +333,33 @@ defmodule Philomena.Users do
         nil
 
       User.valid_password?(user, password) ->
+        {:ok, %{user: user}} =
+          Multi.new()
+          |> Multi.update(:user, User.successful_attempt_changeset(user))
+          |> put_reindex_user()
+          |> Multi.transact()
+
         user
-        |> User.successful_attempt_changeset()
-        |> Repo.update!()
-        |> reindex_user()
 
       true ->
-        user
-        |> User.failed_attempt_changeset()
-        |> Repo.update!()
-        |> reindex_user()
-        |> maybe_send_unlock_instructions(unlock_url_fun)
+        changeset = User.failed_attempt_changeset(user)
+
+        multi = Multi.new() |> Multi.update(:user, changeset)
+
+        multi =
+          if Ecto.Changeset.get_field(changeset, :failed_attempts) >= 10 do
+            multi
+            |> Multi.update(:locked_user, fn %{user: user} -> User.lock_changeset(user) end)
+            |> put_reindex_user(:locked_user)
+          else
+            put_reindex_user(multi)
+          end
+
+        {:ok, changes} = Multi.transact(multi)
+
+        if locked_user = changes[:locked_user] do
+          deliver_user_unlock_instructions(locked_user, unlock_url_fun)
+        end
 
         nil
     end
@@ -555,11 +542,20 @@ defmodule Philomena.Users do
 
   """
   @spec register_user(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def register_user(attrs) do
-    %User{}
-    |> User.registration_changeset(attrs)
-    |> Repo.insert()
-    |> reindex_after_update()
+  def register_user(params) do
+    changeset = User.registration_changeset(%User{}, params)
+
+    Multi.new()
+    |> Multi.insert(:user, changeset)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        {:ok, user}
+
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
@@ -635,9 +631,11 @@ defmodule Philomena.Users do
 
     with {:ok, query} <- UserToken.verify_change_email_token_query(token, context),
          %UserToken{sent_to: email} <- Repo.one(query),
-         {:ok, _} <- Multi.transact(user_email_multi(user, email, context)) do
-      reindex_user(user)
-
+         {:ok, _changes} <-
+           user
+           |> user_email_multi(email, context)
+           |> put_reindex_user()
+           |> Multi.transact() do
       :ok
     else
       _ -> :error
@@ -685,9 +683,11 @@ defmodule Philomena.Users do
   def unlock_user_by_token(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "unlock"),
          %User{} = user <- Repo.one(query),
-         {:ok, %{user: user}} <- Multi.transact(unlock_user_multi(user)) do
-      reindex_user(user)
-
+         {:ok, %{user: user}} <-
+           user
+           |> unlock_user_multi()
+           |> put_reindex_user()
+           |> Multi.transact() do
       {:ok, user}
     else
       _ -> :error
@@ -752,11 +752,10 @@ defmodule Philomena.Users do
     Multi.new()
     |> Multi.update(:user, changeset)
     |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
+    |> put_reindex_user()
     |> Multi.transact()
     |> case do
       {:ok, %{user: user}} ->
-        reindex_user(user)
-
         {:ok, user}
 
       {:error, :user, changeset, _} ->
@@ -808,16 +807,15 @@ defmodule Philomena.Users do
   def update_totp(%User{} = user, params) do
     backup_codes = User.random_backup_codes()
 
-    user
-    |> User.totp_changeset(params, backup_codes)
-    |> Repo.update()
+    Multi.new()
+    |> Multi.update(:user, User.totp_changeset(user, params, backup_codes))
+    |> put_reindex_user()
+    |> Multi.transact()
     |> case do
-      {:ok, user} ->
-        reindex_user(user)
-
+      {:ok, %{user: user}} ->
         {:ok, user, backup_codes}
 
-      {:error, changeset} ->
+      {:error, :user, changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -997,9 +995,11 @@ defmodule Philomena.Users do
   def confirm_user(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "confirm"),
          %User{} = user <- Repo.one(query),
-         {:ok, %{user: user}} <- Multi.transact(confirm_user_multi(user)) do
-      reindex_user(user)
-
+         {:ok, %{user: user}} <-
+           user
+           |> confirm_user_multi()
+           |> put_reindex_user()
+           |> Multi.transact() do
       {:ok, user}
     else
       _ -> :error
@@ -1082,14 +1082,13 @@ defmodule Philomena.Users do
     Multi.new()
     |> Multi.update(:user, User.password_changeset(user, attrs))
     |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
+    |> put_reindex_user()
     |> Multi.transact()
     |> case do
       {:ok, %{user: user}} ->
-        reindex_user(user)
-
         {:ok, user}
 
-      {:error, :user, changeset, _} ->
+      {:error, :user, changeset, _changeset} ->
         {:error, changeset}
     end
   end
@@ -1229,7 +1228,7 @@ defmodule Philomena.Users do
         {"Admin.User:update", Paths.profile_path(updated_user),
          "Updated user details for #{updated_user.name}"}
       end)
-      |> Multi.on_commit(fn %{user: updated_user} -> reindex_user(updated_user) end)
+      |> put_reindex_user()
       |> Multi.transact()
       |> case do
         {:ok, %{user: updated_user}} ->
@@ -1923,10 +1922,19 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def update_settings(%Actor{user: %User{} = user} = actor, attrs) do
     with :ok <- verify_write_access(actor) do
-      user
-      |> User.settings_changeset(attrs)
-      |> Repo.update()
-      |> reindex_after_update()
+      changeset = User.settings_changeset(user, attrs)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -2120,15 +2128,17 @@ defmodule Philomena.Users do
   def update_scratchpad(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
-      user
-      |> User.scratchpad_changeset(params)
-      |> Repo.update()
-      |> reindex_after_update()
+      changeset = User.scratchpad_changeset(user, params)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> put_reindex_user()
+      |> Multi.transact()
       |> case do
-        {:ok, user} ->
+        {:ok, %{user: user}} ->
           {:ok, user}
 
-        {:error, changeset} ->
+        {:error, :user, changeset, _changes} ->
           {:error, user_form(user, changeset)}
       end
     end
@@ -2148,13 +2158,21 @@ defmodule Philomena.Users do
   @spec watch_tag(Actor.t(), Philomena.Tags.Tag.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def watch_tag(%Actor{user: %User{} = user} = actor, tag) do
-    watched_tag_ids = Enum.uniq([tag.id | user.watched_tag_ids])
-
     with :ok <- verify_write_access(actor) do
-      user
-      |> User.watched_tags_changeset(watched_tag_ids)
-      |> Repo.update()
-      |> reindex_after_update()
+      watched_tag_ids = Enum.uniq([tag.id | user.watched_tag_ids])
+      changeset = User.watched_tags_changeset(user, watched_tag_ids)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -2172,13 +2190,21 @@ defmodule Philomena.Users do
   @spec unwatch_tag(Actor.t(), Philomena.Tags.Tag.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def unwatch_tag(%Actor{user: %User{} = user} = actor, tag) do
-    watched_tag_ids = user.watched_tag_ids -- [tag.id]
-
     with :ok <- verify_write_access(actor) do
-      user
-      |> User.watched_tags_changeset(watched_tag_ids)
-      |> Repo.update()
-      |> reindex_after_update()
+      watched_tag_ids = user.watched_tag_ids -- [tag.id]
+      changeset = User.watched_tags_changeset(user, watched_tag_ids)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -2377,8 +2403,11 @@ defmodule Philomena.Users do
   def deactivate_account(%Actor{user: %User{} = user} = actor, reactivation_url_fun) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :deactivate_account, user),
-         {:ok, user} <- Repo.update(User.deactivate_changeset(user, user)) do
-      reindex_user(user)
+         {:ok, %{user: user}} <-
+           Multi.new()
+           |> Multi.update(:user, User.deactivate_changeset(user, user))
+           |> put_reindex_user()
+           |> Multi.transact() do
       deliver_user_reactivation_instructions(user, reactivation_url_fun)
       {:ok, user}
     end
@@ -2408,8 +2437,8 @@ defmodule Philomena.Users do
              Multi.new()
              |> Multi.update(:user, User.reactivate_changeset(user))
              |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, ["reactivate"]))
+             |> put_reindex_user()
            ) do
-      reindex_user(user)
       {:ok, user}
     else
       _ -> :error
@@ -2428,10 +2457,19 @@ defmodule Philomena.Users do
   @spec set_current_filter(User.t(), Filter.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def set_current_filter(%User{} = user, %Filter{} = filter) do
-    user
-    |> User.filter_changeset(filter)
-    |> Repo.update()
-    |> reindex_after_update()
+    changeset = User.filter_changeset(user, filter)
+
+    Multi.new()
+    |> Multi.update(:user, changeset)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        {:ok, user}
+
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
@@ -2447,10 +2485,19 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def clear_recent_filters(%Actor{user: %User{} = user} = actor) do
     with :ok <- verify_write_access(actor) do
-      user
-      |> User.clear_recent_filters_changeset()
-      |> Repo.update()
-      |> reindex_after_update()
+      changeset = User.clear_recent_filters_changeset(user)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
