@@ -186,7 +186,7 @@ defmodule Philomena.Users do
     end
   end
 
-  # Transaction composition.
+  # Transaction composition
 
   defp user_lock_query(%User{id: id}) do
     User
@@ -254,7 +254,7 @@ defmodule Philomena.Users do
     end)
   end
 
-  ## Public access
+  ## Public reads
 
   @doc group: "Public reads"
   @doc """

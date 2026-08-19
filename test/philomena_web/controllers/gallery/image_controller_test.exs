@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.Gallery.ImageControllerTest do
       assert Repo.reload!(gallery).image_count == 1
     end
 
-    test "responds 200 idempotently when the image is already in the gallery", %{conn: conn} do
+    test "responds conflict when the image is already in the gallery", %{conn: conn} do
       %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
       gallery = gallery_fixture(user)
       image = image_fixture()
@@ -50,7 +50,7 @@ defmodule PhilomenaWeb.Gallery.ImageControllerTest do
 
       conn = post(conn, ~p"/galleries/#{gallery}/images", %{"image_id" => to_string(image.id)})
 
-      assert json_response(conn, 200) == %{}
+      assert json_response(conn, 409) == %{}
       assert Repo.reload!(gallery).image_count == 1
     end
 
@@ -106,8 +106,7 @@ defmodule PhilomenaWeb.Gallery.ImageControllerTest do
       assert Repo.reload!(gallery).image_count == 0
     end
 
-    test "responds 200 when the image is not in the gallery", %{conn: conn} do
-      # the delete_all simply removes zero rows and decrements the count by 0
+    test "responds bad request when the image is not in the gallery", %{conn: conn} do
       %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
       gallery = gallery_fixture(user)
       image = image_fixture()
@@ -115,7 +114,8 @@ defmodule PhilomenaWeb.Gallery.ImageControllerTest do
       conn =
         delete(conn, ~p"/galleries/#{gallery}/images", %{"image_id" => to_string(image.id)})
 
-      assert json_response(conn, 200) == %{}
+      assert redirected_to(conn) == "/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
       assert Repo.reload!(gallery).image_count == 0
     end
 

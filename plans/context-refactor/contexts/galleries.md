@@ -15,7 +15,8 @@ Complete for wave 4.
   consistently not-found, independent of actor grants.
 - Actor is authoritative for gallery page viewer state. Gallery/image
   membership mutations independently authorize the visible image and owning
-  gallery. Duplicate adds and absent removals are explicit idempotent successes;
+  gallery. Duplicate adds return a changeset error and absent removals return
+  `{:error, :not_found}`;
   hidden, malformed, and missing images are rejected before persistence.
 - Reorders accept integer or decimal-string IDs only when they are a unique,
   exact permutation of current database membership. Invalid requests are not
@@ -31,7 +32,7 @@ Complete for wave 4.
   and subscription notification callbacks remain explicit documented service
   APIs.
 - Context/controller coverage now includes malformed, missing, and forbidden
-  galleries/images; hidden images; idempotent membership; invalid and stale
+  galleries/images; duplicate and absent membership errors; invalid and stale
   reorder sets; actor-over-Scope state; read/subscription state; bounded
   selectors; erasure/report closure; and search-backed listing/page behavior.
 
@@ -52,7 +53,7 @@ Complete for wave 4.
   `verify_write_access/1` to new/edit and every mutation; make absent result
   independent of actor grants.
 - Load gallery images via `Loader`/Images visibility, enforce gallery ownership
-  and membership in the database query, and make add/remove/reorder idempotency
+  and membership in the database query, and make duplicate/absent membership
   and ordering failures explicit.
 - Bound `user_image_galleries/2`: paginate it for a controller, limit it for a
   selector, or replace it with an existence/ID query suited to its actual caller.

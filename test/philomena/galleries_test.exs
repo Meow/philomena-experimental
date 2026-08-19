@@ -313,13 +313,11 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
       image = image_fixture()
 
-      assert {:ok, result} =
+      assert {:ok, %Gallery{} = result} =
                Galleries.add_image_to_gallery(actor(user), "#{gallery.id}", "#{image.id}")
 
-      assert %Gallery{} = result.gallery
-      assert %Interaction{} = result.interaction
-      assert result.membership_changed?
-      assert result.gallery.image_count == 1
+      assert %Gallery{} = result
+      assert result.image_count == 1
       assert Repo.reload!(gallery).image_count == 1
     end
 
@@ -362,17 +360,17 @@ defmodule Philomena.GalleriesTest do
       assert Galleries.add_image_to_gallery(actor, "abc", "abc") == {:error, :ban}
     end
 
-    test "adding an image already in the gallery is an idempotent success" do
+    test "adding an image already in the gallery returns a changeset error" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
       image = image_fixture()
 
       {:ok, _} = Galleries.add_image_to_gallery(actor(user), "#{gallery.id}", "#{image.id}")
 
-      assert {:ok, result} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Galleries.add_image_to_gallery(actor(user), "#{gallery.id}", "#{image.id}")
 
-      refute result.membership_changed?
+      assert changeset.errors[:interactions]
       assert Repo.reload!(gallery).image_count == 1
       assert Repo.aggregate(Interaction, :count) == 1
     end
@@ -389,20 +387,17 @@ defmodule Philomena.GalleriesTest do
       assert {:ok, result} =
                Galleries.remove_image_from_gallery(actor(user), "#{gallery.id}", "#{image.id}")
 
-      assert result.membership_changed?
-      assert result.gallery.image_count == 0
+      assert result.image_count == 0
       assert Repo.reload!(gallery).image_count == 0
     end
 
-    test "removing an image not in the gallery is an idempotent success" do
+    test "removing an image not in the gallery returns not-found" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
       image = image_fixture()
 
-      assert {:ok, result} =
-               Galleries.remove_image_from_gallery(actor(user), "#{gallery.id}", "#{image.id}")
-
-      refute result.membership_changed?
+      assert Galleries.remove_image_from_gallery(actor(user), "#{gallery.id}", "#{image.id}") ==
+               {:error, :not_found}
     end
 
     test "an unrelated user is unauthorized" do
@@ -689,7 +684,7 @@ defmodule Philomena.GalleriesTest do
       assert {:ok, page, _changeset} = Galleries.load_gallery_index(actor(), params, @pagination)
       assert Enum.any?(page.entries, &(&1.id == gallery.id))
 
-      assert {:ok, %{membership_changed?: true}} =
+      assert {:ok, _gallery} =
                Galleries.remove_image_from_gallery(actor(user), gallery.id, image.id)
 
       assert :ok = Galleries.perform_reindex(:id, [gallery.id])

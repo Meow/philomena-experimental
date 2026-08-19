@@ -40,13 +40,6 @@ defmodule Philomena.Galleries do
   @gallery_selector_limit 100
   @gallery_preloads [:user, thumbnail: [:sources, tags: :aliases]]
 
-  @typedoc "Result of an idempotent gallery membership mutation."
-  @type membership_result :: %{
-          required(:gallery) => Gallery.t(),
-          required(:membership_changed?) => boolean(),
-          optional(:interaction) => %Interaction{}
-        }
-
   defp load_gallery(actor, gallery_id, action) do
     Loader.fetch_and_authorize(Gallery, actor, action, gallery_id, @gallery_preloads)
   end
@@ -65,7 +58,6 @@ defmodule Philomena.Galleries do
     |> case do
       {:ok, %{gallery: gallery}} ->
         unindex_gallery(gallery)
-        # TODO: wtf? this doesn't work at all
         Images.reindex_images(images)
 
         {:ok, gallery}
@@ -75,126 +67,18 @@ defmodule Philomena.Galleries do
     end
   end
 
-  defp lock_gallery(repo, gallery_id) do
-    query = Gallery |> where(id: ^gallery_id) |> lock("FOR UPDATE")
-
-    case repo.one(query) do
-      nil -> {:error, :not_found}
-      gallery -> {:ok, gallery}
-    end
+  defp last_position(gallery_id) do
+    Interaction
+    |> where(gallery_id: ^gallery_id)
+    |> Repo.aggregate(:max, :position)
   end
 
-  defp add_membership(repo, %Gallery{} = gallery, %Image{} = image) do
-    case repo.get_by(Interaction, gallery_id: gallery.id, image_id: image.id) do
-      nil -> insert_membership(repo, gallery, image)
-      interaction -> {:ok, {interaction, false}}
-    end
-  end
-
-  defp insert_membership(repo, %Gallery{} = gallery, %Image{} = image) do
-    position = (last_position(repo, gallery.id) || -1) + 1
-
-    %Interaction{gallery_id: gallery.id}
-    |> Interaction.changeset(%{"image_id" => image.id, "position" => position})
-    |> repo.insert()
-    |> case do
-      {:ok, interaction} -> {:ok, {interaction, true}}
-      error -> error
-    end
-  end
-
-  defp update_gallery_after_add(repo, %Gallery{} = gallery, added?) do
-    if added? do
-      Gallery
-      |> where(id: ^gallery.id)
-      |> repo.update_all(inc: [image_count: 1], set: [updated_at: DateTime.utc_now()])
-    end
-
-    {:ok, repo.reload!(gallery)}
-  end
-
-  defp finish_image_add(result, image) do
-    %{gallery: gallery, membership: {interaction, added?}} = result
-
-    if added? do
-      Images.reindex_image(image)
-      reindex_gallery(gallery)
-    end
-
-    {:ok,
-     result
-     |> Map.drop([:locked_gallery, :membership, :notification])
-     |> Map.merge(%{interaction: interaction, membership_changed?: added?})}
-  end
-
-  defp persist_image_add(%Gallery{} = gallery, %Image{} = image) do
-    Multi.new()
-    |> Multi.run(:locked_gallery, fn repo, %{} -> lock_gallery(repo, gallery.id) end)
-    |> Multi.run(:membership, fn repo, %{locked_gallery: locked_gallery} ->
-      add_membership(repo, locked_gallery, image)
-    end)
-    |> Multi.run(:gallery, fn repo, %{locked_gallery: locked_gallery, membership: {_, added?}} ->
-      update_gallery_after_add(repo, locked_gallery, added?)
-    end)
-    |> Multi.run(:notification, &notify_gallery_if_added/2)
-    |> Multi.transact()
-    |> case do
-      {:ok, result} -> finish_image_add(result, image)
-      error -> error
-    end
-  end
-
-  defp persist_image_removal(%Gallery{} = gallery, %Image{} = image) do
-    Multi.new()
-    |> Multi.run(:locked_gallery, fn repo, %{} -> lock_gallery(repo, gallery.id) end)
-    |> Multi.run(:membership, fn repo, %{locked_gallery: locked_gallery} ->
-      {count, nil} =
-        Interaction
-        |> where(gallery_id: ^locked_gallery.id, image_id: ^image.id)
-        |> repo.delete_all()
-
-      {:ok, count}
-    end)
-    |> Multi.run(:gallery, fn repo,
-                              %{locked_gallery: locked_gallery, membership: removed_count} ->
-      if removed_count > 0 do
-        now = DateTime.utc_now()
-
-        Gallery
-        |> where(id: ^locked_gallery.id)
-        |> repo.update_all(inc: [image_count: -removed_count], set: [updated_at: now])
-      end
-
-      {:ok, repo.reload!(locked_gallery)}
-    end)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{gallery: gallery, membership: removed_count} = result} ->
-        if removed_count > 0 do
-          Images.reindex_image(image)
-          reindex_gallery(gallery)
-        end
-
-        {:ok,
-         result
-         |> Map.drop([:locked_gallery, :membership])
-         |> Map.put(:membership_changed?, removed_count > 0)}
-
-      error ->
-        error
-    end
-  end
-
-  defp notify_gallery_if_added(_repo, %{gallery: gallery, membership: {_, true}}) do
+  defp notify_gallery(_repo, %{gallery: gallery}) do
     Notifications.broadcast_gallery_image(gallery)
   end
 
-  defp notify_gallery_if_added(_repo, %{membership: {_, false}}), do: {:ok, 0}
-
-  defp last_position(repo, gallery_id) do
-    Interaction
-    |> where(gallery_id: ^gallery_id)
-    |> repo.aggregate(:max, :position)
+  defp put_reindex_gallery(%Multi{} = multi, step \\ :gallery) do
+    Multi.on_commit(multi, fn %{^step => gallery} -> reindex_gallery(gallery) end)
   end
 
   defp validate_reorder(%Gallery{} = gallery, image_ids) when is_list(image_ids) do
@@ -281,13 +165,6 @@ defmodule Philomena.Galleries do
   defp image_sort_direction(%{order_position_asc: true}), do: "asc"
   defp image_sort_direction(_gallery), do: "desc"
 
-  defp reindex_after_update({:ok, gallery}) do
-    reindex_gallery(gallery)
-    {:ok, gallery}
-  end
-
-  defp reindex_after_update(error), do: error
-
   defp position_order(%{order_position_asc: true}), do: [asc: :position]
   defp position_order(_gallery), do: [desc: :position]
 
@@ -338,10 +215,14 @@ defmodule Philomena.Galleries do
   def create_gallery(%Actor{user: user} = actor, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Gallery) do
-      %Gallery{}
-      |> Gallery.creation_changeset(attrs, user)
-      |> Repo.insert()
-      |> reindex_after_update()
+      Multi.new()
+      |> Multi.insert(:gallery, Gallery.creation_changeset(%Gallery{}, attrs, user))
+      |> put_reindex_gallery()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{gallery: gallery}} -> {:ok, gallery}
+        {:error, :gallery, changeset, _changes} -> {:error, changeset}
+      end
     end
   end
 
@@ -373,10 +254,14 @@ defmodule Philomena.Galleries do
   def update_gallery(%Actor{} = actor, gallery_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_gallery(actor, gallery_id, :update) do
-      gallery
-      |> Gallery.changeset(attrs)
-      |> Repo.update()
-      |> reindex_after_update()
+      Multi.new()
+      |> Multi.update(:gallery, Gallery.changeset(gallery, attrs))
+      |> put_reindex_gallery()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{gallery: gallery}} -> {:ok, gallery}
+        {:error, :gallery, changeset, _changes} -> {:error, changeset}
+      end
     end
   end
 
@@ -454,7 +339,7 @@ defmodule Philomena.Galleries do
   """
   @spec load_gallery_for_edit(Actor.t(), Loader.integer_id()) ::
           {:ok, {Gallery.t(), Ecto.Changeset.t()}}
-          | {:error, :ban | :unauthorized | :not_found}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def load_gallery_for_edit(%Actor{} = actor, gallery_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_gallery(actor, gallery_id, :edit) do
@@ -783,13 +668,12 @@ defmodule Philomena.Galleries do
   The gallery and image are independently loaded and authorized. On success,
   the image is added at the last position, notifications are broadcast, and
   both search documents are queued for reindexing. Adding an existing
-  membership is an idempotent success with `membership_changed?: false` and no
-  notification or reindex work.
+  membership returns a gallery changeset error.
 
   ## Examples
 
       iex> add_image_to_gallery(actor, "1", "42")
-      {:ok, %{gallery: %Gallery{}, ...}}
+      {:ok, %Gallery{}}
 
       iex> add_image_to_gallery(banned_actor, "1", "42")
       {:error, :ban}
@@ -806,14 +690,39 @@ defmodule Philomena.Galleries do
           gallery_id :: Loader.integer_id(),
           image_id :: Loader.integer_id()
         ) ::
-          {:ok, membership_result()}
+          {:ok, Gallery.t()}
+          | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
-          | Ecto.Multi.failure()
   def add_image_to_gallery(%Actor{} = actor, gallery_id, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_gallery(actor, gallery_id, :add_image),
          {:ok, image} <- load_authorized_image(actor, image_id) do
-      persist_image_add(gallery, image)
+      Multi.new()
+      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery.id))
+      |> Multi.insert(:interaction, fn %{locked_gallery: gallery} ->
+        position = (last_position(gallery.id) || -1) + 1
+
+        %Interaction{gallery_id: gallery.id}
+        |> Interaction.changeset(%{image_id: image.id, position: position})
+      end)
+      |> Multi.update(:gallery, fn %{locked_gallery: gallery} ->
+        Gallery.add_image_changeset(gallery)
+      end)
+      |> Multi.run(:notification, &notify_gallery/2)
+      |> Multi.put(:image, image)
+      |> put_reindex_gallery()
+      |> Images.put_reindex_image(:image)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{gallery: gallery}} ->
+          {:ok, gallery}
+
+        {:error, :interaction, _changeset, _changes} ->
+          {:error, Gallery.add_duplicate_image_error(gallery)}
+
+        {:error, :locked_gallery, :not_found, _changes} ->
+          {:error, :not_found}
+      end
     end
   end
 
@@ -821,15 +730,14 @@ defmodule Philomena.Galleries do
   Removes the image named by `image_id` from the gallery named
   by `gallery_id`, on behalf of `actor`.
 
-  Loading and authorization follow `add_image_to_gallery/3`. Membership is
-  deleted with a gallery-scoped database query. Removal is idempotent: an image
-  not in the gallery is a clean success with `membership_changed?: false` and
-  no reindex work.
+  Loading and authorization follow `add_image_to_gallery/3`. The gallery and
+  interaction rows are locked in that order. Removing an image that is not in
+  the gallery returns `{:error, :not_found}`.
 
   ## Examples
 
       iex> remove_image_from_gallery(actor, "1", "42")
-      {:ok, %{gallery: %Gallery{}, ...}}
+      {:ok, %Gallery{}}
 
   """
   @spec remove_image_from_gallery(
@@ -837,14 +745,36 @@ defmodule Philomena.Galleries do
           gallery_id :: Loader.integer_id(),
           image_id :: Loader.integer_id()
         ) ::
-          {:ok, membership_result()}
+          {:ok, Gallery.t()}
           | {:error, :ban | :unauthorized | :not_found}
           | Ecto.Multi.failure()
   def remove_image_from_gallery(%Actor{} = actor, gallery_id, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_gallery(actor, gallery_id, :remove_image),
          {:ok, image} <- load_authorized_image(actor, image_id) do
-      persist_image_removal(gallery, image)
+      Multi.new()
+      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery.id))
+      |> Multi.lock_one(:locked_interaction, fn %{locked_gallery: gallery} ->
+        Interaction
+        |> where(gallery_id: ^gallery.id)
+        |> where(image_id: ^image.id)
+      end)
+      |> Multi.delete(:interaction, fn %{locked_interaction: interaction} -> interaction end)
+      |> Multi.update(:gallery, fn %{locked_gallery: gallery} ->
+        Gallery.remove_image_changeset(gallery)
+      end)
+      |> Multi.run(:image, fn _repo, _changes -> {:ok, image} end)
+      |> put_reindex_gallery()
+      |> Images.put_reindex_image(:image)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{gallery: gallery}} ->
+          {:ok, gallery}
+
+        {:error, step, :not_found, _changes}
+        when step in [:locked_gallery, :locked_interaction] ->
+          {:error, :not_found}
+      end
     end
   end
 

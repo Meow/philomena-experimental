@@ -5,22 +5,25 @@ defmodule PhilomenaWeb.Gallery.ImageController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, params) do
-    conn.assigns.actor
-    |> Galleries.add_image_to_gallery(params["gallery_id"], params["image_id"])
-    |> respond(conn)
+  def create(conn, %{"gallery_id" => gallery_id} = params) do
+    case Galleries.add_image_to_gallery(conn.assigns.actor, gallery_id, params["image_id"]) do
+      {:ok, _gallery} ->
+        json(conn, %{})
+
+      {:error, %Ecto.Changeset{}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{})
+
+      error ->
+        error
+    end
   end
 
-  def delete(conn, params) do
-    conn.assigns.actor
-    |> Galleries.remove_image_from_gallery(params["gallery_id"], params["image_id"])
-    |> respond(conn)
+  def delete(conn, %{"gallery_id" => gallery_id} = params) do
+    with {:ok, _gallery} <-
+           Galleries.remove_image_from_gallery(conn.assigns.actor, gallery_id, params["image_id"]) do
+      json(conn, %{})
+    end
   end
-
-  defp respond({:ok, _result}, conn), do: json(conn, %{})
-
-  defp respond({:error, reason}, _conn) when reason in [:ban, :unauthorized, :not_found],
-    do: {:error, reason}
-
-  defp respond(_error, conn), do: conn |> put_status(:bad_request) |> json(%{})
 end

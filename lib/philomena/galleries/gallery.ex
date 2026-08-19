@@ -47,6 +47,23 @@ defmodule Philomena.Galleries.Gallery do
   end
 
   @doc false
+  def add_image_changeset(%__MODULE__{} = gallery) do
+    change(gallery, image_count: gallery.image_count + 1)
+  end
+
+  @doc false
+  def remove_image_changeset(%__MODULE__{} = gallery) do
+    change(gallery, image_count: gallery.image_count - 1)
+  end
+
+  @doc false
+  def add_duplicate_image_error(%__MODULE__{} = gallery) do
+    gallery
+    |> changeset()
+    |> add_error(:interactions, "image is already in this gallery")
+  end
+
+  @doc false
   def creation_changeset(gallery, attrs, user) do
     changeset(gallery, attrs)
     |> change(user: user)
