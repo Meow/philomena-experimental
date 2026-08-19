@@ -7,7 +7,6 @@ defmodule PhilomenaWeb.RegistrationController do
 
   plug PhilomenaWeb.CaptchaPlug when action in [:new, :create]
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
-  plug PhilomenaWeb.CompromisedPasswordCheckPlug when action in [:create]
   plug :assign_email_and_password_changesets when action in [:edit]
 
   def new(conn, _params) do

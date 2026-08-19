@@ -4,8 +4,6 @@ defmodule PhilomenaWeb.Registration.PasswordController do
   alias Philomena.Users
   alias PhilomenaWeb.UserAuth
 
-  plug PhilomenaWeb.CompromisedPasswordCheckPlug when action in [:update]
-
   def update(conn, %{"current_password" => password, "user" => user_params}) do
     user = conn.assigns.current_user
 

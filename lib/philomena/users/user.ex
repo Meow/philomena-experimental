@@ -162,8 +162,21 @@ defmodule Philomena.Users.User do
     changeset
     |> validate_required([:password])
     |> validate_length(:password, min: 12, max: 80)
+    |> validate_compromised_password()
     |> prepare_changes(&hash_password/1)
   end
+
+  defp validate_compromised_password(%Ecto.Changeset{valid?: true} = changeset) do
+    validate_change(changeset, :password, fn :password, password ->
+      if Philomena.Users.password_compromised?(password) do
+        [password: "has been compromised in a data breach"]
+      else
+        []
+      end
+    end)
+  end
+
+  defp validate_compromised_password(changeset), do: changeset
 
   defp hash_password(changeset) do
     password = get_change(changeset, :password)

@@ -394,7 +394,49 @@ defmodule Philomena.Users do
 
   @doc group: "Authentication"
   @doc """
+  Checks whether a password has appeared in a known data breach.
+
+  The check is disabled when the `:pwned_passwords` application setting is
+  `false`. Network failures are treated as a password that was not found.
+
+  ## Examples
+
+      iex> password_compromised?(:crypto.strong_rand_bytes(16))
+      false
+
+      iex> password_compromised?("password")
+      true
+
+  """
+  @spec password_compromised?(String.t()) :: boolean()
+  def password_compromised?(password) when is_binary(password) do
+    if Application.get_env(:philomena, :pwned_passwords) == false do
+      false
+    else
+      <<prefix::binary-size(5), rest::binary>> =
+        :sha
+        |> :crypto.hash(password)
+        |> Base.encode16()
+
+      case PhilomenaProxy.Http.get("https://api.pwnedpasswords.com/range/#{prefix}") do
+        {:ok, %{body: body, status: 200}} ->
+          String.contains?(body, rest <> ":")
+
+        _ ->
+          false
+      end
+    end
+  end
+
+  @doc group: "Authentication"
+  @doc """
   Deletes every active session, including incomplete TOTP login sessions, for a user.
+
+  ## Example
+
+      iex> delete_user_sessions(user)
+      :ok
+
   """
   def delete_user_sessions(user) do
     Repo.delete_all(UserToken.user_and_contexts_query(user, ["session", "totp"]))

@@ -3,7 +3,6 @@ defmodule PhilomenaWeb.SessionController do
 
   alias Philomena.Users
   alias PhilomenaWeb.UserAuth
-  alias PhilomenaWeb.CompromisedPasswordCheckPlug
 
   plug PhilomenaWeb.CaptchaPlug when action in [:new, :create]
   plug PhilomenaWeb.CheckCaptchaPlug when action in [:create]
@@ -23,7 +22,7 @@ defmodule PhilomenaWeb.SessionController do
       )
 
     cond do
-      not is_nil(user) and CompromisedPasswordCheckPlug.password_compromised?(password) ->
+      not is_nil(user) and Users.password_compromised?(password) ->
         Users.delete_user_sessions(user)
 
         conn
