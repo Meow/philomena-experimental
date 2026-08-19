@@ -62,13 +62,13 @@ defmodule Philomena.Users do
   # Shared forms, locators, and staff transaction composition.
 
   defp user_form(%User{} = user, changeset \\ nil) do
-    %UserForm{user: user, changeset: changeset || User.changeset(user, %{})}
+    %UserForm{user: user, changeset: changeset || User.changeset(user)}
   end
 
   defp admin_user_form(%User{} = user, changeset \\ nil) do
     %AdminUserForm{
       user: user,
-      changeset: changeset || User.changeset(user, %{}),
+      changeset: changeset || User.changeset(user),
       roles: Repo.all(Role)
     }
   end
@@ -142,53 +142,25 @@ defmodule Philomena.Users do
     end
   end
 
-  # Profile, avatar, and rename persistence.
+  defp setup_roles(nil), do: nil
 
-  defp update_profile_description(%User{} = user, attrs) do
-    changeset = User.description_changeset(user, attrs)
+  defp setup_roles(user) do
+    role_map =
+      user.roles
+      |> Enum.group_by(& &1.resource_type, & &1.name)
+      |> Map.new(fn {type, names} -> {type, Map.new(names, &{&1, []})} end)
 
-    Multi.new()
-    |> Multi.update(:user, changeset)
-    |> Multi.merge(fn %{user: user} ->
-      if user.became_unapproved? do
-        Reports.put_create_system_report(
-          Multi.new(),
-          "Review",
-          "Profile contains external links",
-          :reported_user_id,
-          user.id
-        )
-      else
-        Multi.new()
-      end
-    end)
-    |> put_reindex_user()
-    |> Multi.transact()
-    |> case do
-      {:ok, %{user: user}} ->
-        {:ok, user}
-
-      {:error, :user, changeset, _changes} ->
-        {:error, changeset}
-    end
+    %{user | role_map: role_map}
   end
 
-  defp persist_avatar(%User{} = user, attrs) do
-    changeset = Uploader.analyze_upload(user, attrs)
-
-    Multi.new()
-    |> Multi.update(:user, changeset)
-    |> Uploader.put_persist_upload_and_unpersist_old(:user)
-    |> put_reindex_user()
-    |> Multi.transact()
-    |> case do
-      {:ok, %{user: user}} ->
-        {:ok, user}
-
-      {:error, :user, changeset, _changes} ->
-        {:error, changeset}
-    end
+  defp load_with_roles(query) do
+    query
+    |> Repo.one()
+    |> Repo.preload([:roles, :current_filter, :settings])
+    |> setup_roles()
   end
+
+  # Avatar persistence.
 
   defp clear_avatar(%User{} = user) do
     changeset = User.remove_avatar_changeset(user)
@@ -207,25 +179,7 @@ defmodule Philomena.Users do
     end
   end
 
-  # Authentication role loading and restricted forum cleanup.
-
-  defp load_with_roles(query) do
-    query
-    |> Repo.one()
-    |> Repo.preload([:roles, :current_filter, :settings])
-    |> setup_roles()
-  end
-
-  defp setup_roles(nil), do: nil
-
-  defp setup_roles(user) do
-    role_map =
-      user.roles
-      |> Enum.group_by(& &1.resource_type, & &1.name)
-      |> Map.new(fn {type, names} -> {type, Map.new(names, &{&1, []})} end)
-
-    %{user | role_map: role_map}
-  end
+  # Restricted forum cleanup.
 
   defp put_unsubscribe_restricted_actors(multi, step) do
     Multi.run(multi, step, fn repo, %{user: user} ->
@@ -499,8 +453,7 @@ defmodule Philomena.Users do
 
   """
   @spec preload_preview_awards(User.t() | nil) :: User.t() | nil
-  def preload_preview_awards(nil), do: nil
-  def preload_preview_awards(%User{} = user), do: Repo.preload(user, awards: :badge)
+  def preload_preview_awards(user), do: Repo.preload(user, awards: :badge)
 
   @doc """
   Returns the site staff grouped into categories, as a map keyed by semantic
@@ -2004,9 +1957,31 @@ defmodule Philomena.Users do
   def update_description(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_description, slug) do
-      case update_profile_description(user, attrs) do
-        {:ok, user} -> {:ok, user}
-        {:error, changeset} -> {:error, user_form(user, changeset)}
+      changeset = User.description_changeset(user, attrs)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> Multi.merge(fn %{user: user} ->
+        if user.became_unapproved? do
+          Reports.put_create_system_report(
+            Multi.new(),
+            "Review",
+            "Profile contains external links",
+            :reported_user_id,
+            user.id
+          )
+        else
+          Multi.new()
+        end
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, user_form(user, changeset)}
       end
     end
   end
@@ -2265,9 +2240,19 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :ban | :unauthorized | UserForm.t()}
   def update_avatar(%Actor{user: user} = actor, attrs) do
     with :ok <- verify_write_access(actor) do
-      case persist_avatar(user, attrs) do
-        {:ok, user} -> {:ok, user}
-        {:error, changeset} -> {:error, user_form(user, changeset)}
+      changeset = Uploader.analyze_upload(user, attrs)
+
+      Multi.new()
+      |> Multi.update(:user, changeset)
+      |> Uploader.put_persist_upload_and_unpersist_old(:user)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: user}} ->
+          {:ok, user}
+
+        {:error, :user, changeset, _changes} ->
+          {:error, user_form(user, changeset)}
       end
     end
   end
@@ -2552,7 +2537,19 @@ defmodule Philomena.Users do
   @spec clear_profile_for_erasure(User.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def clear_profile_for_erasure(%User{} = user) do
-    update_profile_description(user, %{description: "", personal_title: ""})
+    changeset = User.description_changeset(user, %{description: "", personal_title: ""})
+
+    Multi.new()
+    |> Multi.update(:user, changeset)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        user
+
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
