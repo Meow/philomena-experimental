@@ -6,6 +6,7 @@ defmodule Philomena.Users.User do
   import Ecto.Changeset
 
   alias Philomena.Schema.TagList
+  alias Philomena.Schema.Approval
 
   alias Philomena.Filters.Filter
   alias Philomena.ArtistLinks.ArtistLink
@@ -107,6 +108,7 @@ defmodule Philomena.Users.User do
     field :avatar_mime_type, :string, virtual: true
     field :uploaded_avatar, :string, virtual: true
     field :removed_avatar, :string, virtual: true
+    field :became_unapproved?, :boolean, virtual: true, default: false
 
     # For authorization
     field :role_map, :any, virtual: true
@@ -307,7 +309,22 @@ defmodule Philomena.Users.User do
       :personal_title,
       ~r/\A((?!site|admin|moderator|assistant|developer|\p{C}).)*\z/iu
     )
+    |> maybe_put_description_approval(user)
   end
+
+  defp maybe_put_description_approval(%{valid?: true} = changeset, user) do
+    was_approved? =
+      Approval.approved?(user, user.description, :external_links) and
+        Approval.approved?(user, user.personal_title, :external_links)
+
+    approved? =
+      Approval.approved?(user, get_field(changeset, :description), :external_links) and
+        Approval.approved?(user, get_field(changeset, :personal_title), :external_links)
+
+    change(changeset, became_unapproved?: was_approved? and not approved?)
+  end
+
+  defp maybe_put_description_approval(changeset, _user), do: changeset
 
   def scratchpad_changeset(user, attrs) do
     user

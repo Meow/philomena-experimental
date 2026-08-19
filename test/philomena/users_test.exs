@@ -9,8 +9,10 @@ defmodule Philomena.UsersTest do
   import Philomena.UserIpsFixtures
   import Philomena.UserFingerprintsFixtures
   import Philomena.FiltersFixtures
+  import Philomena.RulesFixtures
   alias Philomena.Roles.Role
   alias Philomena.ModerationLogs.{ModerationLog, Paths}
+  alias Philomena.Reports.Report
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
   alias Philomena.Users.{AdminUserForm, AliasMatches, Settings, User, UserForm, UserToken}
@@ -822,6 +824,25 @@ defmodule Philomena.UsersTest do
 
       assert updated.id == user.id
       assert Users.fetch_user_for_worker!(user.id).description == "New bio text"
+    end
+
+    test "files one report when the profile becomes unapproved" do
+      user = confirmed_user_fixture()
+      rule_fixture(name: "Review")
+
+      assert {:ok, _updated} =
+               Users.update_description(actor(user), user.slug, %{
+                 "description" => "https://outside.example/profile"
+               })
+
+      assert Repo.aggregate(Report, :count) == 1
+
+      assert {:ok, _updated} =
+               Users.update_description(actor(user), user.slug, %{
+                 "description" => "https://another-outside.example/profile"
+               })
+
+      assert Repo.aggregate(Report, :count) == 1
     end
 
     test "a banned actor is rejected" do
