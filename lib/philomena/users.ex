@@ -394,6 +394,15 @@ defmodule Philomena.Users do
 
   @doc group: "Authentication"
   @doc """
+  Deletes every active session, including incomplete TOTP login sessions, for a user.
+  """
+  def delete_user_sessions(user) do
+    Repo.delete_all(UserToken.user_and_contexts_query(user, ["session", "totp"]))
+    :ok
+  end
+
+  @doc group: "Authentication"
+  @doc """
   Gets a user by API token.
 
   ## Examples

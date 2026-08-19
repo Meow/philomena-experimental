@@ -45,7 +45,7 @@ defmodule PhilomenaProxy.Http do
   """
   @spec get(url(), header_list()) :: result()
   def get(url, headers \\ []) do
-    request(:get, url, [], headers)
+    request(:get, url, nil, headers)
   end
 
   @doc ~S"""
@@ -62,7 +62,7 @@ defmodule PhilomenaProxy.Http do
   """
   @spec head(url(), header_list()) :: result()
   def head(url, headers \\ []) do
-    request(:head, url, [], headers)
+    request(:head, url, nil, headers)
   end
 
   @doc ~S"""
@@ -82,7 +82,7 @@ defmodule PhilomenaProxy.Http do
     request(:post, url, body, headers)
   end
 
-  @spec request(atom(), String.t(), iodata(), header_list()) :: result()
+  @spec request(atom(), String.t(), iodata() | nil, header_list()) :: result()
   defp request(method, url, body, headers) do
     [
       method: method,

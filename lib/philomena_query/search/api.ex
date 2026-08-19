@@ -181,7 +181,7 @@ defmodule PhilomenaQuery.Search.Api do
   def search(url, name, body) do
     url
     |> prepare_url([name, "_search"])
-    |> Client.get(body)
+    |> Client.post(body)
   end
 
   @doc """
@@ -193,7 +193,7 @@ defmodule PhilomenaQuery.Search.Api do
   def msearch(url, lines) do
     url
     |> prepare_url(["_msearch"])
-    |> Client.get(lines)
+    |> Client.post(lines)
   end
 
   @spec prepare_url(String.t(), [String.t()]) :: String.t()
