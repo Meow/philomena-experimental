@@ -20,10 +20,9 @@ defmodule Philomena.Galleries do
   alias Philomena.Galleries.Interaction
   alias Philomena.Galleries.QueryBuilder
   alias Philomena.Galleries.QueryForm
+  alias Philomena.Galleries.ReorderForm
   alias Philomena.Galleries
   alias Philomena.IndexWorker
-  alias Philomena.GalleryReorderWorker
-  alias Philomena.IntegerId
   alias Philomena.Interactions
   alias Philomena.Notifications
   alias Philomena.Images
@@ -83,45 +82,28 @@ defmodule Philomena.Galleries do
     Multi.on_commit(multi, fn %{^step => gallery} -> reindex_gallery(gallery) end)
   end
 
-  defp validate_reorder(%Gallery{} = gallery, image_ids) when is_list(image_ids) do
-    with {:ok, image_ids} <- parse_image_ids(image_ids),
-         true <- length(image_ids) == MapSet.size(MapSet.new(image_ids)),
-         true <- MapSet.new(image_ids) == gallery_image_ids(gallery) do
-      {:ok, image_ids}
-    else
-      _ -> {:error, :invalid_order}
-    end
-  end
-
-  defp validate_reorder(%Gallery{}, _image_ids), do: {:error, :invalid_order}
-
-  defp parse_image_ids(image_ids) do
-    Enum.reduce_while(image_ids, {:ok, []}, fn image_id, {:ok, parsed} ->
-      case IntegerId.parse(image_id) do
-        {:ok, image_id} -> {:cont, {:ok, [image_id | parsed]}}
-        :error -> {:halt, {:error, :invalid_order}}
-      end
-    end)
-    |> case do
-      {:ok, parsed} -> {:ok, Enum.reverse(parsed)}
-      error -> error
-    end
-  end
-
-  defp gallery_image_ids(%Gallery{} = gallery) do
+  defp gallery_image_ids(%Gallery{} = gallery, image_ids) do
     Interaction
-    |> where(gallery_id: ^gallery.id)
+    |> where([interaction], interaction.gallery_id == ^gallery.id)
+    |> where([interaction], interaction.image_id in ^image_ids)
     |> select([interaction], interaction.image_id)
     |> Repo.all()
-    |> MapSet.new()
   end
 
-  defp enqueue_reorder(%Gallery{} = gallery, image_ids) do
-    Exq.enqueue(Exq, "indexing", GalleryReorderWorker, [gallery.id, image_ids])
-    gallery
+  defp validate_reorder(%Gallery{} = gallery, attrs) do
+    with {:ok, reorder_form} <-
+           %ReorderForm{gallery: gallery}
+           |> ReorderForm.changeset(attrs)
+           |> Ecto.Changeset.apply_action(:create) do
+      valid_image_ids = gallery_image_ids(gallery, reorder_form.image_ids)
+
+      reorder_form
+      |> ReorderForm.membership_changeset(valid_image_ids)
+      |> Ecto.Changeset.apply_action(:update)
+    end
   end
 
-  defp persist_reorder(%Gallery{} = gallery, image_ids) do
+  defp persist_reorder_positions(%Gallery{} = gallery, image_ids) do
     interactions =
       Interaction
       |> where(
@@ -136,17 +118,37 @@ defmodule Philomena.Galleries do
       |> Enum.with_index()
       |> Map.new(fn {interaction, index} -> {index, interaction.position} end)
 
-    requested = image_ids |> Enum.with_index() |> Map.new()
+    requested =
+      image_ids
+      |> Enum.with_index()
+      |> Map.new()
 
-    Enum.each(Enum.with_index(interactions), fn {interaction, current_index} ->
-      new_index = requested[interaction.image_id]
+    changes =
+      interactions
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {interaction, current_index} ->
+        new_index = requested[interaction.image_id]
 
-      if new_index != current_index do
-        Interaction
-        |> where([row], row.id == ^interaction.id)
-        |> Repo.update_all(set: [position: interaction_positions[new_index]])
-      end
-    end)
+        if new_index != current_index do
+          [
+            %{
+              id: interaction.id,
+              gallery_id: interaction.gallery_id,
+              image_id: interaction.image_id,
+              position: interaction_positions[new_index]
+            }
+          ]
+        else
+          []
+        end
+      end)
+
+    Repo.insert_all(
+      Interaction,
+      changes,
+      on_conflict: {:replace, [:position]},
+      conflict_target: [:id]
+    )
 
     :ok
   end
@@ -792,70 +794,49 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Queues a reorder of the gallery named by `gallery_id` to the order given by
-  `image_ids`, on behalf of `actor`.
+  Reorders the gallery named by `gallery_id` to the order given by `image_ids`,
+  on behalf of `actor`.
 
-  The IDs may be integers or decimal strings, but must be unique and exactly
-  match the gallery's current membership. Missing, extra, duplicate, or
-  malformed IDs return `{:error, :invalid_order}` without scheduling work.
+  The IDs may be integers or decimal strings, must be unique, and must all
+  belong to the gallery. The list may contain only the images visible on a
+  paginated gallery page and may contain at most 250 IDs; omitted memberships
+  retain their existing positions.
+  Extra, duplicate, or malformed IDs return the rejected reorder changeset.
+  Successful reorders return the validated reorder form after the database
+  update commits.
 
   ## Examples
 
-      iex> reorder_gallery(actor, "1", [3, 1, 2])
-      {:ok, %Gallery{}}
+      iex> reorder_gallery(actor, "1", %{image_ids: [3, 1, 2]})
+      {:ok, %ReorderForm{}}
 
   """
-  @spec reorder_gallery(Actor.t(), Loader.integer_id(), [Loader.integer_id()]) ::
-          {:ok, Gallery.t()}
-          | {:error, :ban | :unauthorized | :not_found | :invalid_order}
-  def reorder_gallery(%Actor{} = actor, gallery_id, image_ids) do
+  @spec reorder_gallery(Actor.t(), Loader.integer_id(), map()) ::
+          {:ok, ReorderForm.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+  def reorder_gallery(%Actor{} = actor, gallery_id, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, gallery} <- load_gallery(actor, gallery_id, :reorder),
-         {:ok, image_ids} <- validate_reorder(gallery, image_ids) do
-      {:ok, enqueue_reorder(gallery, image_ids)}
-    end
-  end
+         {:ok, gallery} <- load_gallery(actor, gallery_id, :reorder) do
+      Multi.new()
+      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery.id))
+      |> Multi.run(:reorder_form, fn _repo, %{locked_gallery: gallery} ->
+        validate_reorder(gallery, params)
+      end)
+      |> Multi.run(:reorder, fn _repo, %{locked_gallery: gallery, reorder_form: reorder_form} ->
+        :ok = persist_reorder_positions(gallery, reorder_form.image_ids)
+        {:ok, nil}
+      end)
+      |> Multi.on_commit(fn %{reorder_form: reorder_form} ->
+        Images.reindex_images(reorder_form.image_ids)
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{reorder_form: reorder_form}} ->
+          {:ok, reorder_form}
 
-  @doc """
-  Worker entry point that performs a previously queued gallery reorder.
-
-  The membership is revalidated to prevent a stale or malformed job from
-  partially reordering the gallery. A valid exact permutation updates positions
-  and queues the affected image documents for reindexing; an invalid set leaves
-  all positions unchanged. A missing gallery raises because a queued job for a
-  deleted gallery violates the worker invariant.
-
-  ## Examples
-
-      iex> perform_reorder(gallery_id, [3, 1, 2])
-      :ok
-
-  """
-  @spec perform_reorder(integer(), [Loader.integer_id()]) :: :ok | {:error, :invalid_order}
-  def perform_reorder(gallery_id, image_ids) do
-    Repo.transaction(fn ->
-      gallery =
-        Gallery
-        |> where(id: ^gallery_id)
-        |> lock("FOR UPDATE")
-        |> Repo.one!()
-
-      case validate_reorder(gallery, image_ids) do
-        {:ok, image_ids} ->
-          :ok = persist_reorder(gallery, image_ids)
-          image_ids
-
-        {:error, :invalid_order} ->
-          Repo.rollback(:invalid_order)
+        {:error, :reorder_form, changeset, _changes} ->
+          {:error, changeset}
       end
-    end)
-    |> case do
-      {:ok, image_ids} ->
-        Images.reindex_images(image_ids)
-        :ok
-
-      {:error, :invalid_order} ->
-        {:error, :invalid_order}
     end
   end
 

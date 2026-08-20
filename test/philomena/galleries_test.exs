@@ -22,6 +22,7 @@ defmodule Philomena.GalleriesTest do
   alias Philomena.Galleries.Gallery
   alias Philomena.Galleries.GalleryPage
   alias Philomena.Galleries.Interaction
+  alias Philomena.Galleries.ReorderForm
   alias Philomena.Images.Image
   alias Philomena.Images.Search.Scope
   alias Philomena.Repo
@@ -413,20 +414,32 @@ defmodule Philomena.GalleriesTest do
   end
 
   describe "reorder_gallery/3" do
-    test "the owner queues a reorder and gets the gallery back" do
+    test "the owner reorders synchronously and gets the reorder form back" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
       images = [image_fixture(), image_fixture(), image_fixture()]
       Enum.each(images, &gallery_image_fixture(gallery, &1))
 
-      assert {:ok, %Gallery{} = returned} =
+      requested_ids = Enum.map(images, & &1.id)
+
+      assert {:ok, %ReorderForm{} = returned} =
                Galleries.reorder_gallery(
                  actor(user),
                  "#{gallery.id}",
-                 Enum.map(Enum.reverse(images), & &1.id)
+                 %{image_ids: requested_ids}
                )
 
-      assert returned.id == gallery.id
+      assert returned.gallery.id == gallery.id
+      assert returned.image_ids == requested_ids
+
+      assert %{position: 2} =
+               Repo.get_by!(Interaction, gallery_id: gallery.id, image_id: Enum.at(images, 0).id)
+
+      assert %{position: 1} =
+               Repo.get_by!(Interaction, gallery_id: gallery.id, image_id: Enum.at(images, 1).id)
+
+      assert %{position: 0} =
+               Repo.get_by!(Interaction, gallery_id: gallery.id, image_id: Enum.at(images, 2).id)
     end
 
     test "an unrelated user is unauthorized" do
@@ -442,78 +455,62 @@ defmodule Philomena.GalleriesTest do
       assert Galleries.reorder_gallery(actor, "abc", [1]) == {:error, :ban}
     end
 
-    test "rejects missing, extra, duplicate, and malformed image ids" do
+    test "accepts a subset but rejects extra, duplicate, and malformed image ids" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
       [image_a, image_b] = [image_fixture(), image_fixture()]
       gallery_image_fixture(gallery, image_a)
       gallery_image_fixture(gallery, image_b)
 
+      assert {:ok, %ReorderForm{}} =
+               Galleries.reorder_gallery(actor(user), gallery.id, %{"image_ids" => [image_a.id]})
+
       for invalid_order <- [
-            [image_a.id],
             [image_a.id, image_b.id, 999_999_999],
             [image_a.id, image_a.id],
             [to_string(image_a.id), "not-an-id"]
           ] do
-        assert Galleries.reorder_gallery(actor(user), gallery.id, invalid_order) ==
-                 {:error, :invalid_order}
+        assert {:error, %Ecto.Changeset{}} =
+                 Galleries.reorder_gallery(actor(user), gallery.id, %{
+                   "image_ids" => invalid_order
+                 })
       end
     end
 
-    test "accepts string ids when they form an exact permutation" do
+    test "accepts string ids in a subset" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
       [image_a, image_b] = [image_fixture(), image_fixture()]
       gallery_image_fixture(gallery, image_a)
       gallery_image_fixture(gallery, image_b)
 
-      assert {:ok, %Gallery{}} =
-               Galleries.reorder_gallery(actor(user), gallery.id, [
-                 to_string(image_b.id),
-                 to_string(image_a.id)
-               ])
+      assert {:ok, %ReorderForm{}} =
+               Galleries.reorder_gallery(actor(user), gallery.id, %{
+                 "image_ids" => [to_string(image_b.id)]
+               })
     end
   end
 
-  describe "perform_reorder/2" do
-    test "updates positions for a valid exact permutation" do
-      user = confirmed_user_fixture()
-      gallery = gallery_fixture(user)
-      [image_a, image_b] = [image_fixture(), image_fixture()]
-      gallery_image_fixture(gallery, image_a)
-      gallery_image_fixture(gallery, image_b)
+  describe "ReorderForm" do
+    test "casts decimal string image ids to integers" do
+      changeset = ReorderForm.changeset(%ReorderForm{}, %{"image_ids" => ["12", "34"]})
 
-      assert :ok = Galleries.perform_reorder(gallery.id, [image_a.id, image_b.id])
-
-      assert %{position: 1} =
-               Repo.get_by!(Interaction, gallery_id: gallery.id, image_id: image_a.id)
-
-      assert %{position: 0} =
-               Repo.get_by!(Interaction, gallery_id: gallery.id, image_id: image_b.id)
+      assert {:ok, %ReorderForm{image_ids: [12, 34]}} =
+               Ecto.Changeset.apply_action(changeset, :create)
     end
 
-    test "rejects a stale set without changing positions" do
-      user = confirmed_user_fixture()
-      gallery = gallery_fixture(user)
-      [image_a, image_b] = [image_fixture(), image_fixture()]
-      gallery_image_fixture(gallery, image_a)
-      gallery_image_fixture(gallery, image_b)
+    test "rejects duplicate image ids" do
+      changeset = ReorderForm.changeset(%ReorderForm{}, %{image_ids: [12, 12]})
 
-      before =
-        Interaction
-        |> where(gallery_id: ^gallery.id)
-        |> Repo.all()
-        |> Map.new(&{&1.image_id, &1.position})
+      refute changeset.valid?
+      assert changeset.errors[:image_ids]
+    end
 
-      assert Galleries.perform_reorder(gallery.id, [image_a.id]) == {:error, :invalid_order}
+    test "rejects malformed image ids" do
+      changeset = ReorderForm.changeset(%ReorderForm{}, %{image_ids: [12, "not-an-id"]})
 
-      positions_after =
-        Interaction
-        |> where(gallery_id: ^gallery.id)
-        |> Repo.all()
-        |> Map.new(&{&1.image_id, &1.position})
-
-      assert positions_after == before
+      refute changeset.valid?
+      assert changeset.errors[:image_ids]
     end
   end
 

@@ -18,19 +18,18 @@ Complete for wave 4.
   gallery. Duplicate adds return a changeset error and absent removals return
   `{:error, :not_found}`;
   hidden, malformed, and missing images are rejected before persistence.
-- Reorders accept integer or decimal-string IDs only when they are a unique,
-  exact permutation of current database membership. Invalid requests are not
-  queued, and the worker revalidates membership so stale jobs cannot partially
-  reorder a gallery.
+- Reorders accept unique integer or decimal-string IDs from the current gallery
+  page. Omitted memberships retain their position slots; invalid requests are
+  rejected, and membership is revalidated while the gallery row is locked so
+  stale requests cannot partially reorder a gallery.
 - The image-page gallery selector was replaced with the Actor-first
   `gallery_choices_for_image/2` and capped at 100 most-recently-updated rows.
   The caller now receives only the authenticated actor's choices; anonymous
   actors receive none.
-- Loaded-record CRUD, membership persistence, reorder scheduling, queries, and
+- Loaded-record CRUD, membership persistence, synchronous reorder, queries, and
   notification steps are private and precede the public API. User erasure uses
-  the narrow `erase_user_galleries/2` service. Worker, user-rename, index queue,
-  and subscription notification callbacks remain explicit documented service
-  APIs.
+  the narrow `erase_user_galleries/2` service. User-rename, index queue, and
+  subscription notification callbacks remain explicit documented service APIs.
 - Context/controller coverage now includes malformed, missing, and forbidden
   galleries/images; duplicate and absent membership errors; invalid and stale
   reorder sets; actor-over-Scope state; read/subscription state; bounded
@@ -58,11 +57,12 @@ Complete for wave 4.
 - Bound `user_image_galleries/2`: paginate it for a controller, limit it for a
   selector, or replace it with an existence/ID query suited to its actual caller.
 - Introduce a named erasure service in Galleries and make generic loaded
-  `delete_gallery/3` private. Classify/restrict raw CRUD, reindex, reorder-worker,
-  and notification helpers as private or documented service APIs.
+  `delete_gallery/3` private. Classify/restrict raw CRUD, reindex,
+  reorder persistence, and notification helpers as private or documented
+  service APIs.
 - Reorder private persistence/query/index/notification functions before public
-  APIs. Document visibility, watcher side effects, worker scheduling, and search
-  consistency.
+  APIs. Document visibility, watcher side effects, synchronous behavior, and
+  search consistency.
 
 ## TODO resolution
 

@@ -5,18 +5,17 @@ defmodule PhilomenaWeb.Gallery.OrderController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def update(conn, %{"gallery_id" => gallery_id, "image_ids" => image_ids})
-      when is_list(image_ids) do
-    case Galleries.reorder_gallery(conn.assigns.actor, gallery_id, image_ids) do
-      {:ok, _gallery} ->
+  def update(conn, %{"gallery_id" => gallery_id} = params) do
+    case Galleries.reorder_gallery(conn.assigns.actor, gallery_id, params) do
+      {:ok, _reorder_form} ->
         json(conn, %{})
 
-      {:error, :invalid_order} ->
+      {:error, %Ecto.Changeset{}} ->
         conn
         |> put_status(:bad_request)
-        |> json(%{error: "image_ids must exactly match the gallery's images"})
+        |> json(%{error: "image_ids must be a non-empty subset of the gallery's images"})
 
-      {:error, _reason} = error ->
+      error ->
         error
     end
   end
