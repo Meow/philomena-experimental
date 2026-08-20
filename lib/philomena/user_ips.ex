@@ -12,6 +12,7 @@ defmodule Philomena.UserIps do
   alias Philomena.Bans
   alias Philomena.UserIps.UserIp
   alias Philomena.UserIps.IpProfile
+  alias Philomena.UserIps.Server
   alias Philomena.Users.User
 
   defp cast_ip(ip) do
@@ -45,6 +46,22 @@ defmodule Philomena.UserIps do
     |> order_by(desc: :updated_at)
     |> Repo.all()
     |> Enum.group_by(& &1.ip)
+  end
+
+  @doc """
+  Asynchronously records usage of an IP address by `user`.
+
+  Invalid IP addresses return `:error`.
+
+  ## Example
+
+      iex> record_usage(user, {127, 0, 0, 1}, ~U[2024-01-01 00:00:00Z])
+      :ok
+
+  """
+  @spec record_usage(User.t(), term(), DateTime.t()) :: :ok | :error
+  def record_usage(%User{id: user_id}, ip_address, updated_at) do
+    Server.record_usage(user_id, ip_address, updated_at)
   end
 
   @doc """

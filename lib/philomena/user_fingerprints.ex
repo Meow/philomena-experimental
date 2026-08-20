@@ -12,6 +12,7 @@ defmodule Philomena.UserFingerprints do
   alias Philomena.Bans
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserFingerprints.FingerprintProfile
+  alias Philomena.UserFingerprints.Server
   alias Philomena.Users.User
 
   defp cast_fingerprint(fingerprint) when is_binary(fingerprint) do
@@ -50,6 +51,22 @@ defmodule Philomena.UserFingerprints do
     |> order_by(desc: :updated_at)
     |> Repo.all()
     |> Enum.group_by(& &1.fingerprint)
+  end
+
+  @doc """
+  Asynchronously records usage of a fingerprint by `user`.
+
+  Invalid fingerprints return `:error`.
+
+  ## Example
+
+      iex> record_usage(user, "d63c4581f8cf58d", ~U[2024-01-01 00:00:00Z])
+      :ok
+
+  """
+  @spec record_usage(User.t(), term(), DateTime.t()) :: :ok | :error
+  def record_usage(%User{id: user_id}, fingerprint, updated_at) do
+    Server.record_usage(user_id, fingerprint, updated_at)
   end
 
   @doc """
