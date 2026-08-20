@@ -3,8 +3,8 @@ defmodule PhilomenaWeb.UserAuth do
   import Phoenix.Controller
 
   alias Philomena.Users
-  alias PhilomenaWeb.UserIpUpdater
-  alias PhilomenaWeb.UserFingerprintUpdater
+  alias Philomena.UserIpUpdater
+  alias Philomena.UserFingerprintUpdater
 
   use PhilomenaWeb, :verified_routes
 

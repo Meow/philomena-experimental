@@ -20,7 +20,7 @@ defmodule PhilomenaWeb.Fingerprint do
     fingerprint = upgrade(get_session(conn, @name), conn.cookies[@name])
 
     # If the fingerprint is valid, persist to session.
-    if valid_format?(fingerprint) do
+    if UserFingerprints.valid_format?(fingerprint) do
       conn
       |> put_session(@name, fingerprint)
       |> assign(:fingerprint, fingerprint)
@@ -30,7 +30,7 @@ defmodule PhilomenaWeb.Fingerprint do
   end
 
   defp upgrade(<<"c", _::binary>> = session_value, <<"d", _::binary>> = cookie_value) do
-    if valid_format?(cookie_value) do
+    if UserFingerprints.valid_format?(cookie_value) do
       # When both fingerprint values are valid and the session value
       # is an old version, use the cookie value.
       cookie_value
@@ -44,32 +44,4 @@ defmodule PhilomenaWeb.Fingerprint do
     # Prefer the session value, using the cookie value if it is unavailable.
     session_value || cookie_value
   end
-
-  @doc """
-  Determine whether the fingerprint corresponds to a valid format.
-
-  Valid formats start with `c` or `d` (for the version). The `c` format is a legacy format
-  corresponding to an integer-valued hash from the frontend. The `d` format is the current
-  format corresponding to a hex-valued hash from the frontend. By design, it is not
-  possible to infer anything else about these values from the server.
-
-  See assets/js/fp.ts for additional information on the generation of the `d` format.
-
-  ## Examples
-
-      iex> valid_format?("b2502085657")
-      false
-
-      iex> valid_format?("c637334158")
-      true
-
-      iex> valid_format?("d63c4581f8cf58d")
-      true
-
-      iex> valid_format?("5162549b16e8448")
-      false
-
-  """
-  @spec valid_format?(any()) :: boolean()
-  defdelegate valid_format?(fingerprint), to: UserFingerprints
 end

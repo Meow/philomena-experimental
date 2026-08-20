@@ -130,10 +130,29 @@ defmodule Philomena.UserFingerprints do
   end
 
   @doc """
-  Returns whether `fingerprint` uses a supported browser fingerprint format.
+  Determine whether the fingerprint corresponds to a valid format.
 
-  Legacy `c` fingerprints contain a decimal hash of at most 12 digits. Current
-  `d` fingerprints contain exactly 14 lowercase hexadecimal digits.
+  Valid formats start with `c` or `d` (for the version). The `c` format is a legacy format
+  corresponding to an integer-valued hash from the frontend. The `d` format is the current
+  format corresponding to a hex-valued hash from the frontend. By design, it is not
+  possible to infer anything else about these values from the server.
+
+  See assets/js/fp.ts for additional information on the generation of the `d` format.
+
+  ## Examples
+
+      iex> valid_format?("b2502085657")
+      false
+
+      iex> valid_format?("c637334158")
+      true
+
+      iex> valid_format?("d63c4581f8cf58d")
+      true
+
+      iex> valid_format?("5162549b16e8448")
+      false
+
   """
   @spec valid_format?(term()) :: boolean()
   def valid_format?(fingerprint)
