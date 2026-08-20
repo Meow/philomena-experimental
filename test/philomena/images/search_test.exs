@@ -52,11 +52,11 @@ defmodule Philomena.Images.SearchTest do
   end
 
   defp scope(overrides \\ []) do
-    %Scope{
-      filter: Keyword.get(overrides, :filter, default_filter()),
-      params: Keyword.get(overrides, :params, %{}),
-      pagination: Keyword.get(overrides, :pagination, @pagination)
-    }
+    Scope.new(
+      Keyword.get(overrides, :filter, default_filter()),
+      Keyword.get(overrides, :pagination, @pagination),
+      Keyword.get(overrides, :params, %{})
+    )
   end
 
   defp result_ids(definition) do
@@ -396,17 +396,46 @@ defmodule Philomena.Images.SearchTest do
       assert Search.find_consecutive(actor(), scope(params: %{"rel" => "next"}), older, compiled) ==
                nil
     end
+
+    test "uses a provided cursor for a non-default sort with tied sort values", %{
+      compiled: compiled
+    } do
+      sort_scope = scope(params: %{"sf" => "score", "sd" => "desc"})
+      {definition, _tags} = Search.query(actor(), sort_scope, %{match_all: %{}})
+
+      %{entries: [{first, first_hit}, {second, second_hit} | _]} =
+        Search.execute(definition, hits: true)
+
+      assert first_hit["sort"] |> hd() == second_hit["sort"] |> hd()
+
+      cursor = Enum.map(first_hit["sort"], &to_string/1)
+      navigation_scope = scope(params: %{"sf" => "score", "rel" => "next", "sort" => cursor})
+
+      assert {adjacent, _hit} =
+               Search.find_consecutive(actor(), navigation_scope, first, compiled)
+
+      assert adjacent.id == second.id
+    end
   end
 
   describe "Scope struct" do
-    test "enforces the filter key" do
-      assert_raise ArgumentError, fn -> struct!(Scope, %{params: %{}}) end
+    test "new stores the filter and pagination" do
+      scope = Scope.new(%{match_all: %{}}, @pagination)
+
+      assert scope.filter == %{match_all: %{}}
+      assert scope.pagination == @pagination
+    end
+
+    test "casts the search_after sort cursor as a string array" do
+      scope = Scope.new(%{match_all: %{}}, @pagination, %{"sort" => ["123", "456"]})
+
+      assert scope.sort == ["123", "456"]
     end
 
     test "defaults params and pagination" do
-      scope = %Scope{filter: %{match_all: %{}}}
+      scope = Scope.new(%{match_all: %{}}, @pagination)
 
-      assert scope.params == %{}
+      assert scope.q == nil
       assert scope.pagination == %{page_number: 1, page_size: 25}
     end
   end

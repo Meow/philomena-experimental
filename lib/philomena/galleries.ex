@@ -475,12 +475,9 @@ defmodule Philomena.Galleries do
 
       scope = %{
         scope
-        | params:
-            Map.merge(scope.params, %{
-              "q" => query,
-              "sf" => "gallery_id:#{gallery.id}",
-              "sd" => image_sort_direction(gallery)
-            })
+        | q: query,
+          sf: "gallery_id:#{gallery.id}",
+          sd: image_sort_direction(gallery)
       }
 
       {:ok, {images, _tags}} = ImageSearch.search_string(actor, scope, query)

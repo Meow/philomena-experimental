@@ -55,7 +55,7 @@ defmodule Philomena.ActivitiesTest do
   end
 
   defp scope do
-    %Scope{filter: default_filter()}
+    Scope.new(default_filter(), %{page_number: 1, page_size: 25})
   end
 
   # The %Filter{} the web layer passes as the comment-strip filter; only its
@@ -193,7 +193,7 @@ defmodule Philomena.ActivitiesTest do
 
       assert hidden_front.featured_image == nil
 
-      include_hidden_scope = %{scope() | params: %{"hidden" => "1"}}
+      include_hidden_scope = %{scope() | hidden: true}
 
       assert {:ok, visible_front} =
                Activities.load_front_page(actor(user), include_hidden_scope, filter(), false)

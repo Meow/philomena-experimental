@@ -45,11 +45,11 @@ defmodule Philomena.Images.NavigationTest do
   end
 
   defp scope(overrides \\ []) do
-    %Scope{
-      filter: Keyword.get(overrides, :filter, default_filter()),
-      params: Keyword.get(overrides, :params, %{}),
-      pagination: Keyword.get(overrides, :pagination, %{page_number: 1, page_size: 25})
-    }
+    Scope.new(
+      Keyword.get(overrides, :filter, default_filter()),
+      Keyword.get(overrides, :pagination, %{page_number: 1, page_size: 25}),
+      Keyword.get(overrides, :params, %{})
+    )
   end
 
   defp hours_ago(hours) do

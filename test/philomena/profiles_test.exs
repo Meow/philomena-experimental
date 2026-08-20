@@ -56,7 +56,7 @@ defmodule Philomena.ProfilesTest do
   end
 
   defp scope do
-    %Scope{filter: default_filter(), params: %{}, pagination: @pagination}
+    Scope.new(default_filter(), @pagination)
   end
 
   # The %Filter{} the profile page scopes its recent comments strip against; a

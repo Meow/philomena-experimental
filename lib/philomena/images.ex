@@ -1016,14 +1016,14 @@ defmodule Philomena.Images do
       |> Keyword.put(:hits, Keyword.get_lazy(opts, :hits, fn -> custom_ordering?(scope) end))
 
     with {:ok, {definition, tags}} <-
-           ImageSearch.search_string(actor, scope, scope.params["q"]) do
+           ImageSearch.search_string(actor, scope, scope.q) do
       images = ImageSearch.execute(definition, execute_opts)
 
       {:ok, %{images: images, tags: tags}}
     end
   end
 
-  defp custom_ordering?(%{params: %{"sf" => sf}}) when sf not in ~W(id first_seen_at), do: true
+  defp custom_ordering?(%{sf: sf}) when sf not in [nil, "id", "first_seen_at"], do: true
   defp custom_ordering?(_scope), do: false
 
   @doc """
@@ -1344,7 +1344,7 @@ defmodule Philomena.Images do
 
   defp navigation_query(actor, scope) do
     {:ok, query} =
-      scope.params["q"]
+      scope.q
       |> match_all_if_blank()
       |> ImageQuery.compile(user: actor.user)
 
@@ -1447,7 +1447,7 @@ defmodule Philomena.Images do
       ImageSearch.search_string(
         actor,
         scope,
-        Map.get(scope.params, "q", "*"),
+        scope.q || "*",
         pagination: %{page_size: 1},
         sorts: &ImageSearch.parse_sort(%{"sf" => "random"}, &1)
       )

@@ -109,7 +109,7 @@ defmodule Philomena.Images.Search do
   @spec query(Actor.t(), Scope.t(), map(), [option()]) :: query_result()
   def query(actor, scope, body, options \\ []) do
     pagination = Keyword.get(options, :pagination, scope.pagination)
-    sorts = Keyword.get(options, :sorts, &parse_sort(scope.params, &1))
+    sorts = Keyword.get(options, :sorts, &parse_sort(scope, &1))
 
     tags =
       body
@@ -167,7 +167,13 @@ defmodule Philomena.Images.Search do
   Returns `%{query:, sorts:}`.
   """
   @spec parse_sort(map(), map()) :: %{query: map(), sorts: list()}
-  def parse_sort(params, query_body) do
+  def parse_sort(%Scope{} = scope, query_body) do
+    sd = parse_sd(%{"sd" => scope.sd})
+
+    parse_sf(%{"sf" => scope.sf}, sd, query_body)
+  end
+
+  def parse_sort(params, query_body) when is_map(params) do
     sd = parse_sd(params)
 
     parse_sf(params, sd, query_body)
@@ -178,7 +184,7 @@ defmodule Philomena.Images.Search do
   describe, for prev/next navigation.
 
   `compiled_query` is the compiled body of the listing's search query;
-  `scope.params["rel"]` selects the direction and `scope.params["sort"]`
+  `scope.rel` selects the direction and `scope.sort`
   carries the sort cursor of the current image, when present.
 
   Returns the `{image, hit}` pair for the neighbouring image, or `nil` at
@@ -186,20 +192,20 @@ defmodule Philomena.Images.Search do
   """
   @spec find_consecutive(Actor.t(), Scope.t(), Image.t(), map()) :: {Image.t(), map()} | nil
   def find_consecutive(actor, scope, image, compiled_query) do
-    params = Map.put_new(scope.params, "sf", "first_seen_at")
+    sf = scope.sf || "first_seen_at"
 
-    %{query: compiled_query, sorts: sorts} = parse_sort(params, compiled_query)
+    %{query: compiled_query, sorts: sorts} = parse_sort(scope, compiled_query)
 
     sorts =
       sorts
       |> Enum.flat_map(&Enum.to_list/1)
-      |> Enum.map(&apply_direction(&1, params["rel"]))
+      |> Enum.map(&apply_direction(&1, scope.rel))
 
     search_after =
-      params["sort"]
+      scope.sort
       |> permit_list()
       |> Enum.flat_map(&permit_value/1)
-      |> default_cursors(params["sf"], image)
+      |> default_cursors(sf, image)
 
     maybe_search_after(
       Image,
@@ -211,7 +217,7 @@ defmodule Philomena.Images.Search do
               scope.filter,
               %{term: %{hidden_from_users: true}},
               %{term: %{id: image.id}},
-              hidden_filter(actor.user, params["hidden"])
+              hidden_filter(actor.user, scope.hidden)
             ]
           }
         },
@@ -238,8 +244,8 @@ defmodule Philomena.Images.Search do
 
   defp create_filters(actor, scope) do
     show_hidden? = authorize(actor, :hide, %Image{}) == :ok
-    del = scope.params["del"]
-    hidden = scope.params["hidden"]
+    del = scope.del
+    hidden = scope.hidden
 
     [
       scope.filter
@@ -272,7 +278,7 @@ defmodule Philomena.Images.Search do
   # Allow users to reverse the effect of hiding images,
   # if desired
 
-  defp maybe_custom_hide(filters, %{id: _id}, "1"),
+  defp maybe_custom_hide(filters, %{id: _id}, true),
     do: filters
 
   defp maybe_custom_hide(filters, %{id: id}, _param),

@@ -97,7 +97,7 @@ defmodule Philomena.Activities do
   end
 
   defp load_featured_image(actor, scope) do
-    include_hidden? = scope.params["hidden"] == "1"
+    include_hidden? = scope.hidden == true
 
     case Images.featured_image(actor, include_hidden?) do
       {:ok, image} -> image

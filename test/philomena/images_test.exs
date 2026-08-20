@@ -4018,11 +4018,11 @@ defmodule Philomena.ImagesTest do
   end
 
   defp index_scope do
-    %Scope{filter: default_filter()}
+    Scope.new(default_filter(), %{page_number: 1, page_size: 25})
   end
 
   defp search_scope(params) do
-    %Scope{filter: default_filter(), params: params}
+    Scope.new(default_filter(), %{page_number: 1, page_size: 25}, params)
   end
 
   defp minutes_ago(minutes) do

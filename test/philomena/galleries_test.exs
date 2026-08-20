@@ -61,7 +61,7 @@ defmodule Philomena.GalleriesTest do
   end
 
   defp scope do
-    %Scope{filter: default_filter(), params: %{}, pagination: @pagination}
+    Scope.new(default_filter(), @pagination)
   end
 
   describe "new_gallery/1" do

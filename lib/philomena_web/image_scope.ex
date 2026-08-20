@@ -20,11 +20,11 @@ defmodule PhilomenaWeb.ImageScope do
   compiled filter, raw params, and the image pagination window.
   """
   def search_scope(conn) do
-    %Scope{
-      filter: conn.assigns.compiled_filter,
-      params: conn.params,
-      pagination: conn.assigns.image_pagination
-    }
+    Scope.new(
+      conn.assigns.compiled_filter,
+      conn.assigns.image_pagination,
+      conn.params
+    )
   end
 
   defp scope(list, conn, key, key_atom) do
