@@ -4017,12 +4017,12 @@ defmodule Philomena.ImagesTest do
     }
   end
 
-  defp index_scope(user \\ nil) do
-    %Scope{user: user, filter: default_filter()}
+  defp index_scope do
+    %Scope{filter: default_filter()}
   end
 
-  defp search_scope(params, user \\ nil) do
-    %Scope{user: user, filter: default_filter(), params: params}
+  defp search_scope(params) do
+    %Scope{filter: default_filter(), params: params}
   end
 
   defp minutes_ago(minutes) do
@@ -4507,7 +4507,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(created_at: minutes_ago(4))
       SearchHelpers.reindex_all!(Image)
 
-      page = Images.load_image_index(index_scope())
+      page = Images.load_image_index(actor(), index_scope())
 
       assert %Scrivener.Page{} = page
       ids = Enum.map(page.entries, & &1.id)
@@ -4521,7 +4521,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(created_at: minutes_ago(1))
       SearchHelpers.reindex_all!(Image)
 
-      page = Images.load_image_index(index_scope())
+      page = Images.load_image_index(actor(), index_scope())
 
       refute image.id in Enum.map(page.entries, & &1.id)
     end
@@ -4539,7 +4539,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, %{images: page, tags: []}} = Images.search_images(search_scope(%{"q" => "*"}))
+      assert {:ok, %{images: page, tags: []}} =
+               Images.search_images(actor(), search_scope(%{"q" => "*"}))
 
       assert %Scrivener.Page{} = page
       assert image.id in Enum.map(page.entries, & &1.id)
@@ -4549,7 +4550,7 @@ defmodule Philomena.ImagesTest do
       _image = image_fixture(tags: "safe")
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, %{tags: tags}} = Images.search_images(search_scope(%{"q" => "safe"}))
+      assert {:ok, %{tags: tags}} = Images.search_images(actor(), search_scope(%{"q" => "safe"}))
 
       assert [%Tag{} = tag] = tags
       assert tag.name == "safe"
@@ -4557,7 +4558,9 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a malformed query returns the compiler error tuple" do
-      assert {:error, msg} = Images.search_images(search_scope(%{"q" => "width.gte:abc"}))
+      assert {:error, msg} =
+               Images.search_images(actor(), search_scope(%{"q" => "width.gte:abc"}))
+
       assert is_binary(msg)
     end
 
@@ -4569,7 +4572,7 @@ defmodule Philomena.ImagesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %{images: page}} =
-               Images.search_images(search_scope(%{"q" => "*", "sf" => "score"}))
+               Images.search_images(actor(), search_scope(%{"q" => "*", "sf" => "score"}))
 
       assert Enum.all?(page.entries, &match?({%Image{}, hit} when is_map(hit), &1))
       assert {%Image{id: id}, _hit} = Enum.find(page.entries, &(elem(&1, 0).id == image.id))
@@ -4580,7 +4583,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, %{images: page}} = Images.search_images(search_scope(%{"q" => "*"}))
+      assert {:ok, %{images: page}} = Images.search_images(actor(), search_scope(%{"q" => "*"}))
 
       assert Enum.all?(page.entries, &match?(%Image{}, &1))
       assert image.id in Enum.map(page.entries, & &1.id)
@@ -4591,7 +4594,7 @@ defmodule Philomena.ImagesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %{images: page}} =
-               Images.search_images(search_scope(%{"q" => "*", "sf" => "id"}))
+               Images.search_images(actor(), search_scope(%{"q" => "*", "sf" => "id"}))
 
       assert Enum.all?(page.entries, &match?(%Image{}, &1))
       assert image.id in Enum.map(page.entries, & &1.id)
@@ -4602,7 +4605,7 @@ defmodule Philomena.ImagesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %{images: page}} =
-               Images.search_images(search_scope(%{"q" => "*", "sf" => "first_seen_at"}))
+               Images.search_images(actor(), search_scope(%{"q" => "*", "sf" => "first_seen_at"}))
 
       assert Enum.all?(page.entries, &match?(%Image{}, &1))
       assert image.id in Enum.map(page.entries, & &1.id)

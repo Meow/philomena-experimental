@@ -60,8 +60,8 @@ defmodule Philomena.GalleriesTest do
     }
   end
 
-  defp scope(user) do
-    %Scope{user: user, filter: default_filter(), params: %{}, pagination: @pagination}
+  defp scope do
+    %Scope{filter: default_filter(), params: %{}, pagination: @pagination}
   end
 
   describe "new_gallery/1" do
@@ -595,7 +595,7 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.load_gallery_page(actor(user), scope(user), "#{gallery.id}")
+               Galleries.load_gallery_page(actor(user), scope(), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
       # The images page carries {image, hit} tuples, not bare image structs.
@@ -611,29 +611,19 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.load_gallery_page(actor(), scope(nil), "#{gallery.id}")
+               Galleries.load_gallery_page(actor(), scope(), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
       assert Enum.empty?(page.images)
     end
 
-    test "uses the actor rather than a conflicting scope user for viewer state" do
-      user = confirmed_user_fixture()
-      other_user = confirmed_user_fixture()
-      gallery = gallery_fixture(other_user)
-      {:ok, _subscription} = Galleries.create_subscription(gallery, user)
-
-      assert {:ok, %GalleryPage{watching: true}} =
-               Galleries.load_gallery_page(actor(user), scope(other_user), gallery.id)
-    end
-
     test "an unknown id is not-found for an anonymous viewer" do
-      assert Galleries.load_gallery_page(actor(), scope(nil), "999999999") ==
+      assert Galleries.load_gallery_page(actor(), scope(), "999999999") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.load_gallery_page(actor(), scope(nil), "abc") == {:error, :not_found}
+      assert Galleries.load_gallery_page(actor(), scope(), "abc") == {:error, :not_found}
     end
   end
 

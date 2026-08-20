@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.SearchController do
   alias Philomena.Interactions
 
   def index(conn, params) do
-    case Images.search_images(ImageScope.search_scope(conn)) do
+    case Images.search_images(conn.assigns.actor, ImageScope.search_scope(conn)) do
       {:ok, %{images: images, tags: tags}} ->
         interactions = Interactions.user_interactions(conn.assigns.actor, images)
 

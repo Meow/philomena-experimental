@@ -54,8 +54,8 @@ defmodule Philomena.TagsTest do
     }
   end
 
-  defp scope(user) do
-    %Scope{user: user, filter: default_filter(), params: %{}, pagination: @pagination}
+  defp scope(_user) do
+    %Scope{filter: default_filter(), params: %{}, pagination: @pagination}
   end
 
   defp only_moderation_log!, do: Repo.one!(ModerationLog)

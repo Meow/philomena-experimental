@@ -9,7 +9,8 @@ Complete for wave 4.
 - `load_front_page/4` remains the sole public Activities API. It authorizes the
   named homepage `:index` action and returns the typed `{:ok, %FrontPage{}}`
   result consumed by the controller.
-- Actor is now authoritative: `scope.user` is replaced with `actor.user` before
+- Actor is authoritative and is passed separately from `Scope`; user-only work
+  uses `actor.user` rather than storing a user in `Scope`.
   any image or watched-tag query, while Scope retains image filter, pagination,
   sort, and display state.
 - Recent images, top-scoring images, recent comments, and watched images remain

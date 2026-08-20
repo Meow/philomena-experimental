@@ -153,13 +153,13 @@ defmodule Philomena.Galleries do
     :ok
   end
 
-  defp gallery_image_definition(_scope, _query, offset) when offset < 0 do
+  defp gallery_image_definition(_actor, _scope, _query, offset) when offset < 0 do
     Search.search_definition(Image, %{query: %{match_none: %{}}})
   end
 
-  defp gallery_image_definition(scope, query, offset) do
+  defp gallery_image_definition(actor, scope, query, offset) do
     {:ok, {definition, _tags}} =
-      ImageSearch.search_string(scope, query,
+      ImageSearch.search_string(actor, scope, query,
         pagination: %{page_number: offset + 1, page_size: 1}
       )
 
@@ -471,7 +471,6 @@ defmodule Philomena.Galleries do
           {:ok, GalleryPage.t()} | {:error, :unauthorized | :not_found}
   def load_gallery_page(%Actor{} = actor, %Scope{} = scope, gallery_id) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :show) do
-      scope = %{scope | user: actor.user}
       query = "gallery_id:#{gallery.id}"
 
       scope = %{
@@ -484,13 +483,13 @@ defmodule Philomena.Galleries do
             })
       }
 
-      {:ok, {images, _tags}} = ImageSearch.search_string(scope, query)
+      {:ok, {images, _tags}} = ImageSearch.search_string(actor, scope, query)
 
       limit = scope.pagination.page_size
       offset = (scope.pagination.page_number - 1) * limit
 
-      gallery_prev = gallery_image_definition(scope, query, offset - 1)
-      gallery_next = gallery_image_definition(scope, query, offset + limit)
+      gallery_prev = gallery_image_definition(actor, scope, query, offset - 1)
+      gallery_next = gallery_image_definition(actor, scope, query, offset + limit)
 
       [images, gallery_prev, gallery_next] =
         Search.msearch_records_with_hits(
@@ -503,12 +502,12 @@ defmodule Philomena.Galleries do
         )
 
       interactions = Interactions.user_interactions(actor, [images, gallery_prev, gallery_next])
-      watching = subscribed?(gallery, scope.user)
+      watching = subscribed?(gallery, actor.user)
 
       gallery_images =
         Enum.to_list(gallery_prev) ++ Enum.to_list(images) ++ Enum.to_list(gallery_next)
 
-      clear_gallery_notification(gallery, scope.user)
+      clear_gallery_notification(gallery, actor.user)
 
       {:ok,
        %GalleryPage{

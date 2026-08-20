@@ -21,7 +21,7 @@ defmodule PhilomenaWeb.ImageController do
   plug PhilomenaWeb.AdvertPlug when action in [:show]
 
   def index(conn, _params) do
-    images = Images.load_image_index(ImageScope.search_scope(conn))
+    images = Images.load_image_index(conn.assigns.actor, ImageScope.search_scope(conn))
 
     interactions = Interactions.user_interactions(conn.assigns.actor, images)
 

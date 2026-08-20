@@ -55,8 +55,8 @@ defmodule Philomena.ProfilesTest do
     }
   end
 
-  defp scope(user) do
-    %Scope{user: user, filter: default_filter(), params: %{}, pagination: @pagination}
+  defp scope do
+    %Scope{filter: default_filter(), params: %{}, pagination: @pagination}
   end
 
   # The %Filter{} the profile page scopes its recent comments strip against; a
@@ -84,7 +84,7 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.load_profile_page(actor(), scope(nil), current_filter(), user.slug)
+               Profiles.load_profile_page(actor(), scope(), current_filter(), user.slug)
 
       assert page.user.id == user.id
 
@@ -137,7 +137,7 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.load_profile_page(actor(), scope(nil), current_filter(), user.slug)
+               Profiles.load_profile_page(actor(), scope(), current_filter(), user.slug)
 
       # The comment itself is not hidden, so it matches the search, but an
       # anonymous viewer cannot see the hidden image, so it is dropped from the
@@ -149,7 +149,7 @@ defmodule Philomena.ProfilesTest do
       for viewer <- [actor(), actor(confirmed_user_fixture()), actor(admin_user_fixture())] do
         assert Profiles.load_profile_page(
                  viewer,
-                 scope(viewer.user),
+                 scope(),
                  current_filter(),
                  "no-such-user"
                ) == {:error, :not_found}
@@ -165,7 +165,7 @@ defmodule Philomena.ProfilesTest do
 
       assert Profiles.load_profile_page(
                actor(admin_user_fixture()),
-               scope(admin_user_fixture()),
+               scope(),
                current_filter(),
                user.slug
              ) == {:error, :not_found}

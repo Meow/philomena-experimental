@@ -15,12 +15,14 @@ defmodule Philomena.Images.Search do
   """
 
   alias Philomena.Images.Image
+  alias Philomena.Attribution.Actor
   alias Philomena.Images.Query
   alias Philomena.Images.Search.Scope
   alias Philomena.Repo
   alias Philomena.Tags.Tag
   alias PhilomenaQuery.Search
   import Ecto.Query
+  import Philomena.Authorization, only: [authorize: 3]
 
   @allowed_sort_fields ~W(
     id
@@ -62,11 +64,11 @@ defmodule Philomena.Images.Search do
 
   Returns `{definition, tags}`.
   """
-  @spec default_query(Scope.t(), [option()]) :: query_result()
+  @spec default_query(Actor.t(), Scope.t(), [option()]) :: query_result()
   # sobelow_skip ["SQL.Query"]
-  def default_query(scope, options \\ []) do
+  def default_query(actor, scope, options \\ []) do
     body =
-      if delay_home_images?(scope.user),
+      if delay_home_images?(actor.user),
         do: %{
           bool: %{
             must: [%{range: %{created_at: %{lte: "now-3m"}}}],
@@ -75,7 +77,7 @@ defmodule Philomena.Images.Search do
         },
         else: %{match_all: %{}}
 
-    query(scope, body, options)
+    query(actor, scope, body, options)
   end
 
   @doc """
@@ -84,12 +86,12 @@ defmodule Philomena.Images.Search do
   Returns `{:ok, {definition, tags}}`, or the compiler's `{:error, msg}` for
   a malformed query.
   """
-  @spec search_string(Scope.t(), String.t() | nil, [option()]) ::
+  @spec search_string(Actor.t(), Scope.t(), String.t() | nil, [option()]) ::
           {:ok, query_result()} | {:error, String.t()}
   # sobelow_skip ["SQL.Query"]
-  def search_string(scope, search_string, options \\ []) do
-    with {:ok, tree} <- Query.compile(search_string, user: scope.user) do
-      {:ok, query(scope, tree, options)}
+  def search_string(actor, scope, search_string, options \\ []) do
+    with {:ok, tree} <- Query.compile(search_string, user: actor.user) do
+      {:ok, query(actor, scope, tree, options)}
     else
       error ->
         error
@@ -104,8 +106,8 @@ defmodule Philomena.Images.Search do
 
   Returns `{definition, tags}`.
   """
-  @spec query(Scope.t(), map(), [option()]) :: query_result()
-  def query(scope, body, options \\ []) do
+  @spec query(Actor.t(), Scope.t(), map(), [option()]) :: query_result()
+  def query(actor, scope, body, options \\ []) do
     pagination = Keyword.get(options, :pagination, scope.pagination)
     sorts = Keyword.get(options, :sorts, &parse_sort(scope.params, &1))
 
@@ -114,7 +116,7 @@ defmodule Philomena.Images.Search do
       |> search_tag_names()
       |> load_tags()
 
-    filters = create_filters(scope)
+    filters = create_filters(actor, scope)
 
     %{query: query, sorts: sort} = sorts.(body)
 
@@ -182,8 +184,8 @@ defmodule Philomena.Images.Search do
   Returns the `{image, hit}` pair for the neighbouring image, or `nil` at
   the end of the sequence.
   """
-  @spec find_consecutive(Scope.t(), Image.t(), map()) :: {Image.t(), map()} | nil
-  def find_consecutive(scope, image, compiled_query) do
+  @spec find_consecutive(Actor.t(), Scope.t(), Image.t(), map()) :: {Image.t(), map()} | nil
+  def find_consecutive(actor, scope, image, compiled_query) do
     params = Map.put_new(scope.params, "sf", "first_seen_at")
 
     %{query: compiled_query, sorts: sorts} = parse_sort(params, compiled_query)
@@ -209,7 +211,7 @@ defmodule Philomena.Images.Search do
               scope.filter,
               %{term: %{hidden_from_users: true}},
               %{term: %{id: image.id}},
-              hidden_filter(scope.user, params["hidden"])
+              hidden_filter(actor.user, params["hidden"])
             ]
           }
         },
@@ -234,8 +236,8 @@ defmodule Philomena.Images.Search do
 
   defp delay_home_images?(user), do: user.settings.delay_home_images
 
-  defp create_filters(scope) do
-    show_hidden? = Canada.Can.can?(scope.user, :hide, %Image{})
+  defp create_filters(actor, scope) do
+    show_hidden? = authorize(actor, :hide, %Image{}) == :ok
     del = scope.params["del"]
     hidden = scope.params["hidden"]
 
@@ -243,7 +245,7 @@ defmodule Philomena.Images.Search do
       scope.filter
     ]
     |> maybe_show_deleted(show_hidden?, del)
-    |> maybe_custom_hide(scope.user, hidden)
+    |> maybe_custom_hide(actor.user, hidden)
     |> hide_non_approved()
   end
 

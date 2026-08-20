@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.RandomController do
   def index(conn, _params) do
     scope = ImageScope.scope(conn)
 
-    case Images.random_image_id(ImageScope.search_scope(conn)) do
+    case Images.random_image_id(conn.assigns.actor, ImageScope.search_scope(conn)) do
       nil ->
         redirect(conn, to: ~p"/images")
 

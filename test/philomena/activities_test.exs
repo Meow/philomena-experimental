@@ -54,8 +54,8 @@ defmodule Philomena.ActivitiesTest do
     }
   end
 
-  defp scope(user \\ nil) do
-    %Scope{user: user, filter: default_filter()}
+  defp scope do
+    %Scope{filter: default_filter()}
   end
 
   # The %Filter{} the web layer passes as the comment-strip filter; only its
@@ -149,13 +149,13 @@ defmodule Philomena.ActivitiesTest do
       user = confirmed_user_fixture()
 
       assert {:ok, front} =
-               Activities.load_front_page(actor(user), scope(user), filter(), false)
+               Activities.load_front_page(actor(user), scope(), filter(), false)
 
       assert %Scrivener.Page{} = front.watched
       assert is_list(front.watched.entries)
     end
 
-    test "the actor's watched tags are authoritative over scope.user" do
+    test "the actor's watched tags are authoritative over the search scope" do
       user = confirmed_user_fixture()
       tag = tag_fixture()
       image = image_fixture(tags: tag.name)
@@ -189,11 +189,11 @@ defmodule Philomena.ActivitiesTest do
       {:ok, _image} = Images.create_image_hide(actor(user), image.id)
 
       assert {:ok, hidden_front} =
-               Activities.load_front_page(actor(user), scope(user), filter(), false)
+               Activities.load_front_page(actor(user), scope(), filter(), false)
 
       assert hidden_front.featured_image == nil
 
-      include_hidden_scope = %{scope(user) | params: %{"hidden" => "1"}}
+      include_hidden_scope = %{scope() | params: %{"hidden" => "1"}}
 
       assert {:ok, visible_front} =
                Activities.load_front_page(actor(user), include_hidden_scope, filter(), false)

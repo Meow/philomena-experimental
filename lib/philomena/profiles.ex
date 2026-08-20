@@ -49,12 +49,12 @@ defmodule Philomena.Profiles do
 
   defp assemble_profile_page(actor, scope, current_filter, user) do
     {:ok, {recent_uploads_def, _tags}} =
-      ImageSearch.search_string(scope, "uploader_id:#{user.id}",
+      ImageSearch.search_string(actor, scope, "uploader_id:#{user.id}",
         pagination: %{page_number: 1, page_size: 4}
       )
 
     {:ok, {recent_faves_def, _tags}} =
-      ImageSearch.search_string(scope, "faved_by_id:#{user.id}",
+      ImageSearch.search_string(actor, scope, "faved_by_id:#{user.id}",
         pagination: %{page_number: 1, page_size: 4}
       )
 
@@ -65,7 +65,7 @@ defmodule Philomena.Profiles do
       |> link_tags()
       |> Enum.map(& &1.id)
 
-    recent_artwork_def = recent_artwork_definition(scope, tags)
+    recent_artwork_def = recent_artwork_definition(actor, scope, tags)
 
     recent_comments_def =
       Comments.comment_search_definition(
@@ -148,13 +148,13 @@ defmodule Philomena.Profiles do
     }
   end
 
-  defp recent_artwork_definition(_scope, []) do
+  defp recent_artwork_definition(_actor, _scope, []) do
     Search.search_definition(Image, %{query: %{match_none: %{}}})
   end
 
-  defp recent_artwork_definition(scope, tags) do
+  defp recent_artwork_definition(actor, scope, tags) do
     {definition, _tags} =
-      ImageSearch.query(scope, %{terms: %{tag_ids: Enum.map(tags, & &1.id)}},
+      ImageSearch.query(actor, scope, %{terms: %{tag_ids: Enum.map(tags, & &1.id)}},
         pagination: %{page_number: 1, page_size: 4}
       )
 
@@ -251,8 +251,6 @@ defmodule Philomena.Profiles do
       ) do
     with {:ok, user} <- Users.load_profile(actor, slug) do
       user = Repo.preload(user, @profile_preloads)
-      scope = %{scope | user: actor.user}
-
       {:ok, assemble_profile_page(actor, scope, current_filter, user)}
     end
   end

@@ -17,11 +17,10 @@ defmodule PhilomenaWeb.ImageScope do
 
   @doc """
   Builds the viewer's `Philomena.Images.Search.Scope` from the request:
-  current user, compiled filter, raw params, and the image pagination window.
+  compiled filter, raw params, and the image pagination window.
   """
   def search_scope(conn) do
     %Scope{
-      user: conn.assigns.current_user,
       filter: conn.assigns.compiled_filter,
       params: conn.params,
       pagination: conn.assigns.image_pagination

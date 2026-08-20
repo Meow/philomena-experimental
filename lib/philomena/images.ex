@@ -937,13 +937,13 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> load_image_index(scope)
+      iex> load_image_index(actor, scope)
       %Scrivener.Page{}
 
   """
-  @spec load_image_index(Scope.t()) :: Scrivener.Page.t()
-  def load_image_index(scope) do
-    {definition, _tags} = ImageSearch.default_query(scope)
+  @spec load_image_index(Actor.t(), Scope.t()) :: Scrivener.Page.t()
+  def load_image_index(%Actor{} = actor, scope) do
+    {definition, _tags} = ImageSearch.default_query(actor, scope)
 
     ImageSearch.execute(definition)
   end
@@ -979,7 +979,7 @@ defmodule Philomena.Images do
   end
 
   @doc """
-  Runs the search the scope's "q" parameter describes for the viewer.
+  Runs the search the scope's "q" parameter describes for `actor`.
 
   Compiles "q" against the viewer's filter and visibility switches and executes
   it. The raw `Tag` records the query names come back alongside the page.
@@ -998,16 +998,16 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> search_images(scope)
+      iex> search_images(actor, scope)
       {:ok, %{images: %Scrivener.Page{}, tags: [%Tag{}]}}
 
-      iex> search_images(bad_query_scope)
+      iex> search_images(actor, bad_query_scope)
       {:error, "There was an error parsing your query."}
 
   """
-  @spec search_images(Scope.t(), Keyword.t()) ::
+  @spec search_images(Actor.t(), Scope.t(), Keyword.t()) ::
           {:ok, %{images: Scrivener.Page.t(), tags: [Tag.t()]}} | {:error, String.t()}
-  def search_images(scope, opts \\ []) do
+  def search_images(%Actor{} = actor, scope, opts \\ []) do
     execute_opts =
       case Keyword.fetch(opts, :preload) do
         {:ok, preloads} -> [queryable: preload(Image, ^preloads)]
@@ -1016,7 +1016,7 @@ defmodule Philomena.Images do
       |> Keyword.put(:hits, Keyword.get_lazy(opts, :hits, fn -> custom_ordering?(scope) end))
 
     with {:ok, {definition, tags}} <-
-           ImageSearch.search_string(scope, scope.params["q"]) do
+           ImageSearch.search_string(actor, scope, scope.params["q"]) do
       images = ImageSearch.execute(definition, execute_opts)
 
       {:ok, %{images: images, tags: tags}}
@@ -1065,13 +1065,13 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> watched_images(scope)
+      iex> watched_images(actor, scope)
       %Scrivener.Page{}
 
   """
-  @spec watched_images(Scope.t()) :: Scrivener.Page.t()
-  def watched_images(scope) do
-    {:ok, {definition, _tags}} = ImageSearch.search_string(scope, "my:watched")
+  @spec watched_images(Actor.t(), Scope.t()) :: Scrivener.Page.t()
+  def watched_images(%Actor{} = actor, scope) do
+    {:ok, {definition, _tags}} = ImageSearch.search_string(actor, scope, "my:watched")
 
     Search.search_records(definition, preload(Image, [:sources, tags: :aliases]))
   end
@@ -1279,8 +1279,8 @@ defmodule Philomena.Images do
 
   @doc """
   Finds the image adjacent to the one `image_id` names in the listing the
-  scope's parameters describe, for prev/next navigation, on behalf of the
-  scope's viewer.
+  scope's parameters describe, for prev/next navigation, on behalf of
+  `actor`.
 
   The image is loaded by id and authorized for `:show`: a non-castable id is
   `{:error, :not_found}`, and an unknown id authorizes `nil`, which no
@@ -1292,41 +1292,42 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> find_consecutive_image(scope, "42")
+      iex> find_consecutive_image(actor, scope, "42")
       {:ok, {%Image{}, {%Image{}, %{"sort" => [...]}}}}
 
   """
-  @spec find_consecutive_image(Scope.t(), IntegerId.integer_id()) ::
+  @spec find_consecutive_image(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), {Image.t(), map()} | nil}}
           | {:error, :unauthorized | :not_found}
-  def find_consecutive_image(scope, image_id) do
+  def find_consecutive_image(%Actor{} = actor, scope, image_id) do
     # TODO: don't crash on invalid query
-    with {:ok, image} <- load_image_for_navigation(scope.user, image_id) do
-      {:ok, {image, ImageSearch.find_consecutive(scope, image, navigation_query(scope))}}
+    with {:ok, image} <- load_image_for_navigation(actor, image_id) do
+      {:ok,
+       {image, ImageSearch.find_consecutive(actor, scope, image, navigation_query(actor, scope))}}
     end
   end
 
   @doc """
   Returns the 1-based page number (as a string) on which the image `image_id`
-  names appears when all images are listed by descending id, on behalf of the
-  scope's viewer.
+  names appears when all images are listed by descending id, on behalf of
+  `actor`.
 
-  Loading and authorization follow `find_consecutive_image/2`.
+  Loading and authorization follow `find_consecutive_image/3`.
 
   ## Examples
 
-      iex> find_image_index_page(scope, "42")
+      iex> find_image_index_page(actor, scope, "42")
       {:ok, "3"}
 
   """
-  @spec find_image_index_page(Scope.t(), IntegerId.integer_id()) ::
+  @spec find_image_index_page(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, String.t()} | {:error, :unauthorized | :not_found}
-  def find_image_index_page(scope, image_id) do
-    with {:ok, image} <- load_image_for_navigation(scope.user, image_id) do
+  def find_image_index_page(%Actor{} = actor, scope, image_id) do
+    with {:ok, image} <- load_image_for_navigation(actor, image_id) do
       pagination = %{scope.pagination | page_number: 1}
 
       {definition, _tags} =
-        ImageSearch.query(scope, %{range: %{id: %{gt: image.id}}}, pagination: pagination)
+        ImageSearch.query(actor, scope, %{range: %{id: %{gt: image.id}}}, pagination: pagination)
 
       images = ImageSearch.execute(definition, queryable: Image)
 
@@ -1341,11 +1342,11 @@ defmodule Philomena.Images do
     |> to_string()
   end
 
-  defp navigation_query(scope) do
+  defp navigation_query(actor, scope) do
     {:ok, query} =
       scope.params["q"]
       |> match_all_if_blank()
-      |> ImageQuery.compile(user: scope.user)
+      |> ImageQuery.compile(user: actor.user)
 
     query
   end
@@ -1365,22 +1366,22 @@ defmodule Philomena.Images do
   lowest-population tags, weighted towards its most distinctive ones and the
   favers it has in common.
 
-  Loading and authorization follow `find_consecutive_image/2`; the image
+  Loading and authorization follow `find_consecutive_image/3`; the image
   carries the faves, sources, and tags the scoring reads.
 
   Returns `{:ok, {image, images}}` with the related images scored best-first.
 
   ## Examples
 
-      iex> related_images(scope, "42")
+      iex> related_images(actor, scope, "42")
       {:ok, {%Image{}, %Scrivener.Page{}}}
 
   """
-  @spec related_images(Scope.t(), IntegerId.integer_id()) ::
+  @spec related_images(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
-  def related_images(scope, image_id) do
+  def related_images(%Actor{} = actor, scope, image_id) do
     with {:ok, image} <-
-           load_image_for_navigation(scope.user, image_id, [:faves, :sources, tags: :aliases]) do
+           load_image_for_navigation(actor, image_id, [:faves, :sources, tags: :aliases]) do
       tags_to_match =
         image.tags
         |> Enum.reject(&(&1.category == "rating"))
@@ -1416,6 +1417,7 @@ defmodule Philomena.Images do
 
       {definition, _tags} =
         ImageSearch.query(
+          actor,
           scope,
           query,
           sorts: &%{query: &1, sorts: [%{_score: :desc}]},
@@ -1435,14 +1437,15 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> random_image_id(scope)
+      iex> random_image_id(actor, scope)
       42
 
   """
-  @spec random_image_id(Scope.t()) :: integer() | nil
-  def random_image_id(scope) do
+  @spec random_image_id(Actor.t(), Scope.t()) :: integer() | nil
+  def random_image_id(%Actor{} = actor, scope) do
     result =
       ImageSearch.search_string(
+        actor,
         scope,
         Map.get(scope.params, "q", "*"),
         pagination: %{page_size: 1},
@@ -1464,10 +1467,10 @@ defmodule Philomena.Images do
     end
   end
 
-  defp load_image_for_navigation(user, image_id, preloads \\ []) do
+  defp load_image_for_navigation(actor, image_id, preloads \\ []) do
     with {:ok, id} <- Loader.parse_id(image_id),
          image = Repo.get(preload(Image, ^preloads), id),
-         :ok <- authorize(user, :show, image),
+         :ok <- authorize(actor, :show, image),
          %Image{} <- image do
       {:ok, image}
     else

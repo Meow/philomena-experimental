@@ -17,6 +17,7 @@ defmodule Philomena.Images.SearchTest do
   @moduletag :search
 
   import Philomena.ImagesFixtures
+  import Philomena.AttributionFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Images.Search
@@ -52,7 +53,6 @@ defmodule Philomena.Images.SearchTest do
 
   defp scope(overrides \\ []) do
     %Scope{
-      user: Keyword.get(overrides, :user),
       filter: Keyword.get(overrides, :filter, default_filter()),
       params: Keyword.get(overrides, :params, %{}),
       pagination: Keyword.get(overrides, :pagination, @pagination)
@@ -83,7 +83,7 @@ defmodule Philomena.Images.SearchTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.default_query(scope())
+      {definition, _tags} = Search.default_query(actor(), scope())
 
       refute image.id in result_ids(definition)
     end
@@ -92,7 +92,7 @@ defmodule Philomena.Images.SearchTest do
       image = image_fixture(created_at: hours_ago(1))
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.default_query(scope())
+      {definition, _tags} = Search.default_query(actor(), scope())
 
       assert image.id in result_ids(definition)
     end
@@ -109,7 +109,7 @@ defmodule Philomena.Images.SearchTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.default_query(scope(user: user))
+      {definition, _tags} = Search.default_query(actor(user), scope())
 
       assert image.id in result_ids(definition)
     end
@@ -119,7 +119,7 @@ defmodule Philomena.Images.SearchTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.default_query(scope(user: user))
+      {definition, _tags} = Search.default_query(actor(user), scope())
 
       refute image.id in result_ids(definition)
     end
@@ -130,7 +130,7 @@ defmodule Philomena.Images.SearchTest do
       image = image_fixture(hidden_from_users: true)
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.query(scope(), %{match_all: %{}})
+      {definition, _tags} = Search.query(actor(), scope(), %{match_all: %{}})
 
       refute image.id in result_ids(definition)
     end
@@ -142,7 +142,8 @@ defmodule Philomena.Images.SearchTest do
       image = image_fixture(hidden_from_users: true)
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.query(scope(params: %{"del" => "1"}), %{match_all: %{}})
+      {definition, _tags} =
+        Search.query(actor(), scope(params: %{"del" => "1"}), %{match_all: %{}})
 
       refute image.id in result_ids(definition)
     end
@@ -154,7 +155,7 @@ defmodule Philomena.Images.SearchTest do
       image = image_fixture(hidden_from_users: true)
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.query(scope(user: admin), %{match_all: %{}})
+      {definition, _tags} = Search.query(actor(admin), scope(), %{match_all: %{}})
 
       refute image.id in result_ids(definition)
     end
@@ -166,7 +167,7 @@ defmodule Philomena.Images.SearchTest do
       SearchHelpers.reindex_all!(Image)
 
       {definition, _tags} =
-        Search.query(scope(user: admin, params: %{"del" => "1"}), %{match_all: %{}})
+        Search.query(actor(admin), scope(params: %{"del" => "1"}), %{match_all: %{}})
 
       ids = result_ids(definition)
       assert hidden.id in ids
@@ -180,7 +181,7 @@ defmodule Philomena.Images.SearchTest do
       SearchHelpers.reindex_all!(Image)
 
       {definition, _tags} =
-        Search.query(scope(user: admin, params: %{"del" => "only"}), %{match_all: %{}})
+        Search.query(actor(admin), scope(params: %{"del" => "only"}), %{match_all: %{}})
 
       ids = result_ids(definition)
       assert hidden.id in ids
@@ -198,7 +199,7 @@ defmodule Philomena.Images.SearchTest do
       SearchHelpers.reindex_all!(Image)
 
       {definition, _tags} =
-        Search.query(scope(user: admin, params: %{"del" => "deleted"}), %{match_all: %{}})
+        Search.query(actor(admin), scope(params: %{"del" => "deleted"}), %{match_all: %{}})
 
       ids = result_ids(definition)
       assert hidden_non_dupe.id in ids
@@ -212,7 +213,7 @@ defmodule Philomena.Images.SearchTest do
       SearchHelpers.reindex_all!(Image)
 
       {definition, _tags} =
-        Search.query(scope(user: moderator, params: %{"del" => "1"}), %{match_all: %{}})
+        Search.query(actor(moderator), scope(params: %{"del" => "1"}), %{match_all: %{}})
 
       assert image.id in result_ids(definition)
     end
@@ -225,7 +226,7 @@ defmodule Philomena.Images.SearchTest do
       SearchHelpers.reindex_all!(Image)
 
       {definition, _tags} =
-        Search.query(scope(user: moderator, params: %{"del" => "only"}), %{match_all: %{}})
+        Search.query(actor(moderator), scope(params: %{"del" => "only"}), %{match_all: %{}})
 
       ids = result_ids(definition)
       assert hidden.id in ids
@@ -238,7 +239,7 @@ defmodule Philomena.Images.SearchTest do
       SearchHelpers.reindex_all!(Image)
 
       {definition, _tags} =
-        Search.query(scope(user: admin, params: %{"del" => "1"}), %{match_all: %{}})
+        Search.query(actor(admin), scope(params: %{"del" => "1"}), %{match_all: %{}})
 
       refute image.id in result_ids(definition)
     end
@@ -251,7 +252,7 @@ defmodule Philomena.Images.SearchTest do
       hides_image!(image, user)
       SearchHelpers.reindex_all!(Image)
 
-      {definition, _tags} = Search.query(scope(user: user), %{match_all: %{}})
+      {definition, _tags} = Search.query(actor(user), scope(), %{match_all: %{}})
 
       refute image.id in result_ids(definition)
     end
@@ -263,7 +264,7 @@ defmodule Philomena.Images.SearchTest do
       SearchHelpers.reindex_all!(Image)
 
       {definition, _tags} =
-        Search.query(scope(user: user, params: %{"hidden" => "1"}), %{match_all: %{}})
+        Search.query(actor(user), scope(params: %{"hidden" => "1"}), %{match_all: %{}})
 
       assert image.id in result_ids(definition)
     end
@@ -271,7 +272,7 @@ defmodule Philomena.Images.SearchTest do
 
   describe "search_string/3" do
     test "returns {:ok, {definition, tags}} for a valid query naming no tag" do
-      assert {:ok, {definition, tags}} = Search.search_string(scope(), "*")
+      assert {:ok, {definition, tags}} = Search.search_string(actor(), scope(), "*")
 
       assert is_map(definition)
       assert tags == []
@@ -280,7 +281,7 @@ defmodule Philomena.Images.SearchTest do
     test "returns the raw Tag record a single-tag query names" do
       _image = image_fixture(tags: "safe")
 
-      assert {:ok, {_definition, tags}} = Search.search_string(scope(), "safe")
+      assert {:ok, {_definition, tags}} = Search.search_string(actor(), scope(), "safe")
 
       assert [%Tag{} = tag] = tags
       assert tag.name == "safe"
@@ -289,7 +290,7 @@ defmodule Philomena.Images.SearchTest do
     end
 
     test "returns {:error, msg} for a malformed query" do
-      assert {:error, msg} = Search.search_string(scope(), "width.gte:abc")
+      assert {:error, msg} = Search.search_string(actor(), scope(), "width.gte:abc")
       assert is_binary(msg)
     end
   end
@@ -374,7 +375,8 @@ defmodule Philomena.Images.SearchTest do
     end
 
     test "rel=next finds the older image", %{compiled: compiled, older: older, newer: newer} do
-      result = Search.find_consecutive(scope(params: %{"rel" => "next"}), newer, compiled)
+      result =
+        Search.find_consecutive(actor(), scope(params: %{"rel" => "next"}), newer, compiled)
 
       assert {image, hit} = result
       assert image.id == older.id
@@ -383,24 +385,26 @@ defmodule Philomena.Images.SearchTest do
     end
 
     test "rel=prev finds the newer image", %{compiled: compiled, older: older, newer: newer} do
-      result = Search.find_consecutive(scope(params: %{"rel" => "prev"}), older, compiled)
+      result =
+        Search.find_consecutive(actor(), scope(params: %{"rel" => "prev"}), older, compiled)
 
       assert {image, _hit} = result
       assert image.id == newer.id
     end
 
     test "returns nil at the end of the sequence", %{compiled: compiled, older: older} do
-      assert Search.find_consecutive(scope(params: %{"rel" => "next"}), older, compiled) == nil
+      assert Search.find_consecutive(actor(), scope(params: %{"rel" => "next"}), older, compiled) ==
+               nil
     end
   end
 
   describe "Scope struct" do
-    test "enforces user and filter keys" do
+    test "enforces the filter key" do
       assert_raise ArgumentError, fn -> struct!(Scope, %{params: %{}}) end
     end
 
     test "defaults params and pagination" do
-      scope = %Scope{user: nil, filter: %{match_all: %{}}}
+      scope = %Scope{filter: %{match_all: %{}}}
 
       assert scope.params == %{}
       assert scope.pagination == %{page_number: 1, page_size: 25}

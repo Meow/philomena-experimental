@@ -53,9 +53,9 @@ defmodule Philomena.Activities do
 
   defp watched_definition(%Actor{user: nil}, _scope), do: {:ok, nil}
 
-  defp watched_definition(%Actor{}, scope) do
+  defp watched_definition(%Actor{} = actor, scope) do
     with {:ok, {definition, _tags}} <-
-           ImageSearch.search_string(scope, "my:watched",
+           ImageSearch.search_string(actor, scope, "my:watched",
              pagination: %{scope.pagination | page_number: 1}
            ) do
       {:ok, definition}
@@ -64,10 +64,11 @@ defmodule Philomena.Activities do
 
   defp search_definitions(%Actor{} = actor, %Scope{} = scope, %Filter{} = filter) do
     {images_definition, _tags} =
-      ImageSearch.default_query(scope, pagination: %{scope.pagination | page_number: 1})
+      ImageSearch.default_query(actor, scope, pagination: %{scope.pagination | page_number: 1})
 
     {top_scoring_definition, _tags} =
       ImageSearch.query(
+        actor,
         scope,
         %{range: %{first_seen_at: %{gt: "now-3d"}}},
         sorts: &%{query: &1, sorts: [%{wilson_score: :desc}, %{first_seen_at: :desc}]},
@@ -161,8 +162,6 @@ defmodule Philomena.Activities do
         show_nsfw_channels?
       )
       when is_boolean(show_nsfw_channels?) do
-    scope = %{scope | user: actor.user}
-
     with :ok <- authorize(actor, :index, FrontPage),
          {:ok, definitions} <- search_definitions(actor, scope, filter) do
       {:ok, assemble_front_page(actor, scope, definitions, show_nsfw_channels?)}
