@@ -45,25 +45,27 @@ defmodule Philomena.Galleries do
   end
 
   defp persist_gallery_deletion(%Gallery{} = gallery, %User{} = closing_user) do
-    images =
+    gallery_query = where(Gallery, id: ^gallery.id)
+
+    image_ids_query =
       Interaction
       |> where(gallery_id: ^gallery.id)
       |> select([i], i.image_id)
-      |> Repo.all()
 
     Multi.new()
+    |> Multi.lock_one(:locked_gallery, gallery_query)
+    |> Multi.all(:image_ids, image_ids_query)
     |> Reports.put_close_reports(:reports, closing_user, gallery_id: gallery.id)
-    |> Multi.delete(:gallery, gallery)
+    |> Multi.delete(:gallery, fn %{locked_gallery: gallery} -> gallery end)
+    |> Multi.on_commit(fn %{gallery: gallery} -> unindex_gallery(gallery) end)
+    |> Multi.on_commit(fn %{image_ids: image_ids} -> Images.reindex_images(image_ids) end)
     |> Multi.transact()
     |> case do
       {:ok, %{gallery: gallery}} ->
-        unindex_gallery(gallery)
-        Images.reindex_images(images)
-
         {:ok, gallery}
 
-      error ->
-        error
+      {:error, :locked_gallery, :not_found, _changes} ->
+        {:error, :not_found}
     end
   end
 
@@ -220,8 +222,11 @@ defmodule Philomena.Galleries do
       |> put_reindex_gallery()
       |> Multi.transact()
       |> case do
-        {:ok, %{gallery: gallery}} -> {:ok, gallery}
-        {:error, :gallery, changeset, _changes} -> {:error, changeset}
+        {:ok, %{gallery: gallery}} ->
+          {:ok, gallery}
+
+        {:error, :gallery, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -259,8 +264,11 @@ defmodule Philomena.Galleries do
       |> put_reindex_gallery()
       |> Multi.transact()
       |> case do
-        {:ok, %{gallery: gallery}} -> {:ok, gallery}
-        {:error, :gallery, changeset, _changes} -> {:error, changeset}
+        {:ok, %{gallery: gallery}} ->
+          {:ok, gallery}
+
+        {:error, :gallery, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -310,8 +318,11 @@ defmodule Philomena.Galleries do
     |> Repo.all()
     |> Enum.reduce_while({:ok, 0}, fn gallery, {:ok, count} ->
       case persist_gallery_deletion(gallery, moderator) do
-        {:ok, _gallery} -> {:cont, {:ok, count + 1}}
-        error -> {:halt, error}
+        {:ok, _gallery} ->
+          {:cont, {:ok, count + 1}}
+
+        error ->
+          {:halt, error}
       end
     end)
   end
