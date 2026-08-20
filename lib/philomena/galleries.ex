@@ -548,14 +548,16 @@ defmodule Philomena.Galleries do
     with :ok <- authorize(actor, :select_for_image, Gallery) do
       choices =
         Gallery
+        |> from(as: :gallery)
         |> where(user_id: ^user.id)
         |> join(
           :inner_lateral,
-          [g],
-          _ in fragment(
-            "SELECT EXISTS(SELECT 1 FROM gallery_interactions gi WHERE gi.image_id = ? AND gi.gallery_id = ?)",
-            ^image.id,
-            g.id
+          [],
+          _ in subquery(
+            Interaction
+            |> where([interaction], interaction.image_id == ^image.id)
+            |> where([interaction], interaction.gallery_id == parent_as(:gallery).id)
+            |> select([interaction], %{exists: count(interaction.id) > 0})
           ),
           on: true
         )
