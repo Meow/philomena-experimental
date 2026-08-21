@@ -88,7 +88,7 @@ defmodule Philomena.ProfilesTest do
 
       assert page.user.id == user.id
 
-      # NOTE: the image strips are %Scrivener.Page{} (msearch_records returns one
+      # NOTE: the image strips are %Scrivener.Page{} (msearch_records returns named
       # page per definition), not bare lists, though the struct type doc says
       # list(). They are Enumerable, so mapping over them yields the records.
       assert %Scrivener.Page{} = page.recent_uploads

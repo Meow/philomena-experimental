@@ -26,28 +26,20 @@ defmodule Philomena.Activities do
   @comment_preloads [:user, image: @image_preloads]
 
   defp multi_search(images, top_scoring, comments, nil) do
-    responses =
-      Search.msearch_records(
-        [images, top_scoring, comments],
-        [
-          preload(Image, ^@image_preloads),
-          preload(Image, ^@image_preloads),
-          preload(Comment, ^@comment_preloads)
-        ]
-      )
-
-    responses ++ [nil]
+    Search.msearch_records(
+      images: {images, preload(Image, ^@image_preloads)},
+      top_scoring: {top_scoring, preload(Image, ^@image_preloads)},
+      comments: {comments, preload(Comment, ^@comment_preloads)}
+    )
+    |> Map.put(:watched, nil)
   end
 
   defp multi_search(images, top_scoring, comments, watched) do
     Search.msearch_records(
-      [images, top_scoring, comments, watched],
-      [
-        preload(Image, ^@image_preloads),
-        preload(Image, ^@image_preloads),
-        preload(Comment, ^@comment_preloads),
-        preload(Image, ^@image_preloads)
-      ]
+      images: {images, preload(Image, ^@image_preloads)},
+      top_scoring: {top_scoring, preload(Image, ^@image_preloads)},
+      comments: {comments, preload(Comment, ^@comment_preloads)},
+      watched: {watched, preload(Image, ^@image_preloads)}
     )
   end
 
@@ -90,10 +82,7 @@ defmodule Philomena.Activities do
   end
 
   defp load_search_sections({images, top_scoring, comments, watched}) do
-    [images, top_scoring, comments, watched] =
-      multi_search(images, top_scoring, comments, watched)
-
-    %{images: images, top_scoring: top_scoring, comments: comments, watched: watched}
+    multi_search(images, top_scoring, comments, watched)
   end
 
   defp load_featured_image(actor, scope) do

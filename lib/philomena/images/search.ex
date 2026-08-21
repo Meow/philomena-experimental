@@ -10,7 +10,7 @@ defmodule Philomena.Images.Search do
   Query-building functions return `{definition, tags}`: an unexecuted search
   definition plus the raw `Tag` records the query names.
   Definitions are executed with `execute/2`, or batched by callers into
-  `PhilomenaQuery.Search.msearch_records/2` alongside definitions for other
+  `PhilomenaQuery.Search.msearch_records/1` alongside definitions for other
   schemas.
   """
 

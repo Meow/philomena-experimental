@@ -97,26 +97,26 @@ defmodule Philomena.Profiles do
         %{page_size: 6}
       )
 
-    [recent_uploads, recent_faves, recent_artwork, recent_comments, recent_posts] =
+    %{
+      recent_uploads: recent_uploads,
+      recent_faves: recent_faves,
+      recent_artwork: recent_artwork,
+      recent_comments: recent_comments,
+      recent_posts: recent_posts
+    } =
       Search.msearch_records(
-        [
-          recent_uploads_def,
-          recent_faves_def,
-          recent_artwork_def,
-          recent_comments_def,
-          recent_posts_def
-        ],
-        [
-          preload(Image, [:sources, tags: :aliases]),
-          preload(Image, [:sources, tags: :aliases]),
-          preload(Image, [:sources, tags: :aliases]),
-          preload(Comment, [
-            :deleted_by,
-            user: [awards: :badge],
-            image: [:sources, tags: :aliases]
-          ]),
-          preload(Post, [:deleted_by, user: [awards: :badge], topic: :forum])
-        ]
+        recent_uploads: {recent_uploads_def, preload(Image, [:sources, tags: :aliases])},
+        recent_faves: {recent_faves_def, preload(Image, [:sources, tags: :aliases])},
+        recent_artwork: {recent_artwork_def, preload(Image, [:sources, tags: :aliases])},
+        recent_comments:
+          {recent_comments_def,
+           preload(Comment, [
+             :deleted_by,
+             user: [awards: :badge],
+             image: [:sources, tags: :aliases]
+           ])},
+        recent_posts:
+          {recent_posts_def, preload(Post, [:deleted_by, user: [awards: :badge], topic: :forum])}
       )
 
     recent_posts = Enum.filter(recent_posts, &(authorize(actor, :show, &1.topic) == :ok))

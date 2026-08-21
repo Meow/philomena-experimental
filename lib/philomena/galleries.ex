@@ -488,15 +488,24 @@ defmodule Philomena.Galleries do
       gallery_prev = gallery_image_definition(actor, scope, query, offset - 1)
       gallery_next = gallery_image_definition(actor, scope, query, offset + limit)
 
-      [images, gallery_prev, gallery_next] =
-        Search.msearch_records_with_hits(
-          [images, gallery_prev, gallery_next],
-          [
-            preload(Image, [:sources, tags: :aliases]),
-            preload(Image, [:sources, tags: :aliases]),
-            preload(Image, [:sources, tags: :aliases])
-          ]
-        )
+      image_preload = preload(Image, [:sources, tags: :aliases])
+
+      searches = [
+        images: {images, image_preload},
+        next: {gallery_next, image_preload}
+      ]
+
+      searches =
+        if offset >= 0 do
+          [previous: {gallery_prev, image_preload}] ++ searches
+        else
+          searches
+        end
+
+      results = Search.msearch_records_with_hits(searches)
+      images = results.images
+      gallery_next = results.next
+      gallery_prev = Map.get(results, :previous, %Scrivener.Page{entries: []})
 
       interactions = Interactions.user_interactions(actor, [images, gallery_prev, gallery_next])
       watching = subscribed?(gallery, actor.user)
