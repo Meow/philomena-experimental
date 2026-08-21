@@ -3,6 +3,38 @@
 Source: `lib/philomena/duplicate_reports.ex`; consumers: duplicate reporting,
 search/reverse-search, and accept/claim/reject controllers.
 
+## Implementation status
+
+Complete for wave 4.
+
+- Actor-first, action-specific APIs now own the staff index, public show,
+  duplicate form/submission, reverse search, transitions, and navigation count.
+  One private loader normalizes report IDs before authorization, while both
+  report images must be visible to the actor. Public viewers see existing
+  reports only when both images remain visible; duplicate-report staff retain
+  their explicit hidden-image visibility.
+- Form preparation and submission share write-access and `:create` checks.
+  Source and target locators are separate from attrs and load through Images'
+  actor-visible report-target API; rejected input returns the associated
+  changeset instead of bespoke report-failure tuples.
+- Accept and reverse-accept lock every report for the image pair and both images
+  in stable order, revalidate direction and permissions inside the transaction,
+  reject competing active reports, and compose the image merge and moderation
+  log atomically. Image indexing, notifications, thumbnails, and firehose work
+  remain after-commit effects.
+- Claim, unclaim, accept, and reject changesets enforce active states. Claims
+  are row-locked, so repeated or concurrent claims return validation errors and
+  cannot reassign the reviewer or duplicate the audit log.
+- Reverse search returns a typed `SearchResult`, preserves validation failures,
+  deterministically orders equal matches, and filters hidden images for actors
+  who cannot view them. Perceptual query construction, raw insertion, upload
+  analysis, and transition mechanics are private; automated generation remains
+  a documented media-pipeline service.
+- Context and controller coverage now includes normalized report/image IDs,
+  forbidden and hidden resources, form/write parity, state failures, reverse
+  direction, competing reports, concurrent claims, atomic logs/merges, search
+  validation, and reverse-search visibility.
+
 ## Findings
 
 - Show and every transition separately parse IDs, query, authorize, and translate

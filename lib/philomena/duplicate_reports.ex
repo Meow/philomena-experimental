@@ -1,187 +1,472 @@
 defmodule Philomena.DuplicateReports do
   @moduledoc """
-  The DuplicateReports context.
+  Duplicate-report submission, staff review, perceptual matching, and reverse
+  image search.
   """
 
-  import Philomena.DuplicateReports.Power
   import Ecto.Query, warn: false
+  import Philomena.DuplicateReports.Power
 
-  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
-
-  alias Philomena.Multi
-  alias Philomena.Repo
-  alias Philomena.IntegerId
-  alias Philomena.Loader
+  import Philomena.Authorization,
+    only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.Attribution.Actor
   alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.DuplicateReports.SearchQuery
+  alias Philomena.DuplicateReports.SearchResult
   alias Philomena.DuplicateReports.Uploader
   alias Philomena.ImageIntensities.ImageIntensity
-  alias Philomena.Images.Image
   alias Philomena.Images
+  alias Philomena.Images.Image
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
+  alias Philomena.Multi
+  alias Philomena.Repo
 
   @valid_states ~w(open rejected accepted claimed)
+  @report_preloads [
+    :user,
+    :modifier,
+    image: [:user, :sources, tags: :aliases],
+    duplicate_of_image: [:user, :sources, tags: :aliases]
+  ]
+  @merge_image_preloads [:user, :intensity, :sources, tags: :aliases]
 
-  # Creates a duplicate report. Visible for testing.
-  @doc false
-  def create_duplicate_report(source, target, user, attrs) do
-    %DuplicateReport{image_id: source.id, duplicate_of_image_id: target.id}
+  defp load_report(%Actor{} = actor, action, report_id) do
+    with {:ok, report} <-
+           Loader.fetch_and_authorize(
+             DuplicateReport,
+             actor,
+             action,
+             report_id,
+             @report_preloads
+           ),
+         :ok <- authorize_report_images(actor, report) do
+      {:ok, report}
+    end
+  end
+
+  defp authorize_report_images(%Actor{} = actor, %DuplicateReport{} = report) do
+    with :ok <- authorize(actor, :show, report.image) do
+      authorize(actor, :show, report.duplicate_of_image)
+    end
+  end
+
+  defp reports_for_image(%Actor{} = actor, %Image{} = image) do
+    DuplicateReport
+    |> where([report], report.image_id == ^image.id or report.duplicate_of_image_id == ^image.id)
+    |> preload(^@report_preloads)
+    |> order_by(desc: :created_at, desc: :id)
+    |> Repo.all()
+    |> Enum.filter(&(authorize_report_images(actor, &1) == :ok))
+  end
+
+  defp report_states(params) do
+    params
+    |> Map.get("states")
+    |> presence()
+    |> Kernel.||(~w(open claimed))
+    |> wrap()
+    |> Enum.filter(&(&1 in @valid_states))
+  end
+
+  defp presence(""), do: nil
+  defp presence(value), do: value
+
+  defp wrap(values) when is_list(values), do: values
+  defp wrap(value), do: [value]
+
+  defp create_report(source, target, user, attrs) do
+    %DuplicateReport{
+      image_id: source.id,
+      image: source,
+      duplicate_of_image_id: target.id,
+      duplicate_of_image: target
+    }
     |> DuplicateReport.creation_changeset(attrs, user)
     |> Repo.insert()
   end
 
-  defp reject_report(%DuplicateReport{} = duplicate_report, user) do
-    duplicate_report
-    |> DuplicateReport.reject_changeset(user)
-    |> Repo.update()
+  defp duplicate_query({intensities, aspect_ratio}, opts) do
+    aspect_dist = Keyword.get(opts, :aspect_dist, 0.05)
+    limit = Keyword.get(opts, :limit, 10)
+    dist = Keyword.get(opts, :dist, 0.25) * 3
+
+    from image in Image,
+      inner_join: intensity in ImageIntensity,
+      on: intensity.image_id == image.id,
+      where:
+        intensity.nw >= ^(intensities.nw - dist) and
+          intensity.nw <= ^(intensities.nw + dist),
+      where:
+        intensity.ne >= ^(intensities.ne - dist) and
+          intensity.ne <= ^(intensities.ne + dist),
+      where:
+        intensity.sw >= ^(intensities.sw - dist) and
+          intensity.sw <= ^(intensities.sw + dist),
+      where:
+        intensity.se >= ^(intensities.se - dist) and
+          intensity.se <= ^(intensities.se + dist),
+      where:
+        image.image_aspect_ratio >= ^(aspect_ratio - aspect_dist) and
+          image.image_aspect_ratio <= ^(aspect_ratio + aspect_dist),
+      order_by: [
+        asc:
+          power(intensity.nw - ^intensities.nw, 2) +
+            power(intensity.ne - ^intensities.ne, 2) +
+            power(intensity.sw - ^intensities.sw, 2) +
+            power(intensity.se - ^intensities.se, 2) +
+            power(image.image_aspect_ratio - ^aspect_ratio, 2),
+        asc: image.id
+      ],
+      limit: ^limit
   end
 
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking duplicate report changes.
+  defp apply_search_visibility(query, %Actor{} = actor) do
+    hidden_image = %Image{hidden_from_users: true}
 
-  ## Examples
-
-      iex> change_duplicate_report(duplicate_report)
-      %Ecto.Changeset{source: %DuplicateReport{}}
-
-  """
-  def change_duplicate_report(%DuplicateReport{} = duplicate_report) do
-    DuplicateReport.changeset(duplicate_report, %{})
+    case authorize(actor, :show, hidden_image) do
+      :ok -> query
+      {:error, :unauthorized} -> where(query, [image], image.hidden_from_users == false)
+    end
   end
 
-  # Merges the duplicate image of `duplicate_report` into its target image.
-  #
-  # Takes an optional `Ecto.Multi`, the duplicate report to accept, and the user
-  # accepting the report. Rejects any other duplicate reports between the same two
-  # images and merges the images.
-  defp accept_report_multi(multi \\ nil, %DuplicateReport{} = duplicate_report, user) do
-    duplicate_report = Repo.preload(duplicate_report, [:image, :duplicate_of_image])
+  defp generate_intensities(%SearchQuery{} = search_query) do
+    analysis = SearchQuery.to_analysis(search_query)
+    PhilomenaMedia.Processors.intensities(analysis, search_query.uploaded_image)
+  end
 
-    other_duplicate_reports =
-      DuplicateReport
-      |> where(
-        [dr],
-        (dr.image_id == ^duplicate_report.image_id and
-           dr.duplicate_of_image_id == ^duplicate_report.duplicate_of_image_id) or
-          (dr.image_id == ^duplicate_report.duplicate_of_image_id and
-             dr.duplicate_of_image_id == ^duplicate_report.image_id)
-      )
-      |> where([dr], dr.id != ^duplicate_report.id)
-      |> update(set: [state: "rejected"])
-
-    changeset = DuplicateReport.accept_changeset(duplicate_report, user)
-
-    multi = multi || Multi.new()
+  defp put_lock_report_pair(
+         %Multi{} = multi,
+         %Actor{} = actor,
+         action,
+         %DuplicateReport{} = loaded_report
+       ) do
+    source_id = loaded_report.image_id
+    target_id = loaded_report.duplicate_of_image_id
 
     multi
-    |> Multi.update(:duplicate_report, changeset)
-    |> Multi.update_all(:other_reports, other_duplicate_reports, [])
-    |> Images.merge_image(duplicate_report.image, duplicate_report.duplicate_of_image, user)
-  end
-
-  # Merges the target of `duplicate_report` into its reported image.
-  #
-  # Creates a duplicate report with the reversed image relationship if one does not
-  # already exist, rejects the original report, and accepts the reversed report.
-  defp accept_reverse_report_multi(%DuplicateReport{} = duplicate_report, user) do
-    new_report =
-      DuplicateReport
-      |> where(duplicate_of_image_id: ^duplicate_report.image_id)
-      |> where(image_id: ^duplicate_report.duplicate_of_image_id)
-      |> limit(1)
-      |> Repo.one()
-
-    new_report =
-      if new_report do
-        new_report
-      else
-        %DuplicateReport{
-          image_id: duplicate_report.duplicate_of_image_id,
-          duplicate_of_image_id: duplicate_report.image_id,
-          reason: Enum.join([duplicate_report.reason, "(Reverse accepted)"], "\n"),
-          user_id: user.id
-        }
-        |> DuplicateReport.changeset(%{})
-        |> Repo.insert!()
-      end
-
-    Multi.new()
-    |> Multi.run(:reject_duplicate_report, fn _, %{} ->
-      reject_report(duplicate_report, user)
+    |> Multi.run(:locked_reports, fn repo, _changes ->
+      lock_report_pair(repo, actor, action, loaded_report, source_id, target_id)
     end)
-    |> accept_report_multi(new_report, user)
+    |> Multi.run(:locked_images, fn repo, %{locked_reports: locked_reports} ->
+      lock_report_images(repo, actor, locked_reports.report)
+    end)
   end
 
-  @doc """
-  Returns a paginated list of duplicate reports for the report index.
+  defp lock_report_pair(repo, actor, action, loaded_report, source_id, target_id) do
+    reports =
+      DuplicateReport
+      |> where(
+        [report],
+        (report.image_id == ^source_id and report.duplicate_of_image_id == ^target_id) or
+          (report.image_id == ^target_id and report.duplicate_of_image_id == ^source_id)
+      )
+      |> order_by(asc: :id)
+      |> lock("FOR UPDATE")
+      |> repo.all()
 
-  `params["states"]` selects which report states to show; a single value or a
-  list is accepted, filtered against the `open`/`rejected`/`accepted`/`claimed`
-  allowlist. A blank or missing selection defaults to `open` and `claimed`; a
-  selection that survives the filter as an empty list matches nothing. The
-  reports carry their user, modifier, and both images (with users, sources, and
-  tags) preloaded, newest first.
+    with %DuplicateReport{image_id: ^source_id, duplicate_of_image_id: ^target_id} = report <-
+           Enum.find(reports, &(&1.id == loaded_report.id)),
+         :ok <- authorize(actor, action, report) do
+      {:ok, %{report: report, reports: reports}}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _other -> {:error, :not_found}
+    end
+  end
 
-  ## Examples
+  defp lock_report_images(repo, actor, report) do
+    images =
+      Image
+      |> where([image], image.id in [^report.image_id, ^report.duplicate_of_image_id])
+      |> order_by(asc: :id)
+      |> preload(^@merge_image_preloads)
+      |> lock("FOR UPDATE")
+      |> repo.all()
 
-      iex> list_duplicate_reports(%{"states" => ["rejected"]}, page_size: 25)
-      %Scrivener.Page{}
+    source = Enum.find(images, &(&1.id == report.image_id))
+    target = Enum.find(images, &(&1.id == report.duplicate_of_image_id))
 
-  """
-  @spec list_duplicate_reports(map(), Repo.pagination_params()) :: Scrivener.Page.t()
-  def list_duplicate_reports(params, pagination) do
-    states =
-      (presence(params["states"]) || ~w(open claimed))
-      |> wrap()
-      |> Enum.filter(&Enum.member?(@valid_states, &1))
+    with %Image{} <- source,
+         %Image{} <- target,
+         true <- source.id != target.id,
+         :ok <- authorize(actor, :show, source),
+         :ok <- authorize(actor, :show, target) do
+      {:ok, %{source: source, target: target}}
+    else
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      _other -> {:error, :not_found}
+    end
+  end
+
+  defp active_other_reports(%{report: report, reports: reports}, excluded_ids \\ []) do
+    ids =
+      reports
+      |> Enum.reject(&(&1.id in [report.id | excluded_ids]))
+      |> Enum.filter(&(&1.state in ["open", "claimed"]))
+      |> Enum.map(& &1.id)
 
     DuplicateReport
-    |> where([d], d.state in ^states)
-    |> preload([
-      :user,
-      :modifier,
-      image: [:user, :sources, tags: :aliases],
-      duplicate_of_image: [:user, :sources, tags: :aliases]
-    ])
-    |> order_by(desc: :created_at)
-    |> Repo.paginate(pagination)
+    |> where([other], other.id in ^ids)
+    |> update(set: [state: "rejected"])
   end
 
-  @doc """
-  Loads the duplicate report named by `id`.
+  defp map_transition_result(result) do
+    case result do
+      {:ok, changes} ->
+        {:ok, changes}
 
-  The report carries its reported and claimed-duplicate images preloaded.
-  Any visitor may view a report; there is no authorization.
+      {:error, _step, %Ecto.Changeset{} = changeset, _changes} ->
+        {:error, changeset}
 
-  ## Examples
+      {:error, _step, reason, _changes} when reason in [:not_found, :unauthorized] ->
+        {:error, reason}
 
-      iex> show_duplicate_report("42")
-      {:ok, %DuplicateReport{}}
+      _error ->
+        {:error, :report_failed}
+    end
+  end
 
-      iex> show_duplicate_report("not-an-integer")
-      {:error, :not_found}
+  defp persist_accept(%Actor{user: user} = actor, report) do
+    Multi.new()
+    |> put_lock_report_pair(actor, :accept, report)
+    |> Multi.merge(fn %{
+                        locked_reports: locked_reports,
+                        locked_images: %{source: source, target: target}
+                      } ->
+      Multi.new()
+      |> Multi.update(
+        :duplicate_report,
+        DuplicateReport.accept_changeset(locked_reports.report, user)
+      )
+      |> Multi.update_all(:other_reports, active_other_reports(locked_reports), [])
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn _changes ->
+          {
+            "DuplicateReport.Accept:create",
+            Paths.image_path(source),
+            "Accepted duplicate report, merged #{source.id} into #{target.id}"
+          }
+        end
+      )
+      |> Images.put_merge_image(source, target, user)
+    end)
+    |> Multi.transact()
+    |> map_transition_result()
+  end
 
-  """
-  @spec show_duplicate_report(String.t() | integer()) ::
-          {:ok, DuplicateReport.t()} | {:error, :not_found}
-  def show_duplicate_report(id) do
-    with {:ok, report_id} <- Loader.parse_id(id),
-         %DuplicateReport{} = report <-
-           Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id) do
-      {:ok, report}
-    else
-      _ -> {:error, :not_found}
+  defp reverse_report_changeset(nil, report, user) do
+    %DuplicateReport{
+      image_id: report.duplicate_of_image_id,
+      duplicate_of_image_id: report.image_id,
+      state: "accepted",
+      modifier_id: user.id
+    }
+    |> DuplicateReport.creation_changeset(
+      %{"reason" => Enum.join([report.reason, "(Reverse accepted)"], "\n")},
+      user
+    )
+  end
+
+  defp reverse_report_changeset(report, _original_report, user) do
+    DuplicateReport.accept_changeset(report, user)
+  end
+
+  defp persist_reverse_accept(%Actor{user: user} = actor, report) do
+    Multi.new()
+    |> put_lock_report_pair(actor, :accept_reverse, report)
+    |> Multi.merge(fn %{
+                        locked_reports:
+                          %{report: original_report, reports: reports} = locked_reports,
+                        locked_images: %{source: original_source, target: original_target}
+                      } ->
+      reverse_report =
+        Enum.find(reports, fn candidate ->
+          candidate.id != original_report.id and
+            candidate.image_id == original_report.duplicate_of_image_id and
+            candidate.duplicate_of_image_id == original_report.image_id
+        end)
+
+      excluded_ids = if reverse_report, do: [reverse_report.id], else: []
+
+      Multi.new()
+      |> Multi.update(
+        :original_report,
+        DuplicateReport.reject_changeset(original_report, user)
+      )
+      |> Multi.insert_or_update(
+        :duplicate_report,
+        reverse_report_changeset(reverse_report, original_report, user)
+      )
+      |> Multi.update_all(
+        :other_reports,
+        active_other_reports(locked_reports, excluded_ids),
+        []
+      )
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        fn _changes ->
+          {
+            "DuplicateReport.AcceptReverse:create",
+            Paths.image_path(original_target),
+            "Reverse-accepted duplicate report, merged #{original_target.id} into #{original_source.id}"
+          }
+        end
+      )
+      |> Images.put_merge_image(original_target, original_source, user)
+    end)
+    |> Multi.transact()
+    |> map_transition_result()
+  end
+
+  defp persist_report_transition(%Actor{user: user} = actor, report, action, changeset, log) do
+    Multi.new()
+    |> Multi.lock_one(:locked_report, where(DuplicateReport, id: ^report.id))
+    |> Multi.run(:authorize, fn _repo, %{locked_report: locked_report} ->
+      case authorize(actor, action, locked_report) do
+        :ok -> {:ok, nil}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
+    |> Multi.update(:duplicate_report, fn %{locked_report: locked_report} ->
+      changeset.(locked_report, user)
+    end)
+    |> ModerationLogs.put_log(:moderation_log, actor, log)
+    |> Multi.transact()
+    |> map_transition_result()
+    |> case do
+      {:ok, %{duplicate_report: duplicate_report}} -> {:ok, duplicate_report}
+      error -> error
     end
   end
 
   @doc """
-  Generates automated duplicate reports for an image based on perceptual matching.
+  Loads the staff duplicate-report index described by `params`.
 
-  Takes a source image and generates duplicate reports for similar images based on
-  intensity and aspect ratio comparison.
+  Access is authorized with `:index` before the state-filtered query runs.
+  Blank or omitted states select open and claimed reports; unknown states are
+  discarded, so a wholly invalid selection returns an empty page.
+
+  ## Examples
+
+      iex> load_duplicate_report_index(moderator, %{"states" => ["rejected"]}, pagination)
+      {:ok, %Scrivener.Page{}}
+
+      iex> load_duplicate_report_index(user, %{}, pagination)
+      {:error, :unauthorized}
+
+  """
+  @spec load_duplicate_report_index(Actor.t(), map(), Repo.pagination_params()) ::
+          {:ok, Scrivener.Page.t(DuplicateReport.t())} | {:error, :unauthorized}
+  def load_duplicate_report_index(%Actor{} = actor, params, pagination) do
+    with :ok <- authorize(actor, :index, DuplicateReport) do
+      reports =
+        DuplicateReport
+        |> where([report], report.state in ^report_states(params))
+        |> preload(^@report_preloads)
+        |> order_by(desc: :created_at, desc: :id)
+        |> Repo.paginate(pagination)
+
+      {:ok, reports}
+    end
+  end
+
+  @doc """
+  Loads one duplicate report for display.
+
+  The report is authorized with `:show`, then both associated images must also
+  be visible to the actor. Missing and malformed IDs are always not-found.
+
+  ## Examples
+
+      iex> load_duplicate_report(actor, "42")
+      {:ok, %DuplicateReport{}}
+
+      iex> load_duplicate_report(actor, "not-an-id")
+      {:error, :not_found}
+
+  """
+  @spec load_duplicate_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
+  def load_duplicate_report(%Actor{} = actor, report_id) do
+    load_report(actor, :show, report_id)
+  end
+
+  @doc """
+  Prepares the duplicate-report form for one visible image.
+
+  The form uses the same write-access and `:create` prerequisites as submission.
+  Existing reports are included only when both of their images are visible to
+  the actor.
+
+  ## Examples
+
+      iex> new_duplicate_report(actor, "42")
+      {:ok, {%Image{}, [%DuplicateReport{}], %Ecto.Changeset{}}}
+
+      iex> new_duplicate_report(banned_actor, "42")
+      {:error, :ban}
+
+  """
+  @spec new_duplicate_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, {Image.t(), [DuplicateReport.t()], Ecto.Changeset.t()}}
+          | {:error, :ban | :not_found | :unauthorized}
+  def new_duplicate_report(%Actor{} = actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, DuplicateReport),
+         {:ok, image} <- Images.load_report_target(actor, image_id) do
+      changeset =
+        %DuplicateReport{image_id: image.id, image: image}
+        |> DuplicateReport.creation_changeset(%{}, actor.user)
+
+      {:ok, {image, reports_for_image(actor, image), changeset}}
+    end
+  end
+
+  @doc """
+  Creates a duplicate report between two actor-visible images.
+
+  Write access and the class `:create` ability are checked before either image
+  is loaded. The locators are parsed independently; malformed, missing, or
+  forbidden images return the shared loader errors. Validation failures return
+  the report changeset with both images attached.
+
+  ## Examples
+
+      iex> create_duplicate_report(actor, "1", "2", %{"reason" => "same image"})
+      {:ok, %DuplicateReport{}}
+
+      iex> create_duplicate_report(actor, "1", "1", %{})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  @spec create_duplicate_report(
+          Actor.t(),
+          Loader.integer_id(),
+          Loader.integer_id(),
+          map()
+        ) ::
+          {:ok, DuplicateReport.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
+  def create_duplicate_report(%Actor{} = actor, source_id, target_id, attrs) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, DuplicateReport),
+         {:ok, source} <- Images.load_report_target(actor, source_id),
+         {:ok, target} <- Images.load_report_target(actor, target_id) do
+      create_report(source, target, actor.user, attrs)
+    end
+  end
+
+  @doc """
+  Generates automated duplicate reports for one media-pipeline image.
+
+  Up to ten visible perceptual matches are considered. Each insert is
+  independent and the per-target insert results are returned to the worker.
 
   ## Examples
 
@@ -189,502 +474,254 @@ defmodule Philomena.DuplicateReports do
       [{:ok, %DuplicateReport{}}, ...]
 
   """
-  def generate_reports(source) do
+  @spec generate_reports(Image.t()) ::
+          [{:ok, DuplicateReport.t()} | {:error, Ecto.Changeset.t()}]
+  def generate_reports(%Image{} = source) do
     source = Repo.preload(source, :intensity)
 
     {source.intensity, source.image_aspect_ratio}
-    |> find_duplicates(dist: 0.2)
-    |> where([i, _it], i.id != ^source.id)
+    |> duplicate_query(dist: 0.2)
+    |> where([image], image.id != ^source.id and image.hidden_from_users == false)
     |> Repo.all()
-    |> Enum.map(fn target ->
-      create_duplicate_report(source, target, nil, %{
+    |> Enum.map(
+      &create_report(source, &1, nil, %{
         "reason" => "Automated Perceptual dedupe match"
       })
-    end)
+    )
   end
 
   @doc """
-  Query for potential duplicate images based on intensity values and aspect ratio.
-
-  Takes a tuple of {intensities, aspect_ratio} and optional options to control the search:
-  - `:aspect_dist` - Maximum aspect ratio difference (default: 0.05)
-  - `:limit` - Maximum number of results (default: 10)
-  - `:dist` - Maximum intensity difference per channel (default: 0.25)
+  Prepares an empty reverse-image-search result for the actor.
 
   ## Examples
 
-      iex> find_duplicates({%{nw: 0.5, ne: 0.5, sw: 0.5, se: 0.5}, 1.0})
-      #Ecto.Query<...>
-
-      iex> find_duplicates({intensities, ratio}, dist: 0.3, limit: 20)
-      #Ecto.Query<...>
+      iex> new_reverse_search(actor)
+      {:ok, %SearchResult{images: nil}}
 
   """
-  def find_duplicates({intensities, aspect_ratio}, opts \\ []) do
-    aspect_dist = Keyword.get(opts, :aspect_dist, 0.05)
-    limit = Keyword.get(opts, :limit, 10)
-    dist = Keyword.get(opts, :dist, 0.25)
-
-    # for each color channel
-    dist = dist * 3
-
-    from i in Image,
-      inner_join: it in ImageIntensity,
-      on: it.image_id == i.id,
-      where: it.nw >= ^(intensities.nw - dist) and it.nw <= ^(intensities.nw + dist),
-      where: it.ne >= ^(intensities.ne - dist) and it.ne <= ^(intensities.ne + dist),
-      where: it.sw >= ^(intensities.sw - dist) and it.sw <= ^(intensities.sw + dist),
-      where: it.se >= ^(intensities.se - dist) and it.se <= ^(intensities.se + dist),
-      where:
-        i.image_aspect_ratio >= ^(aspect_ratio - aspect_dist) and
-          i.image_aspect_ratio <= ^(aspect_ratio + aspect_dist),
-      order_by: [
-        asc:
-          power(it.nw - ^intensities.nw, 2) +
-            power(it.ne - ^intensities.ne, 2) +
-            power(it.sw - ^intensities.sw, 2) +
-            power(it.se - ^intensities.se, 2) +
-            power(i.image_aspect_ratio - ^aspect_ratio, 2)
-      ],
-      limit: ^limit
+  @spec new_reverse_search(Actor.t()) ::
+          {:ok, SearchResult.t()} | {:error, :unauthorized}
+  def new_reverse_search(%Actor{} = actor) do
+    with :ok <- authorize(actor, :search, DuplicateReport) do
+      {:ok,
+       %SearchResult{
+         images: nil,
+         changeset: SearchQuery.changeset(%SearchQuery{})
+       }}
+    end
   end
 
   @doc """
-  Executes the reverse image search query from parameters.
+  Runs a reverse image search for the uploaded image in `attrs`.
+
+  The upload metadata, distance, and limit are validated before media analysis.
+  Results exclude hidden images unless the actor may view them, and carry the
+  normalized search changeset alongside the page. Invalid input returns the
+  rejected changeset explicitly.
 
   ## Examples
 
-      iex> execute_search_query(%{"image" => ..., "distance" => "0.25"})
-      {:ok, [%Image{...}, ....]}
+      iex> search_duplicates(actor, %{"image" => upload, "distance" => "0.25"})
+      {:ok, %SearchResult{images: %Scrivener.Page{}}}
 
-      iex> execute_search_query(%{"image" => ..., "distance" => "asdf"})
+      iex> search_duplicates(actor, %{"image" => upload, "distance" => "bad"})
       {:error, %Ecto.Changeset{}}
 
   """
-  def execute_search_query(attrs \\ %{}) do
-    %SearchQuery{}
-    |> SearchQuery.changeset(attrs)
-    |> Uploader.analyze_upload(attrs)
-    |> Ecto.Changeset.apply_action(:create)
-    |> case do
-      {:ok, search_query} ->
-        intensities = generate_intensities(search_query)
-        aspect = search_query.image_aspect_ratio
-        limit = search_query.limit
-        dist = search_query.distance
+  @spec search_duplicates(Actor.t(), map()) ::
+          {:ok, SearchResult.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def search_duplicates(%Actor{} = actor, attrs) do
+    with :ok <- authorize(actor, :search, DuplicateReport),
+         {:ok, search_query} <-
+           %SearchQuery{}
+           |> SearchQuery.changeset(attrs)
+           |> Uploader.analyze_upload(attrs)
+           |> Ecto.Changeset.apply_action(:create) do
+      intensities = generate_intensities(search_query)
 
-        images =
-          {intensities, aspect}
-          |> find_duplicates(dist: dist, aspect_dist: dist, limit: limit)
-          |> preload([:user, :intensity, [:sources, tags: :aliases]])
-          |> Repo.paginate(page_size: 50)
+      images =
+        {intensities, search_query.image_aspect_ratio}
+        |> duplicate_query(
+          dist: search_query.distance,
+          aspect_dist: search_query.distance,
+          limit: search_query.limit
+        )
+        |> apply_search_visibility(actor)
+        |> preload([:user, :intensity, :sources, tags: :aliases])
+        |> Repo.paginate(page_size: 50)
 
-        {:ok, images}
-
-      error ->
-        error
-    end
-  end
-
-  defp generate_intensities(search_query) do
-    analysis = SearchQuery.to_analysis(search_query)
-    file = search_query.uploaded_image
-
-    PhilomenaMedia.Processors.intensities(analysis, file)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking search query changes.
-
-  ## Examples
-
-      iex> change_search_query(search_query)
-      %Ecto.Changeset{source: %SearchQuery{}}
-
-  """
-  def change_search_query(%SearchQuery{} = search_query) do
-    SearchQuery.changeset(search_query)
-  end
-
-  @doc """
-  Lists the duplicate reports involving the image named by `image_id`, on behalf
-  of `actor`.
-
-  The image is loaded by id (with its sources and tags preloaded) and
-  authorized for `:show`. A non-castable or out-of-range id is
-  `{:error, :not_found}`. A well-formed but unknown id is authorized as a `nil`
-  load: an actor who may not `:show` it gets `{:error, :unauthorized}`, while an
-  actor permitted to act on the `nil` load gets `{:error, :not_found}`.
-
-  Reports where the image is either the reported image or the claimed duplicate
-  are returned, with their user, modifier, and image associations preloaded.
-
-  ## Examples
-
-      iex> image_duplicate_reports(user, "42")
-      {:ok, {%Image{}, [%DuplicateReport{}, ...]}}
-
-      iex> image_duplicate_reports(user, "999999999")
-      {:error, :unauthorized}
-
-  """
-  @spec image_duplicate_reports(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, {Image.t(), [DuplicateReport.t()]}} | {:error, :unauthorized | :not_found}
-  def image_duplicate_reports(%Actor{} = actor, image_id) do
-    with {:ok, id} <- Loader.parse_id(image_id),
-         image = Repo.get(preload(Image, [:sources, tags: :aliases]), id),
-         :ok <- authorize(actor, :show, image),
-         %Image{} <- image do
-      dupe_reports =
-        DuplicateReport
-        |> preload([
-          :user,
-          :modifier,
-          image: [:user, :sources, tags: :aliases],
-          duplicate_of_image: [:user, :sources, tags: :aliases]
-        ])
-        |> where([d], d.image_id == ^image.id or d.duplicate_of_image_id == ^image.id)
-        |> Repo.all()
-
-      {:ok, {image, dupe_reports}}
-    else
-      # Non-castable id, or a `nil` load the actor was permitted to act on.
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
+      {:ok,
+       %SearchResult{
+         images: images,
+         changeset: SearchQuery.changeset(search_query)
+       }}
     end
   end
 
   @doc """
-  Submits a duplicate report from `params["duplicate_report"]`, on behalf of
-  `actor` (a `Philomena.Attribution.Actor` whose user may be `nil` for an
-  anonymous visitor).
+  Accepts a duplicate report and merges its source image into its target.
 
-  The write is refused for a banned actor (`{:error, :ban}`) or one without a
-  fingerprint (`{:error, :unauthorized}`), checked before anything else. A
-  missing `duplicate_report` param, or a source `image_id` that names no image,
-  leaves no source image to act on and is `{:error, :not_found}`. A resolvable
-  source with an unresolvable `duplicate_of_image_id`, or a rejected changeset
-  (such as reporting an image as a duplicate of itself), is
-  `{:error, :report_failed, source}`, carrying the source image for the caller
-  to reuse. On success the report is inserted with the actor's user recorded as
-  the reporter.
-
-  ## Examples
-
-      iex> create_duplicate_report(actor, %{"duplicate_report" => %{"image_id" => "1", "duplicate_of_image_id" => "2"}})
-      {:ok, %DuplicateReport{}}
-
-      iex> create_duplicate_report(actor, %{"duplicate_report" => %{"image_id" => "1", "duplicate_of_image_id" => "1"}})
-      {:error, :report_failed, %Image{}}
-
-      iex> create_duplicate_report(banned_actor, duplicate_report_params)
-      {:error, :ban}
-
-      iex> create_duplicate_report(actor, invalid_source_params)
-      {:error, :not_found}
-
-  """
-  @spec create_duplicate_report(Actor.t(), map()) ::
-          {:ok, DuplicateReport.t()}
-          | {:error, :ban | :unauthorized | :not_found}
-          | {:error, :report_failed, Image.t()}
-  def create_duplicate_report(%Actor{} = actor, params) do
-    with :ok <- verify_write_access(actor) do
-      submit_duplicate_report(actor, params)
-    end
-  end
-
-  # A missing or malformed duplicate_report param leaves no source image to act on.
-  defp submit_duplicate_report(actor, %{"duplicate_report" => report_params})
-       when is_map(report_params) do
-    source = load_image(report_params["image_id"])
-    target = load_image(report_params["duplicate_of_image_id"])
-
-    build_duplicate_report(actor, source, target, report_params)
-  end
-
-  defp submit_duplicate_report(_actor, _params), do: {:error, :not_found}
-
-  # Without a source image there is nothing to report against.
-  defp build_duplicate_report(_actor, nil, _target, _params), do: {:error, :not_found}
-
-  defp build_duplicate_report(_actor, source, nil, _params),
-    do: {:error, :report_failed, source}
-
-  defp build_duplicate_report(%Actor{user: user}, source, target, report_params) do
-    case create_duplicate_report(source, target, user, report_params) do
-      {:ok, duplicate_report} -> {:ok, duplicate_report}
-      {:error, _changeset} -> {:error, :report_failed, source}
-    end
-  end
-
-  defp load_image(id) do
-    case IntegerId.parse(id) do
-      {:ok, id} -> Repo.get(Image, id)
-      :error -> nil
-    end
-  end
-
-  defp presence(""), do: nil
-  defp presence(x), do: x
-
-  defp wrap(list) when is_list(list), do: list
-  defp wrap(not_a_list), do: [not_a_list]
-
-  @doc """
-  Accepts the duplicate report named by `id` and merges the duplicate image into
-  the target, on behalf of `actor` (the acting user).
-
-  The report is authorized for `:edit` after being loaded by id. Any other
-  duplicate reports between the same two images are rejected, the images are
-  merged, and a moderation log is written on success. A merge that cannot complete
-  (such as a report already accepted by someone else) is `{:error, :report_failed}`.
+  Write access, the distinct `:accept` ability, the report direction, and both
+  images are checked before row-locked state is changed. The report, competing
+  active reports, image merge, and moderation log commit atomically. Merge
+  indexing, notifications, thumbnails, and broadcasts run after commit.
 
   ## Examples
 
       iex> accept_duplicate_report(moderator, "42")
-      {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
-
-      iex> accept_duplicate_report(moderator, "42")
-      {:error, :report_failed}
-
-      iex> accept_duplicate_report(admin, "999999999")
-      {:error, :not_found}
+      {:ok, %{duplicate_report: %DuplicateReport{}, image: %Image{}}}
 
       iex> accept_duplicate_report(user, "42")
       {:error, :unauthorized}
 
   """
-  @spec accept_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
-  def accept_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- Loader.parse_id(id),
-         report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
-         :ok <- authorize(actor, :edit, report),
-         %DuplicateReport{} <- report,
-         {:ok, results} <- accept_report_multi(report, actor.user) do
-      report = results.duplicate_report
-
-      ModerationLogs.create_moderation_log(
-        actor,
-        "DuplicateReport.Accept:create",
-        Paths.image_path(report.image),
-        "Accepted duplicate report, merged #{report.image.id} into #{report.duplicate_of_image.id}"
-      )
-
-      {:ok, results}
-    else
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _ -> {:error, :report_failed}
+  @spec accept_duplicate_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, map()}
+          | {:error, :ban | :not_found | :unauthorized | :report_failed | Ecto.Changeset.t()}
+  def accept_duplicate_report(%Actor{} = actor, report_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, report} <- load_report(actor, :accept, report_id) do
+      persist_accept(actor, report)
     end
   end
 
   @doc """
-  Accepts the duplicate report named by `id` in reverse, making the reported
-  image the duplicate of the target instead, on behalf of `actor` (the acting
-  user).
+  Accepts a duplicate report in reverse and merges its target into its source.
 
-  The report is authorized for `:edit` after being loaded by id, with the same
-  not-found/unauthorized shapes as `accept_duplicate_report/2`. The original
-  report is rejected, the images are merged the other way, and a moderation log
-  is written on success. A merge that cannot complete is `{:error, :report_failed}`.
+  The original report is rejected and a locked reverse-direction report is
+  inserted or accepted in the same transaction as the image merge and audit
+  log. Authorization and post-commit behavior match `accept_duplicate_report/2`.
 
   ## Examples
 
       iex> accept_reverse_duplicate_report(moderator, "42")
-      {:ok, %{duplicate_report: %DuplicateReport{}, ...}}
-
-      iex> accept_reverse_duplicate_report(moderator, "42")
-      {:error, :report_failed}
-
-      iex> accept_reverse_duplicate_report(admin, "999999999")
-      {:error, :not_found}
-
-      iex> accept_reverse_duplicate_report(user, "42")
-      {:error, :unauthorized}
+      {:ok, %{duplicate_report: %DuplicateReport{}, image: %Image{}}}
 
   """
-  @spec accept_reverse_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, map()} | {:error, :not_found | :unauthorized | :report_failed}
-  def accept_reverse_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- Loader.parse_id(id),
-         report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
-         :ok <- authorize(actor, :edit, report),
-         %DuplicateReport{} <- report,
-         {:ok, results} <- accept_reverse_report_multi(report, actor.user) do
-      report = results.duplicate_report
-
-      ModerationLogs.create_moderation_log(
-        actor,
-        "DuplicateReport.AcceptReverse:create",
-        Paths.image_path(report.image),
-        "Reverse-accepted duplicate report, merged #{report.image.id} into #{report.duplicate_of_image.id}"
-      )
-
-      {:ok, results}
-    else
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _ -> {:error, :report_failed}
+  @spec accept_reverse_duplicate_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, map()}
+          | {:error, :ban | :not_found | :unauthorized | :report_failed | Ecto.Changeset.t()}
+  def accept_reverse_duplicate_report(%Actor{} = actor, report_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, report} <- load_report(actor, :accept_reverse, report_id) do
+      persist_reverse_accept(actor, report)
     end
   end
 
   @doc """
-  Claims the duplicate report named by `id` for review, on behalf of `actor`
-  (the acting user).
+  Claims one open, unclaimed duplicate report for the acting staff member.
 
-  The report is authorized for `:edit` after being loaded by id, with the same
-  not-found/unauthorized shapes as `accept_duplicate_report/2`. The report is
-  marked claimed by the actor and a moderation log is written on success.
-
-  Does not fail if the report is claimed, or claimed by a different user.
+  The report is reloaded under a row lock and authorized with `:claim`. A
+  repeated or racing claim returns a changeset; the audit log commits with the
+  state change.
 
   ## Examples
 
       iex> claim_duplicate_report(moderator, "42")
-      {:ok, %DuplicateReport{}}
-
-      iex> claim_duplicate_report(admin, "999999999")
-      {:error, :not_found}
-
-      iex> claim_duplicate_report(user, "42")
-      {:error, :unauthorized}
+      {:ok, %DuplicateReport{state: "claimed"}}
 
   """
-  @spec claim_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
-  def claim_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- Loader.parse_id(id),
-         report = Repo.get(DuplicateReport, report_id),
-         :ok <- authorize(actor, :edit, report),
-         %DuplicateReport{} <- report do
-      {:ok, report} = Repo.update(DuplicateReport.claim_changeset(report, actor.user))
-
-      ModerationLogs.create_moderation_log(
+  @spec claim_duplicate_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, DuplicateReport.t()}
+          | {:error, :ban | :not_found | :unauthorized | :report_failed | Ecto.Changeset.t()}
+  def claim_duplicate_report(%Actor{} = actor, report_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, report} <- load_report(actor, :claim, report_id) do
+      persist_report_transition(
         actor,
-        "DuplicateReport.Claim:create",
-        "/duplicate_reports",
-        "Claimed a duplicate report"
+        report,
+        :claim,
+        &DuplicateReport.claim_changeset/2,
+        fn _changes ->
+          {"DuplicateReport.Claim:create", "/duplicate_reports", "Claimed a duplicate report"}
+        end
       )
-
-      {:ok, report}
-    else
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
 
   @doc """
-  Removes the claim on the duplicate report named by `id`, on behalf of `actor`
-  (the acting user).
+  Releases one claimed duplicate report.
 
-  The report is authorized for `:edit` after being loaded by id, with the same
-  not-found/unauthorized shapes as `claim_duplicate_report/2`. The report is
-  returned to the open, unclaimed state and a moderation log is written on
-  success.
-
-  Does not fail if the report is not claimed, or claimed by a different user.
+  The locked report is authorized with `:unclaim`. An already-open or otherwise
+  non-claimed report returns a changeset and does not write an audit log.
 
   ## Examples
 
       iex> unclaim_duplicate_report(moderator, "42")
-      {:ok, %DuplicateReport{}}
-
-      iex> unclaim_duplicate_report(admin, "999999999")
-      {:error, :not_found}
-
-      iex> unclaim_duplicate_report(user, "42")
-      {:error, :unauthorized}
+      {:ok, %DuplicateReport{state: "open"}}
 
   """
-  @spec unclaim_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
-  def unclaim_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- Loader.parse_id(id),
-         report = Repo.get(DuplicateReport, report_id),
-         :ok <- authorize(actor, :edit, report),
-         %DuplicateReport{} <- report do
-      {:ok, report} = Repo.update(DuplicateReport.unclaim_changeset(report))
-
-      ModerationLogs.create_moderation_log(
+  @spec unclaim_duplicate_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, DuplicateReport.t()}
+          | {:error, :ban | :not_found | :unauthorized | :report_failed | Ecto.Changeset.t()}
+  def unclaim_duplicate_report(%Actor{} = actor, report_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, report} <- load_report(actor, :unclaim, report_id) do
+      persist_report_transition(
         actor,
-        "DuplicateReport.Claim:delete",
-        "/duplicate_reports",
-        "Released a duplicate report"
+        report,
+        :unclaim,
+        fn locked_report, _user -> DuplicateReport.unclaim_changeset(locked_report) end,
+        fn _changes ->
+          {"DuplicateReport.Claim:delete", "/duplicate_reports", "Released a duplicate report"}
+        end
       )
-
-      {:ok, report}
-    else
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
 
   @doc """
-  Rejects the duplicate report named by `id`, on behalf of `actor` (the acting
-  user).
+  Rejects one active duplicate report.
 
-  The report is authorized for `:edit` after being loaded by id (with its images
-  preloaded for the log), with the same not-found/unauthorized shapes as
-  `accept_duplicate_report/2`. The report is marked rejected by the actor and a
-  moderation log is written on success.
+  The locked report is authorized with `:reject`; its state change and the
+  direction-bearing moderation log commit atomically.
 
   ## Examples
 
       iex> reject_duplicate_report(moderator, "42")
-      {:ok, %DuplicateReport{}}
-
-      iex> reject_duplicate_report(admin, "999999999")
-      {:error, :not_found}
-
-      iex> reject_duplicate_report(user, "42")
-      {:error, :unauthorized}
+      {:ok, %DuplicateReport{state: "rejected"}}
 
   """
-  @spec reject_duplicate_report(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
-  def reject_duplicate_report(%Actor{} = actor, id) do
-    with {:ok, report_id} <- Loader.parse_id(id),
-         report = Repo.get(preload(DuplicateReport, [:image, :duplicate_of_image]), report_id),
-         :ok <- authorize(actor, :edit, report),
-         %DuplicateReport{} <- report do
-      {:ok, report} = reject_report(report, actor.user)
-
-      ModerationLogs.create_moderation_log(
+  @spec reject_duplicate_report(Actor.t(), Loader.integer_id()) ::
+          {:ok, DuplicateReport.t()}
+          | {:error, :ban | :not_found | :unauthorized | :report_failed | Ecto.Changeset.t()}
+  def reject_duplicate_report(%Actor{} = actor, report_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, report} <- load_report(actor, :reject, report_id) do
+      persist_report_transition(
         actor,
-        "DuplicateReport.Reject:create",
-        "/duplicate_reports",
-        "Rejected duplicate report (#{report.image.id} -> #{report.duplicate_of_image.id})"
+        report,
+        :reject,
+        &DuplicateReport.reject_changeset/2,
+        fn %{duplicate_report: rejected_report} ->
+          {
+            "DuplicateReport.Reject:create",
+            "/duplicate_reports",
+            "Rejected duplicate report (#{rejected_report.image_id} -> #{rejected_report.duplicate_of_image_id})"
+          }
+        end
       )
-
-      {:ok, report}
-    else
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :unauthorized} -> {:error, :unauthorized}
     end
   end
 
   @doc """
-  Counts the number of duplicate reports in "open" state,
-  if the user has permission to view them.
+  Counts open duplicate reports for the staff navigation counter.
+
+  The count is authorized with `:index`; unauthorized actors receive `nil`.
 
   ## Examples
 
-      iex> count_duplicate_reports(admin)
-      42
+      iex> count_duplicate_reports(moderator)
+      4
 
       iex> count_duplicate_reports(user)
       nil
 
   """
-  def count_duplicate_reports(user) do
-    if Canada.Can.can?(user, :index, DuplicateReport) do
-      DuplicateReport
-      |> where(state: "open")
-      |> Repo.aggregate(:count, :id)
-    else
-      nil
+  @spec count_duplicate_reports(Actor.t()) :: non_neg_integer() | nil
+  def count_duplicate_reports(%Actor{} = actor) do
+    case authorize(actor, :index, DuplicateReport) do
+      :ok -> DuplicateReport |> where(state: "open") |> Repo.aggregate(:count, :id)
+      {:error, :unauthorized} -> nil
     end
   end
 end

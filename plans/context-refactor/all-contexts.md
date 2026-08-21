@@ -267,6 +267,13 @@ Wave 4 is underway.
   are explicitly idempotent, exact reorder sets are validated again by a
   row-locked worker, the image-page selector is capped at 100 actor-owned rows,
   and account erasure uses a narrow service instead of public raw deletion.
+- DuplicateReports is complete. Actor-first index, member, form, submission,
+  search, transition, and counter APIs use named abilities and canonical
+  loading. Public report visibility requires both images while authorized staff
+  retain hidden-image review access. Pair/image locks serialize accept direction
+  and competing reports; claims validate under a row lock; image merges and
+  audit logs commit atomically with external effects after commit. Reverse
+  search now returns a typed result and applies actor-aware image visibility.
 
 ### Wave 0: characterize and establish the contract
 

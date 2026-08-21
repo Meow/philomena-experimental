@@ -12,7 +12,7 @@ defmodule PhilomenaWeb.DuplicateReport.AcceptReverseController do
         |> put_flash(:info, "Successfully accepted report in reverse.")
         |> redirect(to: ~p"/duplicate_reports")
 
-      {:error, :report_failed} ->
+      {:error, reason} when reason == :report_failed or is_struct(reason, Ecto.Changeset) ->
         conn
         |> put_flash(:error, "Failed to accept report! Maybe someone else already accepted it.")
         |> redirect(to: ~p"/duplicate_reports")

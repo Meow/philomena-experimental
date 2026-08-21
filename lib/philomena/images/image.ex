@@ -290,6 +290,7 @@ defmodule Philomena.Images.Image do
   def merge_changeset(image, duplicate_of_image) do
     change(image)
     |> validate_not_hidden()
+    |> validate_merge_target(duplicate_of_image)
     |> put_change(:duplicate_id, duplicate_of_image.id)
     |> put_change(:hidden_image_key, create_key())
     |> put_change(:hidden_from_users, true)
@@ -379,6 +380,12 @@ defmodule Philomena.Images.Image do
       changeset
     end
   end
+
+  defp validate_merge_target(changeset, %__MODULE__{hidden_from_users: true}) do
+    add_error(changeset, :duplicate_id, "must refer to a visible image")
+  end
+
+  defp validate_merge_target(changeset, %__MODULE__{}), do: changeset
 
   defp validate_not_approved(changeset) do
     if get_field(changeset, :approved) do

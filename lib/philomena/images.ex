@@ -361,25 +361,41 @@ defmodule Philomena.Images do
   6. Send merge notifications
   7. Reindex both images, the affected galleries, and all of the comments
 
-  ## Parameters
-  - multi: Optional `m:Ecto.Multi` for transaction handling
-  - image: The source image to merge from
-  - duplicate_of_image: The target image to merge into
-  - user: The user performing the merge
-
   ## Examples
 
       iex> merge_image(nil, source_image, target_image, moderator)
-      {:ok,
-       %{
-         image: image,
-         tags: tags
-       }}
+      {:ok, %{image: image, tags: tags}}
 
   """
-  def merge_image(multi \\ nil, %Image{} = image, duplicate_of_image, user) do
-    multi = multi || Multi.new()
+  @spec merge_image(Multi.t() | nil, Image.t(), Image.t(), User.t()) ::
+          {:ok, map()} | Multi.failure()
+  def merge_image(multi \\ nil, %Image{} = image, %Image{} = duplicate_of_image, %User{} = user) do
+    (multi || Multi.new())
+    |> put_merge_image(image, duplicate_of_image, user)
+    |> Multi.transact()
+  end
 
+  @doc """
+  Adds a loaded-image merge to `multi` without transacting it.
+
+  The caller owns authorization and must lock the two images before composing
+  this service when their current state controls the operation. PostgreSQL
+  mutations join the caller's transaction; thumbnail work, indexing, and the
+  firehose broadcast run only after that transaction commits.
+
+  ## Examples
+
+      iex> put_merge_image(multi, source_image, target_image, moderator)
+      %Philomena.Multi{}
+
+  """
+  @spec put_merge_image(Multi.t(), Image.t(), Image.t(), User.t()) :: Multi.t()
+  def put_merge_image(
+        %Multi{} = multi,
+        %Image{} = image,
+        %Image{} = duplicate_of_image,
+        %User{} = user
+      ) do
     image =
       Repo.preload(image, [:user, :intensity, :sources, tags: :aliases])
 
@@ -411,29 +427,24 @@ defmodule Philomena.Images do
     end)
     |> Interactions.migrate_loaded_images(image, duplicate_of_image)
     |> Multi.run(:notification, &notify_merge(&1, &2, image, duplicate_of_image))
-    |> Multi.transact()
-    |> process_after_hide()
-    |> case do
-      {:ok, result} ->
-        reindex_image(duplicate_of_image)
-        Comments.reindex_comments_on_image(duplicate_of_image)
-        reindex_merged_galleries(result)
+    |> Multi.on_commit(&after_merge(&1, duplicate_of_image))
+  end
 
-        PhilomenaWeb.Endpoint.broadcast!(
-          "firehose",
-          "image:merge",
-          %{
-            image: PhilomenaWeb.Api.Json.ImageView.render("image.json", %{image: image}),
-            duplicate_of_image:
-              PhilomenaWeb.Api.Json.ImageView.render("image.json", %{image: duplicate_of_image})
-          }
-        )
+  defp after_merge(result, duplicate_of_image) do
+    process_after_hide({:ok, result})
+    reindex_image(duplicate_of_image)
+    Comments.reindex_comments_on_image(duplicate_of_image)
+    reindex_merged_galleries(result)
 
-        {:ok, result}
-
-      error ->
-        error
-    end
+    PhilomenaWeb.Endpoint.broadcast!(
+      "firehose",
+      "image:merge",
+      %{
+        image: PhilomenaWeb.Api.Json.ImageView.render("image.json", %{image: result.image}),
+        duplicate_of_image:
+          PhilomenaWeb.Api.Json.ImageView.render("image.json", %{image: duplicate_of_image})
+      }
+    )
   end
 
   defp hide_image_multi(changeset, image, user, multi) do

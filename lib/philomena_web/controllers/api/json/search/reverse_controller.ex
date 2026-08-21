@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.Api.Json.Search.ReverseController do
   use PhilomenaWeb, :controller
 
   alias Philomena.DuplicateReports
+  alias Philomena.DuplicateReports.SearchResult
   alias Philomena.Interactions
 
   plug PhilomenaWeb.ScraperCachePlug
@@ -12,9 +13,9 @@ defmodule PhilomenaWeb.Api.Json.Search.ReverseController do
       image_params
       |> Map.put("distance", conn.params["distance"])
       |> Map.put("limit", conn.params["limit"])
-      |> DuplicateReports.execute_search_query()
+      |> then(&DuplicateReports.search_duplicates(conn.assigns.actor, &1))
       |> case do
-        {:ok, images} ->
+        {:ok, %SearchResult{images: images}} ->
           {images, images.total_entries}
 
         {:error, _changeset} ->

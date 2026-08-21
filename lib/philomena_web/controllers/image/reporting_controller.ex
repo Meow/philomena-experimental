@@ -1,16 +1,13 @@
 defmodule PhilomenaWeb.Image.ReportingController do
   use PhilomenaWeb, :controller
 
-  alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.DuplicateReports
 
   action_fallback PhilomenaWeb.FallbackController
 
   def show(conn, params) do
-    with {:ok, {image, dupe_reports}} <-
-           DuplicateReports.image_duplicate_reports(conn.assigns.actor, params["image_id"]) do
-      changeset = DuplicateReports.change_duplicate_report(%DuplicateReport{})
-
+    with {:ok, {image, dupe_reports, changeset}} <-
+           DuplicateReports.new_duplicate_report(conn.assigns.actor, params["image_id"]) do
       render(conn, "show.html",
         layout: false,
         image: image,

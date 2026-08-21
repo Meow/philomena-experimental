@@ -76,6 +76,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
     :update,
     :transition
   ]
+  @duplicate_report_member_actions [:show, :accept, :accept_reverse, :claim, :unclaim, :reject]
   @user_management_actions [
     :index,
     :edit,
@@ -149,7 +150,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   # Manage duplicate reports
   def can?(%User{role: "moderator"}, :index, DuplicateReport), do: true
-  def can?(%User{role: "moderator"}, :edit, %DuplicateReport{}), do: true
+
+  def can?(%User{role: "moderator"}, action, %DuplicateReport{})
+      when action in @duplicate_report_member_actions,
+      do: true
 
   # Manage reports
   def can?(%User{role: "moderator"}, :index, Report), do: true
@@ -441,9 +445,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   def can?(
         %User{role: "assistant", role_map: %{"DuplicateReport" => %{"moderator" => _}}},
-        :edit,
+        action,
         %DuplicateReport{}
-      ),
+      )
+      when action in @duplicate_report_member_actions,
       do: true
 
   def can?(
@@ -645,6 +650,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
       when action in [:show, :index],
       do: true
 
+  # Submit and inspect duplicate reports involving visible images.
+  def can?(%User{}, action, DuplicateReport) when action in [:create, :search], do: true
+  def can?(%User{}, :show, %DuplicateReport{}), do: true
+
   def can?(%User{}, :show, %Tag{}), do: true
 
   # Comment on images where that is allowed
@@ -746,6 +755,7 @@ defimpl Canada.Can, for: Atom do
   alias Philomena.Comments.Comment
   alias Philomena.Commissions.Commission
   alias Philomena.DnpEntries.DnpEntry
+  alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.Filters.Filter
   alias Philomena.Forums.Forum
   alias Philomena.Galleries.Gallery
@@ -779,6 +789,10 @@ defimpl Canada.Can, for: Atom do
   def can?(_user, action, %Image{hidden_from_users: false})
       when action in [:show, :index],
       do: true
+
+  # Submit and inspect duplicate reports involving visible images.
+  def can?(_user, action, DuplicateReport) when action in [:create, :search], do: true
+  def can?(_user, :show, %DuplicateReport{}), do: true
 
   def can?(_user, :show, %Tag{}), do: true
 
