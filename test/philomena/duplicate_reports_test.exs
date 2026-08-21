@@ -37,12 +37,13 @@ defmodule Philomena.DuplicateReportsTest do
 
       {:ok, _rejected} = DuplicateReports.reject_duplicate_report(moderator, rejected.id)
 
-      assert {:ok, page} =
+      assert {:ok, page, changeset} =
                DuplicateReports.load_duplicate_report_index(moderator, %{}, @pagination)
 
       assert Enum.map(page.entries, & &1.id) == [open.id]
+      assert changeset.valid?
 
-      assert {:ok, page} =
+      assert {:ok, page, changeset} =
                DuplicateReports.load_duplicate_report_index(
                  moderator,
                  %{"states" => ["rejected"]},
@@ -50,6 +51,7 @@ defmodule Philomena.DuplicateReportsTest do
                )
 
       assert Enum.map(page.entries, & &1.id) == [rejected.id]
+      assert changeset.valid?
 
       assert DuplicateReports.load_duplicate_report_index(actor(), %{}, @pagination) ==
                {:error, :unauthorized}
@@ -59,7 +61,7 @@ defmodule Philomena.DuplicateReportsTest do
         | role_map: %{"DuplicateReport" => %{"moderator" => []}}
       }
 
-      assert {:ok, _page} =
+      assert {:ok, _page, _changeset} =
                DuplicateReports.load_duplicate_report_index(actor(assistant), %{}, @pagination)
     end
 
@@ -67,7 +69,7 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
       moderator = actor(moderator_user_fixture())
 
-      assert {:ok, blank_page} =
+      assert {:ok, blank_page, blank_changeset} =
                DuplicateReports.load_duplicate_report_index(
                  moderator,
                  %{"states" => ""},
@@ -75,8 +77,9 @@ defmodule Philomena.DuplicateReportsTest do
                )
 
       assert Enum.map(blank_page.entries, & &1.id) == [report.id]
+      assert blank_changeset.valid?
 
-      assert {:ok, invalid_page} =
+      assert {:ok, invalid_page, invalid_changeset} =
                DuplicateReports.load_duplicate_report_index(
                  moderator,
                  %{"states" => ["bogus"]},
@@ -84,12 +87,13 @@ defmodule Philomena.DuplicateReportsTest do
                )
 
       assert invalid_page.entries == []
+      assert invalid_changeset.errors[:states]
     end
 
     test "preloads the reporter, modifier, and both images" do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert {:ok, %{entries: [loaded]}} =
+      assert {:ok, %{entries: [loaded]}, _changeset} =
                DuplicateReports.load_duplicate_report_index(
                  actor(moderator_user_fixture()),
                  %{},

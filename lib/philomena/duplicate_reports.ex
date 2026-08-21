@@ -12,6 +12,8 @@ defmodule Philomena.DuplicateReports do
 
   alias Philomena.Attribution.Actor
   alias Philomena.DuplicateReports.DuplicateReport
+  alias Philomena.DuplicateReports.QueryBuilder
+  alias Philomena.DuplicateReports.QueryForm
   alias Philomena.DuplicateReports.SearchQuery
   alias Philomena.DuplicateReports.SearchResult
   alias Philomena.DuplicateReports.Uploader
@@ -24,7 +26,6 @@ defmodule Philomena.DuplicateReports do
   alias Philomena.Multi
   alias Philomena.Repo
 
-  @valid_states ~w(open rejected accepted claimed)
   @report_preloads [
     :user,
     :modifier,
@@ -61,21 +62,6 @@ defmodule Philomena.DuplicateReports do
     |> Repo.all()
     |> Enum.filter(&(authorize_report_images(actor, &1) == :ok))
   end
-
-  defp report_states(params) do
-    params
-    |> Map.get("states")
-    |> presence()
-    |> Kernel.||(~w(open claimed))
-    |> wrap()
-    |> Enum.filter(&(&1 in @valid_states))
-  end
-
-  defp presence(""), do: nil
-  defp presence(value), do: value
-
-  defp wrap(values) when is_list(values), do: values
-  defp wrap(value), do: [value]
 
   defp create_report(source, target, user, attrs) do
     %DuplicateReport{
@@ -271,30 +257,32 @@ defmodule Philomena.DuplicateReports do
   Loads the staff duplicate-report index described by `params`.
 
   Access is authorized with `:index` before the state-filtered query runs.
-  Blank or omitted states select open and claimed reports; unknown states are
-  discarded, so a wholly invalid selection returns an empty page.
+  Blank or omitted states select open and claimed reports. Invalid state
+  selections return an empty page with their rejected query changeset.
 
   ## Examples
 
       iex> load_duplicate_report_index(moderator, %{"states" => ["rejected"]}, pagination)
-      {:ok, %Scrivener.Page{}}
+      {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
       iex> load_duplicate_report_index(user, %{}, pagination)
       {:error, :unauthorized}
 
   """
   @spec load_duplicate_report_index(Actor.t(), map(), Repo.pagination_params()) ::
-          {:ok, Scrivener.Page.t(DuplicateReport.t())} | {:error, :unauthorized}
+          {:ok, Scrivener.Page.t(DuplicateReport.t()), Ecto.Changeset.t()}
+          | {:error, :unauthorized}
   def load_duplicate_report_index(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, DuplicateReport) do
-      reports =
-        DuplicateReport
-        |> where([report], report.state in ^report_states(params))
-        |> preload(^@report_preloads)
-        |> order_by(desc: :created_at, desc: :id)
-        |> Repo.paginate(pagination)
+      case QueryBuilder.build_query(params) do
+        {:ok, query, query_form} ->
+          query = preload(query, ^@report_preloads)
 
-      {:ok, reports}
+          {:ok, Repo.paginate(query, pagination), QueryForm.changeset(query_form)}
+
+        {:error, changeset} ->
+          {:ok, Repo.paginate(where(DuplicateReport, false), pagination), changeset}
+      end
     end
   end
 

@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.DuplicateReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, duplicate_reports} <-
+    with {:ok, duplicate_reports, changeset} <-
            DuplicateReports.load_duplicate_report_index(
              conn.assigns.actor,
              params,
@@ -15,6 +15,7 @@ defmodule PhilomenaWeb.DuplicateReportController do
       render(conn, "index.html",
         title: "Duplicate Reports",
         duplicate_reports: duplicate_reports,
+        changeset: changeset,
         layout_class: "layout--wide"
       )
     end
