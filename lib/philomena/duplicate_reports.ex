@@ -10,6 +10,8 @@ defmodule Philomena.DuplicateReports do
   import Philomena.Authorization,
     only: [authorize: 3, verify_write_access: 1]
 
+  import Philomena.DuplicateReports.TransactionWorkflow
+
   alias Philomena.Attribution.Actor
   alias Philomena.DuplicateReports.DuplicateReport
   alias Philomena.DuplicateReports.QueryBuilder
@@ -32,7 +34,6 @@ defmodule Philomena.DuplicateReports do
     image: [:user, :sources, tags: :aliases],
     duplicate_of_image: [:user, :sources, tags: :aliases]
   ]
-  @merge_image_preloads [:user, :intensity, :sources, tags: :aliases]
 
   defp load_report(%Actor{} = actor, action, report_id) do
     with {:ok, report} <-
@@ -63,15 +64,56 @@ defmodule Philomena.DuplicateReports do
     |> Enum.filter(&(authorize_report_images(actor, &1) == :ok))
   end
 
-  defp create_report(source, target, user, attrs) do
-    %DuplicateReport{
-      image_id: source.id,
-      image: source,
-      duplicate_of_image_id: target.id,
-      duplicate_of_image: target
-    }
-    |> DuplicateReport.creation_changeset(attrs, user)
-    |> Repo.insert()
+  defp create_system_report(source, target, attrs) do
+    changeset =
+      %DuplicateReport{
+        image_id: source.id,
+        image: source,
+        duplicate_of_image_id: target.id,
+        duplicate_of_image: target
+      }
+      |> DuplicateReport.creation_changeset(attrs, nil)
+
+    Multi.new()
+    |> put_lock_image_pair_without_authorization(source.id, target.id)
+    |> Multi.insert(:duplicate_report, changeset)
+    |> Multi.transact()
+    |> case do
+      {:ok, %{duplicate_report: report}} ->
+        {:ok, report}
+
+      {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _changes} ->
+        {:error, changeset}
+
+      error ->
+        map_lock_errors(error)
+    end
+  end
+
+  defp create_report(source, target, user, attrs, %Actor{} = actor) do
+    changeset =
+      %DuplicateReport{
+        image_id: source.id,
+        image: source,
+        duplicate_of_image_id: target.id,
+        duplicate_of_image: target
+      }
+      |> DuplicateReport.creation_changeset(attrs, user)
+
+    Multi.new()
+    |> put_lock_image_pair(actor, source.id, target.id, :show)
+    |> Multi.insert(:duplicate_report, changeset)
+    |> Multi.transact()
+    |> case do
+      {:ok, %{duplicate_report: report}} ->
+        {:ok, report}
+
+      {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _changes} ->
+        {:error, changeset}
+
+      error ->
+        map_lock_errors(error)
+    end
   end
 
   defp duplicate_query({intensities, aspect_ratio}, opts) do
@@ -123,68 +165,17 @@ defmodule Philomena.DuplicateReports do
     PhilomenaMedia.Processors.intensities(analysis, search_query.uploaded_image)
   end
 
-  defp put_lock_report_pair(
-         %Multi{} = multi,
-         %Actor{} = actor,
-         action,
-         %DuplicateReport{} = loaded_report
-       ) do
-    source_id = loaded_report.image_id
-    target_id = loaded_report.duplicate_of_image_id
-
-    multi
-    |> Multi.run(:locked_reports, fn repo, _changes ->
-      lock_report_pair(repo, actor, action, loaded_report, source_id, target_id)
-    end)
-    |> Multi.run(:locked_images, fn repo, %{locked_reports: locked_reports} ->
-      lock_report_images(repo, actor, locked_reports.report)
-    end)
-  end
-
-  defp lock_report_pair(repo, actor, action, loaded_report, source_id, target_id) do
-    reports =
-      DuplicateReport
-      |> where(
-        [report],
-        (report.image_id == ^source_id and report.duplicate_of_image_id == ^target_id) or
-          (report.image_id == ^target_id and report.duplicate_of_image_id == ^source_id)
-      )
-      |> order_by(asc: :id)
-      |> lock("FOR UPDATE")
-      |> repo.all()
-
-    with %DuplicateReport{image_id: ^source_id, duplicate_of_image_id: ^target_id} = report <-
-           Enum.find(reports, &(&1.id == loaded_report.id)),
-         :ok <- authorize(actor, action, report) do
-      {:ok, %{report: report, reports: reports}}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _other -> {:error, :not_found}
-    end
-  end
-
-  defp lock_report_images(repo, actor, report) do
-    images =
-      Image
-      |> where([image], image.id in [^report.image_id, ^report.duplicate_of_image_id])
-      |> order_by(asc: :id)
-      |> preload(^@merge_image_preloads)
-      |> lock("FOR UPDATE")
-      |> repo.all()
-
-    source = Enum.find(images, &(&1.id == report.image_id))
-    target = Enum.find(images, &(&1.id == report.duplicate_of_image_id))
-
-    with %Image{} <- source,
-         %Image{} <- target,
-         true <- source.id != target.id,
-         :ok <- authorize(actor, :show, source),
-         :ok <- authorize(actor, :show, target) do
-      {:ok, %{source: source, target: target}}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      _other -> {:error, :not_found}
-    end
+  defp reports_for_pair(repo, %DuplicateReport{} = report) do
+    DuplicateReport
+    |> where(
+      [candidate],
+      (candidate.image_id == ^report.image_id and
+         candidate.duplicate_of_image_id == ^report.duplicate_of_image_id) or
+        (candidate.image_id == ^report.duplicate_of_image_id and
+           candidate.duplicate_of_image_id == ^report.image_id)
+    )
+    |> order_by(asc: :id)
+    |> repo.all()
   end
 
   defp active_other_reports(%{report: report, reports: reports}, excluded_ids \\ []) do
@@ -234,14 +225,8 @@ defmodule Philomena.DuplicateReports do
 
   defp persist_report_transition(%Actor{user: user} = actor, report, action, changeset, log) do
     Multi.new()
-    |> Multi.lock_one(:locked_report, where(DuplicateReport, id: ^report.id))
-    |> Multi.run(:authorize, fn _repo, %{locked_report: locked_report} ->
-      case authorize(actor, action, locked_report) do
-        :ok -> {:ok, nil}
-        {:error, reason} -> {:error, reason}
-      end
-    end)
-    |> Multi.update(:duplicate_report, fn %{locked_report: locked_report} ->
+    |> put_lock_image_pair_and_report(report, actor, :show, action)
+    |> Multi.update(:duplicate_report, fn %{locked_duplicate_report: locked_report} ->
       changeset.(locked_report, user)
     end)
     |> ModerationLogs.put_log(:moderation_log, actor, log)
@@ -368,7 +353,7 @@ defmodule Philomena.DuplicateReports do
          :ok <- authorize(actor, :create, DuplicateReport),
          {:ok, source} <- Images.load_report_target(actor, source_id),
          {:ok, target} <- Images.load_report_target(actor, target_id) do
-      create_report(source, target, actor.user, attrs)
+      create_report(source, target, actor.user, attrs, actor)
     end
   end
 
@@ -394,7 +379,7 @@ defmodule Philomena.DuplicateReports do
     |> where([image], image.id != ^source.id and image.hidden_from_users == false)
     |> Repo.all()
     |> Enum.map(
-      &create_report(source, &1, nil, %{
+      &create_system_report(source, &1, %{
         "reason" => "Automated Perceptual dedupe match"
       })
     )
@@ -492,10 +477,14 @@ defmodule Philomena.DuplicateReports do
     with :ok <- verify_write_access(actor),
          {:ok, report} <- load_report(actor, :accept, report_id) do
       Multi.new()
-      |> put_lock_report_pair(actor, :accept, report)
+      |> put_lock_image_pair_and_report(report, actor, :show, :accept)
+      |> Multi.run(:locked_reports, fn repo, %{locked_duplicate_report: locked_report} ->
+        {:ok, %{report: locked_report, reports: reports_for_pair(repo, locked_report)}}
+      end)
       |> Multi.merge(fn %{
                           locked_reports: locked_reports,
-                          locked_images: %{source: source, target: target}
+                          locked_source_image: source,
+                          locked_target_image: target
                         } ->
         Multi.new()
         |> Multi.update(
@@ -537,11 +526,20 @@ defmodule Philomena.DuplicateReports do
     with :ok <- verify_write_access(actor),
          {:ok, report} <- load_report(actor, :accept_reverse, report_id) do
       Multi.new()
-      |> put_lock_report_pair(actor, :accept_reverse, report)
+      |> put_lock_image_pair_and_report(
+        report,
+        actor,
+        :show,
+        :accept_reverse
+      )
+      |> Multi.run(:locked_reports, fn repo, %{locked_duplicate_report: locked_report} ->
+        {:ok, %{report: locked_report, reports: reports_for_pair(repo, locked_report)}}
+      end)
       |> Multi.merge(fn %{
                           locked_reports:
                             %{report: original_report, reports: reports} = locked_reports,
-                          locked_images: %{source: original_source, target: original_target}
+                          locked_source_image: original_source,
+                          locked_target_image: original_target
                         } ->
         reverse_report =
           Enum.find(reports, fn candidate ->
