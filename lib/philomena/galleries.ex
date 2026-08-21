@@ -43,6 +43,24 @@ defmodule Philomena.Galleries do
     Loader.fetch_and_authorize(Gallery, actor, action, gallery_id, @gallery_preloads)
   end
 
+  defp load_authorized_image(actor, image_id) do
+    Loader.fetch_and_authorize(Image, actor, :show, image_id)
+  end
+
+  defp last_position(gallery_id) do
+    Interaction
+    |> where(gallery_id: ^gallery_id)
+    |> Repo.aggregate(:max, :position)
+  end
+
+  defp notify_gallery(_repo, %{gallery: gallery}) do
+    Notifications.broadcast_gallery_image(gallery)
+  end
+
+  defp put_reindex_gallery(%Multi{} = multi, step \\ :gallery) do
+    Multi.on_commit(multi, fn %{^step => gallery} -> reindex_gallery(gallery) end)
+  end
+
   defp persist_gallery_deletion(%Gallery{} = gallery, %User{} = closing_user) do
     gallery_query = where(Gallery, id: ^gallery.id)
 
@@ -68,20 +86,6 @@ defmodule Philomena.Galleries do
     end
   end
 
-  defp last_position(gallery_id) do
-    Interaction
-    |> where(gallery_id: ^gallery_id)
-    |> Repo.aggregate(:max, :position)
-  end
-
-  defp notify_gallery(_repo, %{gallery: gallery}) do
-    Notifications.broadcast_gallery_image(gallery)
-  end
-
-  defp put_reindex_gallery(%Multi{} = multi, step \\ :gallery) do
-    Multi.on_commit(multi, fn %{^step => gallery} -> reindex_gallery(gallery) end)
-  end
-
   defp gallery_image_ids(%Gallery{} = gallery, image_ids) do
     Interaction
     |> where([interaction], interaction.gallery_id == ^gallery.id)
@@ -103,77 +107,96 @@ defmodule Philomena.Galleries do
     end
   end
 
-  defp persist_reorder_positions(%Gallery{} = gallery, image_ids) do
-    interactions =
+  defp position_order(%{order_position_asc: true}), do: [asc: :position]
+  defp position_order(_gallery), do: [desc: :position]
+
+  defp persist_reorder_positions(%Gallery{} = gallery, requested_image_ids) do
+    # Load the submitted subset in the gallery's current display order.
+    affected_interactions =
       Interaction
-      |> where(
-        [interaction],
-        interaction.image_id in ^image_ids and interaction.gallery_id == ^gallery.id
-      )
+      |> where(gallery_id: ^gallery.id)
+      |> where([i], i.image_id in ^requested_image_ids)
       |> order_by(^position_order(gallery))
       |> Repo.all()
 
-    interaction_positions =
-      interactions
+    # If the requested order is [c, a], while the affected rows are currently
+    # [a, c] at positions [0, 2], this becomes %{0 => 0, 1 => 2}.
+    position_by_current_index =
+      affected_interactions
       |> Enum.with_index()
       |> Map.new(fn {interaction, index} -> {index, interaction.position} end)
 
-    requested =
-      image_ids
+    # The requested list describes the desired order of the submitted rows:
+    # [c, a] becomes %{c => 0, a => 1}.
+    requested_index_by_image_id =
+      requested_image_ids
       |> Enum.with_index()
       |> Map.new()
 
-    changes =
-      interactions
+    # Pair each affected row's current index with its requested index.
+    # a moves to position_by_current_index[1] (2), and c moves to
+    # position_by_current_index[0] (0).
+    interaction_updates =
+      affected_interactions
       |> Enum.with_index()
       |> Enum.flat_map(fn {interaction, current_index} ->
-        new_index = requested[interaction.image_id]
+        requested_index = requested_index_by_image_id[interaction.image_id]
 
-        if new_index != current_index do
+        if requested_index != current_index do
           [
             %{
               id: interaction.id,
               gallery_id: interaction.gallery_id,
               image_id: interaction.image_id,
-              position: interaction_positions[new_index]
+              position: position_by_current_index[requested_index]
             }
           ]
         else
+          # Rows already in the requested slot remain unchanged.
           []
         end
       end)
 
     Repo.insert_all(
       Interaction,
-      changes,
+      interaction_updates,
       on_conflict: {:replace, [:position]},
       conflict_target: [:id]
     )
 
-    :ok
-  end
-
-  defp gallery_image_definition(_actor, _scope, _query, offset) when offset < 0 do
-    Search.search_definition(Image, %{query: %{match_none: %{}}})
-  end
-
-  defp gallery_image_definition(actor, scope, query, offset) do
-    {:ok, {definition, _tags}} =
-      ImageSearch.search_string(actor, scope, query,
-        pagination: %{page_number: offset + 1, page_size: 1}
-      )
-
-    definition
+    {:ok, nil}
   end
 
   defp image_sort_direction(%{order_position_asc: true}), do: "asc"
   defp image_sort_direction(_gallery), do: "desc"
 
-  defp position_order(%{order_position_asc: true}), do: [asc: :position]
-  defp position_order(_gallery), do: [desc: :position]
+  defp put_query(list, name, actor, scope, query, pagination) do
+    if pagination.page_number > 0 do
+      {:ok, {definition, _tags}} =
+        ImageSearch.search_string(actor, scope, query, pagination: pagination)
 
-  defp load_authorized_image(actor, image_id) do
-    Loader.fetch_and_authorize(Image, actor, :show, image_id)
+      Keyword.put(list, name, {definition, preload(Image, [:sources, tags: :aliases])})
+    else
+      list
+    end
+  end
+
+  defp reorder_window(%Actor{} = actor, %Scope{} = scope, %Gallery{} = gallery) do
+    query = "gallery_id:#{gallery.id}"
+    scope = %{scope | sf: query, sd: image_sort_direction(gallery)}
+
+    limit = scope.pagination.page_size
+    offset = (scope.pagination.page_number - 1) * limit
+
+    # The leading query will not be possible on the first page, so a map key
+    # with an empty page is inserted if no search was performed.
+
+    []
+    |> put_query(:images, actor, scope, query, scope.pagination)
+    |> put_query(:leading, actor, scope, query, %{page_number: offset - 1, page_size: 1})
+    |> put_query(:trailing, actor, scope, query, %{page_number: offset + limit, page_size: 1})
+    |> Search.msearch_records_with_hits()
+    |> Map.put_new(:leading, %Scrivener.Page{})
   end
 
   @doc """
@@ -471,47 +494,12 @@ defmodule Philomena.Galleries do
           {:ok, GalleryPage.t()} | {:error, :unauthorized | :not_found}
   def load_gallery_page(%Actor{} = actor, %Scope{} = scope, gallery_id) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :show) do
-      query = "gallery_id:#{gallery.id}"
+      %{images: images, leading: leading, trailing: trailing} =
+        reorder_window(actor, scope, gallery)
 
-      scope = %{
-        scope
-        | q: query,
-          sf: "gallery_id:#{gallery.id}",
-          sd: image_sort_direction(gallery)
-      }
-
-      {:ok, {images, _tags}} = ImageSearch.search_string(actor, scope, query)
-
-      limit = scope.pagination.page_size
-      offset = (scope.pagination.page_number - 1) * limit
-
-      gallery_prev = gallery_image_definition(actor, scope, query, offset - 1)
-      gallery_next = gallery_image_definition(actor, scope, query, offset + limit)
-
-      image_preload = preload(Image, [:sources, tags: :aliases])
-
-      searches = [
-        images: {images, image_preload},
-        next: {gallery_next, image_preload}
-      ]
-
-      searches =
-        if offset >= 0 do
-          [previous: {gallery_prev, image_preload}] ++ searches
-        else
-          searches
-        end
-
-      results = Search.msearch_records_with_hits(searches)
-      images = results.images
-      gallery_next = results.next
-      gallery_prev = Map.get(results, :previous, %Scrivener.Page{entries: []})
-
-      interactions = Interactions.user_interactions(actor, [images, gallery_prev, gallery_next])
       watching = subscribed?(gallery, actor.user)
-
-      gallery_images =
-        Enum.to_list(gallery_prev) ++ Enum.to_list(images) ++ Enum.to_list(gallery_next)
+      interactions = Interactions.user_interactions(actor, [images, leading, trailing])
+      gallery_images = Enum.concat([leading, images, trailing])
 
       clear_gallery_notification(gallery, actor.user)
 
@@ -520,8 +508,8 @@ defmodule Philomena.Galleries do
          gallery: gallery,
          images: images,
          gallery_images: gallery_images,
-         gallery_prev: Enum.any?(gallery_prev),
-         gallery_next: Enum.any?(gallery_next),
+         gallery_prev: Enum.any?(leading),
+         gallery_next: Enum.any?(trailing),
          interactions: interactions,
          watching: watching
        }}
@@ -575,110 +563,6 @@ defmodule Philomena.Galleries do
 
       {:ok, choices}
     end
-  end
-
-  @doc """
-  Updates gallery search indices when a user's name changes.
-
-  ## Examples
-
-      iex> user_name_reindex("old_username", "new_username")
-      :ok
-
-  """
-  @spec user_name_reindex(String.t(), String.t()) :: term()
-  def user_name_reindex(old_name, new_name) do
-    data = Galleries.SearchIndex.user_name_update_by_query(old_name, new_name)
-
-    Search.update_by_query(Gallery, data.query, data.set_replacements, data.replacements)
-  end
-
-  @doc """
-  Queues a gallery for reindexing.
-
-  Adds the gallery to the indexing queue to update its search index.
-
-  ## Examples
-
-      iex> reindex_gallery(gallery)
-      %Gallery{}
-
-  """
-  @spec reindex_gallery(Gallery.t()) :: Gallery.t()
-  def reindex_gallery(%Gallery{} = gallery) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Galleries", "id", [gallery.id]])
-
-    gallery
-  end
-
-  @doc """
-  Queues multiple galleries for reindexing by their ids.
-
-  ## Examples
-
-      iex> reindex_galleries([1, 2, 3])
-      [1, 2, 3]
-
-  """
-  @spec reindex_galleries([integer()]) :: [integer()]
-  def reindex_galleries([]), do: []
-
-  def reindex_galleries(gallery_ids) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Galleries", "id", gallery_ids])
-
-    gallery_ids
-  end
-
-  @doc """
-  Removes a gallery from the search index.
-
-  Deletes the gallery's document from the search index.
-
-  ## Examples
-
-      iex> unindex_gallery(gallery)
-      %Gallery{}
-
-  """
-  @spec unindex_gallery(Gallery.t()) :: Gallery.t()
-  def unindex_gallery(%Gallery{} = gallery) do
-    Search.delete_document(gallery.id, Gallery)
-
-    gallery
-  end
-
-  @doc """
-  Returns a list of associations to preload when indexing galleries.
-
-  ## Examples
-
-      iex> indexing_preloads()
-      [:subscribers, :user, :interactions]
-
-  """
-  @spec indexing_preloads() :: [atom()]
-  def indexing_preloads do
-    [:subscribers, :user, :interactions]
-  end
-
-  @doc """
-  Reindexes galleries based on a column condition.
-
-  Updates the search index for all galleries matching the given column condition.
-  Used for batch reindexing of galleries.
-
-  ## Examples
-
-      iex> perform_reindex(:id, [1, 2, 3])
-      {:ok, [%Gallery{}, ...]}
-
-  """
-  @spec perform_reindex(atom(), [term()]) :: term()
-  def perform_reindex(column, condition) do
-    Gallery
-    |> preload(^indexing_preloads())
-    |> where([g], field(g, ^column) in ^condition)
-    |> Search.reindex(Gallery)
   end
 
   @doc """
@@ -828,8 +712,7 @@ defmodule Philomena.Galleries do
         validate_reorder(gallery, params)
       end)
       |> Multi.run(:reorder, fn _repo, %{locked_gallery: gallery, reorder_form: reorder_form} ->
-        :ok = persist_reorder_positions(gallery, reorder_form.image_ids)
-        {:ok, nil}
+        persist_reorder_positions(gallery, reorder_form.image_ids)
       end)
       |> Multi.on_commit(fn %{reorder_form: reorder_form} ->
         Images.reindex_images(reorder_form.image_ids)
@@ -917,5 +800,109 @@ defmodule Philomena.Galleries do
   def clear_gallery_notification(%Gallery{} = gallery, user) do
     Notifications.clear_gallery_image(gallery, user)
     :ok
+  end
+
+  @doc """
+  Updates gallery search indices when a user's name changes.
+
+  ## Examples
+
+      iex> user_name_reindex("old_username", "new_username")
+      :ok
+
+  """
+  @spec user_name_reindex(String.t(), String.t()) :: term()
+  def user_name_reindex(old_name, new_name) do
+    data = Galleries.SearchIndex.user_name_update_by_query(old_name, new_name)
+
+    Search.update_by_query(Gallery, data.query, data.set_replacements, data.replacements)
+  end
+
+  @doc """
+  Queues a gallery for reindexing.
+
+  Adds the gallery to the indexing queue to update its search index.
+
+  ## Examples
+
+      iex> reindex_gallery(gallery)
+      %Gallery{}
+
+  """
+  @spec reindex_gallery(Gallery.t()) :: Gallery.t()
+  def reindex_gallery(%Gallery{} = gallery) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Galleries", "id", [gallery.id]])
+
+    gallery
+  end
+
+  @doc """
+  Queues multiple galleries for reindexing by their ids.
+
+  ## Examples
+
+      iex> reindex_galleries([1, 2, 3])
+      [1, 2, 3]
+
+  """
+  @spec reindex_galleries([integer()]) :: [integer()]
+  def reindex_galleries([]), do: []
+
+  def reindex_galleries(gallery_ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Galleries", "id", gallery_ids])
+
+    gallery_ids
+  end
+
+  @doc """
+  Removes a gallery from the search index.
+
+  Deletes the gallery's document from the search index.
+
+  ## Examples
+
+      iex> unindex_gallery(gallery)
+      %Gallery{}
+
+  """
+  @spec unindex_gallery(Gallery.t()) :: Gallery.t()
+  def unindex_gallery(%Gallery{} = gallery) do
+    Search.delete_document(gallery.id, Gallery)
+
+    gallery
+  end
+
+  @doc """
+  Returns a list of associations to preload when indexing galleries.
+
+  ## Examples
+
+      iex> indexing_preloads()
+      [:subscribers, :user, :interactions]
+
+  """
+  @spec indexing_preloads() :: [atom()]
+  def indexing_preloads do
+    [:subscribers, :user, :interactions]
+  end
+
+  @doc """
+  Reindexes galleries based on a column condition.
+
+  Updates the search index for all galleries matching the given column condition.
+  Used for batch reindexing of galleries.
+
+  ## Examples
+
+      iex> perform_reindex(:id, [1, 2, 3])
+      {:ok, [%Gallery{}, ...]}
+
+  """
+  @spec perform_reindex(atom(), [term()]) :: term()
+  def perform_reindex(column, condition) do
+    Gallery
+    |> preload(^indexing_preloads())
+    |> where([g], field(g, ^column) in ^condition)
+    |> Search.reindex(Gallery)
   end
 end
