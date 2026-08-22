@@ -1,6 +1,10 @@
 defmodule Philomena.Comments do
   @moduledoc """
   Image comment reads, writes, moderation, search, and indexing.
+
+  Comment mutations lock their parent image before locking or changing the
+  comment. This serializes them with image hides and merges, which can change
+  the visibility or ownership of the image's comments.
   """
 
   import Ecto.Query, warn: false
@@ -43,29 +47,8 @@ defmodule Philomena.Comments do
     |> Loader.fetch_and_authorize(actor, action, comment_id, preloads)
   end
 
-  defp notify_comment(_repo, %{image: image, comment: comment}) do
+  defp notify_comment(_repo, %{locked_image: image, comment: comment}) do
     Notifications.broadcast_image_comment(comment.user, image, comment)
-  end
-
-  defp put_reindex_comment(%Multi{} = multi, step \\ :comment) do
-    Multi.on_commit(multi, fn %{^step => comment} -> reindex_comment(comment) end)
-  end
-
-  defp put_approval_report(%Multi{} = multi) do
-    Multi.merge(multi, fn %{comment: comment} ->
-      if comment.became_unapproved? do
-        Multi.new()
-        |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
-        |> Reports.put_create_system_report(
-          "Approval",
-          "Comment contains external links",
-          :comment_id,
-          comment.id
-        )
-      else
-        Multi.new()
-      end
-    end)
   end
 
   defp broadcast_comment(event, %Comment{} = comment) do
@@ -99,6 +82,49 @@ defmodule Philomena.Comments do
       candidate.created_at > ^comment.created_at or
         (candidate.created_at == ^comment.created_at and candidate.id > ^comment.id)
     )
+  end
+
+  defp put_reindex_comment(%Multi{} = multi, step \\ :comment) do
+    Multi.on_commit(multi, fn %{^step => comment} -> reindex_comment(comment) end)
+  end
+
+  defp put_approval_report(%Multi{} = multi) do
+    Multi.merge(multi, fn %{comment: comment} ->
+      if comment.became_unapproved? do
+        Multi.new()
+        |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
+        |> Reports.put_create_system_report(
+          "Approval",
+          "Comment contains external links",
+          :comment_id,
+          comment.id
+        )
+      else
+        Multi.new()
+      end
+    end)
+  end
+
+  defp put_lock_image(%Multi{} = multi, actor, image_id, action) do
+    image_query = where(Image, id: ^image_id)
+
+    multi
+    |> Multi.lock_one(:locked_image, image_query)
+    |> Multi.run(:authorize, fn _repo, %{locked_image: image} ->
+      with :ok <- authorize(actor, action, image) do
+        {:ok, nil}
+      end
+    end)
+  end
+
+  defp map_lock_errors(result) do
+    case result do
+      {:error, _step, :unauthorized, _changes} ->
+        {:error, :unauthorized}
+
+      {:error, _step, :not_found, _changes} ->
+        {:error, :not_found}
+    end
   end
 
   @doc """
@@ -362,12 +388,12 @@ defmodule Philomena.Comments do
         |> Comment.creation_changeset(attrs, actor)
 
       Multi.new()
-      |> Multi.lock_one(:image, image_query)
+      |> put_lock_image(actor, image.id, :create_comment)
       |> Multi.insert(:comment, comment_changeset)
       |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
       |> Multi.run(:notification, &notify_comment/2)
-      |> Images.maybe_subscribe_on(:image, creator, :watch_on_reply)
-      |> Images.put_reindex_image(:image)
+      |> Images.maybe_subscribe_on(:locked_image, creator, :watch_on_reply)
+      |> Images.put_reindex_image(:locked_image)
       |> UserStatistics.put_increment(creator, :comments_count)
       |> put_approval_report()
       |> put_reindex_comment()
@@ -380,6 +406,9 @@ defmodule Philomena.Comments do
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, {image, changeset}}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -481,6 +510,7 @@ defmodule Philomena.Comments do
         |> preload(:user)
 
       Multi.new()
+      |> put_lock_image(actor, image.id, :create_comment)
       |> Multi.lock_one(:original_comment, comment_query)
       |> Multi.update(:comment, comment_changeset)
       |> Versions.record_edit(:version, :original_comment, :comment, actor)
@@ -495,6 +525,9 @@ defmodule Philomena.Comments do
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -568,6 +601,7 @@ defmodule Philomena.Comments do
       reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
 
       Multi.new()
+      |> put_lock_image(actor, image.id, :show)
       |> Multi.update(:comment, changeset)
       |> Reports.put_close_reports(:reports, user, comment_id: comment.id)
       |> ModerationLogs.put_log(
@@ -585,6 +619,9 @@ defmodule Philomena.Comments do
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -606,6 +643,7 @@ defmodule Philomena.Comments do
       changeset = Comment.unhide_changeset(comment)
 
       Multi.new()
+      |> put_lock_image(actor, image.id, :show)
       |> Multi.update(:comment, changeset)
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -622,6 +660,9 @@ defmodule Philomena.Comments do
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -647,7 +688,7 @@ defmodule Philomena.Comments do
       image_query = from(i in Image, where: i.id == ^comment.image_id)
 
       Multi.new()
-      |> Multi.lock_one(:image, image_query)
+      |> put_lock_image(actor, image.id, :show)
       |> Multi.lock_one(:locked_comment, comment_query)
       |> Multi.update(:comment, fn %{locked_comment: comment} ->
         Comment.destroy_changeset(comment)
@@ -667,7 +708,7 @@ defmodule Philomena.Comments do
         :comments_count,
         -1
       )
-      |> Images.put_reindex_image(:image)
+      |> Images.put_reindex_image(:locked_image)
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
@@ -676,6 +717,9 @@ defmodule Philomena.Comments do
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -700,6 +744,7 @@ defmodule Philomena.Comments do
       comment_query = from(c in Comment, where: c.id == ^comment.id)
 
       Multi.new()
+      |> put_lock_image(actor, image.id, :show)
       |> Multi.lock_one(:locked_comment, comment_query)
       |> Multi.update(:comment, fn %{locked_comment: comment} ->
         Comment.approve_changeset(comment)
@@ -721,6 +766,9 @@ defmodule Philomena.Comments do
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -744,7 +792,7 @@ defmodule Philomena.Comments do
     image_query = from(i in Image, where: i.id == ^comment.image_id)
 
     Multi.new()
-    |> Multi.lock_one(:image, image_query)
+    |> Multi.lock_one(:locked_image, image_query)
     |> Multi.lock_one(:locked_comment, comment_query)
     |> Multi.update(:comment, fn %{locked_comment: comment} ->
       comment
@@ -754,7 +802,7 @@ defmodule Philomena.Comments do
     |> Multi.update_all(:update_image, image_query, inc: [comments_count: -1])
     |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
     |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
-    |> Images.put_reindex_image(:image)
+    |> Images.put_reindex_image(:locked_image)
     |> put_reindex_comment()
     |> Multi.transact()
     |> case do
