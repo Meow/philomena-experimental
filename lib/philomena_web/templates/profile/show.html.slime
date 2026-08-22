@@ -41,7 +41,8 @@
           li = link("Tag changes", to: ~p"/tag_changes?#{[tcq: "true_user_id:#{@user.id}", resource_type: "user", resource_id: @user.name]}")
         - else
           li = link("Tag changes", to: ~p"/tag_changes?#{[tcq: "user_id:#{@user.id}", resource_type: "user", resource_id: @user.name]}")
-        li = link("Source changes", to: ~p"/profiles/#{@user}/source_changes")
+        = if can?(@conn, :show_details, @user) do
+          li = link("Source changes", to: ~p"/profiles/#{@user}/source_changes")
 
 = if can_index_user?(@conn) do
   .js-staff-action

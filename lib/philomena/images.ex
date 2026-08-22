@@ -1510,17 +1510,13 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
       iex> load_visible_image(actor, "999999999")
-      {:error, :unauthorized}
+      {:error, :not_found}
 
   """
   @spec load_visible_image(Actor.t(), IntegerId.integer_id(), list()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def load_visible_image(actor, image_id, preloads \\ []) do
-    with {:ok, id} <- Loader.parse_id(image_id) do
-      image = Image |> preload(^preloads) |> Repo.get(id)
-
-      with :ok <- authorize(actor, :show, image), do: {:ok, image}
-    end
+    Loader.fetch_and_authorize(Image, actor, :show, image_id, preloads)
   end
 
   @doc """
@@ -2315,7 +2311,7 @@ defmodule Philomena.Images do
          image: image,
          added: added,
          removed: removed,
-         source_change_count: SourceChanges.count_for_image(image.id)
+         source_change_count: SourceChanges.count_for_image(image)
        }}
     else
       {:error, :ban} -> {:error, :ban}

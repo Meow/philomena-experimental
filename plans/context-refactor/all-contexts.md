@@ -274,6 +274,13 @@ Wave 4 is underway.
   and competing reports; claims validate under a row lock; image merges and
   audit logs commit atomically with external effects after commit. Reverse
   search now returns a typed result and applies actor-aware image visibility.
+- SourceChanges is complete. Image and active-user targets delegate to their
+  owning safe loaders; detailed-profile and identity-metadata permissions run
+  before sensitive history queries. IP and fingerprint locators validate before
+  authorization, and every history route returns a typed result carrying its
+  canonical target, page, and optional mask/count metadata. Missing resources
+  are actor-independent, hidden images remain forbidden where appropriate, and
+  user counts share the rows' filtered query.
 
 ### Wave 0: characterize and establish the contract
 

@@ -2,11 +2,12 @@ defmodule PhilomenaWeb.IpProfile.SourceChangeController do
   use PhilomenaWeb, :controller
 
   alias Philomena.SourceChanges
+  alias Philomena.SourceChanges.SourceChangePage
 
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"ip_profile_id" => ip} = params) do
-    with {:ok, {ip, range, source_changes}} <-
+    with {:ok, %SourceChangePage{target: ip, range: range, source_changes: source_changes}} <-
            SourceChanges.ip_source_changes(
              conn.assigns.actor,
              ip,

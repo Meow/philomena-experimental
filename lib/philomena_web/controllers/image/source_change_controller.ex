@@ -2,11 +2,12 @@ defmodule PhilomenaWeb.Image.SourceChangeController do
   use PhilomenaWeb, :controller
 
   alias Philomena.SourceChanges
+  alias Philomena.SourceChanges.SourceChangePage
 
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, {image, source_changes}} <-
+    with {:ok, %SourceChangePage{target: image, source_changes: source_changes}} <-
            SourceChanges.image_source_changes(
              conn.assigns.actor,
              params["image_id"],

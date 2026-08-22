@@ -14,6 +14,13 @@ defmodule PhilomenaWeb.IpProfile.SourceChangeControllerTest do
                "You must log in to access this page."
     end
 
+    test "the route's login requirement runs before malformed IP validation", %{conn: conn} do
+      conn = get(conn, ~p"/ip_profiles/#{"not-an-ip"}/source_changes")
+
+      assert redirected_to(conn) == ~p"/sessions/new"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You must log in"
+    end
+
     test "redirects a regular user with the authorization flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
 

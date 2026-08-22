@@ -37,6 +37,7 @@ defmodule PhilomenaWeb.ProfileControllerTest do
 
       assert response =~ "Test Profile User&#39;s profile - Derpibooru"
       assert response =~ "All <em>about</em> this test user."
+      refute response =~ "Source changes"
     end
 
     test "renders a profile for logged-in users", %{conn: conn} do
@@ -47,6 +48,18 @@ defmodule PhilomenaWeb.ProfileControllerTest do
       response = html_response(conn, 200)
 
       assert response =~ "Test Profile User&#39;s profile - Derpibooru"
+      refute response =~ "Source changes"
+    end
+
+    test "shows the source-history link to moderators", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+      user = confirmed_user_fixture(%{name: "Test Profile User"})
+
+      conn = get(conn, ~p"/profiles/#{user}")
+      response = html_response(conn, 200)
+
+      assert response =~ "Source changes"
+      assert response =~ ~p"/profiles/#{user}/source_changes"
     end
 
     test "shows recent uploads, comments, and posts", %{conn: conn} do

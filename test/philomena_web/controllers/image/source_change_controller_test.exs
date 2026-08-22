@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.Image.SourceChangeControllerTest do
       conn = get(conn, ~p"/images/999999999/source_changes")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
   end
 end
