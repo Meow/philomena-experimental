@@ -263,18 +263,19 @@ defmodule Philomena.SourceChangesTest do
       assert image_count == 1
     end
 
-    test "a real profile is forbidden without detailed-profile access" do
+    test "a real profile is always allowed" do
       user = confirmed_user_fixture()
 
-      assert SourceChanges.user_source_changes(actor(), user.slug, %{}, @pagination) ==
-               {:error, :unauthorized}
+      assert {:ok, _page} =
+               SourceChanges.user_source_changes(actor(), user.slug, %{}, @pagination)
 
-      assert SourceChanges.user_source_changes(
-               actor(confirmed_user_fixture()),
-               user.slug,
-               %{},
-               @pagination
-             ) == {:error, :unauthorized}
+      assert {:ok, _page} =
+               SourceChanges.user_source_changes(
+                 actor(confirmed_user_fixture()),
+                 user.slug,
+                 %{},
+                 @pagination
+               )
     end
 
     test "an unknown slug is not found for every actor" do

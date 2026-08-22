@@ -19,7 +19,6 @@ defmodule Philomena.SourceChanges do
   alias Philomena.SourceChanges.SourceChangePage
   alias Philomena.UserFingerprints
   alias Philomena.Users
-  alias Philomena.Users.User
   alias PhilomenaQuery.IpMask
 
   defp history_query(query) do
@@ -28,38 +27,21 @@ defmodule Philomena.SourceChanges do
     |> preload([:user, image: [:user, :sources, tags: :aliases]])
   end
 
-  defp image_history_query(%Image{id: image_id}) do
-    SourceChange
-    |> where(image_id: ^image_id)
-    |> history_query()
-  end
-
-  defp user_history_query(%User{id: user_id}) do
-    SourceChange
-    |> join(:inner, [source_change], image in Image, on: source_change.image_id == image.id)
-    |> where(
-      [source_change, image],
-      source_change.user_id == ^user_id and
-        not (image.user_id == ^user_id and image.anonymous == true)
-    )
-  end
-
-  defp load_user_history_target(actor, slug) do
-    with {:ok, user} <- Users.load_profile(actor, slug),
-         :ok <- authorize(actor, :show_details, user) do
-      {:ok, user}
-    end
-  end
-
   defp cast_ip(ip) do
     case EctoNetwork.INET.cast(ip) do
-      {:ok, ip} -> {:ok, ip}
-      _error -> {:error, :not_found}
+      {:ok, ip} ->
+        {:ok, ip}
+
+      _error ->
+        {:error, :not_found}
     end
   end
 
   defp cast_fingerprint(fingerprint) when is_binary(fingerprint) do
-    fingerprint = fingerprint |> String.trim() |> String.downcase()
+    fingerprint =
+      fingerprint
+      |> String.trim()
+      |> String.downcase()
 
     if UserFingerprints.valid_format?(fingerprint) do
       {:ok, fingerprint}
@@ -77,14 +59,14 @@ defmodule Philomena.SourceChanges do
   @doc """
   Counts the history rows for an already-loaded image.
 
-  This narrow composition service is used after Images has authorized and
+  This composition service is used after Images has authorized and
   updated the image, so it does not resolve or authorize a raw locator itself.
   """
   @spec count_for_image(Image.t()) :: non_neg_integer()
   def count_for_image(%Image{id: image_id}) do
     SourceChange
     |> where(image_id: ^image_id)
-    |> Repo.aggregate(:count, :id)
+    |> Repo.aggregate(:count)
   end
 
   @doc """
@@ -101,6 +83,7 @@ defmodule Philomena.SourceChanges do
 
       iex> image_source_changes(actor, "missing", page: 1, page_size: 25)
       {:error, :not_found}
+
   """
   @spec image_source_changes(
           Actor.t(),
@@ -110,7 +93,12 @@ defmodule Philomena.SourceChanges do
           {:ok, SourceChangePage.t()} | {:error, :unauthorized | :not_found}
   def image_source_changes(%Actor{} = actor, image_id, pagination) do
     with {:ok, image} <- Images.load_visible_image(actor, image_id) do
-      source_changes = image |> image_history_query() |> Repo.paginate(pagination)
+      source_changes =
+        SourceChange
+        |> where(image_id: ^image.id)
+        |> history_query()
+        |> Repo.paginate(pagination)
+
       {:ok, %SourceChangePage{target: image, source_changes: source_changes}}
     end
   end
@@ -118,23 +106,32 @@ defmodule Philomena.SourceChanges do
   @doc """
   Loads a page of source changes attributed to the active user named by `slug`.
 
-  The user is resolved through Users before `:show_details` authorization, so
-  missing and deactivated profiles are not found without revealing them through
-  the permission result. No history or count query runs for a forbidden target.
-  Changes to the user's own anonymous uploads are excluded. `params["added"]`
-  may select additions (`"1"`) or removals (`"0"`). `image_count` counts the
-  distinct images represented by the same filtered history query.
+  Missing and deactivated profiles are not found. No history or count query
+  runs for a forbidden target. Changes to the user's own anonymous uploads are
+  excluded. `params["added"]` may select additions (`"1"`) or removals (`"0"`).
+  `image_count` counts the distinct images represented by the same filtered
+  history query.
 
   ## Examples
 
       iex> user_source_changes(moderator, "artist", %{}, page: 1, page_size: 25)
       {:ok, %SourceChangePage{target: %User{}, image_count: 3}}
+
   """
   @spec user_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, SourceChangePage.t()} | {:error, :unauthorized | :not_found}
   def user_source_changes(%Actor{} = actor, slug, params, pagination) do
-    with {:ok, user} <- load_user_history_target(actor, slug) do
-      query = user |> user_history_query() |> added_filter(params)
+    with {:ok, user} <- Users.load_profile(actor, slug),
+         :ok <- authorize(actor, :show, user) do
+      query =
+        SourceChange
+        |> join(:inner, [source_change], _ in assoc(source_change, :image))
+        |> where(
+          [source_change, image],
+          source_change.user_id == ^user.id and
+            not (image.user_id == ^user.id and image.anonymous == true)
+        )
+        |> added_filter(params)
 
       source_changes =
         query

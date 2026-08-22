@@ -20,13 +20,12 @@ defmodule PhilomenaWeb.Profile.SourceChangeControllerTest do
   end
 
   describe "GET /profiles/:profile_id/source_changes" do
-    test "redirects anonymous viewers from a real profile", %{conn: conn} do
+    test "allows anonymous viewers for a real profile", %{conn: conn} do
       user = confirmed_user_fixture()
 
       conn = get(conn, ~p"/profiles/#{user}/source_changes")
 
-      assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+      assert html_response(conn, 200)
     end
 
     test "lists a user's source changes for moderators", %{conn: conn} do
@@ -63,14 +62,13 @@ defmodule PhilomenaWeb.Profile.SourceChangeControllerTest do
       refute response =~ "https://example.com/added-source"
     end
 
-    test "redirects a regular user from a real profile", %{conn: conn} do
+    test "allows a regular user for a real profile", %{conn: conn} do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
       user = confirmed_user_fixture()
 
       conn = get(conn, ~p"/profiles/#{user}/source_changes")
 
-      assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+      assert html_response(conn, 200)
     end
 
     test "uses the not-found response for an unknown profile", %{conn: conn} do
