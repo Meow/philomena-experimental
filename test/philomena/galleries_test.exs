@@ -444,8 +444,12 @@ defmodule Philomena.GalleriesTest do
 
     test "an unrelated user is unauthorized" do
       gallery = gallery_fixture(confirmed_user_fixture())
+      image_a = image_fixture()
+      image_b = image_fixture()
 
-      assert Galleries.reorder_gallery(actor(confirmed_user_fixture()), "#{gallery.id}", [1, 2]) ==
+      assert Galleries.reorder_gallery(actor(confirmed_user_fixture()), "#{gallery.id}", %{
+               "image_ids" => [image_a.id, image_b.id]
+             }) ==
                {:error, :unauthorized}
     end
 

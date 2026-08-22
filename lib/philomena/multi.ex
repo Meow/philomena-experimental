@@ -597,6 +597,54 @@ defmodule Philomena.Multi do
   end
 
   @doc """
+  Locks all of the rows returned by the query for update.
+
+  The locked result is available under `name` to later Multi steps. This is
+  useful before making a change that depends on the returned rows' current
+  state. The query may be a function of earlier Multi changes and is evaluated
+  inside the transaction.
+
+  > #### Warning {: .warning}
+  >
+  > In PostgreSQL, rows are locked in the order of the `ORDER BY` clause as rows
+  > were when the table was scanned. To avoid deadlocks when using `lock_all/3`,
+  > you must provide a query with a fully deterministic ordering, on a column
+  > that never changes for a given row, such as a surrogate `id` key.
+
+  ## Example
+
+      query = Image |> where([i], i.id in ^image_ids) |> order_by(asc: :id)
+
+      Multi.new()
+      |> Multi.lock_all(:user, query)
+      |> Multi.transact()
+
+  """
+  @spec lock_all(
+          t(),
+          Ecto.Multi.name(),
+          Ecto.Queryable.t() | (Ecto.Multi.changes() -> Ecto.Queryable.t())
+        ) :: t()
+  def lock_all(%__MODULE__{} = multi, name, queryable_or_fun) do
+    lock_fn =
+      fn repo, changes ->
+        queryable =
+          if is_function(queryable_or_fun, 1) do
+            queryable_or_fun.(changes)
+          else
+            queryable_or_fun
+          end
+
+        {:ok,
+         queryable
+         |> lock("FOR UPDATE")
+         |> repo.all()}
+      end
+
+    update_in(multi.multi, &Ecto.Multi.run(&1, name, lock_fn))
+  end
+
+  @doc """
   Run the Multi steps inside a transaction.
 
   See `c:Ecto.Repo.transact/2` for more information.

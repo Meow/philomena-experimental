@@ -68,8 +68,10 @@ defmodule PhilomenaWeb.Gallery.OrderControllerTest do
   test "redirects other users with the authorization flash", %{conn: conn} do
     %{conn: conn} = register_and_log_in_user(%{conn: conn})
     gallery = gallery_fixture(confirmed_user_fixture())
+    image = image_fixture()
+    gallery_image_fixture(gallery, image)
 
-    conn = patch(conn, ~p"/galleries/#{gallery}/order", %{"image_ids" => []})
+    conn = patch(conn, ~p"/galleries/#{gallery}/order", %{"image_ids" => [image.id]})
 
     assert redirected_to(conn) == "/"
     assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."

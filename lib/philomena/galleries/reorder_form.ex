@@ -30,8 +30,11 @@ defmodule Philomena.Galleries.ReorderForm do
   end
 
   @doc false
-  def membership_changeset(%__MODULE__{} = reorder_form, valid_image_ids) do
-    changeset = change(reorder_form)
+  def membership_changeset(%__MODULE__{} = reorder_form, %Gallery{} = gallery, valid_image_ids) do
+    changeset =
+      reorder_form
+      |> Map.put(:gallery, gallery)
+      |> change()
 
     if Enum.sort(valid_image_ids) == Enum.sort(reorder_form.image_ids) do
       changeset

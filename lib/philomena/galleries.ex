@@ -2,6 +2,19 @@ defmodule Philomena.Galleries do
   @moduledoc """
   Gallery creation, presentation, image membership, subscriptions, account
   erasure, and search-index coordination.
+
+  ## Gallery/image locking
+
+  Adding, removing, and reordering images lock every affected image before
+  locking the gallery. This hierarchy serializes those operations with image
+  hides and merges, which remove or migrate gallery interactions while holding
+  the image lock. Reordering locks the submitted image set in ascending ID
+  order before acquiring the gallery lock.
+
+  Gallery deletion is a deliberate exception. The gallery must be locked first
+  to determine its complete membership, and locking its images afterwards would
+  invert the hierarchy. Deletion instead relies on the database cascade to lock
+  and remove the gallery's interaction rows.
   """
 
   import Ecto.Query, warn: false
@@ -43,10 +56,6 @@ defmodule Philomena.Galleries do
     Loader.fetch_and_authorize(Gallery, actor, action, gallery_id, @gallery_preloads)
   end
 
-  defp load_authorized_image(actor, image_id) do
-    Loader.fetch_and_authorize(Image, actor, :show, image_id)
-  end
-
   defp last_position(gallery_id) do
     Interaction
     |> where(gallery_id: ^gallery_id)
@@ -62,20 +71,24 @@ defmodule Philomena.Galleries do
   end
 
   defp persist_gallery_deletion(%Gallery{} = gallery, %User{} = closing_user) do
+    # Deletion must lock the gallery before discovering its members. It cannot
+    # then lock the unbounded image set without inverting the image-first
+    # hierarchy used by add/remove/reorder and image hide/merge workflows. The
+    # gallery FK cascade locks and deletes the interaction rows instead.
     gallery_query = where(Gallery, id: ^gallery.id)
 
-    image_ids_query =
+    interactions_query =
       Interaction
       |> where(gallery_id: ^gallery.id)
       |> select([i], i.image_id)
 
     Multi.new()
     |> Multi.lock_one(:locked_gallery, gallery_query)
-    |> Multi.all(:image_ids, image_ids_query)
+    |> Multi.delete_all(:interactions, interactions_query)
     |> Reports.put_close_reports(:reports, closing_user, gallery_id: gallery.id)
     |> Multi.delete(:gallery, fn %{locked_gallery: gallery} -> gallery end)
     |> Multi.on_commit(fn %{gallery: gallery} -> unindex_gallery(gallery) end)
-    |> Multi.on_commit(fn %{image_ids: image_ids} -> Images.reindex_images(image_ids) end)
+    |> Multi.on_commit(fn %{interactions: {_, image_ids}} -> Images.reindex_images(image_ids) end)
     |> Multi.transact()
     |> case do
       {:ok, %{gallery: gallery}} ->
@@ -92,19 +105,6 @@ defmodule Philomena.Galleries do
     |> where([interaction], interaction.image_id in ^image_ids)
     |> select([interaction], interaction.image_id)
     |> Repo.all()
-  end
-
-  defp validate_reorder(%Gallery{} = gallery, attrs) do
-    with {:ok, reorder_form} <-
-           %ReorderForm{gallery: gallery}
-           |> ReorderForm.changeset(attrs)
-           |> Ecto.Changeset.apply_action(:create) do
-      valid_image_ids = gallery_image_ids(gallery, reorder_form.image_ids)
-
-      reorder_form
-      |> ReorderForm.membership_changeset(valid_image_ids)
-      |> Ecto.Changeset.apply_action(:update)
-    end
   end
 
   defp position_order(%{order_position_asc: true}), do: [asc: :position]
@@ -197,6 +197,16 @@ defmodule Philomena.Galleries do
     |> put_query(:trailing, actor, scope, query, %{page_number: offset + limit, page_size: 1})
     |> Search.msearch_records_with_hits()
     |> Map.put_new(:leading, %Scrivener.Page{})
+  end
+
+  def map_lock_errors(result) do
+    case result do
+      {:error, _step, :unauthorized, _changes} ->
+        {:error, :unauthorized}
+
+      {:error, _step, :not_found, _changes} ->
+        {:error, :not_found}
+    end
   end
 
   @doc """
@@ -599,33 +609,40 @@ defmodule Philomena.Galleries do
           | {:error, :ban | :unauthorized | :not_found}
   def add_image_to_gallery(%Actor{} = actor, gallery_id, image_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, gallery} <- load_gallery(actor, gallery_id, :add_image),
-         {:ok, image} <- load_authorized_image(actor, image_id) do
+         {:ok, gallery_id} <- Loader.parse_id(gallery_id),
+         {:ok, image_id} <- Loader.parse_id(image_id) do
       Multi.new()
-      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery.id))
+      |> Multi.lock_one(:locked_image, where(Image, id: ^image_id))
+      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery_id))
+      |> Multi.run(:authorize, fn _repo, %{locked_image: image, locked_gallery: gallery} ->
+        with :ok <- authorize(actor, :show, image),
+             :ok <- authorize(actor, :add_image, gallery) do
+          {:ok, nil}
+        end
+      end)
       |> Multi.insert(:interaction, fn %{locked_gallery: gallery} ->
         position = (last_position(gallery.id) || -1) + 1
 
         %Interaction{gallery_id: gallery.id}
-        |> Interaction.changeset(%{image_id: image.id, position: position})
+        |> Interaction.changeset(%{image_id: image_id, position: position})
       end)
       |> Multi.update(:gallery, fn %{locked_gallery: gallery} ->
         Gallery.add_image_changeset(gallery)
       end)
       |> Multi.run(:notification, &notify_gallery/2)
-      |> Multi.put(:image, image)
       |> put_reindex_gallery()
+      |> Multi.run(:image, fn _repo, %{locked_image: image} -> {:ok, image} end)
       |> Images.put_reindex_image(:image)
       |> Multi.transact()
       |> case do
         {:ok, %{gallery: gallery}} ->
           {:ok, gallery}
 
-        {:error, :interaction, _changeset, _changes} ->
+        {:error, :interaction, _changeset, %{locked_gallery: gallery}} ->
           {:error, Gallery.add_duplicate_image_error(gallery)}
 
-        {:error, :locked_gallery, :not_found, _changes} ->
-          {:error, :not_found}
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -654,30 +671,36 @@ defmodule Philomena.Galleries do
           | Ecto.Multi.failure()
   def remove_image_from_gallery(%Actor{} = actor, gallery_id, image_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, gallery} <- load_gallery(actor, gallery_id, :remove_image),
-         {:ok, image} <- load_authorized_image(actor, image_id) do
+         {:ok, gallery_id} <- Loader.parse_id(gallery_id),
+         {:ok, image_id} <- Loader.parse_id(image_id) do
       Multi.new()
-      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery.id))
+      |> Multi.lock_one(:locked_image, where(Image, id: ^image_id))
+      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery_id))
+      |> Multi.run(:authorize, fn _repo, %{locked_image: image, locked_gallery: gallery} ->
+        with :ok <- authorize(actor, :show, image),
+             :ok <- authorize(actor, :remove_image, gallery) do
+          {:ok, nil}
+        end
+      end)
       |> Multi.lock_one(:locked_interaction, fn %{locked_gallery: gallery} ->
         Interaction
         |> where(gallery_id: ^gallery.id)
-        |> where(image_id: ^image.id)
+        |> where(image_id: ^image_id)
       end)
       |> Multi.delete(:interaction, fn %{locked_interaction: interaction} -> interaction end)
       |> Multi.update(:gallery, fn %{locked_gallery: gallery} ->
         Gallery.remove_image_changeset(gallery)
       end)
-      |> Multi.run(:image, fn _repo, _changes -> {:ok, image} end)
       |> put_reindex_gallery()
+      |> Multi.run(:image, fn _repo, %{locked_image: image} -> {:ok, image} end)
       |> Images.put_reindex_image(:image)
       |> Multi.transact()
       |> case do
         {:ok, %{gallery: gallery}} ->
           {:ok, gallery}
 
-        {:error, step, :not_found, _changes}
-        when step in [:locked_gallery, :locked_interaction] ->
-          {:error, :not_found}
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -705,11 +728,31 @@ defmodule Philomena.Galleries do
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def reorder_gallery(%Actor{} = actor, gallery_id, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, gallery} <- load_gallery(actor, gallery_id, :reorder) do
+         {:ok, gallery_id} <- Loader.parse_id(gallery_id),
+         {:ok, reorder_form} <-
+           %ReorderForm{}
+           |> ReorderForm.changeset(params)
+           |> Ecto.Changeset.apply_action(:create) do
+      image_query =
+        from image in Image,
+          where: image.id in ^reorder_form.image_ids,
+          select: image.id,
+          order_by: [asc: :id]
+
       Multi.new()
-      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery.id))
+      |> Multi.lock_all(:locked_images, image_query)
+      |> Multi.lock_one(:locked_gallery, where(Gallery, id: ^gallery_id))
+      |> Multi.run(:authorize, fn _repo, %{locked_gallery: gallery} ->
+        with :ok <- authorize(actor, :reorder, gallery) do
+          {:ok, nil}
+        end
+      end)
       |> Multi.run(:reorder_form, fn _repo, %{locked_gallery: gallery} ->
-        validate_reorder(gallery, params)
+        valid_image_ids = gallery_image_ids(gallery, reorder_form.image_ids)
+
+        reorder_form
+        |> ReorderForm.membership_changeset(gallery, valid_image_ids)
+        |> Ecto.Changeset.apply_action(:update)
       end)
       |> Multi.run(:reorder, fn _repo, %{locked_gallery: gallery, reorder_form: reorder_form} ->
         persist_reorder_positions(gallery, reorder_form.image_ids)
@@ -724,6 +767,9 @@ defmodule Philomena.Galleries do
 
         {:error, :reorder_form, changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end

@@ -466,6 +466,9 @@ defmodule Philomena.Images do
   end
 
   defp remove_gallery_interactions_multi(multi, image) do
+    # Image hides hold the image lock before reaching this step. Gallery
+    # membership mutations hold the same image lock first; deleting the
+    # interaction rows therefore composes safely with those workflows.
     galleries =
       Gallery
       |> join(:inner, [g], gi in assoc(g, :interactions), on: gi.image_id == ^image.id)
@@ -480,6 +483,10 @@ defmodule Philomena.Images do
   end
 
   defp migrate_gallery_interactions_multi(multi, image, duplicate_of_image) do
+    # Image merges hold both image locks before reaching this step. The
+    # interaction updates and deletes stay in the image merge transaction; a
+    # concurrent gallery deletion may lose the lock race and abort, which
+    # rolls back the complete merge atomically.
     target_gallery_ids =
       Interaction
       |> where(image_id: ^duplicate_of_image.id)
