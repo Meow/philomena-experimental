@@ -16,16 +16,14 @@ defmodule Philomena.SourceChanges do
   alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.SourceChanges.SourceChange
+  alias Philomena.SourceChanges.QueryBuilder
+  alias Philomena.SourceChanges.QueryForm
   alias Philomena.SourceChanges.SourceChangePage
   alias Philomena.UserFingerprints
   alias Philomena.Users
   alias PhilomenaQuery.IpMask
 
-  defp history_query(query) do
-    query
-    |> order_by(desc: :id)
-    |> preload([:user, image: [:user, :sources, tags: :aliases]])
-  end
+  @preloads [:user, image: [:user, :sources, tags: :aliases]]
 
   defp cast_ip(ip) do
     case EctoNetwork.INET.cast(ip) do
@@ -52,10 +50,6 @@ defmodule Philomena.SourceChanges do
 
   defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
 
-  defp added_filter(query, %{"added" => "1"}), do: where(query, added: true)
-  defp added_filter(query, %{"added" => "0"}), do: where(query, added: false)
-  defp added_filter(query, _params), do: query
-
   @doc """
   Counts the history rows for an already-loaded image.
 
@@ -78,28 +72,33 @@ defmodule Philomena.SourceChanges do
 
   ## Examples
 
-      iex> image_source_changes(actor, "42", page: 1, page_size: 25)
-      {:ok, %SourceChangePage{target: %Image{}, source_changes: %Scrivener.Page{}}}
+      iex> image_source_changes(actor, "42", %{}, page: 1, page_size: 25)
+      {:ok, %SourceChangePage{target: %Image{}, source_changes: %Scrivener.Page{}}, changeset}
 
-      iex> image_source_changes(actor, "missing", page: 1, page_size: 25)
+      iex> image_source_changes(actor, "missing", %{}, page: 1, page_size: 25)
       {:error, :not_found}
 
   """
   @spec image_source_changes(
           Actor.t(),
           Philomena.IntegerId.integer_id(),
+          map(),
           Repo.pagination_params()
         ) ::
-          {:ok, SourceChangePage.t()} | {:error, :unauthorized | :not_found}
-  def image_source_changes(%Actor{} = actor, image_id, pagination) do
-    with {:ok, image} <- Images.load_visible_image(actor, image_id) do
+          {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def image_source_changes(%Actor{} = actor, image_id, params, pagination) do
+    with {:ok, image} <- Images.load_visible_image(actor, image_id),
+         {:ok, query, query_form} <- QueryBuilder.build_query(params) do
       source_changes =
-        SourceChange
+        query
         |> where(image_id: ^image.id)
-        |> history_query()
+        |> preload(^@preloads)
         |> Repo.paginate(pagination)
 
-      {:ok, %SourceChangePage{target: image, source_changes: source_changes}}
+      page = %SourceChangePage{target: image, source_changes: source_changes}
+
+      {:ok, page, QueryForm.changeset(query_form)}
     end
   end
 
@@ -108,9 +107,10 @@ defmodule Philomena.SourceChanges do
 
   Missing and deactivated profiles are not found. No history or count query
   runs for a forbidden target. Changes to the user's own anonymous uploads are
-  excluded. `params["added"]` may select additions (`"1"`) or removals (`"0"`).
-  `image_count` counts the distinct images represented by the same filtered
-  history query.
+  excluded. `params` may include an `added` filter (`true`/`"1"` for additions,
+  `false`/`"0"` for removals). `image_count` counts the distinct images
+  represented by the same filtered history query. The successful result includes
+  the normalized query changeset.
 
   ## Examples
 
@@ -119,36 +119,39 @@ defmodule Philomena.SourceChanges do
 
   """
   @spec user_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
-          {:ok, SourceChangePage.t()} | {:error, :unauthorized | :not_found}
+          {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def user_source_changes(%Actor{} = actor, slug, params, pagination) do
     with {:ok, user} <- Users.load_profile(actor, slug),
-         :ok <- authorize(actor, :show, user) do
+         :ok <- authorize(actor, :show, user),
+         {:ok, query, query_form} <- QueryBuilder.build_query(params) do
       query =
-        SourceChange
+        query
         |> join(:inner, [source_change], _ in assoc(source_change, :image))
         |> where(
           [source_change, image],
           source_change.user_id == ^user.id and
             not (image.user_id == ^user.id and image.anonymous == true)
         )
-        |> added_filter(params)
 
       source_changes =
         query
-        |> history_query()
+        |> preload(^@preloads)
         |> Repo.paginate(pagination)
 
       image_count =
         query
+        |> exclude(:order_by)
         |> select([_source_change, image], count(image.id, :distinct))
         |> Repo.one()
 
-      {:ok,
-       %SourceChangePage{
-         target: user,
-         source_changes: source_changes,
-         image_count: image_count
-       }}
+      page = %SourceChangePage{
+        target: user,
+        source_changes: source_changes,
+        image_count: image_count
+      }
+
+      {:ok, page, QueryForm.changeset(query_form)}
     end
   end
 
@@ -157,25 +160,31 @@ defmodule Philomena.SourceChanges do
 
   The address is parsed before the identity-metadata permission is checked, so
   malformed addresses are always not found. Valid addresses with no history
-  return an empty page. `params["mask"]` selects the queried subnet and
-  `params["added"]` may select additions (`"1"`) or removals (`"0"`). The
-  result target is the canonical address and `range` is the actual masked range.
+  return an empty page. `params["mask"]` selects the queried subnet. `params`
+  may include an `added` filter (`true`/`"1"` for additions, `false`/`"0"` for
+  removals). The result target is the canonical address and `range` is the
+  actual masked range.
+
+  The successful result includes the normalized query changeset.
   """
   @spec ip_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
-          {:ok, SourceChangePage.t()} | {:error, :unauthorized | :not_found}
+          {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def ip_source_changes(%Actor{} = actor, ip, params, pagination) do
     with {:ok, ip} <- cast_ip(ip),
-         :ok <- authorize(actor, :show, :identity_metadata) do
+         :ok <- authorize(actor, :show, :identity_metadata),
+         {:ok, query, query_form} <- QueryBuilder.build_query(params) do
       range = IpMask.parse_mask(ip, params)
 
       source_changes =
-        SourceChange
+        query
         |> where(fragment("? >>= ip", ^range))
-        |> added_filter(params)
-        |> history_query()
+        |> preload(^@preloads)
         |> Repo.paginate(pagination)
 
-      {:ok, %SourceChangePage{target: ip, range: range, source_changes: source_changes}}
+      page = %SourceChangePage{target: ip, range: range, source_changes: source_changes}
+
+      {:ok, page, QueryForm.changeset(query_form)}
     end
   end
 
@@ -184,22 +193,28 @@ defmodule Philomena.SourceChanges do
 
   The value is trimmed, lowercased, and validated with UserFingerprints before
   the identity-metadata permission is checked. Malformed values are always not
-  found; a valid fingerprint with no history returns an empty page.
-  `params["added"]` may select additions (`"1"`) or removals (`"0"`).
+  found. A valid fingerprint with no history returns an empty page.
+
+  `params` may include an `added` filter (`true`/`"1"` for additions, `false`/
+  `"0"` for removals). The successful result includes the normalized query
+  changeset.
   """
   @spec fingerprint_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
-          {:ok, SourceChangePage.t()} | {:error, :unauthorized | :not_found}
+          {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def fingerprint_source_changes(%Actor{} = actor, fingerprint, params, pagination) do
     with {:ok, fingerprint} <- cast_fingerprint(fingerprint),
-         :ok <- authorize(actor, :show, :identity_metadata) do
+         :ok <- authorize(actor, :show, :identity_metadata),
+         {:ok, query, query_form} <- QueryBuilder.build_query(params) do
       source_changes =
-        SourceChange
+        query
         |> where(fingerprint: ^fingerprint)
-        |> added_filter(params)
-        |> history_query()
+        |> preload(^@preloads)
         |> Repo.paginate(pagination)
 
-      {:ok, %SourceChangePage{target: fingerprint, source_changes: source_changes}}
+      page = %SourceChangePage{target: fingerprint, source_changes: source_changes}
+
+      {:ok, page, QueryForm.changeset(query_form)}
     end
   end
 end

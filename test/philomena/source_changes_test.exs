@@ -4,6 +4,7 @@ defmodule Philomena.SourceChangesTest do
   use Philomena.DataCase, async: true
 
   alias Philomena.SourceChanges
+  alias Philomena.SourceChanges.QueryForm
   alias Philomena.SourceChanges.SourceChangePage
   alias Scrivener.Page
 
@@ -20,8 +21,8 @@ defmodule Philomena.SourceChangesTest do
       older = source_change_fixture(image)
       newer = source_change_fixture(image)
 
-      assert {:ok, %SourceChangePage{target: loaded_image, source_changes: %Page{} = page}} =
-               SourceChanges.image_source_changes(actor(), to_string(image.id), @pagination)
+      assert {:ok, %SourceChangePage{target: loaded_image, source_changes: %Page{} = page}, _} =
+               SourceChanges.image_source_changes(actor(), to_string(image.id), %{}, @pagination)
 
       assert loaded_image.id == image.id
       assert Enum.map(page.entries, & &1.id) == [newer.id, older.id]
@@ -32,8 +33,13 @@ defmodule Philomena.SourceChangesTest do
       image = image_fixture()
       change = source_change_fixture(image)
 
-      assert {:ok, %SourceChangePage{target: loaded_image, source_changes: page}} =
-               SourceChanges.image_source_changes(actor(user), to_string(image.id), @pagination)
+      assert {:ok, %SourceChangePage{target: loaded_image, source_changes: page}, _} =
+               SourceChanges.image_source_changes(
+                 actor(user),
+                 to_string(image.id),
+                 %{},
+                 @pagination
+               )
 
       assert loaded_image.id == image.id
       assert Enum.map(page.entries, & &1.id) == [change.id]
@@ -44,8 +50,8 @@ defmodule Philomena.SourceChangesTest do
       image = image_fixture()
       source_change_fixture(image, user_id: user.id)
 
-      assert {:ok, %SourceChangePage{source_changes: page}} =
-               SourceChanges.image_source_changes(actor(), to_string(image.id), @pagination)
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
+               SourceChanges.image_source_changes(actor(), to_string(image.id), %{}, @pagination)
 
       [entry] = page.entries
       assert entry.user.id == user.id
@@ -55,8 +61,8 @@ defmodule Philomena.SourceChangesTest do
       image = image_fixture()
       for _ <- 1..3, do: source_change_fixture(image)
 
-      assert {:ok, %SourceChangePage{source_changes: page}} =
-               SourceChanges.image_source_changes(actor(), to_string(image.id),
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
+               SourceChanges.image_source_changes(actor(), to_string(image.id), %{},
                  page: 1,
                  page_size: 2
                )
@@ -69,43 +75,70 @@ defmodule Philomena.SourceChangesTest do
     test "an image with no source changes yields an empty page" do
       image = image_fixture()
 
-      assert {:ok, %SourceChangePage{target: loaded_image, source_changes: page}} =
-               SourceChanges.image_source_changes(actor(), to_string(image.id), @pagination)
+      assert {:ok, %SourceChangePage{target: loaded_image, source_changes: page}, _} =
+               SourceChanges.image_source_changes(actor(), to_string(image.id), %{}, @pagination)
 
       assert loaded_image.id == image.id
       assert page.entries == []
       assert page.total_entries == 0
     end
 
+    test "returns the normalized query changeset" do
+      image = image_fixture()
+
+      assert {:ok, %SourceChangePage{}, %Ecto.Changeset{data: %QueryForm{added: true}}} =
+               SourceChanges.image_source_changes(
+                 actor(),
+                 image.id,
+                 %{"added" => "1"},
+                 @pagination
+               )
+    end
+
+    test "returns a changeset for an invalid filter" do
+      image = image_fixture()
+
+      assert {:error, %Ecto.Changeset{valid?: false}} =
+               SourceChanges.image_source_changes(
+                 actor(),
+                 image.id,
+                 %{"added" => "invalid"},
+                 @pagination
+               )
+    end
+
     test "accepts an integer id" do
       image = image_fixture()
       change = source_change_fixture(image)
 
-      assert {:ok, %SourceChangePage{source_changes: page}} =
-               SourceChanges.image_source_changes(actor(), image.id, @pagination)
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
+               SourceChanges.image_source_changes(actor(), image.id, %{}, @pagination)
 
       assert Enum.map(page.entries, & &1.id) == [change.id]
     end
 
     test "an unknown well-formed id is not found for every actor" do
-      assert SourceChanges.image_source_changes(actor(), "2147483647", @pagination) ==
+      assert SourceChanges.image_source_changes(actor(), "2147483647", %{}, @pagination) ==
                {:error, :not_found}
 
       assert SourceChanges.image_source_changes(
                actor(confirmed_user_fixture()),
                "2147483647",
+               %{},
                @pagination
              ) == {:error, :not_found}
 
       assert SourceChanges.image_source_changes(
                actor(moderator_user_fixture()),
                "2147483647",
+               %{},
                @pagination
              ) == {:error, :not_found}
 
       assert SourceChanges.image_source_changes(
                actor(admin_user_fixture()),
                "2147483647",
+               %{},
                @pagination
              ) == {:error, :not_found}
     end
@@ -117,13 +150,15 @@ defmodule Philomena.SourceChangesTest do
       assert SourceChanges.image_source_changes(
                actor(confirmed_user_fixture()),
                image.id,
+               %{},
                @pagination
              ) == {:error, :unauthorized}
 
-      assert {:ok, %SourceChangePage{source_changes: page}} =
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
                SourceChanges.image_source_changes(
                  actor(moderator_user_fixture()),
                  image.id,
+                 %{},
                  @pagination
                )
 
@@ -131,14 +166,14 @@ defmodule Philomena.SourceChangesTest do
     end
 
     test "a non-castable id is not found" do
-      assert SourceChanges.image_source_changes(actor(), "not-a-number", @pagination) ==
+      assert SourceChanges.image_source_changes(actor(), "not-a-number", %{}, @pagination) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       # IntegerId.parse rejects a value the integer column could not hold before
       # the row is ever queried, ahead of any authorization.
-      assert SourceChanges.image_source_changes(actor(), "99999999999999999999", @pagination) ==
+      assert SourceChanges.image_source_changes(actor(), "99999999999999999999", %{}, @pagination) ==
                {:error, :not_found}
     end
   end
@@ -155,7 +190,7 @@ defmodule Philomena.SourceChangesTest do
                 target: loaded_user,
                 source_changes: %Page{} = page,
                 image_count: image_count
-              }} =
+              }, _} =
                SourceChanges.user_source_changes(
                  actor(moderator_user_fixture()),
                  user.slug,
@@ -175,7 +210,7 @@ defmodule Philomena.SourceChangesTest do
       source_change_fixture(anon_image, user_id: user.id)
       kept = source_change_fixture(public_image, user_id: user.id)
 
-      assert {:ok, %SourceChangePage{source_changes: page, image_count: image_count}} =
+      assert {:ok, %SourceChangePage{source_changes: page, image_count: image_count}, _} =
                SourceChanges.user_source_changes(
                  actor(moderator_user_fixture()),
                  user.slug,
@@ -194,7 +229,7 @@ defmodule Philomena.SourceChangesTest do
       added = source_change_fixture(image, user_id: user.id, added: true)
       source_change_fixture(removed_image, user_id: user.id, added: false)
 
-      assert {:ok, %SourceChangePage{source_changes: page, image_count: image_count}} =
+      assert {:ok, %SourceChangePage{source_changes: page, image_count: image_count}, _} =
                SourceChanges.user_source_changes(
                  actor(moderator_user_fixture()),
                  user.slug,
@@ -213,7 +248,7 @@ defmodule Philomena.SourceChangesTest do
       source_change_fixture(image, user_id: user.id, added: true)
       removed = source_change_fixture(image, user_id: user.id, added: false)
 
-      assert {:ok, %SourceChangePage{source_changes: page}} =
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
                SourceChanges.user_source_changes(
                  actor(moderator_user_fixture()),
                  user.slug,
@@ -232,7 +267,7 @@ defmodule Philomena.SourceChangesTest do
       source_change_fixture(image, user_id: user.id)
       source_change_fixture(other, user_id: user.id)
 
-      assert {:ok, %SourceChangePage{image_count: image_count}} =
+      assert {:ok, %SourceChangePage{image_count: image_count}, _} =
                SourceChanges.user_source_changes(
                  actor(moderator_user_fixture()),
                  user.slug,
@@ -248,7 +283,7 @@ defmodule Philomena.SourceChangesTest do
       image = image_fixture()
       for _ <- 1..3, do: source_change_fixture(image, user_id: user.id)
 
-      assert {:ok, %SourceChangePage{source_changes: page, image_count: image_count}} =
+      assert {:ok, %SourceChangePage{source_changes: page, image_count: image_count}, _} =
                SourceChanges.user_source_changes(
                  actor(moderator_user_fixture()),
                  user.slug,
@@ -266,10 +301,10 @@ defmodule Philomena.SourceChangesTest do
     test "a real profile is always allowed" do
       user = confirmed_user_fixture()
 
-      assert {:ok, _page} =
+      assert {:ok, _page, _changeset} =
                SourceChanges.user_source_changes(actor(), user.slug, %{}, @pagination)
 
-      assert {:ok, _page} =
+      assert {:ok, _page, _changeset} =
                SourceChanges.user_source_changes(
                  actor(confirmed_user_fixture()),
                  user.slug,
@@ -338,7 +373,7 @@ defmodule Philomena.SourceChangesTest do
                 target: %Postgrex.INET{} = ip,
                 range: %Postgrex.INET{} = range,
                 source_changes: page
-              }} =
+              }, _} =
                SourceChanges.ip_source_changes(
                  actor(moderator_user_fixture()),
                  "203.0.113.5",
@@ -354,7 +389,7 @@ defmodule Philomena.SourceChangesTest do
       image = image_fixture()
       change = source_change_fixture(image, ip: "203.0.113.5")
 
-      assert {:ok, %SourceChangePage{range: range, source_changes: page}} =
+      assert {:ok, %SourceChangePage{range: range, source_changes: page}, _} =
                SourceChanges.ip_source_changes(
                  actor(admin_user_fixture()),
                  "203.0.113.5",
@@ -371,7 +406,7 @@ defmodule Philomena.SourceChangesTest do
       added = source_change_fixture(image, ip: "203.0.113.6", added: true)
       source_change_fixture(image, ip: "203.0.113.6", added: false)
 
-      assert {:ok, %SourceChangePage{source_changes: page}} =
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
                SourceChanges.ip_source_changes(
                  actor(moderator_user_fixture()),
                  "203.0.113.6",
@@ -412,7 +447,7 @@ defmodule Philomena.SourceChangesTest do
       older = source_change_fixture(image, fingerprint: "c123")
       newer = source_change_fixture(image, fingerprint: "c123")
 
-      assert {:ok, %SourceChangePage{target: "c123", source_changes: page}} =
+      assert {:ok, %SourceChangePage{target: "c123", source_changes: page}, _} =
                SourceChanges.fingerprint_source_changes(
                  actor(moderator_user_fixture()),
                  "c123",
@@ -424,7 +459,7 @@ defmodule Philomena.SourceChangesTest do
     end
 
     test "a valid fingerprint with no history returns an empty page" do
-      assert {:ok, %SourceChangePage{source_changes: page}} =
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
                SourceChanges.fingerprint_source_changes(
                  actor(admin_user_fixture()),
                  "c999",
@@ -439,7 +474,7 @@ defmodule Philomena.SourceChangesTest do
       image = image_fixture()
       change = source_change_fixture(image, fingerprint: "d63c4581f8cf58d")
 
-      assert {:ok, %SourceChangePage{target: "d63c4581f8cf58d", source_changes: page}} =
+      assert {:ok, %SourceChangePage{target: "d63c4581f8cf58d", source_changes: page}, _} =
                SourceChanges.fingerprint_source_changes(
                  actor(moderator_user_fixture()),
                  " D63C4581F8CF58D ",
@@ -464,7 +499,7 @@ defmodule Philomena.SourceChangesTest do
       source_change_fixture(image, fingerprint: "c456", added: true)
       removed = source_change_fixture(image, fingerprint: "c456", added: false)
 
-      assert {:ok, %SourceChangePage{source_changes: page}} =
+      assert {:ok, %SourceChangePage{source_changes: page}, _} =
                SourceChanges.fingerprint_source_changes(
                  actor(moderator_user_fixture()),
                  "c456",

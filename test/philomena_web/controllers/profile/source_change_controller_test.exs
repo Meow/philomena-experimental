@@ -77,5 +77,15 @@ defmodule PhilomenaWeb.Profile.SourceChangeControllerTest do
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
+
+    test "redirects with an error flash for an invalid filter", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+      user = confirmed_user_fixture()
+
+      conn = get(conn, ~p"/profiles/#{user}/source_changes?added=invalid")
+
+      assert redirected_to(conn) == "/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Invalid source change filter."
+    end
   end
 end

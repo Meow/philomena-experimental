@@ -37,5 +37,14 @@ defmodule PhilomenaWeb.Image.SourceChangeControllerTest do
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
+
+    test "redirects with an error flash for an invalid filter", %{conn: conn} do
+      image = image_fixture()
+
+      conn = get(conn, ~p"/images/#{image}/source_changes?added=invalid")
+
+      assert redirected_to(conn) == "/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Invalid source change filter."
+    end
   end
 end
