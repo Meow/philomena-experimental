@@ -7,12 +7,12 @@ defmodule PhilomenaWeb.DuplicateReport.AcceptReverseController do
 
   def create(conn, %{"duplicate_report_id" => id}) do
     case DuplicateReports.accept_reverse_duplicate_report(conn.assigns.actor, id) do
-      {:ok, _results} ->
+      {:ok, _duplicate_report} ->
         conn
         |> put_flash(:info, "Successfully accepted report in reverse.")
         |> redirect(to: ~p"/duplicate_reports")
 
-      {:error, reason} when reason == :report_failed or is_struct(reason, Ecto.Changeset) ->
+      {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Failed to accept report! Maybe someone else already accepted it.")
         |> redirect(to: ~p"/duplicate_reports")

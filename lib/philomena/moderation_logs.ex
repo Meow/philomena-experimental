@@ -75,8 +75,6 @@ defmodule Philomena.ModerationLogs do
           body :: String.t()
         ) ::
           Multi.t()
-  def put_log(multi, step, actor, type, subject_path, body_or_callback)
-
   def put_log(%Multi{} = multi, step, %Actor{user: %User{} = user}, type, subject_path, body)
       when is_binary(body) do
     Multi.insert(multi, step, log_changeset(user, type, subject_path, body))

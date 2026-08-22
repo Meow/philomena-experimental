@@ -315,10 +315,10 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(source, target)
       other = duplicate_report_fixture(target, source)
 
-      assert {:ok, results} =
+      assert {:ok, result} =
                DuplicateReports.accept_duplicate_report(actor(moderator), report.id)
 
-      assert results.duplicate_report.state == "accepted"
+      assert result.state == "accepted"
       assert Repo.get!(DuplicateReport, other.id).state == "rejected"
 
       source = Repo.get!(Image, source.id)
@@ -374,16 +374,16 @@ defmodule Philomena.DuplicateReportsTest do
       target = image_fixture()
       original = duplicate_report_fixture(source, target)
 
-      assert {:ok, results} =
+      assert {:ok, result} =
                DuplicateReports.accept_reverse_duplicate_report(
                  actor(moderator),
                  original.id
                )
 
       assert Repo.get!(DuplicateReport, original.id).state == "rejected"
-      assert results.duplicate_report.image_id == target.id
-      assert results.duplicate_report.duplicate_of_image_id == source.id
-      assert results.duplicate_report.state == "accepted"
+      assert result.image_id == target.id
+      assert result.duplicate_of_image_id == source.id
+      assert result.state == "accepted"
 
       target = Repo.get!(Image, target.id)
       assert target.hidden_from_users

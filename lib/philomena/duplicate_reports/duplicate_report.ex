@@ -28,7 +28,7 @@ defmodule Philomena.DuplicateReports.DuplicateReport do
   end
 
   @doc false
-  def creation_changeset(duplicate_report, attrs, user) do
+  def creation_changeset(duplicate_report, attrs, user \\ nil) do
     duplicate_report
     |> cast(attrs, [:reason])
     |> put_assoc(:user, user)
@@ -68,6 +68,13 @@ defmodule Philomena.DuplicateReports.DuplicateReport do
     |> validate_actionable()
     |> put_change(:modifier_id, user.id)
     |> put_change(:state, "rejected")
+  end
+
+  @doc false
+  def add_image_acceptance_error(duplicate_report) do
+    duplicate_report
+    |> change()
+    |> add_error(:image_id, "rejected the merge")
   end
 
   defp validate_actionable(changeset) do
