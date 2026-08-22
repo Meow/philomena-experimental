@@ -11,7 +11,7 @@ defmodule Philomena.Comments do
   alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Comments
-  alias Philomena.Comments.{Comment, CommentForm, CommentHistory, Query, Visibility}
+  alias Philomena.Comments.{Comment, CommentHistory, Query, Visibility}
   alias Philomena.Filters.Filter
   alias Philomena.Images
   alias Philomena.Images.Image
@@ -421,7 +421,7 @@ defmodule Philomena.Comments do
   ## Examples
 
       iex> load_comment_for_edit(actor, "1", "2")
-      {:ok, %CommentForm{}}
+      {:ok, %Ecto.Changeset{data: %Comment{}}}
 
       iex> load_comment_for_edit(banned_actor, "1", "2")
       {:error, :ban}
@@ -432,13 +432,13 @@ defmodule Philomena.Comments do
           image_id :: IntegerId.integer_id(),
           comment_id :: IntegerId.integer_id()
         ) ::
-          {:ok, CommentForm.t()} | {:error, request_error()}
+          {:ok, Ecto.Changeset.t()} | {:error, request_error()}
   def load_comment_for_edit(%Actor{} = actor, image_id, comment_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
          {:ok, comment} <- load_image_comment(actor, image, comment_id, :edit, @preloads) do
-      {:ok, %CommentForm{image: image, comment: comment, changeset: Comment.changeset(comment)}}
+      {:ok, Comment.changeset(comment)}
     end
   end
 
@@ -448,8 +448,8 @@ defmodule Philomena.Comments do
   Write access is checked before image authorization, forced-filter enforcement,
   and comment authorization. A successful transaction records the prior version
   Reporting, indexing, and the firehose broadcast run after commit. Validation
-  returns a `CommentForm` preserving the loaded comment. On success, the image
-  is returned for the caller to reuse.
+  returns the changeset preserving the loaded comment and image. On success,
+  the image is returned for the caller to reuse.
 
   ## Examples
 
@@ -457,7 +457,7 @@ defmodule Philomena.Comments do
       {:ok, {%Image{}, %Comment{}}}
 
       iex> update_comment(actor, image, "1", %{"body" => ""})
-      {:error, %CommentForm{}}
+      {:error, %Ecto.Changeset{data: %Comment{}}}
 
   """
   @spec update_comment(
@@ -466,7 +466,7 @@ defmodule Philomena.Comments do
           comment_id :: IntegerId.integer_id(),
           attrs :: map() | nil
         ) ::
-          {:ok, {Image.t(), Comment.t()}} | {:error, CommentForm.t() | request_error()}
+          {:ok, {Image.t(), Comment.t()}} | {:error, Ecto.Changeset.t() | request_error()}
   def update_comment(%Actor{} = actor, image_id, comment_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
@@ -494,7 +494,7 @@ defmodule Philomena.Comments do
           {:ok, {image, comment}}
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, %CommentForm{image: image, comment: comment, changeset: changeset}}
+          {:error, changeset}
       end
     end
   end

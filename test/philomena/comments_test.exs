@@ -26,7 +26,7 @@ defmodule Philomena.CommentsTest do
   alias Philomena.Comments
   alias Philomena.Filters.Filter
   alias Philomena.Repo
-  alias Philomena.Comments.{Comment, CommentForm, CommentHistory, CommentVersion}
+  alias Philomena.Comments.{Comment, CommentHistory, CommentVersion}
   alias Philomena.Images.Image
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Reports.Report
@@ -1126,14 +1126,14 @@ defmodule Philomena.CommentsTest do
       author = confirmed_user_fixture()
       comment = comment_fixture(image, author, %{"body" => "My comment"})
 
-      assert {:ok, %CommentForm{} = form} =
+      assert {:ok, %Ecto.Changeset{} = changeset} =
                Comments.load_comment_for_edit(actor(author), image.id, "#{comment.id}")
 
-      assert form.comment.id == comment.id
+      assert changeset.data.id == comment.id
 
       # The changeset is over the loaded comment, driving the edit form.
-      assert %Comment{} = form.changeset.data
-      assert form.changeset.data.id == comment.id
+      assert %Comment{} = changeset.data
+      assert changeset.data.id == comment.id
     end
 
     test "the edit form rejects an image matching the author's forced filter", %{image: image} do
@@ -1159,14 +1159,14 @@ defmodule Philomena.CommentsTest do
     test "a moderator loads the form", %{image: image} do
       comment = comment_fixture(image, confirmed_user_fixture())
 
-      assert {:ok, %CommentForm{} = form} =
+      assert {:ok, %Ecto.Changeset{} = changeset} =
                Comments.load_comment_for_edit(
                  actor(moderator_user_fixture()),
                  image.id,
                  "#{comment.id}"
                )
 
-      assert form.comment.id == comment.id
+      assert changeset.data.id == comment.id
     end
 
     test "an unknown comment id is not found", %{image: image} do
@@ -1278,11 +1278,10 @@ defmodule Philomena.CommentsTest do
       author = confirmed_user_fixture()
       comment = comment_fixture(image, author, %{"body" => "Original comment body"})
 
-      assert {:error, %CommentForm{} = form} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Comments.update_comment(actor(author), image.id, "#{comment.id}", %{"body" => ""})
 
-      assert form.comment.id == comment.id
-      assert %Ecto.Changeset{} = form.changeset
+      assert changeset.data.id == comment.id
       assert Repo.reload!(comment).body == "Original comment body"
     end
 

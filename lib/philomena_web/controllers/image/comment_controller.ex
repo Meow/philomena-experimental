@@ -73,9 +73,9 @@ defmodule PhilomenaWeb.Image.CommentController do
            Comments.load_comment_for_edit(conn.assigns.actor, image_id, comment_id) do
       render(conn, "edit.html",
         title: "Editing Comment",
-        image: form.image,
-        comment: form.comment,
-        changeset: form.changeset
+        image: form.data.image,
+        comment: form.data,
+        changeset: form
       )
     end
   end
@@ -92,11 +92,11 @@ defmodule PhilomenaWeb.Image.CommentController do
         |> put_flash(:info, "Comment updated successfully.")
         |> redirect(to: ~p"/images/#{image}" <> "#comment_#{comment.id}")
 
-      {:error, %Comments.CommentForm{} = form} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html",
-          image: form.image,
-          comment: form.comment,
-          changeset: form.changeset
+          image: changeset.data.image,
+          comment: changeset.data,
+          changeset: changeset
         )
 
       {:error, _} = error ->
