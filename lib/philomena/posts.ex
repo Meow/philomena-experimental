@@ -298,7 +298,7 @@ defmodule Philomena.Posts do
       |> put_reindex_post()
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_forum: forum, post: post}} ->
+        {:ok, %{locked_forum: forum, post: %Post{} = post}} ->
           RateLimiter.record_action(actor, :post_create, @post_create_window)
 
           # The firehose representation includes the topic author.
@@ -310,7 +310,7 @@ defmodule Philomena.Posts do
 
           {:ok, post}
 
-        {:error, :post, changeset, _changes} ->
+        {:error, :post, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
@@ -414,10 +414,10 @@ defmodule Philomena.Posts do
       |> put_reindex_post()
       |> Multi.transact()
       |> case do
-        {:ok, %{post: post}} ->
+        {:ok, %{post: %Post{} = post}} ->
           {:ok, post}
 
-        {:error, :post, changeset, _changes} ->
+        {:error, :post, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
@@ -489,10 +489,10 @@ defmodule Philomena.Posts do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{post: post}} ->
+        {:ok, %{post: %Post{} = post}} ->
           {:ok, post}
 
-        {:error, :post, changeset, _changes} ->
+        {:error, :post, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
@@ -555,10 +555,10 @@ defmodule Philomena.Posts do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{post: post}} ->
+        {:ok, %{post: %Post{} = post}} ->
           {:ok, post}
 
-        {:error, :post, changeset, _changes} ->
+        {:error, :post, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
@@ -634,10 +634,10 @@ defmodule Philomena.Posts do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{post: post}} ->
+        {:ok, %{post: %Post{} = post}} ->
           {:ok, post}
 
-        {:error, :post, changeset, _changes} ->
+        {:error, :post, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
@@ -764,10 +764,10 @@ defmodule Philomena.Posts do
       |> UserStatistics.put_increment(fn %{post: post} -> post.user_id end, :posts_count)
       |> Multi.transact()
       |> case do
-        {:ok, %{post: post}} ->
+        {:ok, %{post: %Post{} = post}} ->
           {:ok, post}
 
-        {:error, :post, changeset, _changes} ->
+        {:error, :post, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->

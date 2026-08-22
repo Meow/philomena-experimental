@@ -373,12 +373,12 @@ defmodule Philomena.Comments do
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment}} ->
+        {:ok, %{comment: %Comment{} = comment}} ->
           RateLimiter.record_action(actor, :comment_create, @comment_create_window)
           broadcast_comment("comment:create", comment)
           {:ok, comment}
 
-        {:error, :comment, changeset, _changes} ->
+        {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, {image, changeset}}
       end
     end
@@ -488,12 +488,12 @@ defmodule Philomena.Comments do
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment}} ->
+        {:ok, %{comment: %Comment{} = comment}} ->
           broadcast_comment("comment:update", comment)
 
           {:ok, {image, comment}}
 
-        {:error, :comment, changeset, _changes} ->
+        {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, %CommentForm{image: image, comment: comment, changeset: changeset}}
       end
     end
@@ -580,10 +580,10 @@ defmodule Philomena.Comments do
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment}} ->
+        {:ok, %{comment: %Comment{} = comment}} ->
           {:ok, comment}
 
-        {:error, :comment, changeset, _changes} ->
+        {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -617,10 +617,10 @@ defmodule Philomena.Comments do
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment}} ->
+        {:ok, %{comment: %Comment{} = comment}} ->
           {:ok, comment}
 
-        {:error, :comment, changeset, _changes} ->
+        {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -671,10 +671,10 @@ defmodule Philomena.Comments do
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment}} ->
+        {:ok, %{comment: %Comment{} = comment}} ->
           {:ok, comment}
 
-        {:error, :comment, changeset, _changes} ->
+        {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -716,10 +716,10 @@ defmodule Philomena.Comments do
       |> put_reindex_comment()
       |> Multi.transact()
       |> case do
-        {:ok, %{comment: comment}} ->
+        {:ok, %{comment: %Comment{} = comment}} ->
           {:ok, comment}
 
-        {:error, :comment, changeset, _changes} ->
+        {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

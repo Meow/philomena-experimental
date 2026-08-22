@@ -364,14 +364,14 @@ defmodule Philomena.Topics do
       |> Posts.put_reindex_posts_in_topic()
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_forum: forum, topic: topic}} ->
+        {:ok, %{locked_forum: forum, topic: %Topic{} = topic}} ->
           RateLimiter.record_action(actor, :topic_create, @topic_create_window)
 
           result = %{topic: topic, forum: forum, post: hd(topic.posts)}
 
           {:ok, broadcast_topic_creation(result)}
 
-        {:error, :topic, changeset, %{locked_forum: forum}} ->
+        {:error, :topic, %Ecto.Changeset{} = changeset, %{locked_forum: %Forum{} = forum}} ->
           {:error, forum, changeset}
 
         error ->
@@ -464,10 +464,11 @@ defmodule Philomena.Topics do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_forum: forum, topic: topic}} ->
+        {:ok, %{locked_forum: %Forum{} = forum, topic: %Topic{} = topic}} ->
           {:ok, {forum, topic}}
 
-        {:error, :topic, _changeset, %{locked_forum: forum, locked_topic: topic}} ->
+        {:error, :topic, _changeset,
+         %{locked_forum: %Forum{} = forum, locked_topic: %Topic{} = topic}} ->
           {:error, forum, topic}
 
         error ->
@@ -521,10 +522,11 @@ defmodule Philomena.Topics do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_forum: forum, topic: topic}} ->
+        {:ok, %{locked_forum: %Forum{} = forum, topic: %Topic{} = topic}} ->
           {:ok, {forum, topic}}
 
-        {:error, :topic, _changeset, %{locked_forum: forum, locked_topic: topic}} ->
+        {:error, :topic, _changeset,
+         %{locked_forum: %Forum{} = forum, locked_topic: %Topic{} = topic}} ->
           {:error, forum, topic}
 
         error ->
@@ -601,10 +603,11 @@ defmodule Philomena.Topics do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_target_forum: target_forum, topic: topic}} ->
+        {:ok, %{locked_target_forum: %Forum{} = target_forum, topic: %Topic{} = topic}} ->
           {:ok, {target_forum, topic}}
 
-        {:error, :topic, _changeset, %{locked_source_forum: source_forum, locked_topic: topic}} ->
+        {:error, :topic, _changeset,
+         %{locked_source_forum: %Forum{} = source_forum, locked_topic: %Topic{} = topic}} ->
           {:error, source_forum, topic}
 
         error ->

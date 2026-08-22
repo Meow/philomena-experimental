@@ -257,10 +257,10 @@ defmodule Philomena.Galleries do
       |> put_reindex_gallery()
       |> Multi.transact()
       |> case do
-        {:ok, %{gallery: gallery}} ->
+        {:ok, %{gallery: %Gallery{} = gallery}} ->
           {:ok, gallery}
 
-        {:error, :gallery, changeset, _changes} ->
+        {:error, :gallery, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -299,10 +299,10 @@ defmodule Philomena.Galleries do
       |> put_reindex_gallery()
       |> Multi.transact()
       |> case do
-        {:ok, %{gallery: gallery}} ->
+        {:ok, %{gallery: %Gallery{} = gallery}} ->
           {:ok, gallery}
 
-        {:error, :gallery, changeset, _changes} ->
+        {:error, :gallery, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -762,10 +762,10 @@ defmodule Philomena.Galleries do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{reorder_form: reorder_form}} ->
+        {:ok, %{reorder_form: %ReorderForm{} = reorder_form}} ->
           {:ok, reorder_form}
 
-        {:error, :reorder_form, changeset, _changes} ->
+        {:error, :reorder_form, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->

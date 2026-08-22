@@ -97,10 +97,10 @@ defmodule Philomena.Polls do
       |> Multi.update(:poll, fn %{locked_poll: poll} -> Poll.changeset(poll, attrs) end)
       |> Multi.transact()
       |> case do
-        {:ok, %{poll: poll}} ->
+        {:ok, %{poll: %Poll{} = poll}} ->
           {:ok, poll}
 
-        {:error, :poll, changeset, _changes} ->
+        {:error, :poll, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
