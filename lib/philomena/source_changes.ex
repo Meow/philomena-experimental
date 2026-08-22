@@ -55,6 +55,12 @@ defmodule Philomena.SourceChanges do
 
   This composition service is used after Images has authorized and
   updated the image, so it does not resolve or authorize a raw locator itself.
+
+  ## Examples
+
+      iex> count_for_image(image)
+      3
+
   """
   @spec count_for_image(Image.t()) :: non_neg_integer()
   def count_for_image(%Image{id: image_id}) do
@@ -115,7 +121,10 @@ defmodule Philomena.SourceChanges do
   ## Examples
 
       iex> user_source_changes(moderator, "artist", %{}, page: 1, page_size: 25)
-      {:ok, %SourceChangePage{target: %User{}, image_count: 3}}
+      {:ok, %SourceChangePage{target: %User{}, image_count: 3}, changeset}
+
+      iex> user_source_changes(moderator, "missing", %{}, page: 1, page_size: 25)
+      {:error, :not_found}
 
   """
   @spec user_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
@@ -166,6 +175,15 @@ defmodule Philomena.SourceChanges do
   actual masked range.
 
   The successful result includes the normalized query changeset.
+
+  ## Examples
+
+      iex> ip_source_changes(moderator, "203.0.113.5", %{}, page: 1, page_size: 25)
+      {:ok, %SourceChangePage{target: %Postgrex.INET{}, range: %Postgrex.INET{}}, changeset}
+
+      iex> ip_source_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
+      {:error, :not_found}
+
   """
   @spec ip_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
@@ -198,6 +216,15 @@ defmodule Philomena.SourceChanges do
   `params` may include an `added` filter (`true`/`"1"` for additions, `false`/
   `"0"` for removals). The successful result includes the normalized query
   changeset.
+
+  ## Examples
+
+      iex> fingerprint_source_changes(moderator, "c123", %{}, page: 1, page_size: 25)
+      {:ok, %SourceChangePage{target: "c123"}, changeset}
+
+      iex> fingerprint_source_changes(moderator, "invalid", %{}, page: 1, page_size: 25)
+      {:error, :not_found}
+
   """
   @spec fingerprint_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
