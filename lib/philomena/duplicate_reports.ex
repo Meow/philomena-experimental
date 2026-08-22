@@ -44,19 +44,6 @@ defmodule Philomena.DuplicateReports do
     end
   end
 
-  defp visible_reports_query(%Actor{} = actor) do
-    if authorize(actor, :show, %Image{hidden_from_users: true}) == :ok do
-      from report in DuplicateReport,
-        preload: ^@report_preloads
-    else
-      from report in DuplicateReport,
-        join: source in assoc(report, :image),
-        join: target in assoc(report, :duplicate_of_image),
-        where: source.hidden_from_users == false and target.hidden_from_users == false,
-        preload: ^@report_preloads
-    end
-  end
-
   defp visible_images_query(%Actor{} = actor) do
     if authorize(actor, :show, %Image{hidden_from_users: true}) == :ok do
       Image
@@ -103,7 +90,10 @@ defmodule Philomena.DuplicateReports do
   @doc """
   Loads the staff duplicate-report index described by `params`.
 
-  Access is authorized with `:index` before the state-filtered query runs.
+  Unlike regular reports, which are private to staff and submitting users,
+  duplicate reports are publicly-accessible information. Access to the index is
+  therefore permitted to any user.
+
   Blank or omitted states select open and claimed reports. Invalid state
   selections return an empty page with their rejected query changeset.
 
@@ -120,7 +110,7 @@ defmodule Philomena.DuplicateReports do
           {:ok, Scrivener.Page.t(DuplicateReport.t()), Ecto.Changeset.t()}
           | {:error, :unauthorized}
   def load_duplicate_report_index(%Actor{} = actor, params, pagination) do
-    with :ok <- authorize(actor, :index, DuplicateReport) do
+    with :ok <- authorize(actor, :search, DuplicateReport) do
       case QueryBuilder.build_query(params) do
         {:ok, query, query_form} ->
           query = preload(query, ^@report_preloads)
@@ -158,8 +148,8 @@ defmodule Philomena.DuplicateReports do
   Prepares the duplicate-report form for one visible image.
 
   The form uses the same write-access and `:create` prerequisites as submission.
-  Existing reports are included only when both of their images are visible to
-  the actor.
+  A list of all existing reports is provided for the actor to review before
+  submitting a new report.
 
   ## Examples
 
@@ -182,13 +172,13 @@ defmodule Philomena.DuplicateReports do
         |> DuplicateReport.creation_changeset(%{}, actor.user)
 
       reports =
-        actor
-        |> visible_reports_query()
+        DuplicateReport
         |> where(
           [report],
           report.image_id == ^image.id or report.duplicate_of_image_id == ^image.id
         )
         |> order_by(desc: :created_at, desc: :id)
+        |> preload(^@report_preloads)
         |> Repo.all()
 
       {:ok, {image, reports, changeset}}
@@ -467,14 +457,11 @@ defmodule Philomena.DuplicateReports do
       end)
       |> Multi.insert_or_update(:reverse_report, fn
         %{existing_reverse_report: nil, locked_duplicate_report: duplicate_report} ->
-          reason = Enum.join([duplicate_report.reason, "(Reverse accepted)"], "\n")
-
           %DuplicateReport{
             image_id: duplicate_report.duplicate_of_image_id,
             duplicate_of_image_id: duplicate_report.image_id
           }
-          |> DuplicateReport.creation_changeset(%{reason: reason}, user)
-          |> DuplicateReport.accept_changeset(user)
+          |> DuplicateReport.reverse_accept_changeset(user, duplicate_report.reason)
 
         %{existing_reverse_report: reverse_report} ->
           DuplicateReport.accept_changeset(reverse_report, user)

@@ -27,11 +27,9 @@ defmodule PhilomenaWeb.DuplicateReportControllerTest do
       _ = dr
     end
 
-    test "rejects anonymous users", %{conn: conn} do
+    test "permits anonymous users", %{conn: conn} do
       conn = get(conn, ~p"/duplicate_reports")
-
-      assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "can't access"
+      assert html_response(conn, 200)
     end
 
     test "the default view omits rejected/accepted reports", %{conn: conn} do

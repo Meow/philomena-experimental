@@ -30,7 +30,7 @@ defmodule Philomena.DuplicateReportsTest do
   end
 
   describe "load_duplicate_report_index/3" do
-    test "authorizes the staff index and applies the state selection" do
+    test "authorizes the index and applies the state selection" do
       open = duplicate_report_fixture(image_fixture(), image_fixture())
       rejected = duplicate_report_fixture(image_fixture(), image_fixture())
       moderator = actor(moderator_user_fixture())
@@ -53,8 +53,8 @@ defmodule Philomena.DuplicateReportsTest do
       assert Enum.map(page.entries, & &1.id) == [rejected.id]
       assert changeset.valid?
 
-      assert DuplicateReports.load_duplicate_report_index(actor(), %{}, @pagination) ==
-               {:error, :unauthorized}
+      assert {:ok, _page, _changeset} =
+               DuplicateReports.load_duplicate_report_index(actor(), %{}, @pagination)
 
       assistant = %{
         assistant_user_fixture()
@@ -139,7 +139,7 @@ defmodule Philomena.DuplicateReportsTest do
   end
 
   describe "new_duplicate_report/2" do
-    test "returns the visible image, visible reports, and creation changeset" do
+    test "returns the image, all existing reports, and creation changeset" do
       image = image_fixture()
       visible_target = image_fixture()
       hidden_target = image_fixture()
@@ -151,8 +151,8 @@ defmodule Philomena.DuplicateReportsTest do
                DuplicateReports.new_duplicate_report(actor(), image.id)
 
       assert loaded.id == image.id
-      assert Enum.map(reports, & &1.id) == [visible_report.id]
-      refute hidden_report.id in Enum.map(reports, & &1.id)
+      assert visible_report.id in Enum.map(reports, & &1.id)
+      assert hidden_report.id in Enum.map(reports, & &1.id)
       assert changeset.data.image.id == image.id
     end
 
@@ -396,6 +396,24 @@ defmodule Philomena.DuplicateReportsTest do
 
       assert log.body ==
                "Reverse-accepted duplicate report, merged #{target.id} into #{source.id}"
+    end
+
+    test "truncates a long reason before appending the reverse-accepted suffix" do
+      moderator = moderator_user_fixture()
+      source = image_fixture()
+      target = image_fixture()
+      reason = String.duplicate("x", 250)
+      original = duplicate_report_fixture(source, target, nil, %{"reason" => reason})
+
+      assert {:ok, reverse_report} =
+               DuplicateReports.accept_reverse_duplicate_report(
+                 actor(moderator),
+                 original.id
+               )
+
+      assert byte_size(reverse_report.reason) == 250
+      assert String.ends_with?(reverse_report.reason, "\n(Reverse accepted)")
+      assert String.starts_with?(reverse_report.reason, String.duplicate("x", 231))
     end
   end
 

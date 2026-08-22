@@ -45,6 +45,16 @@ defmodule Philomena.DuplicateReports.DuplicateReport do
   end
 
   @doc false
+  def reverse_accept_changeset(duplicate_report, user, reason) do
+    suffix = "\n(Reverse accepted)"
+    reason = String.byte_slice(reason, 0, 250 - byte_size(suffix))
+
+    duplicate_report
+    |> creation_changeset(%{reason: reason <> suffix}, user)
+    |> accept_changeset(user)
+  end
+
+  @doc false
   def claim_changeset(duplicate_report, user) do
     change(duplicate_report)
     |> validate_state("open", "must be open")
