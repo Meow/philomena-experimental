@@ -38,9 +38,6 @@ defmodule Philomena.Comments do
   @image_preloads [:sources, tags: :aliases]
   @preloads [:deleted_by, image: @image_preloads, user: [awards: :badge]]
 
-  @typedoc "A normalized request-facing failure."
-  @type request_error :: :ban | :unauthorized | :not_found | :forced_filter
-
   defp load_image_comment(%Actor{} = actor, %Image{} = image, comment_id, action, preloads) do
     Comment
     |> where(image_id: ^image.id)
@@ -461,7 +458,7 @@ defmodule Philomena.Comments do
           image_id :: IntegerId.integer_id(),
           comment_id :: IntegerId.integer_id()
         ) ::
-          {:ok, Ecto.Changeset.t()} | {:error, request_error()}
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found | :forced_filter}
   def load_comment_for_edit(%Actor{} = actor, image_id, comment_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
@@ -495,7 +492,9 @@ defmodule Philomena.Comments do
           comment_id :: IntegerId.integer_id(),
           attrs :: map() | nil
         ) ::
-          {:ok, {Image.t(), Comment.t()}} | {:error, Ecto.Changeset.t() | request_error()}
+          {:ok, {Image.t(), Comment.t()}}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found | :forced_filter}
   def update_comment(%Actor{} = actor, image_id, comment_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
@@ -593,9 +592,12 @@ defmodule Philomena.Comments do
 
   """
   @spec hide_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id(), map()) ::
-          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+          {:ok, Comment.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found}
   def hide_comment(%Actor{user: user} = actor, image_id, comment_id, params) do
-    with {:ok, image} <- load_image(actor, image_id, :show),
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image(actor, image_id, :show),
          {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @preloads) do
       changeset = Comment.hide_changeset(comment, params, user)
       reason = Ecto.Changeset.get_field(changeset, :deletion_reason)
@@ -636,9 +638,12 @@ defmodule Philomena.Comments do
 
   """
   @spec unhide_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+          {:ok, Comment.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found}
   def unhide_comment(%Actor{} = actor, image_id, comment_id) do
-    with {:ok, image} <- load_image(actor, image_id, :show),
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image(actor, image_id, :show),
          {:ok, comment} <- load_image_comment(actor, image, comment_id, :hide, @preloads) do
       changeset = Comment.unhide_changeset(comment)
 
@@ -680,9 +685,12 @@ defmodule Philomena.Comments do
 
   """
   @spec destroy_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+          {:ok, Comment.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found}
   def destroy_comment(%Actor{} = actor, image_id, comment_id) do
-    with {:ok, image} <- load_image(actor, image_id, :show),
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image(actor, image_id, :show),
          {:ok, comment} <- load_image_comment(actor, image, comment_id, :delete, @preloads) do
       comment_query = from(c in Comment, where: c.id == ^comment.id)
       image_query = from(i in Image, where: i.id == ^comment.image_id)
@@ -737,9 +745,12 @@ defmodule Philomena.Comments do
 
   """
   @spec approve_comment(Actor.t(), IntegerId.integer_id(), IntegerId.integer_id()) ::
-          {:ok, Comment.t()} | {:error, request_error() | Ecto.Changeset.t()}
+          {:ok, Comment.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found}
   def approve_comment(%Actor{user: user} = actor, image_id, comment_id) do
-    with {:ok, image} <- load_image(actor, image_id, :show),
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image(actor, image_id, :show),
          {:ok, comment} <- load_image_comment(actor, image, comment_id, :approve, @preloads) do
       comment_query = from(c in Comment, where: c.id == ^comment.id)
 
