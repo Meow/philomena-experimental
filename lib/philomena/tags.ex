@@ -8,6 +8,7 @@ defmodule Philomena.Tags do
   alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Attribution.Actor
+  alias Philomena.Loader
 
   alias PhilomenaQuery.Search
   alias Philomena.IndexWorker
@@ -178,7 +179,7 @@ defmodule Philomena.Tags do
 
     Search.delete_document(tag.id, Tag)
 
-    TagChanges.delete_empty_tag_changes()
+    TagChanges.cleanup_empty_for_tag_deletion()
 
     Image
     |> where([i], i.id in ^image_ids)
@@ -505,6 +506,33 @@ defmodule Philomena.Tags do
       tag -> {:ok, tag}
     end
   end
+
+  @doc """
+  Loads the visible canonical tag named by `slug` for an actor-scoped
+  cross-context read.
+
+  Aliases resolve to their target. Missing tags are always not found. A real
+  tag the actor may not show is unauthorized.
+
+  ## Examples
+
+      iex> load_visible_tag(actor, "safe")
+      {:ok, %Tag{}}
+
+      iex> load_visible_tag(actor, "missing")
+      {:error, :not_found}
+  """
+  @spec load_visible_tag(Actor.t(), String.t()) ::
+          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+  def load_visible_tag(%Actor{} = actor, slug) when is_binary(slug) do
+    with {:ok, tag} <- Tag |> where(slug: ^slug) |> preload(:aliased_tag) |> Loader.one(),
+         tag = tag.aliased_tag || tag,
+         :ok <- authorize(actor, :show, tag) do
+      {:ok, tag}
+    end
+  end
+
+  def load_visible_tag(%Actor{}, _slug), do: {:error, :not_found}
 
   @doc """
   Searches tags with the query string `query_string` and `pagination`, sorted

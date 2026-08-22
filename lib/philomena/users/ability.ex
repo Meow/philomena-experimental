@@ -245,6 +245,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
     do: true
 
   # Revert tag changes
+  def can?(%User{role: "moderator"}, :index, TagChange), do: true
   def can?(%User{role: "moderator"}, :revert, TagChange), do: true
   def can?(%User{role: "moderator"}, :delete, %TagChange{}), do: true
 
@@ -579,6 +580,8 @@ defimpl Canada.Can, for: Philomena.Users.User do
   #
   # Regular users can...
 
+  def can?(%User{}, :index, TagChange), do: true
+
   # View their own reports
   def can?(%User{}, :index_own, Report), do: true
   #
@@ -763,12 +766,15 @@ defimpl Canada.Can, for: Atom do
   alias Philomena.Posts.Post
   alias Philomena.Rules.Rule
   alias Philomena.StaticPages.StaticPage
+  alias Philomena.TagChanges.TagChange
   alias Philomena.Tags.Tag
   alias Philomena.Topics.Topic
   alias Philomena.Users.User
 
   #
   # Anonymous / non-logged-in users can...
+
+  def can?(_user, :index, TagChange), do: true
   #
 
   # View the assembled homepage

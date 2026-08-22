@@ -814,18 +814,7 @@ defmodule Philomena.Images do
     |> Multi.run(:check_limits, fn _repo, %{image: {image, _added, _removed}} ->
       check_tag_change_limits_before_commit(image, actor)
     end)
-    |> Multi.run(:tag_changes, fn
-      _repo, %{image: {_image, [], []}} ->
-        {:ok, {0, 0}}
-
-      _repo, %{image: {image, added_tags, removed_tags}} ->
-        TagChanges.create_tag_change(
-          image,
-          actor,
-          added_tags,
-          removed_tags
-        )
-    end)
+    |> TagChanges.put_tag_change(actor)
     |> Multi.run(:added_tag_count, fn
       _repo, %{image: {%{hidden_from_users: true}, _added, _removed}} ->
         {:ok, 0}
@@ -2442,7 +2431,7 @@ defmodule Philomena.Images do
 
       RateLimiter.record_action(actor, :tag_update, @tag_update_window)
 
-      {tag_change_count, tag_change_tag_count} = TagChanges.count_tag_changes(:image_id, image.id)
+      {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
 
       {:ok,
        %{
@@ -2945,7 +2934,7 @@ defmodule Philomena.Images do
         reindex_images(image_ids)
         Comments.reindex_comments_on_images(image_ids)
         Tags.reindex_tags(Enum.flat_map(changes, &(&1.added_tags ++ &1.removed_tags)))
-        TagChanges.reindex_tag_changes_on_images(image_ids)
+        TagChanges.reindex_for_images(image_ids)
 
         result
 

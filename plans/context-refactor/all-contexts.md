@@ -281,6 +281,14 @@ Wave 4 is underway.
   canonical target, page, and optional mask/count metadata. Missing resources
   are actor-independent, hidden images remain forbidden where appropriate, and
   user counts share the rows' filtered query.
+- TagChanges is complete. Its former generic loader is split into global and
+  independently resolved image, tag, user, IP, and fingerprint history APIs
+  returning one typed page shape. Query-form and route-resource filters compose,
+  sensitive fields use the shared identity permission, and search visibility
+  excludes hidden-image changes for ordinary viewers. Creation and deletion now
+  compose database work and audit logs transactionally with indexing after
+  commit; empty-row cleanup returns exact IDs, and worker/reindex services have
+  narrow documented boundaries.
 
 ### Wave 0: characterize and establish the contract
 

@@ -334,6 +334,37 @@ defmodule Philomena.Users do
 
   @doc group: "Public reads"
   @doc """
+  Loads an active visible profile by case-insensitive display name.
+
+  TagChanges uses this compatibility locator because its historical
+  `resource_id` links carry display names rather than profile slugs. Missing,
+  malformed, and deactivated profiles are always not found.
+
+  ## Examples
+
+      iex> load_profile_by_name(actor, "Somebody")
+      {:ok, %User{}}
+
+      iex> load_profile_by_name(actor, "missing")
+      {:error, :not_found}
+  """
+  @spec load_profile_by_name(Actor.t(), term()) ::
+          {:ok, User.t()} | {:error, :unauthorized | :not_found}
+  def load_profile_by_name(%Actor{} = actor, name) when is_binary(name) do
+    normalized_name = String.downcase(name)
+
+    User
+    |> where(
+      [user],
+      fragment("lower(?)", user.name) == ^normalized_name and is_nil(user.deleted_at)
+    )
+    |> Loader.one_and_authorize(actor, :show)
+  end
+
+  def load_profile_by_name(%Actor{}, _name), do: {:error, :not_found}
+
+  @doc group: "Public reads"
+  @doc """
   Loads a visible profile by slug as a report target on behalf of `actor`.
 
   Deactivated and missing profiles are always not-found.

@@ -18,6 +18,7 @@ defmodule Philomena.TagChangesTest do
 
   import Philomena.AttributionFixtures
   import Philomena.ImagesFixtures
+  import Philomena.TagsFixtures
   import Philomena.UsersFixtures
 
   import Ecto.Query
@@ -27,8 +28,14 @@ defmodule Philomena.TagChangesTest do
   alias Philomena.ModerationLogs.Paths
   alias Philomena.Repo
   alias Philomena.TagChanges
+  alias Philomena.TagChanges.QueryForm
   alias Philomena.TagChanges.TagChange
+  alias Philomena.TagChanges.TagChangePage
+  alias Philomena.Tags.Tag
   alias PhilomenaQuery.Search
+  alias PhilomenaQuery.SearchHelpers
+
+  @pagination %{page_number: 1, page_size: 25}
 
   setup do
     Search.clear_index!(TagChange)
@@ -63,6 +70,251 @@ defmodule Philomena.TagChangesTest do
     Repo.one!(ModerationLog)
   end
 
+  defp reindex_tag_changes! do
+    SearchHelpers.reindex_all!(TagChange)
+  end
+
+  describe "actor-scoped history reads" do
+    test "the global listing returns a typed page and normalized query form" do
+      {_image, tag_change} = tag_change!(confirmed_user_fixture())
+      reindex_tag_changes!()
+
+      assert {:ok,
+              %TagChangePage{
+                resource_type: :all,
+                target: nil,
+                tag_changes: page
+              }, %Ecto.Changeset{data: %QueryForm{sf: :tag_count, sd: :asc}}} =
+               TagChanges.list_tag_changes(
+                 actor(),
+                 %{"sf" => "tag_count", "sd" => "asc"},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [tag_change.id]
+    end
+
+    test "invalid query and sort input return rejected changesets" do
+      assert {:error, %Ecto.Changeset{valid?: false} = changeset} =
+               TagChanges.list_tag_changes(actor(), %{"sf" => "unknown"}, @pagination)
+
+      assert "is invalid" in errors_on(changeset).sf
+
+      assert {:error, %Ecto.Changeset{valid?: false} = changeset} =
+               TagChanges.list_tag_changes(actor(), %{"tcq" => "("}, @pagination)
+
+      assert errors_on(changeset).tcq != []
+    end
+
+    test "resource APIs resolve image, tag, and user targets independently" do
+      user = confirmed_user_fixture()
+      {image, tag_change} = tag_change!(user)
+      tag = Repo.get_by!(Tag, name: "added test tag")
+      reindex_tag_changes!()
+
+      assert {:ok, %TagChangePage{resource_type: :image, target: loaded_image, tag_changes: page},
+              _} =
+               TagChanges.image_tag_changes(actor(), image.id, %{}, @pagination)
+
+      assert loaded_image.id == image.id
+      assert Enum.map(page.entries, & &1.id) == [tag_change.id]
+
+      assert {:ok, %TagChangePage{resource_type: :tag, target: loaded_tag, tag_changes: page}, _} =
+               TagChanges.tag_tag_changes(actor(), String.upcase(tag.name), %{}, @pagination)
+
+      assert loaded_tag.id == tag.id
+      assert Enum.map(page.entries, & &1.id) == [tag_change.id]
+
+      assert {:ok, %TagChangePage{resource_type: :user, target: loaded_user, tag_changes: page},
+              _} =
+               TagChanges.user_tag_changes(actor(), String.upcase(user.name), %{}, @pagination)
+
+      assert loaded_user.id == user.id
+      assert Enum.map(page.entries, & &1.id) == [tag_change.id]
+    end
+
+    test "the tag resource resolves aliases to their canonical target" do
+      {_image, tag_change} = tag_change!(confirmed_user_fixture())
+      canonical = Repo.get_by!(Tag, name: "added test tag")
+
+      alias_tag =
+        tag_fixture(name: "former added test tag")
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      reindex_tag_changes!()
+
+      assert {:ok,
+              %TagChangePage{
+                resource_type: :tag,
+                target: loaded_tag,
+                tag_changes: page
+              }, _changeset} =
+               TagChanges.tag_tag_changes(actor(), alias_tag.name, %{}, @pagination)
+
+      assert loaded_tag.id == canonical.id
+      assert Enum.map(page.entries, & &1.id) == [tag_change.id]
+    end
+
+    test "resource filters compose with tcq rather than replacing it" do
+      {image, tag_change} = tag_change!(confirmed_user_fixture())
+      other = image_fixture()
+      reindex_tag_changes!()
+
+      assert {:ok, %TagChangePage{tag_changes: page}, _} =
+               TagChanges.image_tag_changes(
+                 actor(),
+                 image.id,
+                 %{"tcq" => "image_id:#{other.id}"},
+                 @pagination
+               )
+
+      assert page.entries == []
+      assert page.total_entries == 0
+
+      assert {:ok, %TagChangePage{tag_changes: page}, _} =
+               TagChanges.image_tag_changes(
+                 actor(),
+                 image.id,
+                 %{"tcq" => "id:#{tag_change.id}"},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [tag_change.id]
+    end
+
+    test "missing resource targets are not found before search" do
+      assert TagChanges.image_tag_changes(actor(), "not-an-id", %{}, @pagination) ==
+               {:error, :not_found}
+
+      assert TagChanges.image_tag_changes(actor(), "2147483647", %{}, @pagination) ==
+               {:error, :not_found}
+
+      assert TagChanges.tag_tag_changes(actor(), "no-such-tag", %{}, @pagination) ==
+               {:error, :not_found}
+
+      assert TagChanges.user_tag_changes(actor(), "no-such-user", %{}, @pagination) ==
+               {:error, :not_found}
+    end
+
+    test "hidden image changes follow image visibility in global and image listings" do
+      {image, tag_change} = tag_change!(confirmed_user_fixture())
+
+      image
+      |> Ecto.Changeset.change(hidden_from_users: true)
+      |> Repo.update!()
+
+      reindex_tag_changes!()
+
+      assert {:ok, %TagChangePage{tag_changes: page}, _} =
+               TagChanges.list_tag_changes(actor(), %{}, @pagination)
+
+      assert page.entries == []
+
+      assert TagChanges.image_tag_changes(actor(), image.id, %{}, @pagination) ==
+               {:error, :unauthorized}
+
+      moderator = actor(moderator_user_fixture())
+
+      assert {:ok, %TagChangePage{tag_changes: global_page}, _} =
+               TagChanges.list_tag_changes(moderator, %{}, @pagination)
+
+      assert Enum.map(global_page.entries, & &1.id) == [tag_change.id]
+
+      assert {:ok, %TagChangePage{tag_changes: image_page}, _} =
+               TagChanges.image_tag_changes(moderator, image.id, %{}, @pagination)
+
+      assert Enum.map(image_page.entries, & &1.id) == [tag_change.id]
+    end
+
+    test "IP and fingerprint locators validate before their sensitive gate" do
+      moderator = actor(moderator_user_fixture())
+      {_image, tag_change} = tag_change!(confirmed_user_fixture())
+      reindex_tag_changes!()
+
+      assert TagChanges.ip_tag_changes(actor(), "bad-ip", %{}, @pagination) ==
+               {:error, :not_found}
+
+      assert TagChanges.ip_tag_changes(actor(), "203.0.113.1", %{}, @pagination) ==
+               {:error, :unauthorized}
+
+      assert {:ok, %TagChangePage{resource_type: :ip, tag_changes: ip_page}, _} =
+               TagChanges.ip_tag_changes(moderator, "203.0.113.1", %{}, @pagination)
+
+      assert Enum.map(ip_page.entries, & &1.id) == [tag_change.id]
+
+      assert TagChanges.fingerprint_tag_changes(actor(), "invalid", %{}, @pagination) ==
+               {:error, :not_found}
+
+      assert TagChanges.fingerprint_tag_changes(
+               actor(),
+               "d015c342859dde3",
+               %{},
+               @pagination
+             ) == {:error, :unauthorized}
+
+      assert {:ok,
+              %TagChangePage{
+                resource_type: :fingerprint,
+                target: "d015c342859dde3",
+                tag_changes: fingerprint_page
+              }, _} =
+               TagChanges.fingerprint_tag_changes(
+                 moderator,
+                 " D015C342859DDE3 ",
+                 %{},
+                 @pagination
+               )
+
+      assert Enum.map(fingerprint_page.entries, & &1.id) == [tag_change.id]
+    end
+
+    test "sensitive tcq fields are authorized without direct role matching" do
+      {_image, tag_change} = tag_change!(confirmed_user_fixture())
+      reindex_tag_changes!()
+
+      assert {:ok, %TagChangePage{tag_changes: ordinary_page},
+              %Ecto.Changeset{
+                data: %QueryForm{compiled_query: %{term: %{"tag" => "ip:203.0.113.1"}}}
+              }} =
+               TagChanges.list_tag_changes(
+                 actor(confirmed_user_fixture()),
+                 %{"tcq" => "ip:203.0.113.1"},
+                 @pagination
+               )
+
+      assert ordinary_page.entries == []
+
+      assert {:ok, %TagChangePage{tag_changes: page},
+              %Ecto.Changeset{
+                data: %QueryForm{compiled_query: %{term: %{"ip" => "203.0.113.1"}}}
+              }} =
+               TagChanges.list_tag_changes(
+                 actor(moderator_user_fixture()),
+                 %{"tcq" => "ip:203.0.113.1"},
+                 @pagination
+               )
+
+      assert Enum.map(page.entries, & &1.id) == [tag_change.id]
+    end
+
+    test "pagination totals and deterministic ordering match the visible result set" do
+      user = confirmed_user_fixture()
+      {_image, older} = tag_change!(user)
+      {_image, middle} = tag_change!(user)
+      {_image, newer} = tag_change!(user)
+      reindex_tag_changes!()
+
+      assert {:ok, %TagChangePage{tag_changes: page}, _} =
+               TagChanges.list_tag_changes(actor(), %{}, %{page_number: 1, page_size: 2})
+
+      assert Enum.map(page.entries, & &1.id) == [newer.id, middle.id]
+      assert page.total_entries == 3
+      assert page.total_pages == 2
+      refute older.id in Enum.map(page.entries, & &1.id)
+    end
+  end
+
   describe "delete_tag_change/2" do
     test "denies an anonymous actor" do
       {_image, tc} = tag_change!(confirmed_user_fixture())
@@ -84,9 +336,17 @@ defmodule Philomena.TagChangesTest do
       author = confirmed_user_fixture()
       moderator = moderator_user_fixture()
       {image, tc} = tag_change!(author)
+      reindex_tag_changes!()
 
       assert {:ok, %TagChange{}} = TagChanges.delete_tag_change(actor(moderator), "#{tc.id}")
       refute Repo.get(TagChange, tc.id)
+
+      Search.refresh_index!(TagChange)
+
+      assert {:ok, %TagChangePage{tag_changes: page}, _changeset} =
+               TagChanges.list_tag_changes(actor(moderator), %{}, @pagination)
+
+      assert page.entries == []
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -104,11 +364,23 @@ defmodule Philomena.TagChangesTest do
                TagChanges.delete_tag_change(actor(admin_user_fixture()), tc.id)
     end
 
-    test "a well-formed id naming no row is unauthorized, not not-found" do
-      # The former load-then-authorize plug authorized the nil load result,
-      # which no :delete rule permits; the context preserves that shape.
+    test "a moderator deletes an anonymous change without crashing" do
+      moderator = moderator_user_fixture()
+      {image, tag_change} = tag_change!(nil)
+
+      assert {:ok, %TagChange{}} =
+               TagChanges.delete_tag_change(actor(moderator), tag_change.id)
+
+      refute Repo.get(TagChange, tag_change.id)
+
+      log = only_moderation_log!()
+      assert log.subject_path == Paths.image_path(image)
+      assert log.body =~ "Deleted tag change by an anonymous user"
+    end
+
+    test "a well-formed id naming no row is not found" do
       assert TagChanges.delete_tag_change(actor(moderator_user_fixture()), "123456789") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an id that cannot name a row is not found" do
@@ -165,8 +437,28 @@ defmodule Philomena.TagChangesTest do
       assert only_moderation_log!().body == "Reverted 0 tag changes"
     end
 
+    test "reverting an already-reverted change is safe" do
+      moderator = actor(moderator_user_fixture())
+      {image, tag_change} = tag_change!(confirmed_user_fixture())
+
+      assert {:ok, [%TagChange{}]} = TagChanges.revert_tag_changes(moderator, [tag_change.id])
+      assert {:ok, [%TagChange{}]} = TagChanges.revert_tag_changes(moderator, [tag_change.id])
+
+      names = image_tag_names(image)
+      refute "added test tag" in names
+      refute "other added tag" in names
+      assert "safe" in names
+    end
+
     test "a non-list ids value from a moderator is invalid" do
       assert TagChanges.revert_tag_changes(actor(moderator_user_fixture()), "42") ==
+               {:error, :invalid_ids}
+
+      assert Repo.aggregate(ModerationLog, :count) == 0
+    end
+
+    test "a list containing a malformed id is invalid before reversion" do
+      assert TagChanges.revert_tag_changes(actor(moderator_user_fixture()), ["not-an-id"]) ==
                {:error, :invalid_ids}
 
       assert Repo.aggregate(ModerationLog, :count) == 0
@@ -192,7 +484,7 @@ defmodule Philomena.TagChangesTest do
       target = confirmed_user_fixture()
 
       assert TagChanges.full_revert(actor(moderator), %{"user_id" => "#{target.id}"}) ==
-               {:ok, %{user_id: "#{target.id}"}}
+               {:ok, %{user_id: target.id}}
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -223,14 +515,14 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "a moderator enqueues a reversion for a fingerprint" do
-      assert {:ok, %{fingerprint: "c1774e9294a"}} =
+      assert {:ok, %{fingerprint: "c1774"}} =
                TagChanges.full_revert(actor(moderator_user_fixture()), %{
-                 "fingerprint" => "c1774e9294a"
+                 "fingerprint" => "c1774"
                })
 
       log = only_moderation_log!()
-      assert log.subject_path == "/fingerprint_profiles/c1774e9294a"
-      assert log.body == "Reverted all tag changes for fingerprint c1774e9294a"
+      assert log.subject_path == "/fingerprint_profiles/c1774"
+      assert log.body == "Reverted all tag changes for fingerprint c1774"
     end
 
     test "params naming no target are invalid" do
@@ -238,6 +530,42 @@ defmodule Philomena.TagChangesTest do
                {:error, :invalid_target}
 
       assert Repo.aggregate(ModerationLog, :count) == 0
+    end
+
+    test "multiple or malformed targets are invalid" do
+      moderator = actor(moderator_user_fixture())
+
+      assert TagChanges.full_revert(moderator, %{
+               "user_id" => "1",
+               "ip" => "203.0.113.1"
+             }) == {:error, :invalid_target}
+
+      assert TagChanges.full_revert(moderator, %{"user_id" => "not-an-id"}) ==
+               {:error, :invalid_target}
+
+      assert TagChanges.full_revert(moderator, %{"fingerprint" => "invalid"}) ==
+               {:error, :invalid_target}
+
+      assert Repo.aggregate(ModerationLog, :count) == 0
+    end
+  end
+
+  describe "cleanup_empty_for_tag_deletion/0" do
+    test "deletes only empty changes and returns their ids" do
+      {_image, retained} = tag_change!(confirmed_user_fixture())
+      image = image_fixture()
+      attribution = actor()
+
+      empty =
+        Repo.insert!(%TagChange{
+          image_id: image.id,
+          ip: attribution.ip,
+          fingerprint: attribution.fingerprint
+        })
+
+      assert TagChanges.cleanup_empty_for_tag_deletion() == {1, [empty.id]}
+      refute Repo.get(TagChange, empty.id)
+      assert Repo.get(TagChange, retained.id)
     end
   end
 end

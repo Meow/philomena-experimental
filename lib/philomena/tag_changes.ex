@@ -1,101 +1,140 @@
 defmodule Philomena.TagChanges do
   @moduledoc """
-  The TagChanges context.
+  Searchable image-tag edit history and its moderation workflows.
+
+  Controller-facing reads resolve image, tag, user, IP, and fingerprint targets
+  independently before searching. Tag-change creation composes into the owning
+  Images transaction, while reindexing and batch reversion remain explicitly
+  named worker services.
   """
 
   import Ecto.Query, warn: false
   import Philomena.Authorization, only: [authorize: 3]
 
-  alias Philomena.Repo
-  alias PhilomenaQuery.Parse.IpParser
-  alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
+  alias Philomena.Images
+  alias Philomena.Images.Image
+  alias Philomena.IndexWorker
   alias Philomena.IntegerId
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
+  alias Philomena.Multi
+  alias Philomena.Repo
+  alias Philomena.Slug
   alias Philomena.TagChangeRevertWorker
   alias Philomena.TagChanges
-  alias Philomena.TagChanges.TagChange
-  alias Philomena.TagChanges.Query
+  alias Philomena.TagChanges.QueryBuilder
+  alias Philomena.TagChanges.QueryForm
   alias Philomena.TagChanges.SearchIndex
-  alias Philomena.IndexWorker
-  alias Philomena.Images
-  alias Philomena.Images.Image
+  alias Philomena.TagChanges.TagChange
+  alias Philomena.TagChanges.TagChangePage
+  alias Philomena.Tags
   alias Philomena.Tags.Tag
+  alias Philomena.UserFingerprints
+  alias Philomena.Users
   alias Philomena.Users.User
+  alias PhilomenaQuery.Batch
+  alias PhilomenaQuery.Search
 
-  @doc """
-  Reverts the tag changes named by `ids` on behalf of `actor`.
+  @history_preloads [:user, image: [:user, :sources, tags: :aliases], tags: [:tag]]
 
-  Authorization (`:revert` on `TagChange`) happens here; on success a
-  moderation log is written attributing the reversion to the actor's user.
-  Changes on images hidden from users are silently skipped, and an empty or
-  fully-skipped list is a successful reversion of zero changes.
-
-  Returns `{:ok, reverted_tag_changes}`, `{:error, :unauthorized}`, or
-  `{:error, :invalid_ids}` when `ids` is not a list. Failures inside the
-  batch update surface as their own `{:error, _}` shapes.
-  """
-  @spec revert_tag_changes(Actor.t(), any()) ::
-          {:ok, [TagChange.t()]} | {:error, any()}
-  def revert_tag_changes(%Actor{} = actor, ids) do
-    with :ok <- authorize(actor, :revert, TagChange),
-         {:ok, tag_changes} <- mass_revert_for(actor, ids) do
-      ModerationLogs.create_moderation_log(
-        actor.user,
-        "TagChange.Revert:create",
-        Paths.profile_path(actor.user),
-        "Reverted #{length(tag_changes)} tag changes"
-      )
-
-      {:ok, tag_changes}
+  defp cast_ip(ip) do
+    case EctoNetwork.INET.cast(ip) do
+      {:ok, ip} -> {:ok, ip}
+      _error -> {:error, :not_found}
     end
   end
 
-  defp mass_revert_for(actor, ids) when is_list(ids) do
-    mass_revert(ids, %{
-      ip: actor.ip,
-      fingerprint: actor.fingerprint,
-      user_id: actor.user.id
-    })
+  defp cast_fingerprint(fingerprint) when is_binary(fingerprint) do
+    fingerprint = fingerprint |> String.trim() |> String.downcase()
+
+    if UserFingerprints.valid_format?(fingerprint) do
+      {:ok, fingerprint}
+    else
+      {:error, :not_found}
+    end
   end
 
-  defp mass_revert_for(_actor, _ids), do: {:error, :invalid_ids}
+  defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
 
-  # Accepts a list of TagChanges.TagChange IDs.
-  #
-  # This is the reversion engine shared by `revert_tag_changes/2` and
-  # `Philomena.TagChangeRevertWorker`; it performs no authorization and writes
-  # no moderation log, so callers needing authorization go through
-  # `revert_tag_changes/2` instead.
-  @doc false
-  def mass_revert(ids, attributes) do
+  defp parse_ids(ids) when is_list(ids) do
+    Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, parsed_ids} ->
+      case Loader.parse_id(id) do
+        {:ok, id} -> {:cont, {:ok, [id | parsed_ids]}}
+        {:error, :not_found} -> {:halt, {:error, :invalid_ids}}
+      end
+    end)
+    |> case do
+      {:ok, parsed_ids} -> {:ok, parsed_ids |> Enum.uniq() |> Enum.reverse()}
+      error -> error
+    end
+  end
+
+  defp parse_ids(_ids), do: {:error, :invalid_ids}
+
+  defp image_visibility_filters(actor) do
+    case authorize(actor, :show, %Image{hidden_from_users: true}) do
+      :ok -> []
+      {:error, :unauthorized} -> [%{term: %{image_hidden: false}}]
+    end
+  end
+
+  defp identity_metadata?(actor), do: authorize(actor, :show, :identity_metadata) == :ok
+
+  defp user_resource_filter(actor, %User{id: user_id}) do
+    if identity_metadata?(actor) do
+      %{term: %{true_user_id: user_id}}
+    else
+      %{term: %{user_id: user_id}}
+    end
+  end
+
+  defp search_tag_changes(actor, resource_type, target, resource_filter, params, pagination) do
+    query_options = [user: actor.user, identity_metadata?: identity_metadata?(actor)]
+
+    with {:ok, body, query_form} <- QueryBuilder.build_query(params, query_options) do
+      filters = image_visibility_filters(actor) ++ List.wrap(resource_filter)
+      body = %{body | query: %{bool: %{must: [body.query | filters]}}}
+
+      tag_changes =
+        TagChange
+        |> Search.search_definition(body, pagination)
+        |> Search.search_records(preload(TagChange, ^@history_preloads))
+
+      page = %TagChangePage{
+        resource_type: resource_type,
+        target: target,
+        tag_changes: tag_changes
+      }
+
+      {:ok, page, QueryForm.changeset(query_form)}
+    end
+  end
+
+  defp tags_to_tag_change(_tag_change, nil, _added), do: []
+
+  defp tags_to_tag_change(tag_change, tags, added) do
+    Enum.map(tags, &%{tag_change_id: tag_change.id, tag_id: &1.id, added: added})
+  end
+
+  defp revert_ids(ids, attributes) do
     tag_changes =
       Repo.all(
-        from tc in TagChange,
-          inner_join: i in assoc(tc, :image),
-          where: tc.id in ^ids and i.hidden_from_users == false,
-          order_by: [desc: :created_at],
+        from tag_change in TagChange,
+          inner_join: image in assoc(tag_change, :image),
+          where: tag_change.id in ^ids and image.hidden_from_users == false,
+          order_by: [desc: tag_change.created_at, desc: tag_change.id],
           preload: [tags: [:tag, :tag_change]]
       )
 
-    case mass_revert_tags(Enum.flat_map(tag_changes, & &1.tags), attributes) do
-      {:ok, _result} ->
-        {:ok, tag_changes}
-
-      error ->
-        error
+    case revert_tags(Enum.flat_map(tag_changes, & &1.tags), attributes) do
+      {:ok, _result} -> {:ok, tag_changes}
+      error -> error
     end
   end
 
-  # Accepts a list of TagChanges.Tag objects with tag_change and tag relations preloaded.
-  @doc false
-  def mass_revert_tags(tags, attributes) do
-    # Reverting a set of changes means restoring the state from before the
-    # earliest of them, so collapse each (image, tag) history to its earliest
-    # record and invert that. `created_at` has second precision,
-    # so ties are broken by tag change id.
+  defp revert_tags(tags, attributes) do
     changes_per_image =
       tags
       |> Enum.group_by(& &1.tag_change.image_id)
@@ -107,7 +146,6 @@ defmodule Philomena.TagChanges do
 
         {added_tags, removed_tags} = Enum.split_with(changed_tags, & &1.added)
 
-        # We send removed tags to be added, and added to be removed. That's how reverting works!
         %{
           image_id: image_id,
           added_tags: Enum.map(removed_tags, & &1.tag),
@@ -118,49 +156,40 @@ defmodule Philomena.TagChanges do
     Images.batch_update(changes_per_image, attributes)
   end
 
-  @doc """
-  Enqueues a background reversion of every tag change made by one identity,
-  on behalf of `actor`.
+  defp full_revert_target(params) do
+    targets =
+      params
+      |> Map.take(["user_id", "ip", "fingerprint"])
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
 
-  The target is named in `params` by exactly one of
-  `"user_id"`, `"ip"`, or `"fingerprint"` (checked in that order). The
-  reversion itself runs in `Philomena.TagChangeRevertWorker`; authorization
-  (`:revert` on `TagChange`) and the moderation log happen here, at enqueue
-  time. The user id is not required to name an existing user - the worker
-  simply reverts nothing - and the log reflects that by falling back to the
-  bare id.
+    case targets do
+      [{"user_id", user_id}] ->
+        with {:ok, user_id} <- Loader.parse_id(user_id), do: {:ok, %{user_id: user_id}}
 
-  Returns `{:ok, target}`, `{:error, :unauthorized}`, or
-  `{:error, :invalid_target}` when `params` names no target.
-  """
-  @spec full_revert(Actor.t(), map()) ::
-          {:ok, map()} | {:error, :unauthorized | :invalid_target}
-  def full_revert(%Actor{} = actor, params) do
-    with :ok <- authorize(actor, :revert, TagChange),
-         {:ok, target} <- full_revert_target(params) do
-      attributes = %{
-        ip: to_string(actor.ip),
-        fingerprint: actor.fingerprint,
-        user_id: actor.user.id,
-        batch_size: 100
-      }
+      [{"ip", ip}] ->
+        with {:ok, ip} <- cast_ip(ip), do: {:ok, %{ip: to_string(ip)}}
 
-      Exq.enqueue(Exq, "indexing", TagChangeRevertWorker, [
-        Map.put(target, :attributes, attributes)
-      ])
+      [{"fingerprint", fingerprint}] ->
+        with {:ok, fingerprint} <- cast_fingerprint(fingerprint),
+             do: {:ok, %{fingerprint: fingerprint}}
 
-      log_full_revert(actor.user, target)
-
-      {:ok, target}
+      _targets ->
+        {:error, :invalid_target}
+    end
+    |> case do
+      {:error, :not_found} -> {:error, :invalid_target}
+      result -> result
     end
   end
 
-  defp full_revert_target(%{"user_id" => user_id}), do: {:ok, %{user_id: user_id}}
-  defp full_revert_target(%{"ip" => ip}), do: {:ok, %{ip: ip}}
-  defp full_revert_target(%{"fingerprint" => fingerprint}), do: {:ok, %{fingerprint: fingerprint}}
-  defp full_revert_target(_params), do: {:error, :invalid_target}
+  defp full_revert_log_user(user_id) do
+    case Repo.get(User, user_id) do
+      %User{} = user -> {"user #{user.name}", Paths.profile_path(user)}
+      nil -> {"user #{user_id}", "/tag_changes"}
+    end
+  end
 
-  defp log_full_revert(user, target) do
+  defp full_revert_log(target) do
     {subject, subject_path} =
       case target do
         %{user_id: user_id} ->
@@ -173,98 +202,445 @@ defmodule Philomena.TagChanges do
           {"fingerprint #{fingerprint}", Paths.fingerprint_profile_path(fingerprint)}
       end
 
-    ModerationLogs.create_moderation_log(
-      user,
+    {
       "TagChange.FullRevert:create",
       subject_path,
       "Reverted all tag changes for #{subject}"
-    )
+    }
   end
 
-  # The revert is enqueued for whatever id was named, so the log entry has to
-  # survive an id that names no user.
-  defp full_revert_log_user(user_id) do
-    with {:ok, id} <- IntegerId.parse(user_id),
-         %User{} = user <- Repo.get(User, id) do
-      {"user #{user.name}", Paths.profile_path(user)}
-    else
-      _ -> {"user #{user_id}", "/tag_changes"}
-    end
+  defp deletion_log(%TagChange{user: user, image: image, tags: tags}) do
+    author = if user, do: user.name, else: "an anonymous user"
+
+    {
+      "TagChange:delete",
+      Paths.image_path(image),
+      "Deleted tag change by #{author} containing #{length(tags)} tags on image #{image.id} from history"
+    }
   end
 
-  @doc """
-  Updates tag change search indices when a user's name changes.
-
-  ## Examples
-
-      iex> user_name_reindex("old_username", "new_username")
-      :ok
-
-  """
-  def user_name_reindex(old_name, new_name) do
-    data = SearchIndex.user_name_update_by_query(old_name, new_name)
-
-    Search.update_by_query(TagChange, data.query, data.set_replacements, data.replacements)
-  end
-
-  @doc """
-  Queues a tag change for reindexing.
-
-  Adds the tag change to the indexing queue to update its search index.
-
-  ## Examples
-
-      iex> reindex_tag_change(tag_change)
-      %TagChange{}
-
-  """
-  def reindex_tag_change(%TagChange{} = tag_change) do
+  defp enqueue_reindex(%TagChange{} = tag_change) do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "id", [tag_change.id]])
-
     tag_change
   end
 
   @doc """
-  Queues all listed tag change IDs for search index updates.
-  Returns the list unchanged, for use in a pipeline.
+  Searches all tag changes visible to `actor`.
+
+  Hidden-image changes are excluded unless the actor may show their images.
+  `params` accepts `tcq`, `sf`, and `sd`; invalid search or sort input returns
+  a rejected query changeset. The successful result includes the normalized
+  query changeset.
 
   ## Examples
 
-      iex> reindex_tag_changes([1, 2, 3])
-      [1, 2, 3]
-
+      iex> list_tag_changes(actor, %{"tcq" => "safe"}, page: 1, page_size: 25)
+      {:ok, %TagChangePage{resource_type: :all}, changeset}
   """
-  def reindex_tag_changes(tag_change_ids) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "id", tag_change_ids])
-
-    tag_change_ids
+  @spec list_tag_changes(Actor.t(), map(), Search.pagination_params()) ::
+          {:ok, TagChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :unauthorized | Ecto.Changeset.t()}
+  def list_tag_changes(%Actor{} = actor, params, pagination) do
+    with :ok <- authorize(actor, :index, TagChange) do
+      search_tag_changes(actor, :all, nil, [], params, pagination)
+    end
   end
 
   @doc """
-  Queues all tag changes associated with a list of image IDs for search index updates.
-  Returns the list unchanged, for use in a pipeline.
+  Searches tag changes on the image named by `image_id`.
+
+  Images owns target loading and visibility authorization. Malformed and absent
+  IDs are not found; a real hidden image forbidden to the actor is unauthorized.
 
   ## Examples
 
-      iex> reindex_tag_changes_on_images([1, 2, 3])
-      [1, 2, 3]
+      iex> image_tag_changes(actor, "42", %{}, page: 1, page_size: 25)
+      {:ok, %TagChangePage{resource_type: :image}, changeset}
 
+      iex> image_tag_changes(actor, "missing", %{}, page: 1, page_size: 25)
+      {:error, :not_found}
   """
-  def reindex_tag_changes_on_images(image_ids) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "image_id", image_ids])
+  @spec image_tag_changes(
+          Actor.t(),
+          IntegerId.integer_id(),
+          map(),
+          Search.pagination_params()
+        ) ::
+          {:ok, TagChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def image_tag_changes(%Actor{} = actor, image_id, params, pagination) do
+    with {:ok, image} <- Images.load_visible_image(actor, image_id) do
+      search_tag_changes(actor, :image, image, %{term: %{image_id: image.id}}, params, pagination)
+    end
+  end
 
+  @doc """
+  Searches tag changes involving the tag named by `tag_name`.
+
+  The name is normalized to the tag's route slug and resolved through Tags.
+  Missing tags are not found before OpenSearch is queried.
+
+  ## Examples
+
+      iex> tag_tag_changes(actor, "safe", %{}, page: 1, page_size: 25)
+      {:ok, %TagChangePage{resource_type: :tag}, changeset}
+  """
+  @spec tag_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+          {:ok, TagChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def tag_tag_changes(%Actor{} = actor, tag_name, params, pagination) when is_binary(tag_name) do
+    slug = tag_name |> String.downcase() |> Slug.slug()
+
+    with {:ok, tag} <- Tags.load_visible_tag(actor, slug) do
+      search_tag_changes(actor, :tag, tag, %{term: %{tag_id: tag.id}}, params, pagination)
+    end
+  end
+
+  def tag_tag_changes(%Actor{}, _tag_name, _params, _pagination), do: {:error, :not_found}
+
+  @doc """
+  Searches tag changes attributed to the active user named by `name`.
+
+  Users owns target loading. Ordinary viewers receive only publicly attributed
+  changes; actors with identity-metadata access receive the user's true
+  attribution, including changes hidden by anonymous upload attribution.
+
+  ## Examples
+
+      iex> user_tag_changes(actor, "Somebody", %{}, page: 1, page_size: 25)
+      {:ok, %TagChangePage{resource_type: :user}, changeset}
+  """
+  @spec user_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+          {:ok, TagChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def user_tag_changes(%Actor{} = actor, name, params, pagination) do
+    with {:ok, user} <- Users.load_profile_by_name(actor, name) do
+      search_tag_changes(
+        actor,
+        :user,
+        user,
+        user_resource_filter(actor, user),
+        params,
+        pagination
+      )
+    end
+  end
+
+  @doc """
+  Searches tag changes attributed to the canonical IP address `ip`.
+
+  Malformed addresses are not found before the shared identity-metadata gate;
+  valid addresses with no changes return an empty page.
+
+  ## Examples
+
+      iex> ip_tag_changes(moderator, "203.0.113.5", %{}, page: 1, page_size: 25)
+      {:ok, %TagChangePage{resource_type: :ip}, changeset}
+
+      iex> ip_tag_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
+      {:error, :not_found}
+  """
+  @spec ip_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+          {:ok, TagChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def ip_tag_changes(%Actor{} = actor, ip, params, pagination) do
+    with {:ok, ip} <- cast_ip(ip),
+         :ok <- authorize(actor, :show, :identity_metadata) do
+      search_tag_changes(actor, :ip, ip, %{term: %{ip: to_string(ip)}}, params, pagination)
+    end
+  end
+
+  @doc """
+  Searches tag changes attributed to a canonical browser `fingerprint`.
+
+  The value is normalized and validated through UserFingerprints before the
+  shared identity-metadata gate. Valid fingerprints with no changes return an
+  empty page.
+
+  ## Examples
+
+      iex> fingerprint_tag_changes(moderator, "C123", %{}, page: 1, page_size: 25)
+      {:ok, %TagChangePage{resource_type: :fingerprint}, changeset}
+  """
+  @spec fingerprint_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+          {:ok, TagChangePage.t(), Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+  def fingerprint_tag_changes(%Actor{} = actor, fingerprint, params, pagination) do
+    with {:ok, fingerprint} <- cast_fingerprint(fingerprint),
+         :ok <- authorize(actor, :show, :identity_metadata) do
+      search_tag_changes(
+        actor,
+        :fingerprint,
+        fingerprint,
+        %{term: %{fingerprint: fingerprint}},
+        params,
+        pagination
+      )
+    end
+  end
+
+  @doc """
+  Adds tag-change creation to an Images update transaction.
+
+  `image_step` must return `{image, added_tags, removed_tags}`. This helper adds
+  `:tag_change` and `:tag_changes` steps; the latter preserves the existing
+  `{added_count, removed_count}` result. An update with no changed tags records
+  no history. Search indexing is deferred until the owning transaction commits.
+
+  ## Examples
+
+      iex> put_tag_change(multi, actor)
+      %Philomena.Multi{}
+  """
+  @spec put_tag_change(Multi.t(), Actor.t(), Multi.name()) :: Multi.t()
+  def put_tag_change(%Multi{} = multi, %Actor{} = actor, image_step \\ :image) do
+    user_id = if actor.user, do: actor.user.id
+
+    multi
+    |> Multi.run(:tag_change, fn repo, changes ->
+      case Map.fetch!(changes, image_step) do
+        {_image, [], []} ->
+          {:ok, nil}
+
+        {image, _added_tags, _removed_tags} ->
+          repo.insert(%TagChange{
+            image_id: image.id,
+            user_id: user_id,
+            ip: actor.ip,
+            fingerprint: actor.fingerprint
+          })
+      end
+    end)
+    |> Multi.run(:tag_changes, fn repo, changes ->
+      case {Map.fetch!(changes, :tag_change), Map.fetch!(changes, image_step)} do
+        {nil, _image_result} ->
+          {:ok, {0, 0}}
+
+        {tag_change, {_image, added_tags, removed_tags}} ->
+          {added_count, nil} =
+            repo.insert_all(TagChanges.Tag, tags_to_tag_change(tag_change, added_tags, true))
+
+          {removed_count, nil} =
+            repo.insert_all(TagChanges.Tag, tags_to_tag_change(tag_change, removed_tags, false))
+
+          {:ok, {added_count, removed_count}}
+      end
+    end)
+    |> Multi.on_commit(fn
+      %{tag_change: %TagChange{} = tag_change} -> enqueue_reindex(tag_change)
+      %{tag_change: nil} -> :ok
+    end)
+  end
+
+  @doc """
+  Reverts the valid tag-change IDs in `ids` on behalf of `actor`.
+
+  Malformed ID lists return `{:error, :invalid_ids}`. Missing IDs and changes on
+  hidden images are skipped, making stale or repeated batch submissions safe.
+  The successful moderation log records the number of loaded changes reverted.
+
+  ## Examples
+
+      iex> revert_tag_changes(moderator, ["12", "13"])
+      {:ok, [%TagChange{}, %TagChange{}]}
+  """
+  @spec revert_tag_changes(Actor.t(), term()) ::
+          {:ok, [TagChange.t()]} | {:error, term()}
+  def revert_tag_changes(%Actor{} = actor, ids) do
+    with :ok <- authorize(actor, :revert, TagChange),
+         {:ok, ids} <- parse_ids(ids),
+         {:ok, tag_changes} <-
+           revert_ids(ids, %{ip: actor.ip, fingerprint: actor.fingerprint, user_id: actor.user.id}) do
+      ModerationLogs.create_moderation_log(
+        actor,
+        "TagChange.Revert:create",
+        Paths.profile_path(actor.user),
+        "Reverted #{length(tag_changes)} tag changes"
+      )
+
+      {:ok, tag_changes}
+    end
+  end
+
+  @doc """
+  Reverts a validated worker batch without request authorization or logging.
+
+  The worker owns batching by image ID. Missing IDs and hidden-image changes are
+  skipped; database failures are returned to the worker.
+
+  ## Examples
+
+      iex> revert_for_worker([12, 13], attributes)
+      {:ok, [%TagChange{}, %TagChange{}]}
+  """
+  @spec revert_for_worker([IntegerId.integer_id()], map()) ::
+          {:ok, [TagChange.t()]} | {:error, term()}
+  def revert_for_worker(ids, attributes) do
+    with {:ok, ids} <- parse_ids(ids), do: revert_ids(ids, attributes)
+  end
+
+  @doc """
+  Enqueues a full reversion for exactly one user ID, IP, or fingerprint target.
+
+  Target values are normalized before enqueue. User IDs need not currently name
+  a user because historical rows can outlive their account. Invalid, absent, or
+  ambiguous targets return `{:error, :invalid_target}`. The audit log commits
+  before the worker job is enqueued.
+
+  ## Examples
+
+      iex> full_revert(moderator, %{"ip" => "203.0.113.5"})
+      {:ok, %{ip: "203.0.113.5"}}
+  """
+  @spec full_revert(Actor.t(), map()) ::
+          {:ok, map()}
+          | {:error, :unauthorized | :invalid_target | Ecto.Changeset.t()}
+  def full_revert(%Actor{} = actor, params) do
+    with :ok <- authorize(actor, :revert, TagChange),
+         {:ok, target} <- full_revert_target(params) do
+      attributes = %{
+        ip: to_string(actor.ip),
+        fingerprint: actor.fingerprint,
+        user_id: actor.user.id,
+        batch_size: 100
+      }
+
+      Multi.new()
+      |> ModerationLogs.put_log(:moderation_log, actor, fn _changes -> full_revert_log(target) end)
+      |> Multi.on_commit(fn _changes ->
+        Exq.enqueue(Exq, "indexing", TagChangeRevertWorker, [
+          Map.put(target, :attributes, attributes)
+        ])
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, _changes} -> {:ok, target}
+        {:error, :moderation_log, changeset, _changes} -> {:error, changeset}
+      end
+    end
+  end
+
+  @doc """
+  Deletes the tag change named by `id` and its moderation audit atomically.
+
+  Loading precedes `:delete` authorization, so malformed and absent IDs are
+  always not found while a real forbidden row is unauthorized. Anonymous
+  changes use an explicit author label in the log. The search document is
+  deleted only after the database transaction commits.
+
+  ## Examples
+
+      iex> delete_tag_change(moderator, "42")
+      {:ok, %TagChange{}}
+
+      iex> delete_tag_change(actor, "missing")
+      {:error, :not_found}
+  """
+  @spec delete_tag_change(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, TagChange.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def delete_tag_change(%Actor{} = actor, id) do
+    query = preload(TagChange, [:user, :image, tags: [:tag]])
+
+    with {:ok, tag_change} <- Loader.fetch_and_authorize(query, actor, :delete, id) do
+      Multi.new()
+      |> Multi.delete(:tag_change, tag_change)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag_change: tag_change} ->
+        deletion_log(tag_change)
+      end)
+      |> Multi.on_commit(fn %{tag_change: tag_change} ->
+        Search.delete_document(tag_change.id, TagChange)
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{tag_change: tag_change}} -> {:ok, tag_change}
+        {:error, :tag_change, changeset, _changes} -> {:error, changeset}
+      end
+    end
+  end
+
+  @doc """
+  Deletes tag-change rows left empty by tag deletion and removes their search
+  documents.
+
+  Returns `{count, ids}` using the database's explicit `RETURNING id` result.
+
+  ## Examples
+
+      iex> cleanup_empty_for_tag_deletion()
+      {2, [12, 13]}
+  """
+  @spec cleanup_empty_for_tag_deletion() :: {non_neg_integer(), [integer()]}
+  def cleanup_empty_for_tag_deletion do
+    empty_changes =
+      TagChange
+      |> from(as: :tag_change)
+      |> where(
+        not exists(where(TagChanges.Tag, [tag], tag.tag_change_id == parent_as(:tag_change).id))
+      )
+      |> select([tag_change], tag_change.id)
+
+    {count, tag_change_ids} = Repo.delete_all(empty_changes)
+    Enum.each(tag_change_ids, &Search.delete_document(&1, TagChange))
+
+    {count, tag_change_ids}
+  end
+
+  @doc """
+  Counts tag-change batches and changed tags for an already-loaded image.
+
+  ## Examples
+
+      iex> count_for_image(image)
+      {3, 7}
+  """
+  @spec count_for_image(Image.t()) :: {non_neg_integer(), non_neg_integer()}
+  def count_for_image(%Image{id: image_id}) do
+    TagChange
+    |> where(image_id: ^image_id)
+    |> join(:left, [tag_change], tag in assoc(tag_change, :tags))
+    |> select([tag_change, tag], {count(tag_change, :distinct), count(tag)})
+    |> Repo.one()
+  end
+
+  @doc """
+  Updates tag-change search documents after a user rename.
+
+  ## Examples
+
+      iex> user_name_reindex("old name", "new name")
+      :ok
+  """
+  @spec user_name_reindex(String.t(), String.t()) :: term()
+  def user_name_reindex(old_name, new_name) do
+    data = SearchIndex.user_name_update_by_query(old_name, new_name)
+    Search.update_by_query(TagChange, data.query, data.set_replacements, data.replacements)
+  end
+
+  @doc """
+  Queues every tag change associated with `image_ids` for worker reindexing.
+
+  ## Examples
+
+      iex> reindex_for_images([12, 13])
+      [12, 13]
+  """
+  @spec reindex_for_images([integer()]) :: [integer()]
+  def reindex_for_images(image_ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "image_id", image_ids])
     image_ids
   end
 
   @doc """
-  Returns a list of associations to preload when indexing tag changes.
+  Returns the association projection required to serialize tag-change search
+  documents.
 
   ## Examples
 
       iex> indexing_preloads()
-      [:image, :tags, :user]
-
+      [image: image_query, tags: [tag: tag_query], user: user_query]
   """
+  @spec indexing_preloads() :: keyword()
   def indexing_preloads do
     alias_tags_query = select(Tag, [:aliased_tag_id, :name])
 
@@ -273,239 +649,55 @@ defmodule Philomena.TagChanges do
       |> select([:id, :name])
       |> preload(aliases: ^alias_tags_query)
 
-    image_query =
-      Image
-      |> select([:anonymous, :user_id])
+    image_query = select(Image, [:anonymous, :hidden_from_users, :user_id])
 
     [
       image: image_query,
-      tags: [
-        tag: base_tags_query
-      ],
+      tags: [tag: base_tags_query],
       user: select(User, [:name])
     ]
   end
 
   @doc """
-  Reindexes tag changes based on a column condition.
-
-  Updates the search index for all tag changes matching the given column condition.
-  Used for batch reindexing of tag changes.
+  Worker entry point for reindexing tag changes matching `column` and
+  `condition`.
 
   ## Examples
 
-      iex> perform_reindex(:id, [1, 2, 3])
-      {:ok, [%TagChange{}, ...]}
-
+      iex> perform_reindex(:id, [12, 13])
+      :ok
   """
+  @spec perform_reindex(atom(), [term()]) :: term()
   def perform_reindex(column, condition) do
     TagChange
     |> preload(^indexing_preloads())
-    |> where([tc], field(tc, ^column) in ^condition)
+    |> where([tag_change], field(tag_change, ^column) in ^condition)
     |> Search.reindex(TagChange)
   end
 
-  defp tags_to_tag_change(_, nil, _), do: []
-
-  defp tags_to_tag_change(tag_change, tags, added) do
-    tags
-    |> Enum.map(
-      &%{
-        tag_change_id: tag_change.id,
-        tag_id: &1.id,
-        added: added
-      }
-    )
-  end
-
   @doc """
-  Creates a tag_change.
-  """
-  def create_tag_change(image, %Actor{user: user} = actor, added_tags, removed_tags) do
-    user_id = if user, do: user.id, else: nil
-
-    {:ok, tc} =
-      %TagChange{
-        image_id: image.id,
-        user_id: user_id,
-        ip: actor.ip,
-        fingerprint: actor.fingerprint
-      }
-      |> Repo.insert()
-
-    {added_count, nil} =
-      Repo.insert_all(TagChanges.Tag, tags_to_tag_change(tc, added_tags, true))
-
-    {removed_count, nil} =
-      Repo.insert_all(TagChanges.Tag, tags_to_tag_change(tc, removed_tags, false))
-
-    reindex_tag_change(tc)
-
-    {:ok, {added_count, removed_count}}
-  end
-
-  @doc """
-  Deletes the tag change named by `id` from the history, on behalf of `actor`.
-
-  Authorization (`:delete` on the loaded record) happens here; on success the
-  record's search document is removed and a moderation log is written. An id
-  that cannot name a row is `{:error, :not_found}`, while a well-formed id
-  that names no row authorizes `nil` - which no rule permits - and is
-  therefore `{:error, :unauthorized}`.
+  Worker service that reverts every tag change selected by `queryable`, batching
+  only on image IDs so one image's history cannot straddle a batch boundary.
 
   ## Examples
 
-      iex> delete_tag_change(moderator, "1")
-      {:ok, %TagChange{}}
-
-      iex> delete_tag_change(user, "1")
-      {:error, :unauthorized}
-
-      iex> delete_tag_change(moderator, "not-an-integer")
-      {:error, :not_found}
-
+      iex> revert_all_for_worker(query, %{batch_size: 100})
+      :ok
   """
-  @spec delete_tag_change(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, TagChange.t()}
-          | {:error, :unauthorized | :not_found}
-          | {:error, Ecto.Changeset.t()}
-  def delete_tag_change(%Actor{} = actor, id) do
-    with {:ok, id} <- Loader.parse_id(id) do
-      tag_change =
-        TagChange
-        |> preload([:user, :image, tags: [:tag]])
-        |> Repo.get(id)
+  @spec revert_all_for_worker(Ecto.Queryable.t(), map()) :: :ok | {:error, term()}
+  def revert_all_for_worker(queryable, attributes) do
+    batch_size = attributes[:batch_size] || 100
+    attributes = Map.delete(attributes, :batch_size)
 
-      with :ok <- authorize(actor, :delete, tag_change) do
-        delete_loaded_tag_change(actor, tag_change)
+    queryable
+    |> Batch.query_batches(batch_size: batch_size, id_field: :image_id)
+    |> Enum.reduce_while(:ok, fn queryable, :ok ->
+      ids = Repo.all(select(queryable, [tag_change], tag_change.id))
+
+      case revert_for_worker(ids, attributes) do
+        {:ok, _tag_changes} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
       end
-    end
+    end)
   end
-
-  defp delete_loaded_tag_change(actor, %TagChange{} = tag_change) do
-    case Repo.delete(tag_change) do
-      {:ok, %TagChange{} = tc} = result ->
-        Search.delete_document(tc.id, TagChange)
-        log_tag_change_deletion(actor, tc)
-        result
-
-      result ->
-        result
-    end
-  end
-
-  # Matches only changes authored by a user: deleting an anonymous tag change
-  # has always crashed when writing this log entry, and that behavior is
-  # pinned until it is deliberately fixed.
-  # FIXME: fix the crash?
-  defp log_tag_change_deletion(actor, %TagChange{user: %{name: name}, image: image, tags: tags}) do
-    ModerationLogs.create_moderation_log(
-      actor,
-      "TagChange:delete",
-      Paths.image_path(image),
-      "Deleted tag change by #{name} containing #{length(tags)} tags on image #{image.id} from history"
-    )
-  end
-
-  @doc """
-  Deletes tag changes that have no associated tags.
-
-  ## Examples
-
-      iex> delete_empty_tag_changes()
-      {number_of_deleted_records, [%TagChange{}, ...]}
-
-  """
-  def delete_empty_tag_changes do
-    # TODO: does this even work? It seems to be missing a select
-    {count, tag_changes} =
-      TagChange
-      |> from(as: :tag_change)
-      |> where(
-        not exists(where(TagChanges.Tag, [t], t.tag_change_id == parent_as(:tag_change).id))
-      )
-      |> select([tc], tc)
-      |> Repo.delete_all()
-
-    Enum.each(tag_changes, &Search.delete_document(&1.id, TagChange))
-
-    {count, tag_changes}
-  end
-
-  def count_tag_changes(field_name, value) do
-    TagChange
-    |> where([c], field(c, ^field_name) == ^value)
-    |> join(:left, [c], t in assoc(c, :tags))
-    |> select([c, t], {count(c, :distinct), count(t)})
-    |> Repo.one()
-  end
-
-  @doc """
-  Load tag changes for the given search query (`tcq`) and resource filters
-  (`image`, `tag`, `user`, and for staff, `ip`, `fingerprint`).
-  """
-  @spec load(Actor.t(), map(), Search.pagination_params()) :: Scrivener.Page.t(TagChange.t())
-  def load(%Actor{user: user}, params, pagination) do
-    # TODO: resource filter support seems unnecessary since the query language can handle anything?
-    {:ok, query} = Query.compile(get_query(params), user: user)
-
-    TagChange
-    |> Search.search_definition(
-      %{
-        query: %{
-          bool: %{
-            must: [query | resource_filters(user, params)]
-          }
-        },
-        sort: parse_sort(params)
-      },
-      pagination
-    )
-    |> Search.search_records(
-      preload(TagChange, [:user, image: [:user, :sources, tags: :aliases], tags: [:tag]])
-    )
-  end
-
-  defp resource_filters(user, %{"resource_type" => type, "resource_id" => id})
-       when is_binary(type) and is_binary(id) and id != "" do
-    [resource_filter(user, type, id)]
-  end
-
-  defp resource_filters(_user, _params), do: []
-
-  # Term filters mirroring the fields each role may query through `tcq`
-  # (see Philomena.TagChanges.Query): ip and fingerprint are moderator-only.
-  # A recognized resource the requester may not filter by, or an invalid
-  # value, matches nothing rather than silently listing everything.
-  defp resource_filter(_user, "image", id), do: %{term: %{image_id: id}}
-  defp resource_filter(_user, "tag", name), do: %{term: %{tag: String.downcase(name)}}
-  defp resource_filter(_user, "user", name), do: %{term: %{user: String.downcase(name)}}
-
-  defp resource_filter(%{role: role}, "ip", ip) when role in ~W(moderator admin) do
-    case IpParser.parse(ip) do
-      {:ok, _tokens, "", _, _, _} -> %{term: %{ip: ip}}
-      _ -> %{match_none: %{}}
-    end
-  end
-
-  defp resource_filter(%{role: role}, "fingerprint", fp) when role in ~W(moderator admin),
-    do: %{term: %{fingerprint: fp}}
-
-  defp resource_filter(_user, _type, _id), do: %{match_none: %{}}
-
-  defp parse_sort(%{"sf" => sf, "sd" => sd})
-       when sf in ["created_at", "tag_count", "added_tag_count", "removed_tag_count"] and
-              sd in ["desc", "asc"] do
-    [%{sf => sd}, %{"id" => sd}]
-  end
-
-  defp parse_sort(_params) do
-    [%{created_at: :desc}, %{id: :desc}]
-  end
-
-  defp get_query(%{"tcq" => ""}), do: "*"
-
-  defp get_query(%{"tcq" => q}), do: q
-
-  defp get_query(_), do: "*"
 end

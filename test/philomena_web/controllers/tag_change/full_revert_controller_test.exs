@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.TagChange.FullRevertControllerTest do
 
     test "a moderator enqueues a reversion for a fingerprint", %{conn: conn} do
       conn = log_in_user(conn, moderator_user_fixture())
-      conn = post(conn, ~p"/tag_changes/full_revert", %{"fingerprint" => "c1774e9294a"})
+      conn = post(conn, ~p"/tag_changes/full_revert", %{"fingerprint" => "c1774"})
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Reversion of tag changes enqueued"
