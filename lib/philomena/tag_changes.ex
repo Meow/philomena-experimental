@@ -148,57 +148,80 @@ defmodule Philomena.TagChanges do
     Images.batch_update(changes_per_image, attributes)
   end
 
-  defp full_revert_target(params) do
-    targets =
-      params
-      |> Map.take(["user_id", "ip", "fingerprint"])
-      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
-
-    case targets do
-      [{"user_id", user_id}] ->
-        with {:ok, user_id} <- Loader.parse_id(user_id), do: {:ok, %{user_id: user_id}}
-
-      [{"ip", ip}] ->
-        with {:ok, ip} <- cast_ip(ip), do: {:ok, %{ip: to_string(ip)}}
-
-      [{"fingerprint", fingerprint}] ->
-        with {:ok, fingerprint} <- cast_fingerprint(fingerprint),
-             do: {:ok, %{fingerprint: fingerprint}}
-
-      _targets ->
-        {:error, :invalid_target}
-    end
-    |> case do
-      {:error, :not_found} -> {:error, :invalid_target}
-      result -> result
-    end
-  end
-
-  defp full_revert_log_user(user_id) do
-    case Repo.get(User, user_id) do
-      %User{} = user -> {"user #{user.name}", Paths.profile_path(user)}
-      nil -> {"user #{user_id}", "/tag_changes"}
-    end
-  end
-
-  defp full_revert_log(target) do
-    {subject, subject_path} =
-      case target do
-        %{user_id: user_id} ->
-          full_revert_log_user(user_id)
-
-        %{ip: ip} ->
-          {"ip #{ip}", Paths.ip_profile_path(ip)}
-
-        %{fingerprint: fingerprint} ->
-          {"fingerprint #{fingerprint}", Paths.fingerprint_profile_path(fingerprint)}
-      end
-
-    {
-      "TagChange.FullRevert:create",
-      subject_path,
-      "Reverted all tag changes for #{subject}"
+  defp enqueue_full_revert(actor, target, {subject, subject_path}) do
+    attributes = %{
+      ip: to_string(actor.ip),
+      fingerprint: actor.fingerprint,
+      user_id: actor.user.id,
+      batch_size: 100
     }
+
+    Multi.new()
+    |> ModerationLogs.put_log(:moderation_log, actor, fn _changes ->
+      {"TagChange.FullRevert:create", subject_path, "Reverted all tag changes for #{subject}"}
+    end)
+    |> Multi.on_commit(fn _changes ->
+      Exq.enqueue(Exq, "indexing", TagChangeRevertWorker, [
+        Map.put(target, :attributes, attributes)
+      ])
+    end)
+    |> Multi.transact()
+    |> case do
+      {:ok, _changes} -> {:ok, target}
+      {:error, :moderation_log, changeset, _changes} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Enqueues a reversion of all tag changes attributed to a user profile.
+
+  Missing profiles return `{:error, :not_found}`.
+  """
+  @spec full_revert_user_tag_changes(Actor.t(), String.t()) ::
+          {:ok, %{user_id: integer()}} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def full_revert_user_tag_changes(%Actor{} = actor, slug) do
+    with :ok <- authorize(actor, :revert, TagChange),
+         {:ok, user} <- Users.load_profile(actor, slug) do
+      enqueue_full_revert(
+        actor,
+        %{user_id: user.id},
+        {"user #{user.name}", Paths.profile_path(user)}
+      )
+    end
+  end
+
+  @doc """
+  Enqueues a reversion of all tag changes attributed to an IP address.
+
+  Invalid IP addresses return `{:error, :not_found}`.
+  """
+  @spec full_revert_ip_tag_changes(Actor.t(), term()) ::
+          {:ok, %{ip: String.t()}} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def full_revert_ip_tag_changes(%Actor{} = actor, ip) do
+    with :ok <- authorize(actor, :revert, TagChange),
+         {:ok, ip} <- cast_ip(ip) do
+      ip = to_string(ip)
+      enqueue_full_revert(actor, %{ip: ip}, {"ip #{ip}", Paths.ip_profile_path(ip)})
+    end
+  end
+
+  @doc """
+  Enqueues a reversion of all tag changes attributed to a fingerprint.
+
+  Invalid fingerprints return `{:error, :not_found}`.
+  """
+  @spec full_revert_fingerprint_tag_changes(Actor.t(), term()) ::
+          {:ok, %{fingerprint: String.t()}}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def full_revert_fingerprint_tag_changes(%Actor{} = actor, fingerprint) do
+    with :ok <- authorize(actor, :revert, TagChange),
+         {:ok, fingerprint} <- cast_fingerprint(fingerprint) do
+      enqueue_full_revert(
+        actor,
+        %{fingerprint: fingerprint},
+        {"fingerprint #{fingerprint}", Paths.fingerprint_profile_path(fingerprint)}
+      )
+    end
   end
 
   defp deletion_log(%TagChange{user: user, image: image, tags: tags}) do
@@ -489,48 +512,6 @@ defmodule Philomena.TagChanges do
            |> RevertForm.changeset(%{ids: ids})
            |> Ecto.Changeset.apply_action(:create) do
       revert_ids(revert_form.ids, attributes)
-    end
-  end
-
-  @doc """
-  Enqueues a full reversion for exactly one user ID, IP, or fingerprint target.
-
-  Target values are normalized before enqueue. User IDs need not currently name
-  a user because historical rows can outlive their account. Invalid, absent, or
-  ambiguous targets return `{:error, :invalid_target}`. The audit log commits
-  before the worker job is enqueued.
-
-  ## Examples
-
-      iex> full_revert(moderator, %{"ip" => "203.0.113.5"})
-      {:ok, %{ip: "203.0.113.5"}}
-
-  """
-  @spec full_revert(Actor.t(), map()) ::
-          {:ok, map()}
-          | {:error, :unauthorized | :invalid_target | Ecto.Changeset.t()}
-  def full_revert(%Actor{} = actor, params) do
-    with :ok <- authorize(actor, :revert, TagChange),
-         {:ok, target} <- full_revert_target(params) do
-      attributes = %{
-        ip: to_string(actor.ip),
-        fingerprint: actor.fingerprint,
-        user_id: actor.user.id,
-        batch_size: 100
-      }
-
-      Multi.new()
-      |> ModerationLogs.put_log(:moderation_log, actor, fn _changes -> full_revert_log(target) end)
-      |> Multi.on_commit(fn _changes ->
-        Exq.enqueue(Exq, "indexing", TagChangeRevertWorker, [
-          Map.put(target, :attributes, attributes)
-        ])
-      end)
-      |> Multi.transact()
-      |> case do
-        {:ok, _changes} -> {:ok, target}
-        {:error, :moderation_log, changeset, _changes} -> {:error, changeset}
-      end
     end
   end
 

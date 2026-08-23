@@ -1,12 +1,12 @@
-defmodule PhilomenaWeb.TagChange.FullRevertController do
+defmodule PhilomenaWeb.Profile.TagChange.RevertController do
   use PhilomenaWeb, :controller
 
   alias Philomena.TagChanges
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, params) do
-    case TagChanges.full_revert(conn.assigns.actor, params) do
+  def create(conn, %{"profile_id" => user_id}) do
+    case TagChanges.full_revert_user_tag_changes(conn.assigns.actor, user_id) do
       {:ok, _target} ->
         conn
         |> put_flash(:info, "Reversion of tag changes enqueued.")
@@ -15,10 +15,13 @@ defmodule PhilomenaWeb.TagChange.FullRevertController do
       {:error, :unauthorized} = error ->
         error
 
-      {:error, :invalid_target} ->
+      {:error, :not_found} ->
         conn
         |> put_flash(:error, "Couldn't revert those tag changes!")
         |> redirect(external: conn.assigns.referrer)
+
+      error ->
+        error
     end
   end
 end

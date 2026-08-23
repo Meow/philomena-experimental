@@ -475,17 +475,27 @@ defmodule Philomena.TagChangesTest do
     end
   end
 
-  describe "full_revert/2" do
+  describe "full_revert_*_tag_changes/2" do
     test "denies an anonymous actor" do
-      assert TagChanges.full_revert(actor(), %{"user_id" => "1"}) == {:error, :unauthorized}
+      assert TagChanges.full_revert_user_tag_changes(actor(), "user") == {:error, :unauthorized}
+
+      assert TagChanges.full_revert_ip_tag_changes(actor(), "203.0.113.1") ==
+               {:error, :unauthorized}
+
+      assert TagChanges.full_revert_fingerprint_tag_changes(actor(), "c1774") ==
+               {:error, :unauthorized}
     end
 
     test "denies a regular user before looking at the target" do
       user_actor = actor(confirmed_user_fixture())
 
-      assert TagChanges.full_revert(user_actor, %{"user_id" => "1"}) == {:error, :unauthorized}
+      assert TagChanges.full_revert_user_tag_changes(user_actor, "user") ==
+               {:error, :unauthorized}
 
-      assert TagChanges.full_revert(user_actor, %{"something" => "else"}) ==
+      assert TagChanges.full_revert_ip_tag_changes(user_actor, "203.0.113.1") ==
+               {:error, :unauthorized}
+
+      assert TagChanges.full_revert_fingerprint_tag_changes(user_actor, "c1774") ==
                {:error, :unauthorized}
     end
 
@@ -493,7 +503,7 @@ defmodule Philomena.TagChangesTest do
       moderator = moderator_user_fixture()
       target = confirmed_user_fixture()
 
-      assert TagChanges.full_revert(actor(moderator), %{"user_id" => "#{target.id}"}) ==
+      assert TagChanges.full_revert_user_tag_changes(actor(moderator), target.slug) ==
                {:ok, %{user_id: target.id}}
 
       log = only_moderation_log!()
@@ -503,20 +513,19 @@ defmodule Philomena.TagChangesTest do
       assert log.body == "Reverted all tag changes for user #{target.name}"
     end
 
-    test "a user id naming no user still logs, against the tag changes listing" do
-      assert {:ok, _target} =
-               TagChanges.full_revert(actor(moderator_user_fixture()), %{
-                 "user_id" => "123456789"
-               })
-
-      log = only_moderation_log!()
-      assert log.subject_path == "/tag_changes"
-      assert log.body == "Reverted all tag changes for user 123456789"
+    test "a missing user profile is not found" do
+      assert TagChanges.full_revert_user_tag_changes(
+               actor(moderator_user_fixture()),
+               "missing"
+             ) == {:error, :not_found}
     end
 
     test "a moderator enqueues a reversion for an ip" do
       assert {:ok, %{ip: "203.0.113.9"}} =
-               TagChanges.full_revert(actor(moderator_user_fixture()), %{"ip" => "203.0.113.9"})
+               TagChanges.full_revert_ip_tag_changes(
+                 actor(moderator_user_fixture()),
+                 "203.0.113.9"
+               )
 
       log = only_moderation_log!()
       assert log.type == "TagChange.FullRevert:create"
@@ -526,35 +535,30 @@ defmodule Philomena.TagChangesTest do
 
     test "a moderator enqueues a reversion for a fingerprint" do
       assert {:ok, %{fingerprint: "c1774"}} =
-               TagChanges.full_revert(actor(moderator_user_fixture()), %{
-                 "fingerprint" => "c1774"
-               })
+               TagChanges.full_revert_fingerprint_tag_changes(
+                 actor(moderator_user_fixture()),
+                 "c1774"
+               )
 
       log = only_moderation_log!()
       assert log.subject_path == "/fingerprint_profiles/c1774"
       assert log.body == "Reverted all tag changes for fingerprint c1774"
     end
 
-    test "params naming no target are invalid" do
-      assert TagChanges.full_revert(actor(moderator_user_fixture()), %{"something" => "else"}) ==
-               {:error, :invalid_target}
+    test "invalid targets are not found" do
+      assert TagChanges.full_revert_user_tag_changes(
+               actor(moderator_user_fixture()),
+               "not-a-user"
+             ) ==
+               {:error, :not_found}
 
-      assert Repo.aggregate(ModerationLog, :count) == 0
-    end
+      assert TagChanges.full_revert_ip_tag_changes(actor(moderator_user_fixture()), "not-an-ip") ==
+               {:error, :not_found}
 
-    test "multiple or malformed targets are invalid" do
-      moderator = actor(moderator_user_fixture())
-
-      assert TagChanges.full_revert(moderator, %{
-               "user_id" => "1",
-               "ip" => "203.0.113.1"
-             }) == {:error, :invalid_target}
-
-      assert TagChanges.full_revert(moderator, %{"user_id" => "not-an-id"}) ==
-               {:error, :invalid_target}
-
-      assert TagChanges.full_revert(moderator, %{"fingerprint" => "invalid"}) ==
-               {:error, :invalid_target}
+      assert TagChanges.full_revert_fingerprint_tag_changes(
+               actor(moderator_user_fixture()),
+               "invalid"
+             ) == {:error, :not_found}
 
       assert Repo.aggregate(ModerationLog, :count) == 0
     end

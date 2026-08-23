@@ -28,7 +28,7 @@ ul
 
 h2 Actions
 ul
-  li = link "Revert all tag changes", to: ~p"/tag_changes/full_revert?#{[ip: to_string(@ip)]}", data: [confirm: "Are you really, really sure?", method: "create"]
+  li = link "Revert all tag changes", to: ~p"/ip_profiles/#{to_string(@ip)}/tag_changes/revert", data: [confirm: "Are you really, really sure?", method: "create"]
 
 h4 Observed users
 table.table

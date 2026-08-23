@@ -302,6 +302,10 @@ defmodule PhilomenaWeb.Router do
       resources "/ip_history", Profile.IpHistoryController, only: [:index]
       resources "/fp_history", Profile.FpHistoryController, only: [:index]
       resources "/aliases", Profile.AliasController, only: [:index]
+
+      resources "/tag_changes/revert", Profile.TagChange.RevertController,
+        only: [:create],
+        singleton: true
     end
 
     scope "/filters", Filter, as: :filter do
@@ -341,10 +345,18 @@ defmodule PhilomenaWeb.Router do
 
     resources "/ip_profiles", IpProfileController, only: [:show] do
       resources "/source_changes", IpProfile.SourceChangeController, only: [:index]
+
+      resources "/tag_changes/revert", IpProfile.TagChange.RevertController,
+        only: [:create],
+        singleton: true
     end
 
     resources "/fingerprint_profiles", FingerprintProfileController, only: [:show] do
       resources "/source_changes", FingerprintProfile.SourceChangeController, only: [:index]
+
+      resources "/tag_changes/revert", FingerprintProfile.TagChange.RevertController,
+        only: [:create],
+        singleton: true
     end
 
     resources "/moderation_logs", ModerationLogController, only: [:index]
@@ -448,11 +460,6 @@ defmodule PhilomenaWeb.Router do
 
     resources "/tag_changes/revert", TagChange.RevertController,
       as: :tag_change_revert,
-      only: [:create],
-      singleton: true
-
-    resources "/tag_changes/full_revert", TagChange.FullRevertController,
-      as: :tag_change_full_revert,
       only: [:create],
       singleton: true
 
