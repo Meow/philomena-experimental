@@ -415,7 +415,7 @@ defmodule Philomena.TagChangesTest do
       assert "added test tag" in image_tag_names(image)
 
       assert {:ok, [%TagChange{}]} =
-               TagChanges.revert_tag_changes(actor(moderator), ["#{tc.id}"])
+               TagChanges.revert_tag_changes(actor(moderator), %{"ids" => ["#{tc.id}"]})
 
       # Reverting the change removes the two tags it had added.
       names = image_tag_names(image)
@@ -432,7 +432,8 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "an empty list is a successful reversion of zero changes" do
-      assert {:ok, []} = TagChanges.revert_tag_changes(actor(moderator_user_fixture()), [])
+      assert {:ok, []} =
+               TagChanges.revert_tag_changes(actor(moderator_user_fixture()), %{ids: []})
 
       assert only_moderation_log!().body == "Reverted 0 tag changes"
     end
@@ -441,8 +442,11 @@ defmodule Philomena.TagChangesTest do
       moderator = actor(moderator_user_fixture())
       {image, tag_change} = tag_change!(confirmed_user_fixture())
 
-      assert {:ok, [%TagChange{}]} = TagChanges.revert_tag_changes(moderator, [tag_change.id])
-      assert {:ok, [%TagChange{}]} = TagChanges.revert_tag_changes(moderator, [tag_change.id])
+      assert {:ok, [%TagChange{}]} =
+               TagChanges.revert_tag_changes(moderator, %{ids: [tag_change.id]})
+
+      assert {:ok, [%TagChange{}]} =
+               TagChanges.revert_tag_changes(moderator, %{ids: [tag_change.id]})
 
       names = image_tag_names(image)
       refute "added test tag" in names
@@ -451,15 +455,21 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "a non-list ids value from a moderator is invalid" do
-      assert TagChanges.revert_tag_changes(actor(moderator_user_fixture()), "42") ==
-               {:error, :invalid_ids}
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               TagChanges.revert_tag_changes(actor(moderator_user_fixture()), %{"ids" => "42"})
+
+      assert changeset.errors[:ids]
 
       assert Repo.aggregate(ModerationLog, :count) == 0
     end
 
     test "a list containing a malformed id is invalid before reversion" do
-      assert TagChanges.revert_tag_changes(actor(moderator_user_fixture()), ["not-an-id"]) ==
-               {:error, :invalid_ids}
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               TagChanges.revert_tag_changes(actor(moderator_user_fixture()), %{
+                 "ids" => ["not-an-id"]
+               })
+
+      assert changeset.errors[:ids]
 
       assert Repo.aggregate(ModerationLog, :count) == 0
     end

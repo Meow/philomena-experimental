@@ -6,19 +6,19 @@ defmodule PhilomenaWeb.TagChange.RevertController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case TagChanges.revert_tag_changes(conn.assigns.actor, params["ids"]) do
+    case TagChanges.revert_tag_changes(conn.assigns.actor, params) do
       {:ok, tag_changes} ->
         conn
         |> put_flash(:info, "Successfully reverted #{length(tag_changes)} tag changes.")
         |> redirect(external: conn.assigns.referrer)
 
-      {:error, :unauthorized} = error ->
-        error
-
-      _error ->
+      {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Couldn't revert those tag changes!")
         |> redirect(external: conn.assigns.referrer)
+
+      error ->
+        error
     end
   end
 end

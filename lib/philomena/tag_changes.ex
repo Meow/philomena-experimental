@@ -26,6 +26,7 @@ defmodule Philomena.TagChanges do
   alias Philomena.TagChanges
   alias Philomena.TagChanges.QueryBuilder
   alias Philomena.TagChanges.QueryForm
+  alias Philomena.TagChanges.RevertForm
   alias Philomena.TagChanges.SearchIndex
   alias Philomena.TagChanges.TagChange
   alias Philomena.TagChanges.TagChangePage
@@ -63,21 +64,6 @@ defmodule Philomena.TagChanges do
   end
 
   defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
-
-  defp parse_ids(ids) when is_list(ids) do
-    Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, parsed_ids} ->
-      case Loader.parse_id(id) do
-        {:ok, id} -> {:cont, {:ok, [id | parsed_ids]}}
-        {:error, :not_found} -> {:halt, {:error, :invalid_ids}}
-      end
-    end)
-    |> case do
-      {:ok, parsed_ids} -> {:ok, parsed_ids |> Enum.uniq() |> Enum.reverse()}
-      error -> error
-    end
-  end
-
-  defp parse_ids(_ids), do: {:error, :invalid_ids}
 
   defp image_visibility_filters(actor) do
     case authorize(actor, :show, %Image{hidden_from_users: true}) do
@@ -448,23 +434,30 @@ defmodule Philomena.TagChanges do
   @doc """
   Reverts the valid tag-change IDs in `ids` on behalf of `actor`.
 
-  Malformed ID lists return `{:error, :invalid_ids}`. Missing IDs and changes on
+  Malformed ID lists return `{:error, changeset}`. Missing IDs and changes on
   hidden images are skipped, making stale or repeated batch submissions safe.
   The successful moderation log records the number of loaded changes reverted.
 
   ## Examples
 
-      iex> revert_tag_changes(moderator, ["12", "13"])
+      iex> revert_tag_changes(moderator, %{"ids" => ["12", "13"]})
       {:ok, [%TagChange{}, %TagChange{}]}
 
   """
-  @spec revert_tag_changes(Actor.t(), term()) ::
-          {:ok, [TagChange.t()]} | {:error, term()}
-  def revert_tag_changes(%Actor{} = actor, ids) do
+  @spec revert_tag_changes(Actor.t(), map()) ::
+          {:ok, [TagChange.t()]} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def revert_tag_changes(%Actor{} = actor, params) do
     with :ok <- authorize(actor, :revert, TagChange),
-         {:ok, ids} <- parse_ids(ids),
+         {:ok, revert_form} <-
+           %RevertForm{}
+           |> RevertForm.changeset(params)
+           |> Ecto.Changeset.apply_action(:create),
          {:ok, tag_changes} <-
-           revert_ids(ids, %{ip: actor.ip, fingerprint: actor.fingerprint, user_id: actor.user.id}) do
+           revert_ids(revert_form.ids, %{
+             ip: actor.ip,
+             fingerprint: actor.fingerprint,
+             user_id: actor.user.id
+           }) do
       ModerationLogs.create_moderation_log(
         actor,
         "TagChange.Revert:create",
@@ -489,9 +482,14 @@ defmodule Philomena.TagChanges do
 
   """
   @spec revert_for_worker([IntegerId.integer_id()], map()) ::
-          {:ok, [TagChange.t()]} | {:error, term()}
+          {:ok, [TagChange.t()]} | {:error, Ecto.Changeset.t()}
   def revert_for_worker(ids, attributes) do
-    with {:ok, ids} <- parse_ids(ids), do: revert_ids(ids, attributes)
+    with {:ok, revert_form} <-
+           %RevertForm{}
+           |> RevertForm.changeset(%{ids: ids})
+           |> Ecto.Changeset.apply_action(:create) do
+      revert_ids(revert_form.ids, attributes)
+    end
   end
 
   @doc """
