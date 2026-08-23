@@ -74,14 +74,6 @@ defmodule Philomena.TagChanges do
 
   defp identity_metadata?(actor), do: authorize(actor, :show, :identity_metadata) == :ok
 
-  defp user_resource_filter(actor, %User{id: user_id}) do
-    if identity_metadata?(actor) do
-      %{term: %{true_user_id: user_id}}
-    else
-      %{term: %{user_id: user_id}}
-    end
-  end
-
   defp search_tag_changes(actor, resource_type, target, resource_filter, params, pagination) do
     query_options = [user: actor.user, identity_metadata?: identity_metadata?(actor)]
 
@@ -111,41 +103,42 @@ defmodule Philomena.TagChanges do
   end
 
   defp revert_ids(ids, attributes) do
-    tag_changes =
-      Repo.all(
-        from tag_change in TagChange,
-          inner_join: image in assoc(tag_change, :image),
-          where: tag_change.id in ^ids and image.hidden_from_users == false,
-          order_by: [desc: tag_change.created_at, desc: tag_change.id],
-          preload: [tags: [:tag, :tag_change]]
-      )
+    tag_change_query =
+      from tag_change in TagChange,
+        inner_join: image in assoc(tag_change, :image),
+        where: tag_change.id in ^ids and image.hidden_from_users == false,
+        order_by: [desc: tag_change.created_at, desc: tag_change.id],
+        preload: [tags: [:tag, :tag_change]]
 
-    case revert_tags(Enum.flat_map(tag_changes, & &1.tags), attributes) do
+    tag_changes = Repo.all(tag_change_query)
+
+    tag_changes
+    |> Enum.flat_map(& &1.tags)
+    |> revert_tags(attributes)
+    |> case do
       {:ok, _result} -> {:ok, tag_changes}
       error -> error
     end
   end
 
   defp revert_tags(tags, attributes) do
-    changes_per_image =
-      tags
-      |> Enum.group_by(& &1.tag_change.image_id)
-      |> Enum.map(fn {image_id, instances} ->
-        changed_tags =
-          instances
-          |> Enum.sort_by(&{DateTime.to_unix(&1.tag_change.created_at), &1.tag_change_id})
-          |> Enum.uniq_by(& &1.tag_id)
+    tags
+    |> Enum.group_by(& &1.tag_change.image_id)
+    |> Enum.map(fn {image_id, instances} ->
+      changed_tags =
+        instances
+        |> Enum.sort_by(&{DateTime.to_unix(&1.tag_change.created_at), &1.tag_change_id})
+        |> Enum.uniq_by(& &1.tag_id)
 
-        {added_tags, removed_tags} = Enum.split_with(changed_tags, & &1.added)
+      {added_tags, removed_tags} = Enum.split_with(changed_tags, & &1.added)
 
-        %{
-          image_id: image_id,
-          added_tags: Enum.map(removed_tags, & &1.tag),
-          removed_tags: Enum.map(added_tags, & &1.tag)
-        }
-      end)
-
-    Images.batch_update(changes_per_image, attributes)
+      %{
+        image_id: image_id,
+        added_tags: Enum.map(removed_tags, & &1.tag),
+        removed_tags: Enum.map(added_tags, & &1.tag)
+      }
+    end)
+    |> Images.batch_update(attributes)
   end
 
   defp enqueue_full_revert(actor, target, {subject, subject_path}) do
@@ -224,21 +217,6 @@ defmodule Philomena.TagChanges do
     end
   end
 
-  defp deletion_log(%TagChange{user: user, image: image, tags: tags}) do
-    author = if user, do: user.name, else: "an anonymous user"
-
-    {
-      "TagChange:delete",
-      Paths.image_path(image),
-      "Deleted tag change by #{author} containing #{length(tags)} tags on image #{image.id} from history"
-    }
-  end
-
-  defp enqueue_reindex(%TagChange{} = tag_change) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "id", [tag_change.id]])
-    tag_change
-  end
-
   @doc """
   Searches all tag changes visible to `actor`.
 
@@ -307,7 +285,10 @@ defmodule Philomena.TagChanges do
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def tag_tag_changes(%Actor{} = actor, tag_name, params, pagination) when is_binary(tag_name) do
-    slug = tag_name |> String.downcase() |> Slug.slug()
+    slug =
+      tag_name
+      |> String.downcase()
+      |> Slug.slug()
 
     with {:ok, tag} <- Tags.load_visible_tag(actor, slug) do
       search_tag_changes(actor, :tag, tag, %{term: %{tag_id: tag.id}}, params, pagination)
@@ -334,11 +315,18 @@ defmodule Philomena.TagChanges do
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def user_tag_changes(%Actor{} = actor, name, params, pagination) do
     with {:ok, user} <- Users.load_profile_by_name(actor, name) do
+      user_resource_filter =
+        if identity_metadata?(actor) do
+          %{term: %{true_user_id: user.id}}
+        else
+          %{term: %{user_id: user.id}}
+        end
+
       search_tag_changes(
         actor,
         :user,
         user,
-        user_resource_filter(actor, user),
+        user_resource_filter,
         params,
         pagination
       )
@@ -449,8 +437,11 @@ defmodule Philomena.TagChanges do
       end
     end)
     |> Multi.on_commit(fn
-      %{tag_change: %TagChange{} = tag_change} -> enqueue_reindex(tag_change)
-      %{tag_change: nil} -> :ok
+      %{tag_change: %TagChange{} = tag_change} ->
+        Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "id", [tag_change.id]])
+
+      %{tag_change: nil} ->
+        nil
     end)
   end
 
@@ -542,7 +533,13 @@ defmodule Philomena.TagChanges do
       Multi.new()
       |> Multi.delete(:tag_change, tag_change)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag_change: tag_change} ->
-        deletion_log(tag_change)
+        author = if tag_change.user, do: tag_change.user.name, else: "an anonymous user"
+
+        {
+          "TagChange:delete",
+          Paths.image_path(tag_change.image),
+          "Deleted tag change by #{author} containing #{length(tag_change.tags)} tags on image #{tag_change.image_id} from history"
+        }
       end)
       |> Multi.on_commit(fn %{tag_change: tag_change} ->
         Search.delete_document(tag_change.id, TagChange)
