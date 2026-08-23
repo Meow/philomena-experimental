@@ -41,13 +41,19 @@ defmodule Philomena.TagChanges do
 
   defp cast_ip(ip) do
     case EctoNetwork.INET.cast(ip) do
-      {:ok, ip} -> {:ok, ip}
-      _error -> {:error, :not_found}
+      {:ok, ip} ->
+        {:ok, ip}
+
+      _error ->
+        {:error, :not_found}
     end
   end
 
   defp cast_fingerprint(fingerprint) when is_binary(fingerprint) do
-    fingerprint = fingerprint |> String.trim() |> String.downcase()
+    fingerprint =
+      fingerprint
+      |> String.trim()
+      |> String.downcase()
 
     if UserFingerprints.valid_format?(fingerprint) do
       {:ok, fingerprint}
@@ -236,6 +242,7 @@ defmodule Philomena.TagChanges do
 
       iex> list_tag_changes(actor, %{"tcq" => "safe"}, page: 1, page_size: 25)
       {:ok, %TagChangePage{resource_type: :all}, changeset}
+
   """
   @spec list_tag_changes(Actor.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
@@ -259,6 +266,7 @@ defmodule Philomena.TagChanges do
 
       iex> image_tag_changes(actor, "missing", %{}, page: 1, page_size: 25)
       {:error, :not_found}
+
   """
   @spec image_tag_changes(
           Actor.t(),
@@ -284,6 +292,7 @@ defmodule Philomena.TagChanges do
 
       iex> tag_tag_changes(actor, "safe", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{resource_type: :tag}, changeset}
+
   """
   @spec tag_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
@@ -309,6 +318,7 @@ defmodule Philomena.TagChanges do
 
       iex> user_tag_changes(actor, "Somebody", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{resource_type: :user}, changeset}
+
   """
   @spec user_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
@@ -339,6 +349,7 @@ defmodule Philomena.TagChanges do
 
       iex> ip_tag_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
       {:error, :not_found}
+
   """
   @spec ip_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
@@ -361,6 +372,7 @@ defmodule Philomena.TagChanges do
 
       iex> fingerprint_tag_changes(moderator, "C123", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{resource_type: :fingerprint}, changeset}
+
   """
   @spec fingerprint_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
@@ -391,6 +403,7 @@ defmodule Philomena.TagChanges do
 
       iex> put_tag_change(multi, actor)
       %Philomena.Multi{}
+
   """
   @spec put_tag_change(Multi.t(), Actor.t(), Multi.name()) :: Multi.t()
   def put_tag_change(%Multi{} = multi, %Actor{} = actor, image_step \\ :image) do
@@ -443,6 +456,7 @@ defmodule Philomena.TagChanges do
 
       iex> revert_tag_changes(moderator, ["12", "13"])
       {:ok, [%TagChange{}, %TagChange{}]}
+
   """
   @spec revert_tag_changes(Actor.t(), term()) ::
           {:ok, [TagChange.t()]} | {:error, term()}
@@ -472,6 +486,7 @@ defmodule Philomena.TagChanges do
 
       iex> revert_for_worker([12, 13], attributes)
       {:ok, [%TagChange{}, %TagChange{}]}
+
   """
   @spec revert_for_worker([IntegerId.integer_id()], map()) ::
           {:ok, [TagChange.t()]} | {:error, term()}
@@ -491,6 +506,7 @@ defmodule Philomena.TagChanges do
 
       iex> full_revert(moderator, %{"ip" => "203.0.113.5"})
       {:ok, %{ip: "203.0.113.5"}}
+
   """
   @spec full_revert(Actor.t(), map()) ::
           {:ok, map()}
@@ -535,6 +551,7 @@ defmodule Philomena.TagChanges do
 
       iex> delete_tag_change(actor, "missing")
       {:error, :not_found}
+
   """
   @spec delete_tag_change(Actor.t(), IntegerId.integer_id()) ::
           {:ok, TagChange.t()}
@@ -569,6 +586,7 @@ defmodule Philomena.TagChanges do
 
       iex> cleanup_empty_for_tag_deletion()
       {2, [12, 13]}
+
   """
   @spec cleanup_empty_for_tag_deletion() :: {non_neg_integer(), [integer()]}
   def cleanup_empty_for_tag_deletion do
@@ -593,6 +611,7 @@ defmodule Philomena.TagChanges do
 
       iex> count_for_image(image)
       {3, 7}
+
   """
   @spec count_for_image(Image.t()) :: {non_neg_integer(), non_neg_integer()}
   def count_for_image(%Image{id: image_id}) do
@@ -610,6 +629,7 @@ defmodule Philomena.TagChanges do
 
       iex> user_name_reindex("old name", "new name")
       :ok
+
   """
   @spec user_name_reindex(String.t(), String.t()) :: term()
   def user_name_reindex(old_name, new_name) do
@@ -624,6 +644,7 @@ defmodule Philomena.TagChanges do
 
       iex> reindex_for_images([12, 13])
       [12, 13]
+
   """
   @spec reindex_for_images([integer()]) :: [integer()]
   def reindex_for_images(image_ids) do
@@ -639,6 +660,7 @@ defmodule Philomena.TagChanges do
 
       iex> indexing_preloads()
       [image: image_query, tags: [tag: tag_query], user: user_query]
+
   """
   @spec indexing_preloads() :: keyword()
   def indexing_preloads do
@@ -666,6 +688,7 @@ defmodule Philomena.TagChanges do
 
       iex> perform_reindex(:id, [12, 13])
       :ok
+
   """
   @spec perform_reindex(atom(), [term()]) :: term()
   def perform_reindex(column, condition) do
@@ -683,6 +706,7 @@ defmodule Philomena.TagChanges do
 
       iex> revert_all_for_worker(query, %{batch_size: 100})
       :ok
+
   """
   @spec revert_all_for_worker(Ecto.Queryable.t(), map()) :: :ok | {:error, term()}
   def revert_all_for_worker(queryable, attributes) do
