@@ -77,7 +77,7 @@ defmodule PhilomenaWeb.Tag.AliasControllerTest do
       assert redirected_to(conn) == ~p"/tags/#{tag}/alias/edit"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Tag alias queued"
 
-      assert Repo.get!(Tag, tag.id).aliased_tag_id == target.id
+      assert Repo.get!(Tag, tag.id).aliased_tag_id == nil
     end
 
     test "an admin aliases the tag into the target (PUT)", %{conn: conn} do
@@ -90,7 +90,7 @@ defmodule PhilomenaWeb.Tag.AliasControllerTest do
       assert redirected_to(conn) == ~p"/tags/#{tag}/alias/edit"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Tag alias queued"
 
-      assert Repo.get!(Tag, tag.id).aliased_tag_id == target.id
+      assert Repo.get!(Tag, tag.id).aliased_tag_id == nil
     end
 
     test "aliasing into an unknown target re-renders the form with errors", %{conn: conn} do

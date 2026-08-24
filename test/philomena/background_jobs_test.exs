@@ -186,6 +186,8 @@ defmodule Philomena.BackgroundJobsTest do
       assert {:ok, aliased} =
                Tags.alias_tag(actor(admin), alias_tag.slug, %{"target_tag" => target.name})
 
+      finalized_alias = Repo.get!(Tag, alias_tag_id)
+      Repo.update!(Ecto.Changeset.change(finalized_alias, aliased_tag_id: target_id))
       assert {:ok, %Tag{id: ^alias_tag_id}} = Tags.unalias_tag(actor(admin), aliased.slug)
 
       assert {:ok, %Tag{id: ^target_id}} =

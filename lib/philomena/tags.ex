@@ -43,6 +43,7 @@ defmodule Philomena.Tags do
   alias Philomena.Tags.Uploader
   alias Philomena.Users
   alias Philomena.Users.User
+  alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
 
   @show_preloads [
@@ -130,11 +131,6 @@ defmodule Philomena.Tags do
     target_tag = find_canonical_tag_by_name(target_name)
 
     Tag.alias_changeset(tag, attrs, target_tag)
-  end
-
-  defp enqueue_alias(%Tag{aliased_tag: %Tag{} = target_tag} = tag) do
-    Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
-    tag
   end
 
   defp enqueue_unalias(%Tag{} = tag) do
@@ -316,10 +312,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Worker entry point that migrates an alias's associations to its target.
+  Worker entry point that migrates an alias's taggings to its target.
 
-  Taggings, filters, watches, links, DNP entries, channels, and the alias row
-  move in one transaction. Image and tag indexing begins only after commit.
+  Taggings are moved in batches to avoid holding locks for the full migration.
+  The alias is finalized only after all batches have completed.
 
   ## Examples
 
@@ -329,9 +325,38 @@ defmodule Philomena.Tags do
   """
   @spec perform_alias(integer(), integer()) :: :ok
   def perform_alias(tag_id, target_tag_id) do
-    tag = Repo.get!(Tag, tag_id)
+    tag = Repo.get!(Tag, tag_id) |> Repo.preload(:aliased_tag)
     target_tag = Repo.get!(Tag, target_tag_id)
 
+    taggings_query = where(Tagging, tag_id: ^tag.id)
+
+    Batch.query_batches(taggings_query, batch_size: 10_000, id_field: :image_id)
+    |> Enum.each(&migrate_alias_taggings(&1, target_tag.id))
+
+    case tag
+         |> Tag.alias_changeset(%{target_tag: target_tag.name}, target_tag)
+         |> Repo.update() do
+      {:ok, _tag} ->
+        enqueue_image_reindex(target_tag)
+        enqueue_tag_reindex([tag, target_tag])
+        :ok
+
+      {:error, reason} ->
+        raise "tag alias finalization failed: #{inspect(reason)}"
+    end
+  end
+
+  defp migrate_alias_taggings(batch_query, target_tag_id) do
+    taggings =
+      batch_query
+      |> select([tagging], %{image_id: tagging.image_id, tag_id: type(^target_tag_id, :integer)})
+      |> Repo.all()
+
+    Repo.insert_all(Tagging, taggings, on_conflict: :nothing)
+    Repo.delete_all(batch_query)
+  end
+
+  defp alias_association_multi(multi, tag, target_tag) do
     hidden_filters_query =
       Filter
       |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
@@ -379,20 +404,7 @@ defmodule Philomena.Tags do
       |> where(associated_artist_tag_id: ^tag.id)
       |> update(set: [associated_artist_tag_id: ^target_tag.id])
 
-    # FIXME: there is intentionally not any limit to how many images can be
-    # added to a tag. The delete operation might lock hundreds of
-    # thousands of rows and effectively downtime the site
-    new_taggings_query =
-      from i in Image,
-        inner_join: it in Tagging,
-        on: it.image_id == i.id,
-        select: %{image_id: i.id, tag_id: ^target_tag.id},
-        where: it.tag_id == ^tag.id
-
-    old_taggings_query =
-      where(Tagging, tag_id: ^tag.id)
-
-    Multi.new()
+    multi
     |> Multi.update_all(:update_hidden_filters, hidden_filters_query, [])
     |> Multi.update_all(:update_spoilered_filters, spoilered_filters_query, [])
     |> Multi.update_all(:update_users_watching, users_watching_query, [])
@@ -403,27 +415,6 @@ defmodule Philomena.Tags do
     |> Multi.update_all(:update_artist_links, artist_links_query, [])
     |> Multi.update_all(:update_dnp_entries, dnp_entries_query, [])
     |> Multi.update_all(:update_channels, channels_query, [])
-    |> Multi.insert_all(:insert_new_taggings, Tagging, new_taggings_query, on_conflict: :nothing)
-    |> Multi.delete_all(:delete_old_taggings, old_taggings_query)
-    |> Multi.update_all(:finalize_alias, where(Tag, id: ^tag.id),
-      set: [
-        images_count: 0,
-        aliased_tag_id: target_tag.id,
-        updated_at: DateTime.utc_now(:second)
-      ]
-    )
-    |> Multi.on_commit(fn _changes ->
-      enqueue_image_reindex(target_tag)
-      enqueue_tag_reindex([tag, target_tag])
-    end)
-    |> Multi.transact()
-    |> case do
-      {:ok, _changes} ->
-        :ok
-
-      {:error, step, reason, _changes} ->
-        raise "tag alias failed at #{step}: #{inspect(reason)}"
-    end
   end
 
   @doc """
@@ -1001,8 +992,9 @@ defmodule Philomena.Tags do
   @doc """
   Aliases the tag named by `slug` on behalf of `actor`.
 
-  Write access, `:alias` authorization, the alias relation, and its audit log
-  share one transaction. Association migration is queued after commit.
+  Write access, `:alias` authorization, the association migration, and its
+  audit log share one transaction. Tagging migration and alias finalization
+  are queued after commit.
 
   ## Examples
 
@@ -1016,20 +1008,37 @@ defmodule Philomena.Tags do
   def alias_tag(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :alias, slug, @alias_preloads) do
-      Multi.new()
-      |> Multi.update(:tag, tag_alias_changeset(tag, attrs))
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag: tag} ->
-        {
-          "Tag.Alias:update",
-          Paths.tag_path(tag),
-          "Aliased tag '#{tag.name}' into '#{tag.aliased_tag.name}'"
-        }
-      end)
-      |> Multi.on_commit(fn %{tag: tag} -> enqueue_alias(tag) end)
-      |> Multi.transact()
-      |> case do
-        {:ok, %{tag: tag}} -> {:ok, tag}
-        {:error, :tag, changeset, _changes} -> {:error, changeset}
+      alias_changeset = tag_alias_changeset(tag, attrs)
+
+      case Ecto.Changeset.apply_action(alias_changeset, :update) do
+        {:ok, _tag} ->
+          target_tag = Ecto.Changeset.get_field(alias_changeset, :aliased_tag)
+
+          alias_association_multi(Multi.new(), tag, target_tag)
+          |> ModerationLogs.put_log(
+            :moderation_log,
+            actor,
+            "Tag.Alias:update",
+            Paths.tag_path(tag),
+            "Aliased tag '#{tag.name}' into '#{target_tag.name}'"
+          )
+          |> Multi.on_commit(fn _changes ->
+            Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
+          end)
+          |> Multi.transact()
+          |> case do
+            {:ok, _changes} ->
+              {:ok, Ecto.Changeset.apply_changes(alias_changeset)}
+
+            {:error, :moderation_log, changeset, _changes} ->
+              {:error, changeset}
+
+            {:error, _step, reason, _changes} ->
+              raise "tag alias failed: #{inspect(reason)}"
+          end
+
+        {:error, changeset} ->
+          {:error, changeset}
       end
     end
   end

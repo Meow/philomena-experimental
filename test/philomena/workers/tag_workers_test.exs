@@ -2,6 +2,7 @@ defmodule Philomena.TagWorkersTest do
   use Philomena.DataCase, async: false
   use Patch
 
+  import Philomena.AttributionFixtures
   import Philomena.ImagesFixtures
   import Philomena.ArtistLinksFixtures
   import Philomena.TagsFixtures
@@ -14,6 +15,7 @@ defmodule Philomena.TagWorkersTest do
   alias Philomena.TagReindexWorker
   alias Philomena.Tags.Tag
   alias Philomena.TagUnaliasWorker
+  alias Philomena.Tags
   alias PhilomenaQuery.Search
 
   defp tag_ids(image) do
@@ -40,7 +42,8 @@ defmodule Philomena.TagWorkersTest do
     assert Repo.reload!(source).aliased_tag_id == target.id
   end
 
-  test "the alias worker deletes conflicting artist links before updating links" do
+  test "aliasing deletes conflicting artist links before the worker runs" do
+    admin = admin_user_fixture()
     user = confirmed_user_fixture()
     source = tag_fixture(name: "artist:worker alias source")
     target = tag_fixture(name: "artist:worker alias target")
@@ -49,15 +52,16 @@ defmodule Philomena.TagWorkersTest do
     source_link = artist_link_fixture(user, source, %{"uri" => uri})
     target_link = artist_link_fixture(user, target, %{"uri" => uri})
 
-    source
-    |> Ecto.Changeset.change(aliased_tag_id: target.id)
-    |> Repo.update!()
-
-    assert :ok = TagAliasWorker.perform(source.id, target.id)
+    assert {:ok, _tag} =
+             Tags.alias_tag(
+               actor(admin),
+               source.slug,
+               %{"target_tag" => target.name}
+             )
 
     refute Repo.get(ArtistLink, source_link.id)
     assert Repo.get!(ArtistLink, target_link.id).tag_id == target.id
-    assert Repo.reload!(source).aliased_tag_id == target.id
+    assert Repo.reload!(source).aliased_tag_id == nil
   end
 
   test "the unalias worker removes the alias relationship" do

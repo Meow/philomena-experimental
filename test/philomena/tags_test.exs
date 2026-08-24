@@ -354,7 +354,7 @@ defmodule Philomena.TagsTest do
                })
 
       assert aliased.id == tag.id
-      assert Repo.reload!(tag).aliased_tag_id == target.id
+      assert Repo.reload!(tag).aliased_tag_id == nil
 
       log = only_moderation_log!()
       assert log.type == "Tag.Alias:update"
