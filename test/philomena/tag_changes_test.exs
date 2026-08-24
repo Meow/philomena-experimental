@@ -503,8 +503,10 @@ defmodule Philomena.TagChangesTest do
       moderator = moderator_user_fixture()
       target = confirmed_user_fixture()
 
-      assert TagChanges.full_revert_user_tag_changes(actor(moderator), target.slug) ==
-               {:ok, %{user_id: target.id}}
+      assert {:ok, result} =
+               TagChanges.full_revert_user_tag_changes(actor(moderator), target.slug)
+
+      assert result.id == target.id
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -521,7 +523,7 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "a moderator enqueues a reversion for an ip" do
-      assert {:ok, %{ip: "203.0.113.9"}} =
+      assert {:ok, "203.0.113.9"} =
                TagChanges.full_revert_ip_tag_changes(
                  actor(moderator_user_fixture()),
                  "203.0.113.9"
@@ -534,7 +536,7 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "a moderator enqueues a reversion for a fingerprint" do
-      assert {:ok, %{fingerprint: "c1774"}} =
+      assert {:ok, "c1774"} =
                TagChanges.full_revert_fingerprint_tag_changes(
                  actor(moderator_user_fixture()),
                  "c1774"

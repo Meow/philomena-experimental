@@ -141,7 +141,7 @@ defmodule Philomena.TagChanges do
     |> Images.batch_update(attributes)
   end
 
-  defp enqueue_full_revert(actor, target, {subject, subject_path}) do
+  defp put_enqueue_full_revert(%Multi{} = multi, actor, target) do
     attributes = %{
       ip: to_string(actor.ip),
       fingerprint: actor.fingerprint,
@@ -149,20 +149,11 @@ defmodule Philomena.TagChanges do
       batch_size: 100
     }
 
-    Multi.new()
-    |> ModerationLogs.put_log(:moderation_log, actor, fn _changes ->
-      {"TagChange.FullRevert:create", subject_path, "Reverted all tag changes for #{subject}"}
-    end)
-    |> Multi.on_commit(fn _changes ->
+    Multi.on_commit(multi, fn _changes ->
       Exq.enqueue(Exq, "indexing", TagChangeRevertWorker, [
         Map.put(target, :attributes, attributes)
       ])
     end)
-    |> Multi.transact()
-    |> case do
-      {:ok, _changes} -> {:ok, target}
-      {:error, :moderation_log, changeset, _changes} -> {:error, changeset}
-    end
   end
 
   @doc """
@@ -171,15 +162,27 @@ defmodule Philomena.TagChanges do
   Missing profiles return `{:error, :not_found}`.
   """
   @spec full_revert_user_tag_changes(Actor.t(), String.t()) ::
-          {:ok, %{user_id: integer()}} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def full_revert_user_tag_changes(%Actor{} = actor, slug) do
     with :ok <- authorize(actor, :revert, TagChange),
          {:ok, user} <- Users.load_profile(actor, slug) do
-      enqueue_full_revert(
+      Multi.new()
+      |> put_enqueue_full_revert(actor, %{user_id: user.id})
+      |> ModerationLogs.put_log(
+        :moderation_log,
         actor,
-        %{user_id: user.id},
-        {"user #{user.name}", Paths.profile_path(user)}
+        "TagChange.FullRevert:create",
+        Paths.profile_path(user),
+        "Reverted all tag changes for user #{user.name}"
       )
+      |> Multi.transact()
+      |> case do
+        {:ok, _changes} ->
+          {:ok, user}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -189,12 +192,29 @@ defmodule Philomena.TagChanges do
   Invalid IP addresses return `{:error, :not_found}`.
   """
   @spec full_revert_ip_tag_changes(Actor.t(), term()) ::
-          {:ok, %{ip: String.t()}} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, String.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def full_revert_ip_tag_changes(%Actor{} = actor, ip) do
     with :ok <- authorize(actor, :revert, TagChange),
          {:ok, ip} <- cast_ip(ip) do
       ip = to_string(ip)
-      enqueue_full_revert(actor, %{ip: ip}, {"ip #{ip}", Paths.ip_profile_path(ip)})
+
+      Multi.new()
+      |> put_enqueue_full_revert(actor, %{ip: ip})
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "TagChange.FullRevert:create",
+        Paths.ip_profile_path(ip),
+        "Reverted all tag changes for ip #{ip}"
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, _changes} ->
+          {:ok, ip}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -204,16 +224,28 @@ defmodule Philomena.TagChanges do
   Invalid fingerprints return `{:error, :not_found}`.
   """
   @spec full_revert_fingerprint_tag_changes(Actor.t(), term()) ::
-          {:ok, %{fingerprint: String.t()}}
+          {:ok, String.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def full_revert_fingerprint_tag_changes(%Actor{} = actor, fingerprint) do
     with :ok <- authorize(actor, :revert, TagChange),
          {:ok, fingerprint} <- cast_fingerprint(fingerprint) do
-      enqueue_full_revert(
+      Multi.new()
+      |> put_enqueue_full_revert(actor, %{fingerprint: fingerprint})
+      |> ModerationLogs.put_log(
+        :moderation_log,
         actor,
-        %{fingerprint: fingerprint},
-        {"fingerprint #{fingerprint}", Paths.fingerprint_profile_path(fingerprint)}
+        "TagChange.FullRevert:create",
+        Paths.fingerprint_profile_path(fingerprint),
+        "Reverted all tag changes for fingerprint #{fingerprint}"
       )
+      |> Multi.transact()
+      |> case do
+        {:ok, _changes} ->
+          {:ok, fingerprint}
+
+        error ->
+          error
+      end
     end
   end
 

@@ -54,7 +54,9 @@ defmodule PhilomenaWeb.Profile.TagChange.RevertControllerTest do
       conn = post(conn, ~p"/ip_profiles/not-an-ip/tag_changes/revert")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Couldn't revert those tag changes!"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
   end
 end
