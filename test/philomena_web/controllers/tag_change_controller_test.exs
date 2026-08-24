@@ -121,7 +121,7 @@ defmodule PhilomenaWeb.TagChangeControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
 
-    test "hidden image history follows image visibility", %{conn: conn} do
+    test "hidden image history ignores image visibility", %{conn: conn} do
       image = tag_change_fixture!(confirmed_user_fixture(), "hidden marker tag, second tag")
 
       image
@@ -131,7 +131,7 @@ defmodule PhilomenaWeb.TagChangeControllerTest do
       SearchHelpers.reindex_all!(TagChange)
 
       response = html_response(get(conn, ~p"/tag_changes"), 200)
-      refute response =~ "hidden marker tag"
+      assert response =~ "hidden marker tag"
 
       conn = get(conn, ~p"/tag_changes?#{[resource_type: "image", resource_id: image.id]}")
       assert redirected_to(conn) == "/"

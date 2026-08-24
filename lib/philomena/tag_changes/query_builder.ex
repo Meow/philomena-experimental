@@ -1,50 +1,45 @@
 defmodule Philomena.TagChanges.QueryBuilder do
   @moduledoc false
 
-  import Ecto.Changeset
-
-  alias Philomena.TagChanges.Query
+  alias Philomena.Users.User
   alias Philomena.TagChanges.QueryForm
 
   @doc """
-  Validates the listing parameters and builds the OpenSearch query and sort.
+  Builds a tag change search query based on the given parameters.
 
-  The caller supplies the already-authorized query capabilities in `options`.
-  Invalid sort or query syntax returns the rejected query-form changeset.
+  ## Parameters
+
+    * `params` - Map of optional search parameters:
+      * `tcq` - Search query
+      * `sf` - Sort field:
+        * `created_at` - Creation timestamp
+        * `tag_count` - Number of tags added and removed
+        * `added_tag_count` - Number of tags added
+        * `removed_tag_count` - Number of tags removed
+      * `sd` - Sort direction:
+        * `asc` - Results ascending by `sf`
+        * `desc` - Results descending by `sf`
+
+  Returns `{:ok, query, query_form}` with an OpenSearch query body for `TagChanges
+  that can be used with `PhilomenaQuery.Search`, or `{:error, changeset}` if the
+  provided parameters are invalid.
   """
-  @spec build_query(map(), keyword()) ::
+  @spec build_query(User.t() | nil, map()) ::
           {:ok, map(), QueryForm.t()} | {:error, Ecto.Changeset.t()}
-  def build_query(params \\ %{}, options \\ []) do
-    changeset =
-      %QueryForm{}
-      |> QueryForm.changeset(params)
-      |> compile_query(options)
-
-    with {:ok, query_form} <- apply_action(changeset, :create) do
+  def build_query(user, params \\ %{}) do
+    with {:ok, query_form} <-
+           %QueryForm{}
+           |> QueryForm.changeset(user, params)
+           |> Ecto.Changeset.apply_action(:create) do
       body = %{
         query: query_form.compiled_query,
         sort: [
-          %{Atom.to_string(query_form.sf) => query_form.sd},
+          %{query_form.sf => query_form.sd},
           %{"id" => query_form.sd}
         ]
       }
 
       {:ok, body, query_form}
-    end
-  end
-
-  defp compile_query(%Ecto.Changeset{valid?: false} = changeset, _options), do: changeset
-
-  defp compile_query(changeset, options) do
-    case Query.compile(get_field(changeset, :tcq),
-           user: options[:user],
-           identity_metadata?: options[:identity_metadata?] || false
-         ) do
-      {:ok, query} ->
-        put_change(changeset, :compiled_query, query)
-
-      {:error, message} ->
-        add_error(changeset, :tcq, message)
     end
   end
 end

@@ -1,6 +1,8 @@
 defmodule Philomena.TagChanges.Query do
   @moduledoc false
 
+  import Philomena.Authorization, only: [authorize: 3]
+
   alias PhilomenaQuery.Parse.Parser
 
   defp user_my_transform(%{user: %{id: id}}, "changes"),
@@ -45,14 +47,18 @@ defmodule Philomena.TagChanges.Query do
     |> Parser.parse(query_string, context)
   end
 
-  defp fields_for(_user, true), do: moderator_fields()
-  defp fields_for(nil, false), do: anonymous_fields()
-  defp fields_for(_user, false), do: user_fields()
-
   def compile(query_string, opts \\ []) do
     user = Keyword.get(opts, :user)
-    identity_metadata? = Keyword.get(opts, :identity_metadata?, false)
 
-    parse(fields_for(user, identity_metadata?), %{user: user}, query_string)
+    cond do
+      not is_nil(user) and authorize(user, :show, :identity_metadata) == :ok ->
+        parse(moderator_fields(), %{user: user}, query_string)
+
+      not is_nil(user) ->
+        parse(user_fields(), %{user: user}, query_string)
+
+      true ->
+        parse(anonymous_fields(), %{}, query_string)
+    end
   end
 end

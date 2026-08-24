@@ -84,7 +84,7 @@ defmodule Philomena.TagChangesTest do
                 resource_type: :all,
                 target: nil,
                 tag_changes: page
-              }, %Ecto.Changeset{data: %QueryForm{sf: :tag_count, sd: :asc}}} =
+              }, %Ecto.Changeset{data: %QueryForm{sf: "tag_count", sd: "asc"}}} =
                TagChanges.list_tag_changes(
                  actor(),
                  %{"sf" => "tag_count", "sd" => "asc"},
@@ -197,7 +197,7 @@ defmodule Philomena.TagChangesTest do
                {:error, :not_found}
     end
 
-    test "hidden image changes follow image visibility in global and image listings" do
+    test "hidden image changes ignore image visibility in global listings but not image listings" do
       {image, tag_change} = tag_change!(confirmed_user_fixture())
 
       image
@@ -206,10 +206,10 @@ defmodule Philomena.TagChangesTest do
 
       reindex_tag_changes!()
 
-      assert {:ok, %TagChangePage{tag_changes: page}, _} =
+      assert {:ok, %TagChangePage{tag_changes: global_page}, _} =
                TagChanges.list_tag_changes(actor(), %{}, @pagination)
 
-      assert page.entries == []
+      assert Enum.map(global_page.entries, & &1.id) == [tag_change.id]
 
       assert TagChanges.image_tag_changes(actor(), image.id, %{}, @pagination) ==
                {:error, :unauthorized}

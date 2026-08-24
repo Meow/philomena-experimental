@@ -75,12 +75,15 @@ defmodule Philomena.TagChanges do
 
   defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
 
-  defp identity_metadata?(actor), do: authorize(actor, :show, :identity_metadata) == :ok
-
-  defp search_tag_changes(actor, resource_type, target, resource_filter, params, pagination) do
-    query_options = [user: actor.user, identity_metadata?: identity_metadata?(actor)]
-
-    with {:ok, body, query_form} <- QueryBuilder.build_query(params, query_options) do
+  defp search_tag_changes(
+         %Actor{user: user},
+         resource_type,
+         target,
+         resource_filter,
+         params,
+         pagination
+       ) do
+    with {:ok, body, query_form} <- QueryBuilder.build_query(user, params) do
       filters = List.wrap(resource_filter)
       body = %{body | query: %{bool: %{must: [body.query | filters]}}}
 
@@ -95,11 +98,11 @@ defmodule Philomena.TagChanges do
         tag_changes: tag_changes
       }
 
-      {:ok, page, QueryForm.changeset(query_form)}
+      {:ok, page, QueryForm.changeset(query_form, user)}
     end
   end
 
-  defp revert_ids(ids, attributes) do
+  defp revert_tag_change_ids(ids, attributes) do
     tag_change_query =
       from tag_change in TagChange,
         inner_join: image in assoc(tag_change, :image),
@@ -113,8 +116,11 @@ defmodule Philomena.TagChanges do
     |> Enum.flat_map(& &1.tag_change_tags)
     |> revert_tag_change_tags(attributes)
     |> case do
-      {:ok, _result} -> {:ok, tag_changes}
-      error -> error
+      {:ok, _result} ->
+        {:ok, tag_changes}
+
+      error ->
+        error
     end
   end
 
@@ -345,7 +351,7 @@ defmodule Philomena.TagChanges do
   def user_tag_changes(%Actor{} = actor, name, params, pagination) do
     with {:ok, user} <- Users.load_profile_by_name(actor, name) do
       user_resource_filter =
-        if identity_metadata?(actor) do
+        if authorize(actor, :show, :identity_metadata) == :ok do
           %{term: %{true_user_id: user.id}}
         else
           %{term: %{user_id: user.id}}
@@ -496,7 +502,7 @@ defmodule Philomena.TagChanges do
            |> RevertForm.changeset(params)
            |> Ecto.Changeset.apply_action(:create),
          {:ok, tag_changes} <-
-           revert_ids(revert_form.ids, %{
+           revert_tag_change_ids(revert_form.ids, %{
              ip: actor.ip,
              fingerprint: actor.fingerprint,
              user_id: actor.user.id
@@ -531,7 +537,7 @@ defmodule Philomena.TagChanges do
            %RevertForm{}
            |> RevertForm.changeset(%{ids: ids})
            |> Ecto.Changeset.apply_action(:create) do
-      revert_ids(revert_form.ids, attributes)
+      revert_tag_change_ids(revert_form.ids, attributes)
     end
   end
 
