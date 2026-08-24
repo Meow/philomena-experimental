@@ -981,7 +981,7 @@ defmodule Philomena.Tags do
 
     Tagging
     |> where(tag_id: ^tag.id)
-    |> Batch.query_batches(batch_size: 10_000, id_field: :image_id)
+    |> Batch.query_batches(batch_size: 1_000, id_field: :image_id)
     |> Enum.each(fn batch_query ->
       # Lock all images in the batch first to prevent image operations from racing tag updates.
       image_query =
@@ -1070,7 +1070,7 @@ defmodule Philomena.Tags do
 
     Tagging
     |> where(tag_id: ^tag.id)
-    |> Batch.query_batches(batch_size: 10_000, id_field: :image_id)
+    |> Batch.query_batches(batch_size: 1_000, id_field: :image_id)
     |> Enum.each(fn batch_query ->
       # Lock all images in the batch first to prevent image operations from racing tag updates.
       image_query =

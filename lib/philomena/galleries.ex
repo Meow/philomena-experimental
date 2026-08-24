@@ -26,6 +26,7 @@ defmodule Philomena.Galleries do
   alias Philomena.Repo
   alias Philomena.Loader
 
+  alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
   alias Philomena.Attribution.Actor
   alias Philomena.Galleries.Gallery
@@ -70,16 +71,39 @@ defmodule Philomena.Galleries do
     Multi.on_commit(multi, fn %{^step => gallery} -> reindex_gallery(gallery) end)
   end
 
+  defp cleanup_gallery(%Gallery{} = gallery) do
+    gallery_query = where(Gallery, id: ^gallery.id)
+
+    Interaction
+    |> where(gallery_id: ^gallery.id)
+    |> Batch.query_batches(batch_size: 1_000, id_field: :image_id)
+    |> Enum.each(fn batch_query ->
+      Multi.new()
+      |> Multi.lock_one(:locked_gallery, gallery_query)
+      |> Multi.delete_all(:interactions, select(batch_query, [i], i.image_id))
+      |> Multi.update_all(
+        :update_gallery,
+        fn %{interactions: {count, _image_ids}} ->
+          update(gallery_query, inc: [image_count: ^(-count)])
+        end,
+        []
+      )
+      |> Multi.on_commit(fn %{interactions: {_count, image_ids}} ->
+        Images.reindex_images(image_ids)
+      end)
+      |> Multi.transact()
+    end)
+  end
+
   defp persist_gallery_deletion(%Gallery{} = gallery, %User{} = closing_user) do
+    cleanup_gallery(gallery)
+
     # Deletion must lock the gallery before discovering its members. It cannot
     # then lock the unbounded image set without inverting the image-first
     # hierarchy used by add/remove/reorder and image hide/merge workflows. The
-    # gallery FK cascade locks and deletes the interaction rows instead.
+    # gallery FK cascade locks and deletes any raced interaction rows instead.
     gallery_query = where(Gallery, id: ^gallery.id)
 
-    # FIXME: there is intentionally not any limit to how many images can be
-    # added to a gallery. The delete operation might lock hundreds of
-    # thousands of rows and effectively downtime the site
     interactions_query =
       Interaction
       |> where(gallery_id: ^gallery.id)
