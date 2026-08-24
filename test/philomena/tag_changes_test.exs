@@ -81,7 +81,6 @@ defmodule Philomena.TagChangesTest do
 
       assert {:ok,
               %TagChangePage{
-                resource_type: :all,
                 target: nil,
                 tag_changes: page
               }, %Ecto.Changeset{data: %QueryForm{sf: "tag_count", sd: "asc"}}} =
@@ -112,22 +111,20 @@ defmodule Philomena.TagChangesTest do
       tag = Repo.get_by!(Tag, name: "added test tag")
       reindex_tag_changes!()
 
-      assert {:ok, %TagChangePage{resource_type: :image, target: loaded_image, tag_changes: page},
-              _} =
+      assert {:ok, %TagChangePage{target: loaded_image, tag_changes: page}, _} =
                TagChanges.image_tag_changes(actor(), image.id, %{}, @pagination)
 
       assert loaded_image.id == image.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
 
-      assert {:ok, %TagChangePage{resource_type: :tag, target: loaded_tag, tag_changes: page}, _} =
-               TagChanges.tag_tag_changes(actor(), String.upcase(tag.name), %{}, @pagination)
+      assert {:ok, %TagChangePage{target: loaded_tag, tag_changes: page}, _} =
+               TagChanges.tag_tag_changes(actor(), tag.slug, %{}, @pagination)
 
       assert loaded_tag.id == tag.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
 
-      assert {:ok, %TagChangePage{resource_type: :user, target: loaded_user, tag_changes: page},
-              _} =
-               TagChanges.user_tag_changes(actor(), String.upcase(user.name), %{}, @pagination)
+      assert {:ok, %TagChangePage{target: loaded_user, tag_changes: page}, _} =
+               TagChanges.user_tag_changes(actor(), user.slug, %{}, @pagination)
 
       assert loaded_user.id == user.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
@@ -146,11 +143,10 @@ defmodule Philomena.TagChangesTest do
 
       assert {:ok,
               %TagChangePage{
-                resource_type: :tag,
                 target: loaded_tag,
                 tag_changes: page
               }, _changeset} =
-               TagChanges.tag_tag_changes(actor(), alias_tag.name, %{}, @pagination)
+               TagChanges.tag_tag_changes(actor(), alias_tag.slug, %{}, @pagination)
 
       assert loaded_tag.id == canonical.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
@@ -238,7 +234,7 @@ defmodule Philomena.TagChangesTest do
       assert TagChanges.ip_tag_changes(actor(), "203.0.113.1", %{}, @pagination) ==
                {:error, :unauthorized}
 
-      assert {:ok, %TagChangePage{resource_type: :ip, tag_changes: ip_page}, _} =
+      assert {:ok, %TagChangePage{tag_changes: ip_page}, _} =
                TagChanges.ip_tag_changes(moderator, "203.0.113.1", %{}, @pagination)
 
       assert Enum.map(ip_page.entries, & &1.id) == [tag_change.id]
@@ -255,7 +251,6 @@ defmodule Philomena.TagChangesTest do
 
       assert {:ok,
               %TagChangePage{
-                resource_type: :fingerprint,
                 target: "d015c342859dde3",
                 tag_changes: fingerprint_page
               }, _} =

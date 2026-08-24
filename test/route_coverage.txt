@@ -233,9 +233,11 @@
 [x] PUT    /dnp/:id                                                         DnpEntryController :update
 [x] GET    /ip_profiles/:id                                                 IpProfileController :show
 [x] GET    /ip_profiles/:ip_profile_id/source_changes                       IpProfile.SourceChangeController :index
+[x] GET    /ip_profiles/:ip_profile_id/tag_changes                          IpProfile.TagChangeController :index
 [x] POST   /ip_profiles/:ip_profile_id/tag_changes/revert                   IpProfile.TagChange.RevertController :create
 [x] GET    /fingerprint_profiles/:id                                        FingerprintProfileController :show
 [x] GET    /fingerprint_profiles/:fingerprint_profile_id/source_changes     FingerprintProfile.SourceChangeController :index
+[x] GET    /fingerprint_profiles/:fingerprint_profile_id/tag_changes        FingerprintProfile.TagChangeController :index
 [x] POST   /fingerprint_profiles/:fingerprint_profile_id/tag_changes/revert FingerprintProfile.TagChange.RevertController :create
 [x] GET    /moderation_logs                                                 ModerationLogController :index
 [x] GET    /admin/reports                                                   Admin.ReportController :index
@@ -391,6 +393,7 @@
 [x] PATCH  /images/:image_id/sources                                        Image.SourceController :update
 [x] PUT    /images/:image_id/sources                                        Image.SourceController :update
 [x] GET    /images/:image_id/source_changes                                 Image.SourceChangeController :index
+[x] GET    /images/:image_id/tag_changes                                    Image.TagChangeController :index
 [x] PATCH  /images/:image_id/description                                    Image.DescriptionController :update
 [x] PUT    /images/:image_id/description                                    Image.DescriptionController :update
 [x] GET    /images/:image_id/navigate                                       Image.NavigateController :index
@@ -404,6 +407,7 @@
 [x] GET    /themes                                                          ThemeController :index
 [x] GET    /tags                                                            TagController :index
 [x] GET    /tags/:id                                                        TagController :show
+[x] GET    /tags/:tag_id/tag_changes                                        Tag.TagChangeController :index
 [x] GET    /tag_changes                                                     TagChangeController :index
 [x] DELETE /tag_changes/:id                                                 TagChangeController :delete
 [x] GET    /search/reverse                                                  Search.ReverseController :index
@@ -434,6 +438,7 @@
 [x] POST   /profiles/:profile_id/reports                                    Profile.ReportController :create
 [x] GET    /profiles/:profile_id/commission                                 Profile.CommissionController :show
 [x] GET    /profiles/:profile_id/source_changes                             Profile.SourceChangeController :index
+[x] GET    /profiles/:profile_id/tag_changes                                Profile.TagChangeController :index
 [x] POST   /posts/preview                                                   Post.PreviewController :create
 [x] GET    /posts                                                           PostController :index
 [x] GET    /commissions                                                     CommissionController :index

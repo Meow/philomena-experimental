@@ -345,6 +345,7 @@ defmodule PhilomenaWeb.Router do
 
     resources "/ip_profiles", IpProfileController, only: [:show] do
       resources "/source_changes", IpProfile.SourceChangeController, only: [:index]
+      resources "/tag_changes", IpProfile.TagChangeController, only: [:index]
 
       resources "/tag_changes/revert", IpProfile.TagChange.RevertController,
         only: [:create],
@@ -353,6 +354,7 @@ defmodule PhilomenaWeb.Router do
 
     resources "/fingerprint_profiles", FingerprintProfileController, only: [:show] do
       resources "/source_changes", FingerprintProfile.SourceChangeController, only: [:index]
+      resources "/tag_changes", FingerprintProfile.TagChangeController, only: [:index]
 
       resources "/tag_changes/revert", FingerprintProfile.TagChange.RevertController,
         only: [:create],
@@ -491,6 +493,7 @@ defmodule PhilomenaWeb.Router do
       resources "/tags", Image.TagController, only: [:update], singleton: true
       resources "/sources", Image.SourceController, only: [:update], singleton: true
       resources "/source_changes", Image.SourceChangeController, only: [:index]
+      resources "/tag_changes", Image.TagChangeController, only: [:index]
       resources "/description", Image.DescriptionController, only: [:update], singleton: true
       resources "/navigate", Image.NavigateController, only: [:index]
       resources "/reports", Image.ReportController, only: [:new, :create]
@@ -509,7 +512,9 @@ defmodule PhilomenaWeb.Router do
 
     resources "/themes", ThemeController, only: [:index]
 
-    resources "/tags", TagController, only: [:index, :show]
+    resources "/tags", TagController, only: [:index, :show] do
+      resources "/tag_changes", Tag.TagChangeController, only: [:index]
+    end
 
     resources "/tag_changes", TagChangeController, only: [:index, :delete]
 
@@ -543,6 +548,7 @@ defmodule PhilomenaWeb.Router do
       resources "/reports", Profile.ReportController, only: [:new, :create]
       resources "/commission", Profile.CommissionController, only: [:show], singleton: true
       resources "/source_changes", Profile.SourceChangeController, only: [:index]
+      resources "/tag_changes", Profile.TagChangeController, only: [:index]
     end
 
     scope "/posts", Post, as: :post do

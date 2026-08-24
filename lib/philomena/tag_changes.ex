@@ -21,7 +21,6 @@ defmodule Philomena.TagChanges do
   alias Philomena.ModerationLogs.Paths
   alias Philomena.Multi
   alias Philomena.Repo
-  alias Philomena.Slug
   alias Philomena.TagChangeRevertWorker
   alias Philomena.TagChanges.QueryBuilder
   alias Philomena.TagChanges.QueryForm
@@ -77,7 +76,6 @@ defmodule Philomena.TagChanges do
 
   defp search_tag_changes(
          %Actor{user: user},
-         resource_type,
          target,
          resource_filter,
          params,
@@ -93,7 +91,6 @@ defmodule Philomena.TagChanges do
         |> Search.search_records(preload(TagChange, ^@history_preloads))
 
       page = %TagChangePage{
-        resource_type: resource_type,
         target: target,
         tag_changes: tag_changes
       }
@@ -263,7 +260,7 @@ defmodule Philomena.TagChanges do
   ## Examples
 
       iex> list_tag_changes(actor, %{"tcq" => "safe"}, page: 1, page_size: 25)
-      {:ok, %TagChangePage{resource_type: :all}, changeset}
+      {:ok, %TagChangePage{target: nil}, changeset}
 
   """
   @spec list_tag_changes(Actor.t(), map(), Search.pagination_params()) ::
@@ -271,7 +268,7 @@ defmodule Philomena.TagChanges do
           | {:error, :unauthorized | Ecto.Changeset.t()}
   def list_tag_changes(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, TagChange) do
-      search_tag_changes(actor, :all, nil, [], params, pagination)
+      search_tag_changes(actor, nil, [], params, pagination)
     end
   end
 
@@ -284,7 +281,7 @@ defmodule Philomena.TagChanges do
   ## Examples
 
       iex> image_tag_changes(actor, "42", %{}, page: 1, page_size: 25)
-      {:ok, %TagChangePage{resource_type: :image}, changeset}
+      {:ok, %TagChangePage{target: image}, changeset}
 
       iex> image_tag_changes(actor, "missing", %{}, page: 1, page_size: 25)
       {:error, :not_found}
@@ -300,40 +297,34 @@ defmodule Philomena.TagChanges do
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def image_tag_changes(%Actor{} = actor, image_id, params, pagination) do
     with {:ok, image} <- Images.load_visible_image(actor, image_id) do
-      search_tag_changes(actor, :image, image, %{term: %{image_id: image.id}}, params, pagination)
+      search_tag_changes(actor, image, %{term: %{image_id: image.id}}, params, pagination)
     end
   end
 
   @doc """
-  Searches tag changes involving the tag named by `tag_name`.
+  Searches tag changes involving the tag named by `slug`.
 
-  The name is normalized to the tag's route slug and resolved through Tags.
   Missing tags are not found before OpenSearch is queried.
 
   ## Examples
 
       iex> tag_tag_changes(actor, "safe", %{}, page: 1, page_size: 25)
-      {:ok, %TagChangePage{resource_type: :tag}, changeset}
+      {:ok, %TagChangePage{target: tag}, changeset}
 
   """
   @spec tag_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def tag_tag_changes(%Actor{} = actor, tag_name, params, pagination) when is_binary(tag_name) do
-    slug =
-      tag_name
-      |> String.downcase()
-      |> Slug.slug()
-
+  def tag_tag_changes(%Actor{} = actor, slug, params, pagination) when is_binary(slug) do
     with {:ok, tag} <- Tags.load_visible_tag(actor, slug) do
-      search_tag_changes(actor, :tag, tag, %{term: %{tag_id: tag.id}}, params, pagination)
+      search_tag_changes(actor, tag, %{term: %{tag_id: tag.id}}, params, pagination)
     end
   end
 
-  def tag_tag_changes(%Actor{}, _tag_name, _params, _pagination), do: {:error, :not_found}
+  def tag_tag_changes(%Actor{}, _slug, _params, _pagination), do: {:error, :not_found}
 
   @doc """
-  Searches tag changes attributed to the active user named by `name`.
+  Searches tag changes attributed to the active user named by their profile slug.
 
   Users owns target loading. Ordinary viewers receive only publicly attributed
   changes; actors with identity-metadata access receive the user's true
@@ -342,14 +333,14 @@ defmodule Philomena.TagChanges do
   ## Examples
 
       iex> user_tag_changes(actor, "Somebody", %{}, page: 1, page_size: 25)
-      {:ok, %TagChangePage{resource_type: :user}, changeset}
+      {:ok, %TagChangePage{target: user}, changeset}
 
   """
   @spec user_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def user_tag_changes(%Actor{} = actor, name, params, pagination) do
-    with {:ok, user} <- Users.load_profile_by_name(actor, name) do
+  def user_tag_changes(%Actor{} = actor, slug, params, pagination) do
+    with {:ok, user} <- Users.load_profile(actor, slug) do
       user_resource_filter =
         if authorize(actor, :show, :identity_metadata) == :ok do
           %{term: %{true_user_id: user.id}}
@@ -359,7 +350,6 @@ defmodule Philomena.TagChanges do
 
       search_tag_changes(
         actor,
-        :user,
         user,
         user_resource_filter,
         params,
@@ -377,7 +367,7 @@ defmodule Philomena.TagChanges do
   ## Examples
 
       iex> ip_tag_changes(moderator, "203.0.113.5", %{}, page: 1, page_size: 25)
-      {:ok, %TagChangePage{resource_type: :ip}, changeset}
+      {:ok, %TagChangePage{target: ip}, changeset}
 
       iex> ip_tag_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
       {:error, :not_found}
@@ -389,7 +379,7 @@ defmodule Philomena.TagChanges do
   def ip_tag_changes(%Actor{} = actor, ip, params, pagination) do
     with {:ok, ip} <- cast_ip(ip),
          :ok <- authorize(actor, :show, :identity_metadata) do
-      search_tag_changes(actor, :ip, ip, %{term: %{ip: to_string(ip)}}, params, pagination)
+      search_tag_changes(actor, ip, %{term: %{ip: to_string(ip)}}, params, pagination)
     end
   end
 
@@ -403,7 +393,7 @@ defmodule Philomena.TagChanges do
   ## Examples
 
       iex> fingerprint_tag_changes(moderator, "C123", %{}, page: 1, page_size: 25)
-      {:ok, %TagChangePage{resource_type: :fingerprint}, changeset}
+      {:ok, %TagChangePage{target: fingerprint}, changeset}
 
   """
   @spec fingerprint_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
@@ -414,7 +404,6 @@ defmodule Philomena.TagChanges do
          :ok <- authorize(actor, :show, :identity_metadata) do
       search_tag_changes(
         actor,
-        :fingerprint,
         fingerprint,
         %{term: %{fingerprint: fingerprint}},
         params,
