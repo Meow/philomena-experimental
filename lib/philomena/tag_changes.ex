@@ -75,20 +75,13 @@ defmodule Philomena.TagChanges do
 
   defp cast_fingerprint(_fingerprint), do: {:error, :not_found}
 
-  defp image_visibility_filters(actor) do
-    case authorize(actor, :show, %Image{hidden_from_users: true}) do
-      :ok -> []
-      {:error, :unauthorized} -> [%{term: %{image_hidden: false}}]
-    end
-  end
-
   defp identity_metadata?(actor), do: authorize(actor, :show, :identity_metadata) == :ok
 
   defp search_tag_changes(actor, resource_type, target, resource_filter, params, pagination) do
     query_options = [user: actor.user, identity_metadata?: identity_metadata?(actor)]
 
     with {:ok, body, query_form} <- QueryBuilder.build_query(params, query_options) do
-      filters = image_visibility_filters(actor) ++ List.wrap(resource_filter)
+      filters = List.wrap(resource_filter)
       body = %{body | query: %{bool: %{must: [body.query | filters]}}}
 
       tag_changes =

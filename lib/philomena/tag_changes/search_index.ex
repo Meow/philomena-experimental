@@ -5,7 +5,7 @@ defmodule Philomena.TagChanges.SearchIndex do
 
   @impl true
   def version do
-    2
+    1
   end
 
   @impl true
@@ -27,7 +27,6 @@ defmodule Philomena.TagChanges.SearchIndex do
         properties: %{
           id: %{type: "integer"},
           image_id: %{type: "keyword"},
-          image_hidden: %{type: "boolean"},
           created_at: %{type: "date"},
           tag: %{type: "keyword"},
           added_tag: %{type: "keyword"},
@@ -65,7 +64,6 @@ defmodule Philomena.TagChanges.SearchIndex do
     %{
       id: tag_change.id,
       image_id: tag_change.image_id,
-      image_hidden: tag_change.image.hidden_from_users,
       user:
         if(!anonymous,
           do: String.downcase(tag_change.user.name)
