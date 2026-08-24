@@ -124,47 +124,6 @@ defmodule Philomena.Tags do
     tag
   end
 
-  @doc """
-  Worker entry point that deletes a queued tag and repairs dependent indexes.
-
-  The tag row and its database cascades commit before OpenSearch cleanup,
-  empty TagChanges cleanup, and affected-image reindexing run.
-
-  ## Examples
-
-      iex> perform_delete(42)
-      :ok
-
-  """
-  @spec perform_delete(integer()) :: :ok
-  def perform_delete(tag_id) do
-    tag = Repo.get!(Tag, tag_id)
-
-    image_ids_query =
-      Image
-      |> join(:inner, [image], _tag in assoc(image, :tags))
-      |> where([_image, joined_tag], joined_tag.id == ^tag.id)
-      |> select([image, _joined_tag], image.id)
-
-    Multi.new()
-    |> Multi.all(:image_ids, image_ids_query)
-    |> Multi.delete(:tag, tag)
-    |> Multi.on_commit(fn %{image_ids: image_ids, tag: tag} ->
-      Search.delete_document(tag.id, Tag)
-      TagChanges.cleanup_empty_for_tag_deletion()
-
-      Image
-      |> where([image], image.id in ^image_ids)
-      |> preload(^Images.indexing_preloads())
-      |> Search.reindex(Image)
-    end)
-    |> Multi.transact()
-    |> case do
-      {:ok, _changes} -> :ok
-      {:error, step, reason, _changes} -> raise "tag delete failed at #{step}: #{inspect(reason)}"
-    end
-  end
-
   defp tag_alias_changeset(%Tag{} = tag, attrs) do
     form = Tag.alias_form_changeset(tag, attrs)
     target_name = Ecto.Changeset.get_field(form, :target_tag)
@@ -209,6 +168,151 @@ defmodule Philomena.Tags do
         {^column, fragment("array_replace(?, ?, ?)", field(q, ^column), ^old_value, ^new_value)}
       ]
     )
+  end
+
+  # Computes the search query that lists the tag's images. A tag whose name
+  # compiles back to itself is used verbatim; anything else is escaped so the
+  # search parser does not reinterpret it.
+  defp maybe_escape_name(%{name: name}) do
+    name =
+      name
+      |> String.replace(~r/\s+/, " ")
+      |> String.trim()
+      |> String.downcase()
+
+    case Images.Query.compile(name) do
+      {:ok, %{term: %{"tags" => ^name}}} ->
+        name
+
+      _error ->
+        escape_name(name)
+    end
+  end
+
+  defp escape_name(name) do
+    if String.contains?(name, "(") or String.contains?(name, ")") do
+      # \ * ? " should be escaped, wrap in quotes so parser doesn't
+      # choke on parens.
+      name =
+        name
+        |> String.replace("\\", "\\\\")
+        |> String.replace("*", "\\*")
+        |> String.replace("?", "\\?")
+        |> String.replace("\"", "\\\"")
+
+      "\"#{name}\""
+    else
+      # \ * ? - ! " all must be escaped.
+      name
+      |> String.replace(~r/\A-/, "\\-")
+      |> String.replace(~r/\A!/, "\\!")
+      |> String.replace("\\", "\\\\")
+      |> String.replace("*", "\\*")
+      |> String.replace("?", "\\?")
+      |> String.replace("\"", "\\\"")
+    end
+  end
+
+  @spec get_or_create_non_empty_tags_list(list(String.t())) :: list()
+  defp get_or_create_non_empty_tags_list(tag_names) do
+    tags =
+      tag_names
+      |> Enum.map(fn tag_name ->
+        %Tag{}
+        |> Tag.creation_changeset(%{name: tag_name})
+        |> Ecto.Changeset.apply_changes()
+        |> Map.take([
+          :slug,
+          :name,
+          :category,
+          :images_count,
+          :description,
+          :short_description,
+          :namespace,
+          :name_in_namespace,
+          :image,
+          :image_format,
+          :image_mime_type,
+          :mod_notes
+        ])
+        |> Map.merge(%{
+          created_at: {:placeholder, :timestamp},
+          updated_at: {:placeholder, :timestamp}
+        })
+      end)
+
+    %{new_tags: {_rows_affected, new_tags}, all_tags: all_tags} =
+      Multi.new()
+      |> Multi.insert_all(
+        :new_tags,
+        Tag,
+        tags,
+        placeholders: %{timestamp: DateTime.utc_now(:second)},
+        on_conflict: :nothing,
+        returning: [:id]
+      )
+      |> Multi.all(
+        :all_tags,
+        Tag
+        |> where([t], t.name in ^tag_names)
+        |> preload([:implied_tags, aliased_tag: :implied_tags])
+      )
+      |> Multi.transact()
+      |> case do
+        {:ok, ok} ->
+          ok
+
+        result ->
+          raise "get_or_create_tags failed: #{inspect(result)}\ntag_names: #{inspect(tag_names)}"
+      end
+
+    new_tags
+    |> reindex_tags()
+
+    all_tags
+    |> Enum.map(&(&1.aliased_tag || &1))
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  @doc """
+  Worker entry point that deletes a queued tag and repairs dependent indexes.
+
+  The tag row and its database cascades commit before OpenSearch cleanup,
+  empty TagChanges cleanup, and affected-image reindexing run.
+
+  ## Examples
+
+      iex> perform_delete(42)
+      :ok
+
+  """
+  @spec perform_delete(integer()) :: :ok
+  def perform_delete(tag_id) do
+    tag = Repo.get!(Tag, tag_id)
+
+    image_ids_query =
+      Image
+      |> join(:inner, [image], _tag in assoc(image, :tags))
+      |> where([_image, joined_tag], joined_tag.id == ^tag.id)
+      |> select([image, _joined_tag], image.id)
+
+    Multi.new()
+    |> Multi.all(:image_ids, image_ids_query)
+    |> Multi.delete(:tag, tag)
+    |> Multi.on_commit(fn %{image_ids: image_ids, tag: tag} ->
+      Search.delete_document(tag.id, Tag)
+      TagChanges.cleanup_empty_for_tag_deletion()
+
+      Image
+      |> where([image], image.id in ^image_ids)
+      |> preload(^Images.indexing_preloads())
+      |> Search.reindex(Image)
+    end)
+    |> Multi.transact()
+    |> case do
+      {:ok, _changes} -> :ok
+      {:error, step, reason, _changes} -> raise "tag delete failed at #{step}: #{inspect(reason)}"
+    end
   end
 
   @doc """
@@ -421,67 +525,6 @@ defmodule Philomena.Tags do
       [] -> []
       tag_names -> get_or_create_non_empty_tags_list(tag_names)
     end
-  end
-
-  @spec get_or_create_non_empty_tags_list(list(String.t())) :: list()
-  defp get_or_create_non_empty_tags_list(tag_names) do
-    tags =
-      tag_names
-      |> Enum.map(fn tag_name ->
-        %Tag{}
-        |> Tag.creation_changeset(%{name: tag_name})
-        |> Ecto.Changeset.apply_changes()
-        |> Map.take([
-          :slug,
-          :name,
-          :category,
-          :images_count,
-          :description,
-          :short_description,
-          :namespace,
-          :name_in_namespace,
-          :image,
-          :image_format,
-          :image_mime_type,
-          :mod_notes
-        ])
-        |> Map.merge(%{
-          created_at: {:placeholder, :timestamp},
-          updated_at: {:placeholder, :timestamp}
-        })
-      end)
-
-    %{new_tags: {_rows_affected, new_tags}, all_tags: all_tags} =
-      Multi.new()
-      |> Multi.insert_all(
-        :new_tags,
-        Tag,
-        tags,
-        placeholders: %{timestamp: DateTime.utc_now(:second)},
-        on_conflict: :nothing,
-        returning: [:id]
-      )
-      |> Multi.all(
-        :all_tags,
-        Tag
-        |> where([t], t.name in ^tag_names)
-        |> preload([:implied_tags, aliased_tag: :implied_tags])
-      )
-      |> Multi.transact()
-      |> case do
-        {:ok, ok} ->
-          ok
-
-        result ->
-          raise "get_or_create_tags failed: #{inspect(result)}\ntag_names: #{inspect(tag_names)}"
-      end
-
-    new_tags
-    |> reindex_tags()
-
-    all_tags
-    |> Enum.map(&(&1.aliased_tag || &1))
-    |> Enum.uniq_by(& &1.id)
   end
 
   @doc """
@@ -725,49 +768,6 @@ defmodule Philomena.Tags do
          filters_hiding: filters_hiding,
          users_watching: users_watching
        }}
-    end
-  end
-
-  # Computes the search query that lists the tag's images. A tag whose name
-  # compiles back to itself is used verbatim; anything else is escaped so the
-  # search parser does not reinterpret it.
-  defp maybe_escape_name(%{name: name}) do
-    name =
-      name
-      |> String.replace(~r/\s+/, " ")
-      |> String.trim()
-      |> String.downcase()
-
-    case Images.Query.compile(name) do
-      {:ok, %{term: %{"tags" => ^name}}} ->
-        name
-
-      _error ->
-        escape_name(name)
-    end
-  end
-
-  defp escape_name(name) do
-    if String.contains?(name, "(") or String.contains?(name, ")") do
-      # \ * ? " should be escaped, wrap in quotes so parser doesn't
-      # choke on parens.
-      name =
-        name
-        |> String.replace("\\", "\\\\")
-        |> String.replace("*", "\\*")
-        |> String.replace("?", "\\?")
-        |> String.replace("\"", "\\\"")
-
-      "\"#{name}\""
-    else
-      # \ * ? - ! " all must be escaped.
-      name
-      |> String.replace(~r/\A-/, "\\-")
-      |> String.replace(~r/\A!/, "\\!")
-      |> String.replace("\\", "\\\\")
-      |> String.replace("*", "\\*")
-      |> String.replace("?", "\\?")
-      |> String.replace("\"", "\\\"")
     end
   end
 
