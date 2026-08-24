@@ -2677,7 +2677,7 @@ defmodule Philomena.Users do
     |> Multi.transact()
     |> case do
       {:ok, %{user: user}} ->
-        user
+        {:ok, user}
 
       {:error, :user, changeset, _changes} ->
         {:error, changeset}
