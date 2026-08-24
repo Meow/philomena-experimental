@@ -32,7 +32,6 @@ defmodule Philomena.Tags do
   alias Philomena.TagAliasWorker
   alias Philomena.TagDeleteWorker
   alias Philomena.TagReindexWorker
-  alias Philomena.TagUnaliasWorker
   alias Philomena.TagChanges
   alias Philomena.Tags.Implication
   alias Philomena.Tags.QueryBuilder
@@ -122,11 +121,6 @@ defmodule Philomena.Tags do
 
   defp enqueue_delete(%Tag{} = tag) do
     Exq.enqueue(Exq, "indexing", TagDeleteWorker, [tag.id])
-    tag
-  end
-
-  defp enqueue_unalias(%Tag{} = tag) do
-    Exq.enqueue(Exq, "indexing", TagUnaliasWorker, [tag.id])
     tag
   end
 
@@ -394,33 +388,6 @@ defmodule Philomena.Tags do
     enqueue_tag_reindex([tag, target_tag])
 
     :ok
-  end
-
-  @doc """
-  Worker entry point that removes a queued alias and repairs its indexes.
-
-  ## Examples
-
-      iex> perform_unalias(12)
-      {:ok, %Tag{}}
-
-  """
-  @spec perform_unalias(integer()) :: {:ok, Tag.t()} | {:error, Ecto.Changeset.t()}
-  def perform_unalias(tag_id) do
-    tag = Repo.get!(Tag, tag_id)
-    former_alias = Repo.preload(tag, :aliased_tag).aliased_tag
-
-    Multi.new()
-    |> Multi.update(:tag, Tag.unalias_changeset(tag))
-    |> Multi.on_commit(fn %{tag: tag} ->
-      enqueue_image_reindex(former_alias)
-      enqueue_tag_reindex([tag, former_alias])
-    end)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{tag: tag}} -> {:ok, tag}
-      {:error, :tag, changeset, _changes} -> {:error, changeset}
-    end
   end
 
   @doc """
@@ -1148,10 +1115,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Queues removal of the alias on the tag named by `slug`, on behalf of `actor`.
+  Removes the alias on the tag named by `slug`, on behalf of `actor`.
 
-  Write access and `:unalias` authorization precede an atomic audit insert. The
-  worker is released only after the audit commits.
+  Write access, `:unalias` authorization, the relationship update, and the
+  audit log share one transaction. Image and tag reindexing runs after commit.
 
   ## Examples
 
@@ -1164,9 +1131,12 @@ defmodule Philomena.Tags do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def unalias_tag(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, tag} <- load_tag_for_action(actor, :unalias, slug, @alias_preloads),
-         %Ecto.Changeset{valid?: true} <- Tag.unalias_request_changeset(tag) do
+         {:ok, tag} <- load_tag_for_action(actor, :unalias, slug, @alias_preloads) do
+      unalias_changeset = Tag.unalias_changeset(tag)
+      former_alias = tag.aliased_tag
+
       Multi.new()
+      |> Multi.update(:tag, unalias_changeset)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -1174,15 +1144,18 @@ defmodule Philomena.Tags do
         Paths.tag_path(tag),
         "Dealiased tag '#{tag.name}'"
       )
-      |> Multi.on_commit(fn _changes -> enqueue_unalias(tag) end)
+      |> Multi.on_commit(fn %{tag: tag} ->
+        enqueue_image_reindex(former_alias)
+        enqueue_tag_reindex([tag, former_alias])
+      end)
       |> Multi.transact()
       |> case do
-        {:ok, _changes} -> {:ok, tag}
-        {:error, :moderation_log, changeset, _changes} -> {:error, changeset}
+        {:ok, %{tag: %Tag{} = tag}} ->
+          {:ok, tag}
+
+        {:error, :tag, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
-    else
-      %Ecto.Changeset{} = changeset -> {:error, changeset}
-      error -> error
     end
   end
 

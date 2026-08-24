@@ -34,9 +34,9 @@ defmodule Philomena.BackgroundJobsTest do
     :ok
   end
 
-  defp assert_enqueued(queue, worker, arguments) do
+  defp assert_enqueued(queue, worker, arguments, count \\ 1) do
     call = {:enqueue, [Exq, queue, worker, arguments]}
-    assert Enum.count(history(Exq), &(&1 == call)) == 1
+    assert Enum.count(history(Exq), &(&1 == call)) == count
   end
 
   defp reset_exq_spy do
@@ -195,8 +195,7 @@ defmodule Philomena.BackgroundJobsTest do
 
       assert_enqueued("indexing", Philomena.TagDeleteWorker, [delete_tag_id])
       assert_enqueued("indexing", Philomena.TagAliasWorker, [alias_tag_id, target_id])
-      assert_enqueued("indexing", Philomena.TagUnaliasWorker, [alias_tag_id])
-      assert_enqueued("indexing", Philomena.TagReindexWorker, [target_id])
+      assert_enqueued("indexing", Philomena.TagReindexWorker, [target_id], 2)
       assert_enqueued("indexing", Philomena.IndexWorker, ["Tags", "id", [target_id]])
     end
   end

@@ -121,7 +121,7 @@ defmodule PhilomenaWeb.Tag.AliasControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "can't access"
     end
 
-    test "an admin queues a dealias", %{conn: conn} do
+    test "an admin dealiases the tag", %{conn: conn} do
       target = tag_fixture(name: "target tag dealias")
 
       tag =
@@ -133,7 +133,8 @@ defmodule PhilomenaWeb.Tag.AliasControllerTest do
       conn = delete(conn, ~p"/tags/#{tag}/alias")
 
       assert redirected_to(conn) == ~p"/tags/#{tag}"
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Tag dealias queued"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Tag dealias successful"
+      assert Repo.get!(Tag, tag.id).aliased_tag_id == nil
     end
 
     test "an unknown slug is the not-found redirect for a role_map moderator", %{

@@ -14,7 +14,6 @@ defmodule Philomena.TagWorkersTest do
   alias Philomena.TagDeleteWorker
   alias Philomena.TagReindexWorker
   alias Philomena.Tags.Tag
-  alias Philomena.TagUnaliasWorker
   alias Philomena.Tags
   alias PhilomenaQuery.Search
 
@@ -98,19 +97,6 @@ defmodule Philomena.TagWorkersTest do
     refute Repo.get(ArtistLink, source_link.id)
     assert Repo.get!(ArtistLink, target_link.id).tag_id == target.id
     assert Repo.reload!(source).aliased_tag_id == target.id
-  end
-
-  test "the unalias worker removes the alias relationship" do
-    target = tag_fixture(name: "worker unalias target")
-
-    source =
-      tag_fixture(name: "worker unalias source")
-      |> Ecto.Changeset.change(aliased_tag_id: target.id)
-      |> Repo.update!()
-
-    assert {:ok, %Tag{id: source_id}} = TagUnaliasWorker.perform(source.id)
-    assert source_id == source.id
-    assert Repo.reload!(source).aliased_tag_id == nil
   end
 
   test "the delete worker removes the tag and its image taggings" do

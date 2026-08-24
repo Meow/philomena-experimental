@@ -30,7 +30,7 @@ defmodule PhilomenaWeb.Tag.AliasController do
   def delete(conn, params) do
     with {:ok, tag} <- Tags.unalias_tag(conn.assigns.actor, params["tag_id"]) do
       conn
-      |> put_flash(:info, "Tag dealias queued.")
+      |> put_flash(:info, "Tag dealias successful.")
       |> redirect(to: ~p"/tags/#{tag}")
     end
   end

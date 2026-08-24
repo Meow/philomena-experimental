@@ -454,6 +454,7 @@ defmodule Philomena.TagsTest do
 
       assert {:ok, %Tag{} = returned} = Tags.unalias_tag(actor(admin_user_fixture()), tag.slug)
       assert returned.id == tag.id
+      assert Repo.reload!(tag).aliased_tag_id == nil
 
       log = only_moderation_log!()
       assert log.type == "Tag.Alias:delete"

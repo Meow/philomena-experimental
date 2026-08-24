@@ -154,17 +154,18 @@ defmodule Philomena.Tags.Tag do
 
   def unalias_changeset(tag) do
     tag
-    |> unalias_request_changeset()
+    |> change()
+    |> validate_aliased()
     |> put_change(:aliased_tag_id, nil)
   end
 
-  def unalias_request_changeset(%Tag{aliased_tag_id: nil} = tag) do
-    tag
-    |> change()
-    |> add_error(:aliased_tag, "is not aliased")
+  defp validate_aliased(changeset) do
+    if get_field(changeset, :aliased_tag_id) do
+      changeset
+    else
+      add_error(changeset, :aliased_tag, "is not aliased")
+    end
   end
-
-  def unalias_request_changeset(%Tag{} = tag), do: change(tag)
 
   def creation_changeset(tag, attrs) do
     tag
