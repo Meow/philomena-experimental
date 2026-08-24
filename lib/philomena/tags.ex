@@ -1114,15 +1114,24 @@ defmodule Philomena.Tags do
     tag = Repo.get!(Tag, tag_id)
 
     # First recount the tag
-    image_count =
-      Image
-      |> join(:inner, [i], _ in assoc(i, :tags))
-      |> where([i, t], i.hidden_from_users == false and t.id == ^tag.id)
-      |> Repo.aggregate(:count)
-
-    Tag
-    |> where(id: ^tag.id)
-    |> Repo.update_all(set: [images_count: image_count])
+    Multi.new()
+    |> Multi.run(:image_count, fn repo, _changes ->
+      {:ok,
+       Image
+       |> join(:inner, [i], _ in assoc(i, :tags))
+       |> where([i, t], i.hidden_from_users == false and t.id == ^tag.id)
+       |> repo.aggregate(:count)}
+    end)
+    |> Multi.update_all(
+      :update_tag,
+      fn %{image_count: image_count} ->
+        Tag
+        |> where(id: ^tag.id)
+        |> update(set: [images_count: ^image_count])
+      end,
+      []
+    )
+    |> Multi.transact()
 
     # Then reindex
     Image
