@@ -169,7 +169,7 @@ defmodule Philomena.Tags do
         })
       end)
 
-    %{new_tags: {_rows_affected, new_tags}, all_tags: all_tags} =
+    {:ok, %{all_tags: all_tags}} =
       Multi.new()
       |> Multi.insert_all(
         :new_tags,
@@ -185,17 +185,8 @@ defmodule Philomena.Tags do
         |> where([t], t.name in ^tag_names)
         |> preload([:implied_tags, aliased_tag: :implied_tags])
       )
+      |> Multi.on_commit(fn %{new_tags: {_count, new_tags}} -> reindex_tags(new_tags) end)
       |> Multi.transact()
-      |> case do
-        {:ok, ok} ->
-          ok
-
-        result ->
-          raise "get_or_create_tags failed: #{inspect(result)}\ntag_names: #{inspect(tag_names)}"
-      end
-
-    new_tags
-    |> reindex_tags()
 
     all_tags
     |> Enum.map(&(&1.aliased_tag || &1))
@@ -574,6 +565,7 @@ defmodule Philomena.Tags do
         "Updated details on tag '#{tag.name}'"
       )
       |> Multi.on_commit(fn %{tag: updated_tag} ->
+        # credo:disable-for-next-line
         if updated_tag.category != tag.category do
           reindex_tag_images(updated_tag)
         end
