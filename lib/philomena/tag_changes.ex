@@ -1,11 +1,6 @@
 defmodule Philomena.TagChanges do
   @moduledoc """
-  Searchable image-tag edit history and its moderation workflows.
-
-  Controller-facing reads resolve image, tag, user, IP, and fingerprint targets
-  independently before searching. Tag-change creation composes into the owning
-  Images transaction, while reindexing and batch reversion remain explicitly
-  named worker services.
+  Searchable tag edit history and moderation workflows.
   """
 
   import Ecto.Query, warn: false
@@ -160,6 +155,12 @@ defmodule Philomena.TagChanges do
   Enqueues a reversion of all tag changes attributed to a user profile.
 
   Missing profiles return `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> full_revert_user_tag_changes(moderator, "some-user")
+      {:ok, %User{}}
+
   """
   @spec full_revert_user_tag_changes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
@@ -190,6 +191,12 @@ defmodule Philomena.TagChanges do
   Enqueues a reversion of all tag changes attributed to an IP address.
 
   Invalid IP addresses return `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> full_revert_ip_tag_changes(moderator, "203.0.113.5")
+      {:ok, "203.0.113.5"}
+
   """
   @spec full_revert_ip_tag_changes(Actor.t(), term()) ::
           {:ok, String.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
@@ -222,6 +229,12 @@ defmodule Philomena.TagChanges do
   Enqueues a reversion of all tag changes attributed to a fingerprint.
 
   Invalid fingerprints return `{:error, :not_found}`.
+
+  ## Examples
+
+      iex> full_revert_fingerprint_tag_changes(moderator, "C123")
+      {:ok, "c123"}
+
   """
   @spec full_revert_fingerprint_tag_changes(Actor.t(), term()) ::
           {:ok, String.t()}
