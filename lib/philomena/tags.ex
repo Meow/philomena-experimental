@@ -662,7 +662,11 @@ defmodule Philomena.Tags do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def delete_tag(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, tag} <- load_tag_for_action(actor, :delete, slug, @show_preloads) do
+         {:ok, tag} <- load_tag_for_action(actor, :delete, slug, @show_preloads),
+         {:ok, _tag} <-
+           tag
+           |> Tag.deletion_changeset()
+           |> Ecto.Changeset.apply_action(:update) do
       Multi.new()
       |> ModerationLogs.put_log(
         :moderation_log,

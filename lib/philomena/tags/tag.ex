@@ -199,6 +199,16 @@ defmodule Philomena.Tags.Tag do
     |> put_namespace_category()
   end
 
+  def deletion_changeset(tag) do
+    changeset = change(tag)
+
+    if get_field(changeset, :category) == "rating" do
+      add_error(changeset, :category, "cannot delete a rating tag")
+    else
+      changeset
+    end
+  end
+
   defp maybe_put_implied_tag_list(changeset, tag) do
     if get_field(changeset, :implied_tag_list) do
       changeset
