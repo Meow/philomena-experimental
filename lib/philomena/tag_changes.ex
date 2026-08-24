@@ -23,11 +23,11 @@ defmodule Philomena.TagChanges do
   alias Philomena.Repo
   alias Philomena.Slug
   alias Philomena.TagChangeRevertWorker
-  alias Philomena.TagChanges
   alias Philomena.TagChanges.QueryBuilder
   alias Philomena.TagChanges.QueryForm
   alias Philomena.TagChanges.RevertForm
   alias Philomena.TagChanges.SearchIndex
+  alias Philomena.TagChanges.TagChangeTag
   alias Philomena.TagChanges.TagChange
   alias Philomena.TagChanges.TagChangePage
   alias Philomena.Tags
@@ -38,11 +38,15 @@ defmodule Philomena.TagChanges do
   alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
 
-  @history_preloads [:user, image: [:user, :sources, tags: :aliases], tags: [:tag]]
+  @history_preloads [
+    :user,
+    image: [:user, :sources, tags: :aliases],
+    tag_change_tags: [:tag]
+  ]
 
-  defp tags_to_tag_change(_tag_change, nil, _added), do: []
+  defp tag_change_tag_rows(_tag_change, nil, _added), do: []
 
-  defp tags_to_tag_change(tag_change, tags, added) do
+  defp tag_change_tag_rows(tag_change, tags, added) do
     Enum.map(tags, &%{tag_change_id: tag_change.id, tag_id: &1.id, added: added})
   end
 
@@ -108,21 +112,21 @@ defmodule Philomena.TagChanges do
         inner_join: image in assoc(tag_change, :image),
         where: tag_change.id in ^ids and image.hidden_from_users == false,
         order_by: [desc: tag_change.created_at, desc: tag_change.id],
-        preload: [tags: [:tag, :tag_change]]
+        preload: [tag_change_tags: [:tag, :tag_change]]
 
     tag_changes = Repo.all(tag_change_query)
 
     tag_changes
-    |> Enum.flat_map(& &1.tags)
-    |> revert_tags(attributes)
+    |> Enum.flat_map(& &1.tag_change_tags)
+    |> revert_tag_change_tags(attributes)
     |> case do
       {:ok, _result} -> {:ok, tag_changes}
       error -> error
     end
   end
 
-  defp revert_tags(tags, attributes) do
-    tags
+  defp revert_tag_change_tags(tag_change_tags, attributes) do
+    tag_change_tags
     |> Enum.group_by(& &1.tag_change.image_id)
     |> Enum.map(fn {image_id, instances} ->
       changed_tags =
@@ -460,10 +464,10 @@ defmodule Philomena.TagChanges do
 
         {tag_change, {_image, added_tags, removed_tags}} ->
           {added_count, nil} =
-            repo.insert_all(TagChanges.Tag, tags_to_tag_change(tag_change, added_tags, true))
+            repo.insert_all(TagChangeTag, tag_change_tag_rows(tag_change, added_tags, true))
 
           {removed_count, nil} =
-            repo.insert_all(TagChanges.Tag, tags_to_tag_change(tag_change, removed_tags, false))
+            repo.insert_all(TagChangeTag, tag_change_tag_rows(tag_change, removed_tags, false))
 
           {:ok, {added_count, removed_count}}
       end
@@ -561,7 +565,7 @@ defmodule Philomena.TagChanges do
   def delete_tag_change(%Actor{} = actor, id) do
     with {:ok, tag_change} <-
            TagChange
-           |> preload([:user, :image, tags: [:tag]])
+           |> preload([:user, :image, tag_change_tags: [:tag]])
            |> Loader.fetch_and_authorize(actor, :delete, id) do
       author = if tag_change.user, do: tag_change.user.name, else: "an anonymous user"
 
@@ -572,7 +576,7 @@ defmodule Philomena.TagChanges do
         actor,
         "TagChange:delete",
         Paths.image_path(tag_change.image),
-        "Deleted tag change by #{author} containing #{length(tag_change.tags)} tags on image #{tag_change.image_id} from history"
+        "Deleted tag change by #{author} containing #{length(tag_change.tag_change_tags)} tags on image #{tag_change.image_id} from history"
       )
       |> Multi.on_commit(fn %{tag_change: tag_change} ->
         Search.delete_document(tag_change.id, TagChange)
@@ -606,7 +610,13 @@ defmodule Philomena.TagChanges do
       TagChange
       |> from(as: :tag_change)
       |> where(
-        not exists(where(TagChanges.Tag, [tag], tag.tag_change_id == parent_as(:tag_change).id))
+        not exists(
+          where(
+            TagChangeTag,
+            [tag_change_tag],
+            tag_change_tag.tag_change_id == parent_as(:tag_change).id
+          )
+        )
       )
       |> select([tag_change], tag_change.id)
 
@@ -629,7 +639,7 @@ defmodule Philomena.TagChanges do
   def count_for_image(%Image{id: image_id}) do
     TagChange
     |> where(image_id: ^image_id)
-    |> join(:left, [tag_change], tag in assoc(tag_change, :tags))
+    |> join(:left, [tag_change], tag_change_tag in assoc(tag_change, :tag_change_tags))
     |> select([tag_change, tag], {count(tag_change, :distinct), count(tag)})
     |> Repo.one()
   end
@@ -671,7 +681,7 @@ defmodule Philomena.TagChanges do
   ## Examples
 
       iex> indexing_preloads()
-      [image: image_query, tags: [tag: tag_query], user: user_query]
+      [image: image_query, tag_change_tags: [tag: tag_query], user: user_query]
 
   """
   @spec indexing_preloads() :: list()
@@ -687,7 +697,7 @@ defmodule Philomena.TagChanges do
 
     [
       image: image_query,
-      tags: [tag: base_tags_query],
+      tag_change_tags: [tag: base_tags_query],
       user: select(User, [:name])
     ]
   end

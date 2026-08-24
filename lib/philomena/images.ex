@@ -1131,7 +1131,7 @@ defmodule Philomena.Images do
       subquery(
         TagChange
         |> where(image_id: parent_as(:image).id)
-        |> join(:left, [c], t in assoc(c, :tags))
+        |> join(:left, [c], t in assoc(c, :tag_change_tags))
         |> select([c, t], %{
           change_count: count(c, :distinct),
           tag_count: count(t)
@@ -2911,7 +2911,7 @@ defmodule Philomena.Images do
       added_changes = tag_change_data(inserted, new_tag_changes, true)
       removed_changes = tag_change_data(deleted, new_tag_changes, false)
 
-      Repo.insert_all(TagChanges.Tag, added_changes ++ removed_changes)
+      Repo.insert_all(Philomena.TagChanges.TagChangeTag, added_changes ++ removed_changes)
 
       # In order to merge into the existing tables here in one go, insert_all
       # is used with a query that is guaranteed to conflict on every row by
@@ -2974,7 +2974,7 @@ defmodule Philomena.Images do
     |> Enum.reject(&(Enum.empty?(&1.added_tags) && Enum.empty?(&1.removed_tags)))
   end
 
-  # Generate data for TagChanges.Tag struct.
+  # Generate data for TagChanges.TagChangeTag rows.
   defp tag_change_data(changes, tag_changes, added) do
     Enum.map(changes, fn [image_id, tag_id] ->
       %{id: id} = Map.get(tag_changes, image_id)
