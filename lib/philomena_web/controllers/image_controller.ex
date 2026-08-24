@@ -62,6 +62,7 @@ defmodule PhilomenaWeb.ImageController do
       description: description,
       interactions: page.interactions,
       watching: page.watching,
+      can_interact: page.can_interact,
       layout_class: "layout--wide",
       title: "##{image.id} - #{Images.tag_list(image)}"
     ]
@@ -82,12 +83,6 @@ defmodule PhilomenaWeb.ImageController do
   def create(conn, params) do
     case Images.upload_image(conn.assigns.actor, params["image"]) do
       {:ok, %{image: image}} ->
-        PhilomenaWeb.Endpoint.broadcast!(
-          "firehose",
-          "image:create",
-          PhilomenaWeb.Api.Json.ImageView.render("show.json", %{image: image, interactions: []})
-        )
-
         conn
         |> put_flash(:info, "Image created successfully.")
         |> redirect(to: ~p"/images/#{image}")
@@ -121,7 +116,7 @@ defmodule PhilomenaWeb.ImageController do
         |> redirect(to: ~p"/images/#{image.duplicate_id}")
         |> halt()
 
-      {:error, :not_found} = error ->
+      {:error, _not_visible_or_missing} = error ->
         conn
         |> PhilomenaWeb.FallbackController.call(error)
         |> halt()

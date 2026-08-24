@@ -53,13 +53,15 @@ defmodule PhilomenaWeb.Image.RepairControllerTest do
       refute Repo.reload!(image).processed
     end
 
-    test "for an unknown image_id redirects with the authorization flash", %{conn: conn} do
+    test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = post(conn, ~p"/images/999999999/repair")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central

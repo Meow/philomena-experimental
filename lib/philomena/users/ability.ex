@@ -446,6 +446,26 @@ defimpl Canada.Can, for: Philomena.Users.User do
       ),
       do: true
 
+  def can?(
+        %User{role: "assistant", role_map: %{"Image" => %{"moderator" => _}}},
+        action,
+        %Image{}
+      )
+      when action in [
+             :feature,
+             :lock_comments,
+             :lock_description,
+             :lock_tags,
+             :remove_hash,
+             :edit_scratchpad,
+             :remove_source_history,
+             :repair,
+             :replace_file,
+             :update_hide_reason,
+             :unhide
+           ],
+      do: true
+
   # Dupe assistant actions
   def can?(
         %User{role: "assistant", role_map: %{"DuplicateReport" => %{"moderator" => _}}},
@@ -661,7 +681,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
       do: true
 
   def can?(%User{}, action, %Image{hidden_from_users: false})
-      when action in [:show, :index],
+      when action in [:show, :index, :subscribe, :unsubscribe, :mark_read],
       do: true
 
   # Submit and inspect duplicate reports involving visible images.

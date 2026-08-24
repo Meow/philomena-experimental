@@ -7,7 +7,7 @@
     = render PhilomenaWeb.AdvertView, "_box.html", advert: @conn.assigns.advert, conn: @conn
 
   .image-description
-    = render PhilomenaWeb.ImageView, "_description.html", image: @image, body: @description, conn: @conn
+    = render PhilomenaWeb.ImageView, "_description.html", image: @image, body: @description, changeset: @image_changeset, conn: @conn
   = render PhilomenaWeb.Image.DescriptionView, "_form.html", image: @image, changeset: @image_changeset, conn: @conn
 
   = render PhilomenaWeb.ImageView, "_tags.html", image: @image, tag_change_count: @tag_change_count, tag_change_tag_count: @tag_change_tag_count, changeset: @image_changeset, conn: @conn
@@ -19,7 +19,7 @@
     - @conn.assigns.current_ban ->
       = render PhilomenaWeb.BanView, "_ban_reason.html", conn: @conn
 
-    - @image.commenting_allowed ->
+    - @image.commenting_allowed && @comment_changeset ->
       = render PhilomenaWeb.Image.CommentView, "_form.html", image: @image, changeset: @comment_changeset, remote: true, conn: @conn
 
     - true ->

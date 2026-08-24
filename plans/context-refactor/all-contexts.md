@@ -233,7 +233,7 @@ Wave 2 is complete.
 
 Wave 3 is complete.
 
-Wave 4 is underway.
+Wave 4 is complete.
 
 - ImageFaves, ImageHides, and ImageVotes now expose only loaded-image
   `Ecto.Multi` composition steps beneath the Images authorization boundary.
@@ -298,6 +298,15 @@ Wave 4 is underway.
   cleanup returns exact deleted IDs. Database/audit work is transactional with
   storage, jobs, and indexing deferred until commit, while raw mutation and
   single-record indexing helpers are private.
+- Images is complete. Actor-first member loading makes malformed and missing
+  locators independent of identity and removes public/API/oEmbed bypasses.
+  Write prerequisites and named abilities cover uploads, metadata, moderation,
+  subscriptions, and interactions; page controls also enforce locks and forced
+  filters. Search/navigation share actor-aware visibility and parser-owned tag
+  metadata. Raw loaded mutations are private, worker and cross-context services
+  are explicit, database/audit work is transactional under row locks where
+  state matters, and indexing, media, CDN, and firehose work runs only after a
+  successful commit.
 
 ### Wave 0: characterize and establish the contract
 

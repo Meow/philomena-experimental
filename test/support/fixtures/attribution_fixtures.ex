@@ -57,7 +57,7 @@ defmodule Philomena.AttributionFixtures do
   @doc """
   Clears the Valkey tag-change rate-limit counters for the given attribution.
 
-  Tag changes authored through `Philomena.Images.update_loaded_tags/3` bump the
+  Tag changes authored through `Philomena.Images.update_tags/3` bump the
   `rltcn:`/`rltcr:` counters, which `Philomena.TagChanges.Limits` scopes to the
   acting identity: `u:<user_id>` for a logged-in user, `i:<ip>` for an anonymous
   visitor (50 tag changes / 1 rating change per 10 minutes for

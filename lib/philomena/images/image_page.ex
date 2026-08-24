@@ -14,6 +14,7 @@ defmodule Philomena.Images.ImagePage do
     :image,
     :comments,
     :watching,
+    :can_interact,
     :user_galleries,
     :interactions,
     :comment_changeset,
@@ -23,6 +24,7 @@ defmodule Philomena.Images.ImagePage do
     :image,
     :comments,
     :watching,
+    :can_interact,
     :user_galleries,
     :interactions,
     :comment_changeset,
@@ -33,9 +35,10 @@ defmodule Philomena.Images.ImagePage do
           image: Image.t(),
           comments: Scrivener.Page.t(),
           watching: boolean(),
+          can_interact: boolean(),
           user_galleries: [{Philomena.Galleries.Gallery.t(), boolean()}],
           interactions: list(),
-          comment_changeset: Ecto.Changeset.t(),
-          image_changeset: Ecto.Changeset.t()
+          comment_changeset: Ecto.Changeset.t() | nil,
+          image_changeset: Ecto.Changeset.t() | nil
         }
 end

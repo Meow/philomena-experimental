@@ -31,6 +31,7 @@ defmodule Philomena.TagChangesTest do
   alias Philomena.TagChanges.QueryForm
   alias Philomena.TagChanges.TagChange
   alias Philomena.TagChanges.TagChangePage
+  alias Philomena.Tags
   alias Philomena.Tags.Tag
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
@@ -49,13 +50,17 @@ defmodule Philomena.TagChangesTest do
   # image plus the single TagChange row that recorded the two adds.
   defp tag_change!(user) do
     image = image_fixture()
+    attribution = actor(user)
+    added_tags = Tags.get_or_create_tags("added test tag, other added tag")
 
-    {:ok, _} =
-      Images.update_loaded_tags(image, actor(user), %{
-        "old_tag_input" => "safe",
-        "tag_input" => "safe, added test tag, other added tag"
+    {:ok, [image_id]} =
+      Images.batch_update([image.id], added_tags, [], %{
+        user_id: user && user.id,
+        ip: attribution.ip,
+        fingerprint: attribution.fingerprint
       })
 
+    assert image_id == image.id
     {image, Repo.one!(from tc in TagChange, where: tc.image_id == ^image.id)}
   end
 

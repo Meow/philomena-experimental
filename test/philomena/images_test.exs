@@ -3,6 +3,8 @@ defmodule Philomena.ImagesTest do
 
   import Ecto.Query
 
+  alias Ecto.Adapters.SQL.Sandbox
+  alias Phoenix.Socket.Broadcast
   alias Philomena.Multi
   alias Philomena.ImageFaves
   alias Philomena.ImageFaves.ImageFave
@@ -26,6 +28,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.Tags.Tag
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
+  alias PhilomenaWeb.Endpoint
 
   import Philomena.GalleriesFixtures
   import Philomena.FiltersFixtures
@@ -185,13 +188,14 @@ defmodule Philomena.ImagesTest do
     %{"old_sources" => %{}, "sources" => sources}
   end
 
-  # Hides an image through the internal engine (which writes no moderation log),
-  # so a later log assertion sees only the row the function under test creates.
   defp hidden_image_fixture(reason \\ "Original reason") do
     image = image_fixture()
+    moderator = moderator_user_fixture()
 
-    {:ok, %{image: hidden}} =
-      Images.hide_loaded_image(image, moderator_user_fixture(), %{"deletion_reason" => reason})
+    {:ok, hidden} =
+      Images.hide_image(actor(moderator), image.id, %{"deletion_reason" => reason})
+
+    Repo.delete_all(ModerationLog)
 
     hidden
   end
@@ -223,7 +227,7 @@ defmodule Philomena.ImagesTest do
       attrs = %{"image" => png_upload(), "tag_input" => "safe, solo, mare"}
 
       assert {:error, :image, changeset, _changes} =
-               Images.create_image(actor(user), attrs)
+               Images.upload_image(actor(user), attrs)
 
       assert "has already been uploaded: it's image #{existing.id}" in errors_on(changeset).image
     end
@@ -235,25 +239,28 @@ defmodule Philomena.ImagesTest do
     # transaction must surface the affected gallery ids for reindexing - the
     # galleries step returns them, and process_after_hide queues the reindex.
     test "removes the image from galleries and returns the affected gallery ids" do
-      moderator = user_fixture()
+      moderator = moderator_user_fixture()
       image = image_fixture()
       gallery = gallery_fixture(user_fixture())
       gallery_image_fixture(gallery, image)
 
-      assert {:ok, %{galleries: {1, [gallery_id]}}} =
-               Images.hide_loaded_image(image, moderator, %{"deletion_reason" => "Rule violation"})
+      assert {:ok, _hidden} =
+               Images.hide_image(actor(moderator), image.id, %{
+                 "deletion_reason" => "Rule violation"
+               })
 
-      assert gallery_id == gallery.id
       assert Repo.reload!(gallery).image_count == 0
       refute Repo.get_by(Interaction, gallery_id: gallery.id)
     end
 
     test "returns no gallery ids when the image is in no gallery" do
-      moderator = user_fixture()
+      moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, %{galleries: {0, []}}} =
-               Images.hide_loaded_image(image, moderator, %{"deletion_reason" => "Rule violation"})
+      assert {:ok, _hidden} =
+               Images.hide_image(actor(moderator), image.id, %{
+                 "deletion_reason" => "Rule violation"
+               })
     end
   end
 
@@ -267,7 +274,10 @@ defmodule Philomena.ImagesTest do
       gallery_image_fixture(gallery, filler)
       gallery_image_fixture(gallery, source)
 
-      assert {:ok, _result} = Images.merge_image(nil, source, target, moderator)
+      assert {:ok, _result} =
+               Multi.new()
+               |> Images.put_merge_image(source, target, moderator)
+               |> Multi.transact()
 
       # The source image's interaction was repointed in place.
       assert %{position: 1} =
@@ -285,7 +295,10 @@ defmodule Philomena.ImagesTest do
       gallery_image_fixture(gallery, source)
       gallery_image_fixture(gallery, target)
 
-      assert {:ok, _result} = Images.merge_image(nil, source, target, moderator)
+      assert {:ok, _result} =
+               Multi.new()
+               |> Images.put_merge_image(source, target, moderator)
+               |> Multi.transact()
 
       # The target keeps its own interaction; the source's is simply deleted.
       assert [%{image_id: target_id, position: 1}] =
@@ -307,7 +320,10 @@ defmodule Philomena.ImagesTest do
       sha = png_upload_sha512()
       image = image_fixture(image_sha512_hash: sha, image_orig_sha512_hash: sha)
 
-      assert {:ok, updated} = Images.update_file(image, %{"image" => png_upload()})
+      moderator = moderator_user_fixture()
+
+      assert {:ok, updated} =
+               Images.update_file(actor(moderator), image.id, %{"image" => png_upload()})
 
       # The dedup fingerprint is still set - it is overwritten with the (same)
       # new file's hash, never nulled.
@@ -322,7 +338,10 @@ defmodule Philomena.ImagesTest do
       other = image_fixture(image_sha512_hash: dup_sha, image_orig_sha512_hash: dup_sha)
       image = image_fixture()
 
-      assert {:error, changeset} = Images.update_file(image, %{"image" => png_upload()})
+      moderator = moderator_user_fixture()
+
+      assert {:error, changeset} =
+               Images.update_file(actor(moderator), image.id, %{"image" => png_upload()})
 
       assert "has already been uploaded: it's image #{other.id}" in errors_on(changeset).image
       # The target image keeps its own fingerprint.
@@ -483,18 +502,16 @@ defmodule Philomena.ImagesTest do
       assert cleared.id == image.id
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found. No log.
+    test "a moderator with an unknown well-formed id is not found" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.remove_image_hash(actor(moderator), "2147483647") == {:error, :unauthorized}
+      assert Images.remove_image_hash(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.remove_image_hash(actor(admin), "2147483647") == {:error, :not_found}
@@ -590,18 +607,16 @@ defmodule Philomena.ImagesTest do
       assert repaired.id == image.id
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found. No log.
+    test "a moderator with an unknown well-formed id is not found" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.repair_image(actor(moderator), "2147483647") == {:error, :unauthorized}
+      assert Images.repair_image(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.repair_image(actor(admin), "2147483647") == {:error, :not_found}
@@ -701,20 +716,18 @@ defmodule Philomena.ImagesTest do
       assert cleared.id == image.id
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found. No log.
+    test "a moderator with an unknown well-formed id is not found" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
       assert Images.remove_source_history(actor(moderator), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.remove_source_history(actor(admin), "2147483647") == {:error, :not_found}
@@ -854,25 +867,23 @@ defmodule Philomena.ImagesTest do
       assert loaded.id == image.id
     end
 
-    test "an unknown well-formed id is unauthorized for an anonymous actor" do
-      # The image loads as nil and a nil actor fails :index on the nil load, so
-      # the missing image surfaces as unauthorized rather than not found.
-      assert Images.image_fave_list(actor(), "2147483647") == {:error, :unauthorized}
+    test "an unknown well-formed id is not found for an anonymous actor" do
+      # Missing image locators resolve to not-found before authorization.
+      assert Images.image_fave_list(actor(), "2147483647") == {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a regular user" do
+    test "an unknown well-formed id is not found for a regular user" do
       assert Images.image_fave_list(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator" do
+    test "an unknown well-formed id is not found for a moderator" do
       assert Images.image_fave_list(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :index on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.image_fave_list(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
@@ -928,18 +939,16 @@ defmodule Philomena.ImagesTest do
       assert loaded.id == image.id
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found.
+    test "a moderator with an unknown well-formed id is not found" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
       assert Images.load_hidable_image(actor(moderator), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an admin with an unknown well-formed id is not found" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.load_hidable_image(actor(admin), "2147483647") == {:error, :not_found}
@@ -1059,11 +1068,11 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
       assert Images.update_scratchpad(actor(moderator), "2147483647", %{"scratchpad" => "new"}) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
@@ -1125,14 +1134,14 @@ defmodule Philomena.ImagesTest do
       assert Images.subscribed?(image, user)
     end
 
-    test "a banned user still subscribes" do
-      # subscribe_image runs no ban check, so a banned actor reaches the
-      # subscription just like any other viewer.
-      user = banned_user_fixture()
+    test "a banned actor cannot subscribe" do
+      user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.subscribe_image(actor(user), to_string(image.id))
-      assert Images.subscribed?(image, user)
+      assert Images.subscribe_image(actor(user, ban: @ban), to_string(image.id)) ==
+               {:error, :ban}
+
+      refute Images.subscribed?(image, user)
     end
 
     test "accepts an integer id" do
@@ -1143,25 +1152,23 @@ defmodule Philomena.ImagesTest do
       assert subscribed.id == image.id
     end
 
-    test "an unknown well-formed id is unauthorized for an anonymous actor" do
-      # The image loads as nil and a nil actor fails :show on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found.
-      assert Images.subscribe_image(actor(), "2147483647") == {:error, :unauthorized}
+    test "an unknown well-formed id is not found for an anonymous actor" do
+      # Missing image locators resolve to not-found before authorization.
+      assert Images.subscribe_image(actor(), "2147483647") == {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a regular user" do
+    test "an unknown well-formed id is not found for a regular user" do
       assert Images.subscribe_image(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator" do
+    test "an unknown well-formed id is not found for a moderator" do
       assert Images.subscribe_image(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :show on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.subscribe_image(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
@@ -1203,13 +1210,15 @@ defmodule Philomena.ImagesTest do
       refute Images.subscribed?(image, user)
     end
 
-    test "a banned user still unsubscribes" do
-      user = banned_user_fixture()
+    test "a banned actor cannot unsubscribe" do
+      user = confirmed_user_fixture()
       image = image_fixture()
       {:ok, _} = Images.create_subscription(image, user)
 
-      assert {:ok, _} = Images.unsubscribe_image(actor(user), to_string(image.id))
-      refute Images.subscribed?(image, user)
+      assert Images.unsubscribe_image(actor(user, ban: @ban), to_string(image.id)) ==
+               {:error, :ban}
+
+      assert Images.subscribed?(image, user)
     end
 
     test "accepts an integer id" do
@@ -1222,18 +1231,18 @@ defmodule Philomena.ImagesTest do
       refute Images.subscribed?(image, user)
     end
 
-    test "an unknown well-formed id is unauthorized for an anonymous actor" do
-      assert Images.unsubscribe_image(actor(), "2147483647") == {:error, :unauthorized}
+    test "an unknown well-formed id is not found for an anonymous actor" do
+      assert Images.unsubscribe_image(actor(), "2147483647") == {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a regular user" do
+    test "an unknown well-formed id is not found for a regular user" do
       assert Images.unsubscribe_image(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator" do
+    test "an unknown well-formed id is not found for a moderator" do
       assert Images.unsubscribe_image(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
@@ -1340,18 +1349,16 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized" do
-      # The image loads as nil and a moderator fails :approve on the nil load, so
-      # the missing image surfaces as unauthorized rather than not found. No log.
+    test "a moderator with an unknown well-formed id is not found" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.approve_image(actor(moderator), "2147483647") == {:error, :unauthorized}
+      assert Images.approve_image(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found" do
-      # An admin clears :approve on the nil load via the blanket ability rule,
-      # then the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.approve_image(actor(admin), "2147483647") == {:error, :not_found}
@@ -1460,20 +1467,18 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found.
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
       assert Images.set_comment_locked(actor(moderator), "2147483647", true) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found and writes no log" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.set_comment_locked(actor(admin), "2147483647", true) == {:error, :not_found}
@@ -1584,20 +1589,18 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found.
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
       assert Images.set_description_locked(actor(moderator), "2147483647", true) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found and writes no log" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.set_description_locked(actor(admin), "2147483647", true) ==
@@ -1703,20 +1706,18 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found.
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
       assert Images.set_tag_locked(actor(moderator), "2147483647", true) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found and writes no log" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.set_tag_locked(actor(admin), "2147483647", true) == {:error, :not_found}
@@ -1766,7 +1767,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       # Seed a starting locked tag, then replace it wholesale.
-      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "old lock"})
+      {:ok, _} =
+        Images.update_locked_tags(actor(moderator), image.id, %{"tag_input" => "old lock"})
+
       assert locked_tag_names(image) == ["old lock"]
 
       assert {:ok, updated} =
@@ -1781,7 +1784,10 @@ defmodule Philomena.ImagesTest do
     test "an empty tag_input clears the locked-tags list" do
       moderator = moderator_user_fixture()
       image = image_fixture()
-      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "safe, cute"})
+
+      {:ok, _} =
+        Images.update_locked_tags(actor(moderator), image.id, %{"tag_input" => "safe, cute"})
+
       assert locked_tag_names(image) == ["cute", "safe"]
 
       assert {:ok, _} =
@@ -1834,7 +1840,13 @@ defmodule Philomena.ImagesTest do
     test "a regular user cannot update and the list and log stay untouched" do
       user = confirmed_user_fixture()
       image = image_fixture()
-      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "safe"})
+
+      {:ok, _} =
+        Images.update_locked_tags(actor(moderator_user_fixture()), image.id, %{
+          "tag_input" => "safe"
+        })
+
+      Repo.delete_all(ModerationLog)
 
       assert Images.update_locked_tags(actor(user), to_string(image.id), %{"tag_input" => "cute"}) ==
                {:error, :unauthorized}
@@ -1845,7 +1857,13 @@ defmodule Philomena.ImagesTest do
 
     test "an anonymous actor cannot update and the list and log stay untouched" do
       image = image_fixture()
-      {:ok, _} = Images.update_locked_tags(image, %{"tag_input" => "safe"})
+
+      {:ok, _} =
+        Images.update_locked_tags(actor(moderator_user_fixture()), image.id, %{
+          "tag_input" => "safe"
+        })
+
+      Repo.delete_all(ModerationLog)
 
       assert Images.update_locked_tags(actor(), to_string(image.id), %{"tag_input" => "cute"}) ==
                {:error, :unauthorized}
@@ -1854,11 +1872,11 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
       assert Images.update_locked_tags(actor(moderator), "2147483647", %{"tag_input" => "safe"}) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
@@ -1968,18 +1986,16 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found.
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.feature_image(actor(moderator), "2147483647") == {:error, :unauthorized}
+      assert Images.feature_image(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found and writes no log" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.feature_image(actor(admin), "2147483647") == {:error, :not_found}
@@ -2118,20 +2134,18 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
-      # The image loads as nil and a moderator fails :hide on the nil load, so the
-      # missing image surfaces as unauthorized rather than not found.
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
       assert Images.update_file(actor(moderator), "2147483647", %{"image" => png_upload()}) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found and writes no log" do
-      # An admin clears :hide on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.update_file(actor(admin), "2147483647", %{"image" => png_upload()}) ==
@@ -2261,7 +2275,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a moderator with an unknown well-formed id is not found and writes no log" do
-      # Unlike the :hide wrappers, the load has no per-image authorization, so a
+      # Missing image locators resolve to not-found before authorization.
       # missing image is a plain not-found rather than unauthorized.
       moderator = moderator_user_fixture()
 
@@ -2377,18 +2391,16 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "an Image-admin role_map moderator with an unknown well-formed id is unauthorized" do
-      # The image loads as nil and the :destroy grant does not extend to the nil
-      # load, so the missing image surfaces as unauthorized. No log.
+    test "an Image-admin role_map moderator with an unknown well-formed id is not found" do
+      # Missing image locators resolve to not-found before authorization.
       moderator = role_moderator_fixture("Image")
 
-      assert Images.destroy_image(actor(moderator), "2147483647") == {:error, :unauthorized}
+      assert Images.destroy_image(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found" do
-      # An admin clears :destroy on the nil load via the blanket ability rule,
-      # then the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
       assert Images.destroy_image(actor(admin), "2147483647") == {:error, :not_found}
@@ -2409,6 +2421,23 @@ defmodule Philomena.ImagesTest do
   end
 
   describe "update_description/3" do
+    test "broadcasts the description and rendered image after persistence" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id, description: "Old")
+      :ok = Endpoint.subscribe("firehose")
+
+      assert {:ok, {_image, "Old"}} =
+               Images.update_description(actor(uploader), image.id, %{"description" => "New"})
+
+      assert_receive %Broadcast{
+        event: "image:description_update",
+        payload: %{image_id: image_id, added: "New", removed: "Old"}
+      }
+
+      assert image_id == image.id
+      assert_receive %Broadcast{event: "image:update"}
+    end
+
     test "the uploader edits its own image, persisting the new description" do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id)
@@ -2529,17 +2558,16 @@ defmodule Philomena.ImagesTest do
       assert Repo.reload!(image).description == "Original"
     end
 
-    test "an unknown well-formed id is unauthorized for a non-admin actor" do
+    test "an unknown well-formed id is not found for a non-admin actor" do
       # The image loads as nil and a regular user fails :edit_description on the
-      # nil load, so the missing image surfaces as unauthorized.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.update_description(actor(confirmed_user_fixture()), "2147483647", %{
                "description" => "x"
-             }) == {:error, :unauthorized}
+             }) == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :edit_description on the nil load via the blanket ability
-      # rule, then the image presence check fails, so the missing image is not
+      # Missing image locators resolve to not-found before authorization.
       # found.
       assert Images.update_description(actor(admin_user_fixture()), "2147483647", %{
                "description" => "x"
@@ -2709,19 +2737,17 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "an unknown well-formed image_id is unauthorized for a non-admin actor" do
-      # The image loads as nil and a regular user fails :tamper on the nil load,
-      # so the missing image surfaces as unauthorized.
+    test "an unknown well-formed image_id is not found for a non-admin actor" do
+      # Missing image locators resolve to not-found before authorization.
       user = confirmed_user_fixture()
       target = confirmed_user_fixture()
 
       assert Images.delete_user_vote(actor(user), "2147483647", to_string(target.id)) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown well-formed image_id is not found for an admin" do
-      # An admin clears :tamper on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
       target = confirmed_user_fixture()
 
@@ -2881,7 +2907,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a moderator with an unknown well-formed image_id is not found and writes no log" do
-      # Unlike the :hide wrappers, the load has no per-image authorization, so a
+      # Missing image locators resolve to not-found before authorization.
       # missing image is a plain not-found rather than unauthorized.
       moderator = moderator_user_fixture()
       new_owner = confirmed_user_fixture()
@@ -2971,21 +2997,19 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a regular actor" do
-      # The image loads as nil and a regular actor fails :vote on the nil load, so
-      # the missing image surfaces as unauthorized.
+    test "an unknown well-formed id is not found for a regular actor" do
+      # Missing image locators resolve to not-found before authorization.
       assert Images.create_image_hide(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a moderator" do
+    test "an unknown well-formed id is not found for a moderator" do
       assert Images.create_image_hide(actor(moderator_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :vote on the nil load via the blanket ability rule, then
-      # the image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.create_image_hide(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
@@ -3049,9 +3073,9 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
     end
 
-    test "an unknown well-formed id is unauthorized for a regular actor" do
+    test "an unknown well-formed id is not found for a regular actor" do
       assert Images.delete_image_hide(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
@@ -3076,7 +3100,7 @@ defmodule Philomena.ImagesTest do
                {:error, :not_found}
 
       assert Images.create_fave(actor(confirmed_user_fixture()), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert Images.create_fave(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
@@ -3360,11 +3384,11 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
       assert Images.hide_image(actor(moderator), "2147483647", %{"deletion_reason" => "Rule #0"}) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
@@ -3474,13 +3498,13 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
       assert Images.update_hide_reason(actor(moderator), "2147483647", %{
                "deletion_reason" => "New"
              }) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert moderation_log_count() == 0
     end
@@ -3585,10 +3609,10 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a moderator with an unknown well-formed id is unauthorized and writes no log" do
+    test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
-      assert Images.unhide_image(actor(moderator), "2147483647") == {:error, :unauthorized}
+      assert Images.unhide_image(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
@@ -3613,6 +3637,27 @@ defmodule Philomena.ImagesTest do
   end
 
   describe "update_sources/3" do
+    test "broadcasts source and rendered image updates after persistence" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      :ok = Endpoint.subscribe("firehose")
+
+      assert {:ok, _result} =
+               Images.update_sources(
+                 actor(user),
+                 image.id,
+                 add_source_attrs("https://example.test/source")
+               )
+
+      assert_receive %Broadcast{
+        event: "image:source_update",
+        payload: %{image_id: image_id}
+      }
+
+      assert image_id == image.id
+      assert_receive %Broadcast{event: "image:update"}
+    end
+
     test "a signed-in actor adds a source, recording an attributed change and bumping stats" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -3705,19 +3750,18 @@ defmodule Philomena.ImagesTest do
       assert source_change_row_count(image) == 0
     end
 
-    test "an unknown well-formed id is unauthorized for a regular actor" do
+    test "an unknown well-formed id is not found for a regular actor" do
       # The image loads as nil and a regular actor fails :edit_metadata on the nil
-      # load, so the missing image surfaces as unauthorized.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.update_sources(
                actor(confirmed_user_fixture()),
                "2147483647",
                add_source_attrs("https://x.test")
-             ) == {:error, :unauthorized}
+             ) == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :edit_metadata on the nil load via the blanket ability
-      # rule, then the image presence check fails, so it is not found.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.update_sources(
                actor(admin_user_fixture()),
                "2147483647",
@@ -3791,6 +3835,28 @@ defmodule Philomena.ImagesTest do
       # empty on its own.
       reset_tag_change_limits()
       :ok
+    end
+
+    test "broadcasts tag and rendered image updates after persistence" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+      :ok = Endpoint.subscribe("firehose")
+
+      assert {:ok, _result} =
+               Images.update_tags(
+                 actor(user),
+                 image.id,
+                 tag_attrs("safe", "safe, broadcast tag, another broadcast tag")
+               )
+
+      assert_receive %Broadcast{
+        event: "image:tag_update",
+        payload: %{image_id: image_id, added: added}
+      }
+
+      assert image_id == image.id
+      assert Enum.sort(added) == ["another broadcast tag", "broadcast tag"]
+      assert_receive %Broadcast{event: "image:update"}
     end
 
     test "a signed-in actor changes tags, recording an attributed change and bumping stats" do
@@ -3909,19 +3975,18 @@ defmodule Philomena.ImagesTest do
       refute Repo.exists?(from tc in TagChange, where: tc.image_id == ^image.id)
     end
 
-    test "an unknown well-formed id is unauthorized for a regular actor" do
+    test "an unknown well-formed id is not found for a regular actor" do
       # The image loads as nil and a regular actor fails :edit_metadata on the nil
-      # load, so the missing image surfaces as unauthorized.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.update_tags(
                actor(confirmed_user_fixture()),
                "2147483647",
                tag_attrs("safe", "safe, a, b")
-             ) == {:error, :unauthorized}
+             ) == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :edit_metadata on the nil load via the blanket ability
-      # rule, then the image presence check fails, so it is not found.
+      # Missing image locators resolve to not-found before authorization.
       assert Images.update_tags(
                actor(admin_user_fixture()),
                "2147483647",
@@ -4090,13 +4155,11 @@ defmodule Philomena.ImagesTest do
       assert loaded.id == image.id
     end
 
-    test "a hidden image still loads for an anonymous viewer" do
-      # Viewing carries no authorization here; a hidden image renders its
-      # deleted notice rather than being withheld.
+    test "a hidden image is unauthorized for an anonymous viewer" do
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, %{image: loaded}} = Images.load_image_for_show(actor(), to_string(image.id))
-      assert loaded.id == image.id
+      assert Images.load_image_for_show(actor(), to_string(image.id)) ==
+               {:error, :unauthorized}
     end
 
     test "a hidden duplicate is redirected for an anonymous viewer" do
@@ -4136,8 +4199,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "an unknown well-formed id is not found for an anonymous viewer" do
-      # There is no authorization on this loader, so a missing image is a plain
-      # not found for every actor rather than an unauthorized.
+      # Missing images are resolved before the viewer's :show permission.
       assert Images.load_image_for_show(actor(), "2147483647") == {:error, :not_found}
     end
 
@@ -4181,6 +4243,45 @@ defmodule Philomena.ImagesTest do
       refute page.watching
       assert page.user_galleries == []
       assert page.interactions == []
+      refute page.can_interact
+    end
+
+    test "a banned viewer gets no write controls or mutation changesets" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      page = Images.load_image_page(actor(user, ban: @ban), image, page: 1, page_size: 25)
+
+      refute page.can_interact
+      assert page.interactions == []
+      assert page.comment_changeset == nil
+      assert page.image_changeset == nil
+    end
+
+    test "a forced-filtered image gets no write controls or mutation changesets" do
+      image = image_fixture()
+
+      {user, _filter} =
+        force_filter(confirmed_user_fixture(), hidden_complex_str: "id:#{image.id}")
+
+      page = Images.load_image_page(actor(user), image, page: 1, page_size: 25)
+
+      refute page.can_interact
+      assert page.interactions == []
+      assert page.comment_changeset == nil
+      assert page.image_changeset == nil
+    end
+
+    test "a hidden image gets no interaction controls even for a moderator" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(hidden_from_users: true)
+
+      page = Images.load_image_page(actor(moderator), image, page: 1, page_size: 25)
+
+      refute page.can_interact
+      assert page.interactions == []
+      assert page.comment_changeset == nil
+      assert %Ecto.Changeset{} = page.image_changeset
     end
 
     test "watching is true once the viewer is subscribed" do
@@ -4276,6 +4377,7 @@ defmodule Philomena.ImagesTest do
   describe "upload_image/2" do
     test "a normal actor uploads an image and the row exists" do
       actor = actor(confirmed_user_fixture())
+      :ok = Endpoint.subscribe("firehose")
 
       assert {:ok, %{image: %Image{} = image, upload_pid: pid}} =
                Images.upload_image(actor, %{
@@ -4286,9 +4388,16 @@ defmodule Philomena.ImagesTest do
       # The background upload process finishes the persist/repair work against
       # the Repo; in an async case it owns no sandbox connection, so grant it the
       # test's before awaiting its exit.
-      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
+      Sandbox.allow(Repo, self(), pid)
 
       assert Repo.get(Image, image.id)
+
+      assert_receive %Broadcast{
+        event: "image:create",
+        payload: %{image: %{id: image_id}}
+      }
+
+      assert image_id == image.id
       await_async_upload()
     end
 
@@ -4341,7 +4450,7 @@ defmodule Philomena.ImagesTest do
 
       # Let the background upload process finish against the test's sandbox
       # connection before the test exits.
-      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
+      Sandbox.allow(Repo, self(), pid)
       await_async_upload()
     end
 

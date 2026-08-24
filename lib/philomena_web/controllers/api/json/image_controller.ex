@@ -12,28 +12,20 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
        [params_name: "image", params_key: "image"] when action in [:create]
 
   def show(conn, %{"id" => id}) do
-    case Images.load_image(id) do
+    case Images.load_api_image(conn.assigns.actor, id) do
       {:ok, image} ->
         interactions = Interactions.user_interactions(conn.assigns.actor, [image])
 
         render(conn, "show.json", image: image, interactions: interactions)
 
-      {:error, :not_found} ->
+      {:error, _not_visible_or_missing} ->
         not_found(conn)
     end
   end
 
   def create(conn, %{"image" => image_params}) do
-    case Images.create_image(conn.assigns.actor, image_params) do
+    case Images.upload_image(conn.assigns.actor, image_params) do
       {:ok, %{image: image}} ->
-        image = Images.preload_created_image(image)
-
-        PhilomenaWeb.Endpoint.broadcast!(
-          "firehose",
-          "image:create",
-          PhilomenaWeb.Api.Json.ImageView.render("show.json", %{image: image, interactions: []})
-        )
-
         render(conn, "show.json", image: image, interactions: [])
 
       {:error, :image, changeset, _} ->

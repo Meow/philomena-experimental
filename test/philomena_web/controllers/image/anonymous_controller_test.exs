@@ -51,7 +51,7 @@ defmodule PhilomenaWeb.Image.AnonymousControllerTest do
       assert anonymous?(image)
     end
 
-    # NOTE: an unknown (well-formed) id loads nil and the moderator is
+    # Missing image locators resolve to not-found before authorization.
     # authorized on it, so :create returns not_found - an unknown id redirects
     # rather than crashing in update_anonymous.
     test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
@@ -121,7 +121,7 @@ defmodule PhilomenaWeb.Image.AnonymousControllerTest do
       refute anonymous?(image)
     end
 
-    # NOTE: an unknown (well-formed) id loads nil and the moderator is
+    # Missing image locators resolve to not-found before authorization.
     # authorized on it, so :delete returns not_found - an unknown id redirects
     # rather than crashing.
     test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do

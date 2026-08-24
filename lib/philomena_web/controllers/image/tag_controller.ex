@@ -14,27 +14,11 @@ defmodule PhilomenaWeb.Image.TagController do
       {:ok,
        %{
          image: image,
-         added: added_tags,
-         removed: removed_tags,
+         added: _added_tags,
+         removed: _removed_tags,
          tag_change_count: tag_change_count,
          tag_change_tag_count: tag_change_tag_count
        }} ->
-        PhilomenaWeb.Endpoint.broadcast!(
-          "firehose",
-          "image:tag_update",
-          %{
-            image_id: image.id,
-            added: Enum.map(added_tags, & &1.name),
-            removed: Enum.map(removed_tags, & &1.name)
-          }
-        )
-
-        PhilomenaWeb.Endpoint.broadcast!(
-          "firehose",
-          "image:update",
-          PhilomenaWeb.Api.Json.ImageView.render("show.json", %{image: image, interactions: []})
-        )
-
         changeset = Images.change_image(image)
 
         conn

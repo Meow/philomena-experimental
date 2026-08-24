@@ -10,6 +10,7 @@ defmodule Philomena.TagChangeRevertWorkerTest do
 
   alias Philomena.Images
   alias Philomena.TagChangeRevertWorker
+  alias Philomena.Tags
 
   # Images validate a 3-tag minimum, so every input keeps these on top of
   # whatever tag the test adds or removes.
@@ -23,16 +24,23 @@ defmodule Philomena.TagChangeRevertWorkerTest do
   end
 
   defp change_tags!(image, user, old_input, new_input) do
-    # Force-reload :tags so successive edits diff against the current state,
-    # as a controller-loaded image would; update_tags's own preload no-ops on
-    # an already-loaded association.
-    image = Repo.preload(image, [:tags], force: true)
+    old_tags = Tags.get_or_create_tags(old_input)
+    new_tags = Tags.get_or_create_tags(new_input)
+    old_ids = MapSet.new(old_tags, & &1.id)
+    new_ids = MapSet.new(new_tags, & &1.id)
 
-    {:ok, _} =
-      Images.update_loaded_tags(image, actor(user), %{
-        "old_tag_input" => old_input,
-        "tag_input" => new_input
-      })
+    added = Enum.reject(new_tags, &MapSet.member?(old_ids, &1.id))
+    removed = Enum.reject(old_tags, &MapSet.member?(new_ids, &1.id))
+    attribution = actor(user)
+
+    assert {:ok, [image_id]} =
+             Images.batch_update([image.id], added, removed, %{
+               user_id: user.id,
+               ip: attribution.ip,
+               fingerprint: attribution.fingerprint
+             })
+
+    assert image_id == image.id
   end
 
   defp full_revert!(user, batch_size) do

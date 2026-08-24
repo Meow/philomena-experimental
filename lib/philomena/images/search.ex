@@ -54,6 +54,7 @@ defmodule Philomena.Images.Search do
   @type option ::
           {:pagination, map()}
           | {:sorts, (map() -> %{query: map(), sorts: list()})}
+          | {:tag_names, [String.t()]}
 
   @doc """
   Builds the default image listing query for the viewer.
@@ -90,10 +91,11 @@ defmodule Philomena.Images.Search do
           {:ok, query_result()} | {:error, String.t()}
   # sobelow_skip ["SQL.Query"]
   def search_string(actor, scope, search_string, options \\ []) do
-    with {:ok, tree} <- Query.compile(search_string, user: actor.user) do
-      {:ok, query(actor, scope, tree, options)}
-    else
-      error ->
+    case Query.compile_with_tag_names(search_string, user: actor.user) do
+      {:ok, %{query: tree, tag_names: tag_names}} ->
+        {:ok, query(actor, scope, tree, Keyword.put(options, :tag_names, tag_names))}
+
+      {:error, _message} = error ->
         error
     end
   end
@@ -111,10 +113,7 @@ defmodule Philomena.Images.Search do
     pagination = Keyword.get(options, :pagination, scope.pagination)
     sorts = Keyword.get(options, :sorts, &parse_sort(scope, &1))
 
-    tags =
-      body
-      |> search_tag_names()
-      |> load_tags()
+    tags = options |> Keyword.get(:tag_names, []) |> load_tags()
 
     filters = create_filters(actor, scope)
 
@@ -213,12 +212,7 @@ defmodule Philomena.Images.Search do
         query: %{
           bool: %{
             must: compiled_query,
-            must_not: [
-              scope.filter,
-              %{term: %{hidden_from_users: true}},
-              %{term: %{id: image.id}},
-              hidden_filter(actor.user, scope.hidden)
-            ]
+            must_not: [%{term: %{id: image.id}} | create_filters(actor, scope)]
           }
         },
         sort: sorts,
@@ -290,18 +284,6 @@ defmodule Philomena.Images.Search do
   # Hide all images that aren't approved from all search queries.
   defp hide_non_approved(filters),
     do: [%{term: %{approved: false}} | filters]
-
-  # TODO: the search parser should try to optimize queries
-  defp search_tag_name(%{term: %{"tags" => tag_name}}), do: [tag_name]
-  defp search_tag_name(_other_query), do: []
-
-  defp search_tag_names(%{bool: %{must: musts}}), do: Enum.flat_map(musts, &search_tag_name(&1))
-
-  defp search_tag_names(%{bool: %{should: shoulds}}),
-    do: Enum.flat_map(shoulds, &search_tag_name(&1))
-
-  defp search_tag_names(%{term: %{"tags" => tag_name}}), do: [tag_name]
-  defp search_tag_names(_other_query), do: []
 
   defp load_tags([]), do: []
 
@@ -429,7 +411,4 @@ defmodule Philomena.Images.Search do
 
   defp permit_value(value) when is_binary(value) or is_number(value), do: [value]
   defp permit_value(_value), do: []
-
-  defp hidden_filter(%{id: id}, param) when param != "1", do: %{term: %{hidden_by_user_ids: id}}
-  defp hidden_filter(_user, _param), do: %{match_none: %{}}
 end

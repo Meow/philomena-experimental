@@ -75,13 +75,13 @@ defmodule Philomena.WorkerTest do
   test "the thumbnail worker generates media, broadcasts completion, and reindexes" do
     image = %Image{id: 321}
     patch(Thumbnailer, :generate_thumbnails, :ok)
-    patch(Images, :get_image!, image)
+    patch(Images, :load_image_for_reindex!, image)
     patch(Images, :reindex_image, image)
 
     assert image == ThumbnailWorker.perform(image.id)
 
     assert_exact_call(Thumbnailer, :generate_thumbnails, [image.id])
-    assert_exact_call(Images, :get_image!, [image.id])
+    assert_exact_call(Images, :load_image_for_reindex!, [image.id])
     assert_exact_call(Images, :reindex_image, [image])
   end
 

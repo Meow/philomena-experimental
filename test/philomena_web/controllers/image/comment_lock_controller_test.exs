@@ -51,13 +51,15 @@ defmodule PhilomenaWeb.Image.CommentLockControllerTest do
       refute comments_allowed?(image)
     end
 
-    test "for an unknown image_id redirects with the authorization flash", %{conn: conn} do
+    test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = post(conn, ~p"/images/999999999/comment_lock")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central
@@ -116,13 +118,15 @@ defmodule PhilomenaWeb.Image.CommentLockControllerTest do
       assert comments_allowed?(image)
     end
 
-    test "for an unknown image_id redirects with the authorization flash", %{conn: conn} do
+    test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn = delete(conn, ~p"/images/999999999/comment_lock")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central

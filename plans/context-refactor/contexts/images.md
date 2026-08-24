@@ -3,6 +3,32 @@
 Source: `lib/philomena/images.ex`; consumers: the largest HTML/JSON/RSS
 controller set, workers, search/indexing, media processing, and other contexts.
 
+## Implementation status
+
+Complete for wave 4.
+
+- One Actor-first member loader now parses and fetches a real image before
+  action authorization. Malformed and missing locators are actor-independent,
+  hidden images no longer leak through API/oEmbed bypasses, and the only bang
+  loader is explicitly named for invariant-enforced indexing jobs.
+- New/upload, metadata edits, moderation, subscriptions, and image interactions
+  share the write-access gate. Sensitive uploader/anonymity changes also need a
+  per-image action, while page interaction controls account for authorization,
+  locks, forced filters, and actor state.
+- Search scope no longer substitutes for Actor. Navigation returns controlled
+  parser errors, uses the shared visibility filters, and parser-owned referenced
+  tag metadata replaces the Images-specific recursive query matcher.
+- Raw loaded-record mutations are private. Request APIs, merge composition, user
+  erasure, indexing, thumbnail repair, and purge workers use narrow named
+  boundaries with documented side effects.
+- Image creation and description/source/tag mutations own their firehose
+  broadcasts. State-dependent moderation locks the image row; database changes,
+  counters/reports, and audit logs commit together, with indexing, media, CDN,
+  and broadcast work deferred until success.
+- Context and controller coverage pins malformed, missing, hidden, forbidden,
+  forced-filtered, banned, state-transition, audit, broadcast, navigation, and
+  search behavior across anonymous, user, moderator, and admin actors.
+
 ## Findings
 
 - The 3,500-line module exposes loaded-record CRUD, controller orchestration,

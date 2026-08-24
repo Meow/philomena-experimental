@@ -112,7 +112,7 @@ defmodule Philomena.BackgroundJobsTest do
       reset_exq_spy()
 
       assert {:ok, _image} =
-               Images.update_loaded_tags(image, actor(user), %{
+               Images.update_tags(actor(user), image.id, %{
                  "old_tag_input" => tags,
                  "tag_input" => "#{tags}, background added tag"
                })
@@ -146,26 +146,30 @@ defmodule Philomena.BackgroundJobsTest do
 
   describe "image processing jobs" do
     test "repairs use the image queue for still images and the video queue for WebM" do
+      moderator = moderator_user_fixture()
       image = image_fixture()
       video = image_fixture(image_mime_type: "video/webm", image_format: "webm")
       image_id = image.id
       video_id = video.id
 
-      assert Images.repair_image(image) == image
-      assert Images.repair_image(video) == video
+      assert {:ok, repaired_image} = Images.repair_image(actor(moderator), image.id)
+      assert {:ok, repaired_video} = Images.repair_image(actor(moderator), video.id)
+      assert repaired_image.id == image.id
+      assert repaired_video.id == video.id
 
       assert_enqueued("images", Philomena.ThumbnailWorker, [image_id])
       assert_enqueued("videos", Philomena.ThumbnailWorker, [video_id])
     end
 
     test "purges every visible and hidden thumbnail path" do
-      image = image_fixture()
+      moderator = moderator_user_fixture()
       hidden_key = "hidden-key"
+      image = image_fixture(hidden_image_key: hidden_key)
 
       expected_files =
         Thumbnailer.thumbnail_urls(image, hidden_key) ++ Thumbnailer.thumbnail_urls(image, nil)
 
-      assert {:ok, _job_id} = Images.purge_files(image, hidden_key)
+      assert {:ok, _image} = Images.repair_image(actor(moderator), image.id)
 
       assert_enqueued("indexing", Philomena.ImagePurgeWorker, [expected_files])
     end

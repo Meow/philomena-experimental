@@ -86,15 +86,17 @@ defmodule PhilomenaWeb.Image.DestroyControllerTest do
       assert Repo.reload!(image).image != nil
     end
 
-    # Failure path: an unknown image_id is authorized against a nil resource,
+    # Missing image locators resolve to not-found before authorization.
     # for which the role_map moderator has no matching rule.
-    test "for an unknown image_id redirects with the authorization flash", %{conn: conn} do
+    test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
       conn = log_in_role_moderator(conn, "Image")
 
       conn = post(conn, ~p"/images/999999999/destroy")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Couldn't find what you were looking for!"
     end
 
     # NOTE: a non-integer image_id short-circuits to NotFoundPlug via the central

@@ -11,7 +11,6 @@ defmodule PhilomenaWeb.Image.HideControllerTest do
   alias Philomena.Multi
   alias Philomena.ImageHides
   alias Philomena.ImageHides.ImageHide
-  alias Philomena.Images
   alias Philomena.Repo
 
   defp interaction_path(image_id), do: ~p"/images/#{image_id}/hide"
@@ -46,7 +45,7 @@ defmodule PhilomenaWeb.Image.HideControllerTest do
              }
 
       assert hide(image, user)
-      assert Images.get_image!(image.id).hides_count == 1
+      assert Repo.reload!(image).hides_count == 1
     end
 
     test "when already hidden stays hidden", %{conn: conn, user: user} do
@@ -63,7 +62,7 @@ defmodule PhilomenaWeb.Image.HideControllerTest do
              }
 
       assert hide(image, user)
-      assert Images.get_image!(image.id).hides_count == 1
+      assert Repo.reload!(image).hides_count == 1
     end
   end
 
@@ -84,7 +83,7 @@ defmodule PhilomenaWeb.Image.HideControllerTest do
              }
 
       refute hide(image, user)
-      assert Images.get_image!(image.id).hides_count == 0
+      assert Repo.reload!(image).hides_count == 0
     end
 
     test "with no existing hide still returns 200 interaction data", %{conn: conn} do

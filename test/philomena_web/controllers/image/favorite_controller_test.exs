@@ -73,7 +73,9 @@ defmodule PhilomenaWeb.Image.FavoriteControllerTest do
       conn = get(conn, ~p"/images/999999999/favorites")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Couldn't find what you were looking for!"
     end
   end
 end

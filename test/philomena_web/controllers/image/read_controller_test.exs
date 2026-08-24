@@ -40,7 +40,7 @@ defmodule PhilomenaWeb.Image.ReadControllerTest do
 
   test "POST for an unknown image redirects with the not-found flash", %{conn: conn} do
     # NOTE: the context authorizes the loaded record on :create; id 999999999
-    # loads nil, authorization passes on the nil load, so it returns not_found
+    # Missing image locators resolve to not-found before authorization.
     # and redirects instead of passing nil into clear_image_notification/2.
     %{conn: conn} = register_and_log_in_user(%{conn: conn})
 

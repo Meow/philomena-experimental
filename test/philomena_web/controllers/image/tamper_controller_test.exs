@@ -85,7 +85,7 @@ defmodule PhilomenaWeb.Image.TamperControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Vote removed."
     end
 
-    # Failure path: an unknown user_id loads nil and resolves to not_found here,
+    # Missing image locators resolve to not-found before authorization.
     # redirecting rather than crashing.
     test "for an unknown user_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})

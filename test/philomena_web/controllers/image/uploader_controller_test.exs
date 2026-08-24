@@ -103,7 +103,7 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
     end
 
     # NOTE: the context authorizes the loaded image on :update; an unknown
-    # (well-formed) id loads nil and the moderator is authorized on it, so it
+    # Missing image locators resolve to not-found before authorization.
     # returns not_found - an unknown id redirects rather than crashing.
     test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})

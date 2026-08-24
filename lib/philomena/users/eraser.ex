@@ -120,6 +120,6 @@ defmodule Philomena.Users.Eraser do
       fingerprint: @wipe_fp
     }
 
-    {:ok, _} = Images.update_loaded_sources(source_change.image, actor, attrs)
+    {:ok, _} = Images.revert_source_change_for_erasure(source_change.image, actor, attrs)
   end
 end

@@ -100,7 +100,42 @@ defmodule PhilomenaWeb.ImageControllerTest do
       assert html_response(conn, 200) =~ "##{image.id} - safe - Derpibooru"
     end
 
-    test "renders the deleted page for a hidden image", %{conn: conn} do
+    test "does not render mutation controls for a banned viewer", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_banned_user(%{conn: conn})
+      image = image_fixture()
+
+      conn = get(conn, ~p"/images/#{image}")
+      response = html_response(conn, 200)
+
+      refute response =~ ~s(id="edit-description")
+      refute response =~ ~s(id="edit-source")
+      refute response =~ ~s(id="edit-tags")
+      refute response =~ "interaction--fave"
+      refute response =~ "interaction--upvote"
+      refute response =~ "interaction--downvote"
+    end
+
+    test "does not expose a hidden image to an anonymous viewer", %{conn: conn} do
+      image = image_fixture(hidden_from_users: true)
+
+      conn = get(conn, ~p"/images/#{image}")
+
+      assert redirected_to(conn) == "/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+    end
+
+    test "does not expose a hidden image to a regular viewer", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_user(%{conn: conn})
+      image = image_fixture(hidden_from_users: true)
+
+      conn = get(conn, ~p"/images/#{image}")
+
+      assert redirected_to(conn) == "/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+    end
+
+    test "renders the deleted page for a moderator", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture(hidden_from_users: true)
 
       conn = get(conn, ~p"/images/#{image}")

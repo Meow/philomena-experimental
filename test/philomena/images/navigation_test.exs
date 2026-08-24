@@ -5,10 +5,9 @@ defmodule Philomena.Images.NavigationTest do
   random-image picker.
 
   All four run a search scoped to a viewer, so they are asserted against the
-  real OpenSearch index. Each loads its subject image by id and authorizes it
-  for `:show`, so they share the navigation authorization matrix: a
-  non-castable id is not found, an unknown id is unauthorized for a viewer
-  with no blanket rule and not found for an admin.
+  real OpenSearch index. Each parses and loads its subject image before `:show`
+  authorization, so malformed and missing ids are consistently not found for
+  every actor.
   """
 
   use Philomena.DataCase, async: false
@@ -121,20 +120,18 @@ defmodule Philomena.Images.NavigationTest do
       assert adjacent.id == older.id
     end
 
-    test "an unknown well-formed id is unauthorized for an anonymous viewer" do
-      # The image loads as nil and a nil viewer fails :show on the nil load, so
-      # the missing image surfaces as unauthorized rather than not found.
+    test "an unknown well-formed id is not found for an anonymous viewer" do
+      # Missing image locators resolve to not-found before authorization.
       assert Images.find_consecutive_image(
                actor(),
                scope(params: %{"rel" => "next"}),
                "2147483647"
              ) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      # An admin clears :show on the nil load via the blanket rule, then the
-      # image presence check fails, so the missing image is not found.
+      # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
       scope = scope(params: %{"rel" => "next"})
 
@@ -178,9 +175,9 @@ defmodule Philomena.Images.NavigationTest do
       assert Images.find_image_index_page(actor(), scope(), newer.id) == {:ok, "1"}
     end
 
-    test "an unknown well-formed id is unauthorized for an anonymous viewer" do
+    test "an unknown well-formed id is not found for an anonymous viewer" do
       assert Images.find_image_index_page(actor(), scope(), "2147483647") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
@@ -221,8 +218,8 @@ defmodule Philomena.Images.NavigationTest do
       assert loaded.id == image.id
     end
 
-    test "an unknown well-formed id is unauthorized for an anonymous viewer" do
-      assert Images.related_images(actor(), scope(), "2147483647") == {:error, :unauthorized}
+    test "an unknown well-formed id is not found for an anonymous viewer" do
+      assert Images.related_images(actor(), scope(), "2147483647") == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
@@ -240,11 +237,11 @@ defmodule Philomena.Images.NavigationTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert Images.random_image_id(actor(), scope()) == image.id
+      assert Images.random_image_id(actor(), scope()) == {:ok, image.id}
     end
 
     test "returns nil when the index is empty" do
-      assert Images.random_image_id(actor(), scope()) == nil
+      assert Images.random_image_id(actor(), scope()) == {:ok, nil}
     end
 
     test "restricts the pool to the q parameter" do
@@ -253,16 +250,16 @@ defmodule Philomena.Images.NavigationTest do
       SearchHelpers.reindex_all!(Image)
 
       assert Images.random_image_id(actor(), scope(params: %{"q" => "test wanted tag"})) ==
-               wanted.id
+               {:ok, wanted.id}
     end
 
-    test "returns nil for a malformed query string" do
+    test "returns an explicit error for a malformed query string" do
       # An unbalanced parenthesis fails to compile, and the picker treats a
       # malformed query as an empty pool.
       _image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert Images.random_image_id(actor(), scope(params: %{"q" => "((("})) == nil
+      assert {:error, _message} = Images.random_image_id(actor(), scope(params: %{"q" => "((("}))
     end
   end
 end
