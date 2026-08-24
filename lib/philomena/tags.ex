@@ -101,22 +101,6 @@ defmodule Philomena.Tags do
   # Computes the search query that lists the tag's images. A tag whose name
   # compiles back to itself is used verbatim. Anything else is escaped so the
   # search parser does not reinterpret it.
-  defp maybe_escape_name(%{name: name}) do
-    name =
-      name
-      |> String.replace(~r/\s+/, " ")
-      |> String.trim()
-      |> String.downcase()
-
-    case Images.Query.compile(name) do
-      {:ok, %{term: %{"tags" => ^name}}} ->
-        name
-
-      _error ->
-        escape_name(name)
-    end
-  end
-
   defp escape_name(name) do
     if String.contains?(name, "(") or String.contains?(name, ")") do
       # \ * ? " should be escaped, wrap in quotes so parser doesn't
@@ -141,56 +125,20 @@ defmodule Philomena.Tags do
     end
   end
 
-  @spec get_or_create_non_empty_tags_list(list(String.t())) :: list()
-  defp get_or_create_non_empty_tags_list(tag_names) do
-    tags =
-      tag_names
-      |> Enum.map(fn tag_name ->
-        %Tag{}
-        |> Tag.creation_changeset(%{name: tag_name})
-        |> Ecto.Changeset.apply_changes()
-        |> Map.take([
-          :slug,
-          :name,
-          :category,
-          :images_count,
-          :description,
-          :short_description,
-          :namespace,
-          :name_in_namespace,
-          :image,
-          :image_format,
-          :image_mime_type,
-          :mod_notes
-        ])
-        |> Map.merge(%{
-          created_at: {:placeholder, :timestamp},
-          updated_at: {:placeholder, :timestamp}
-        })
-      end)
+  defp maybe_escape_name(%{name: name}) do
+    name =
+      name
+      |> String.replace(~r/\s+/, " ")
+      |> String.trim()
+      |> String.downcase()
 
-    {:ok, %{all_tags: all_tags}} =
-      Multi.new()
-      |> Multi.insert_all(
-        :new_tags,
-        Tag,
-        tags,
-        placeholders: %{timestamp: DateTime.utc_now(:second)},
-        on_conflict: :nothing,
-        returning: [:id]
-      )
-      |> Multi.all(
-        :all_tags,
-        Tag
-        |> where([t], t.name in ^tag_names)
-        |> preload([:implied_tags, aliased_tag: :implied_tags])
-      )
-      |> Multi.on_commit(fn %{new_tags: {_count, new_tags}} -> reindex_tags(new_tags) end)
-      |> Multi.transact()
+    case Images.Query.compile(name) do
+      {:ok, %{term: %{"tags" => ^name}}} ->
+        name
 
-    all_tags
-    |> Enum.map(&(&1.aliased_tag || &1))
-    |> Enum.uniq_by(& &1.id)
+      _error ->
+        escape_name(name)
+    end
   end
 
   defp filtered_taggings_for_alias(batch_query, target_tag, [
@@ -230,11 +178,42 @@ defmodule Philomena.Tags do
       [%Tag{name: "safe"}, %Tag{name: "cute"}, %Tag{name: "pony"}]
 
   """
-  @spec get_or_create_tags(String.t()) :: list()
+  @spec get_or_create_tags(String.t()) :: [Tag.t()]
   def get_or_create_tags(tag_list) do
-    case Tag.parse_tag_list(tag_list) do
-      [] -> []
-      tag_names -> get_or_create_non_empty_tags_list(tag_names)
+    with tag_names when tag_names != [] <- Tag.parse_tag_list(tag_list) do
+      tag_query =
+        Tag
+        |> where([tag], tag.name in ^tag_names)
+        |> preload([:implied_tags, aliased_tag: :implied_tags])
+
+      insert_rows =
+        Enum.map(tag_names, fn tag_name ->
+          %Tag{}
+          |> Tag.creation_changeset(%{name: tag_name})
+          |> Ecto.Changeset.apply_changes()
+          |> Map.take(Tag.insert_fields())
+          |> Map.merge(%{
+            created_at: {:placeholder, :timestamp},
+            updated_at: {:placeholder, :timestamp}
+          })
+        end)
+
+      insert_options = [
+        placeholders: %{timestamp: DateTime.utc_now(:second)},
+        on_conflict: :nothing,
+        returning: [:id]
+      ]
+
+      {:ok, %{all_tags: all_tags}} =
+        Multi.new()
+        |> Multi.insert_all(:new_tags, Tag, insert_rows, insert_options)
+        |> Multi.all(:all_tags, tag_query)
+        |> Multi.on_commit(fn %{new_tags: {_count, new_tags}} -> reindex_tags(new_tags) end)
+        |> Multi.transact()
+
+      all_tags
+      |> Enum.map(&(&1.aliased_tag || &1))
+      |> Enum.uniq_by(& &1.id)
     end
   end
 
