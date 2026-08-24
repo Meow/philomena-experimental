@@ -826,5 +826,12 @@ defmodule Philomena.TagsTest do
       assert [%Tag{name: "safe"}] = tags
       assert Tags.find_canonical_tag_by_name(oversized) == nil
     end
+
+    test "creates new tags" do
+      tags = Tags.get_or_create_tags("new tag")
+
+      assert [%Tag{name: "new tag"}] = tags
+      refute is_nil(Tags.find_canonical_tag_by_name("new tag"))
+    end
   end
 end
