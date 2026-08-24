@@ -3,9 +3,12 @@ defmodule Philomena.TagWorkersTest do
   use Patch
 
   import Philomena.ImagesFixtures
+  import Philomena.ArtistLinksFixtures
   import Philomena.TagsFixtures
+  import Philomena.UsersFixtures
 
   alias Philomena.Repo
+  alias Philomena.ArtistLinks.ArtistLink
   alias Philomena.TagAliasWorker
   alias Philomena.TagDeleteWorker
   alias Philomena.TagReindexWorker
@@ -34,6 +37,26 @@ defmodule Philomena.TagWorkersTest do
     ids = tag_ids(image)
     assert target.id in ids
     refute source.id in ids
+    assert Repo.reload!(source).aliased_tag_id == target.id
+  end
+
+  test "the alias worker deletes conflicting artist links before updating links" do
+    user = confirmed_user_fixture()
+    source = tag_fixture(name: "artist:worker alias source")
+    target = tag_fixture(name: "artist:worker alias target")
+    uri = "https://example.com/artist"
+
+    source_link = artist_link_fixture(user, source, %{"uri" => uri})
+    target_link = artist_link_fixture(user, target, %{"uri" => uri})
+
+    source
+    |> Ecto.Changeset.change(aliased_tag_id: target.id)
+    |> Repo.update!()
+
+    assert :ok = TagAliasWorker.perform(source.id, target.id)
+
+    refute Repo.get(ArtistLink, source_link.id)
+    assert Repo.get!(ArtistLink, target_link.id).tag_id == target.id
     assert Repo.reload!(source).aliased_tag_id == target.id
   end
 

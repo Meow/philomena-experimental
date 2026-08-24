@@ -347,11 +347,27 @@ defmodule Philomena.Tags do
       |> where([u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
       |> prepare_array_replace(:watched_tag_ids, tag.id, target_tag.id)
 
-    # FIXME: constraint index_artist_links_on_uri_tag_id_user_id
     artist_links_query =
       ArtistLink
       |> where(tag_id: ^tag.id)
       |> update(set: [tag_id: ^target_tag.id])
+
+    conflicting_artist_links_query =
+      from source in ArtistLink,
+        join: target in ArtistLink,
+        on:
+          target.tag_id == ^target_tag.id and
+            target.uri == source.uri and
+            target.user_id == source.user_id,
+        where:
+          source.tag_id == ^tag.id and
+            source.aasm_state != "rejected" and
+            target.aasm_state != "rejected",
+        select: source.id
+
+    conflicting_artist_links_delete_query =
+      from artist_link in ArtistLink,
+        where: artist_link.id in subquery(conflicting_artist_links_query)
 
     dnp_entries_query =
       DnpEntry
@@ -380,6 +396,10 @@ defmodule Philomena.Tags do
     |> Multi.update_all(:update_hidden_filters, hidden_filters_query, [])
     |> Multi.update_all(:update_spoilered_filters, spoilered_filters_query, [])
     |> Multi.update_all(:update_users_watching, users_watching_query, [])
+    |> Multi.delete_all(
+      :delete_conflicting_artist_links,
+      conflicting_artist_links_delete_query
+    )
     |> Multi.update_all(:update_artist_links, artist_links_query, [])
     |> Multi.update_all(:update_dnp_entries, dnp_entries_query, [])
     |> Multi.update_all(:update_channels, channels_query, [])
