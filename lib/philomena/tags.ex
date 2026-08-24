@@ -281,189 +281,6 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Worker entry point that deletes a queued tag and repairs dependent indexes.
-
-  The tag row and its database cascades commit before OpenSearch cleanup,
-  empty TagChanges cleanup, and affected-image reindexing run.
-
-  ## Examples
-
-      iex> perform_delete(42)
-      :ok
-
-  """
-  @spec perform_delete(integer()) :: :ok
-  def perform_delete(tag_id) do
-    tag = Repo.get!(Tag, tag_id)
-
-    image_ids_query =
-      Image
-      |> join(:inner, [image], _tag in assoc(image, :tags))
-      |> where([_image, joined_tag], joined_tag.id == ^tag.id)
-      |> select([image, _joined_tag], image.id)
-
-    Multi.new()
-    |> Multi.all(:image_ids, image_ids_query)
-    |> Multi.delete(:tag, tag)
-    |> Multi.on_commit(fn %{image_ids: image_ids, tag: tag} ->
-      Search.delete_document(tag.id, Tag)
-      TagChanges.cleanup_empty_for_tag_deletion()
-
-      Image
-      |> where([image], image.id in ^image_ids)
-      |> preload(^Images.indexing_preloads())
-      |> Search.reindex(Image)
-    end)
-    |> Multi.transact()
-    |> case do
-      {:ok, _changes} -> :ok
-      {:error, step, reason, _changes} -> raise "tag delete failed at #{step}: #{inspect(reason)}"
-    end
-  end
-
-  @doc """
-  Worker entry point that migrates an alias's taggings to its target.
-
-  Taggings are moved in batches to avoid holding locks for the full migration.
-
-  ## Examples
-
-      iex> perform_alias(12, 13)
-      :ok
-
-  """
-  @spec perform_alias(integer(), integer()) :: :ok
-  def perform_alias(tag_id, target_tag_id) do
-    tag = Repo.get!(Tag, tag_id)
-    target_tag = Repo.get!(Tag, target_tag_id)
-
-    Tagging
-    |> where(tag_id: ^tag.id)
-    |> Batch.query_batches(batch_size: 10_000, id_field: :image_id)
-    |> Enum.each(fn batch_query ->
-      # Lock all images in the batch first to prevent image operations from racing tag updates.
-      image_query =
-        from image in Image,
-          where: image.id in subquery(select(batch_query, [tagging], tagging.image_id)),
-          order_by: [asc: :id]
-
-      # The image counter represents only the count of visible images.
-      # To preserve this meaning, the operation must be split into migrating
-      # taggings of visible and non-visible images.
-
-      {visible_taggings, visible_insert_all} =
-        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: false)
-
-      {hidden_taggings, hidden_insert_all} =
-        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: true)
-
-      Multi.new()
-      |> Multi.lock_all(:images, image_query)
-      |> Multi.insert_all(:new_visible, Tagging, visible_insert_all, on_conflict: :nothing)
-      |> Multi.insert_all(:new_hidden, Tagging, hidden_insert_all, on_conflict: :nothing)
-      |> Multi.delete_all(:old_visible, visible_taggings)
-      |> Multi.delete_all(:old_hidden, hidden_taggings)
-      |> Multi.update_all(
-        :target_tag,
-        fn %{new_visible: {count, _}} ->
-          Tag
-          |> where(id: ^target_tag.id)
-          |> update(inc: [images_count: ^count])
-        end,
-        []
-      )
-      |> Multi.update_all(
-        :source_tag,
-        fn %{old_visible: {count, _}} ->
-          Tag
-          |> where(id: ^tag.id)
-          |> update(inc: [images_count: ^(-count)])
-        end,
-        []
-      )
-      |> Multi.transact()
-    end)
-
-    enqueue_image_reindex(target_tag)
-    enqueue_tag_reindex([tag, target_tag])
-
-    :ok
-  end
-
-  @doc """
-  Adds tag copying from `source` to `target` to an image-merge transaction.
-
-  Only newly inserted target taggings increment tag image counters.
-
-  ## Examples
-
-      iex> put_copy_tags(multi, source_image, target_image)
-      %Philomena.Multi{}
-
-  """
-  @spec put_copy_tags(Multi.t(), Image.t(), Image.t()) :: Multi.t()
-  def put_copy_tags(%Multi{} = multi, %Image{} = source, %Image{} = target) do
-    source_taggings_query =
-      Tagging
-      |> where(image_id: ^source.id)
-      |> select([tagging], %{
-        image_id: type(^target.id, :integer),
-        tag_id: tagging.tag_id
-      })
-
-    multi
-    |> Multi.all(:source_taggings, source_taggings_query)
-    |> Multi.insert_all(
-      :target_taggings,
-      Tagging,
-      fn %{source_taggings: source_taggings} ->
-        source_taggings
-      end,
-      on_conflict: :nothing,
-      returning: [:tag_id]
-    )
-    |> Multi.run(:copied_tag_ids, fn _repo, %{target_taggings: {_count, target_taggings}} ->
-      {:ok, Enum.map(target_taggings, & &1.tag_id)}
-    end)
-    |> Multi.run(:update_image_counts, fn repo, %{copied_tag_ids: copied_tag_ids} ->
-      {:ok, update_image_counts(repo, 1, copied_tag_ids)}
-    end)
-    |> Multi.on_commit(fn %{copied_tag_ids: copied_tag_ids} ->
-      enqueue_tag_id_reindex(copied_tag_ids)
-    end)
-  end
-
-  @doc """
-  Applies `diff` to each tag's image count inside the caller's transaction.
-
-  Overlapping bulk updates must lock tag rows in ascending primary-key order.
-  PostgreSQL otherwise may acquire the update locks in different orders and
-  deadlock concurrent image writes; this invariant was reproduced by parallel
-  uploads in philomena-dev/philomena#483.
-
-  ## Examples
-
-      iex> update_image_counts(repo, 1, [12, 13])
-      2
-
-  """
-  @spec update_image_counts(module(), integer(), [integer()]) :: integer()
-  def update_image_counts(repo, diff, tag_ids)
-
-  def update_image_counts(_repo, _diff, []), do: 0
-
-  def update_image_counts(repo, diff, tag_ids) do
-    locked_tags = locked_tag_ids(tag_ids)
-
-    {rows_affected, _} =
-      Tag
-      |> where([t], t.id in subquery(locked_tags))
-      |> repo.update_all(inc: [images_count: diff])
-
-    rows_affected
-  end
-
-  @doc """
   Gets existing tags or creates new ones from a tag list string.
 
   Takes a string of comma-separated tag names, parses it into individual tags,
@@ -727,35 +544,6 @@ defmodule Philomena.Tags do
        }}
     end
   end
-
-  @doc """
-  Finds the canonical tag named by `name`, resolving one stored alias.
-
-  This is a trusted composition lookup for changesets in other contexts; it
-  returns `nil` when the submitted name cannot identify a tag.
-
-  ## Examples
-
-      iex> find_canonical_tag_by_name("safe")
-      %Tag{}
-
-      iex> find_canonical_tag_by_name("nonexistent")
-      nil
-
-  """
-  @spec find_canonical_tag_by_name(String.t() | nil) :: Tag.t() | nil
-  def find_canonical_tag_by_name(name) when is_binary(name) do
-    Tag
-    |> where(name: ^Tag.clean_tag_name(name))
-    |> preload(:aliased_tag)
-    |> Repo.one()
-    |> case do
-      nil -> nil
-      tag -> tag.aliased_tag || tag
-    end
-  end
-
-  def find_canonical_tag_by_name(_name), do: nil
 
   @doc """
   Adds the tag named by `slug` to `actor`'s watched tags.
@@ -1067,54 +855,6 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Performs reindexing of all images associated with a tag.
-
-  Updates the tag's image count to reflect the current number of non-hidden images,
-  then reindexes all associated images and filters that reference this tag.
-
-  ## Examples
-
-      iex> perform_reindex_images(123)
-
-  """
-  def perform_reindex_images(tag_id) do
-    tag = Repo.get!(Tag, tag_id)
-
-    # First recount the tag
-    Multi.new()
-    |> Multi.run(:image_count, fn repo, _changes ->
-      {:ok,
-       Image
-       |> join(:inner, [i], _ in assoc(i, :tags))
-       |> where([i, t], i.hidden_from_users == false and t.id == ^tag.id)
-       |> repo.aggregate(:count)}
-    end)
-    |> Multi.update_all(
-      :update_tag,
-      fn %{image_count: image_count} ->
-        Tag
-        |> where(id: ^tag.id)
-        |> update(set: [images_count: ^image_count])
-      end,
-      []
-    )
-    |> Multi.transact()
-
-    # Then reindex
-    Image
-    |> join(:inner, [i], _ in assoc(i, :tags))
-    |> where([_i, t], t.id == ^tag.id)
-    |> preload(^Images.indexing_preloads())
-    |> Search.reindex(Image)
-
-    Filter
-    |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
-    |> or_where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
-    |> preload(^Filters.indexing_preloads())
-    |> Search.reindex(Filter)
-  end
-
-  @doc """
   Removes the alias on the tag named by `slug`, on behalf of `actor`.
 
   Write access, `:unalias` authorization, the relationship update, and the
@@ -1160,53 +900,263 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Queues a list of tags for search index updates.
-  Returns the list of tags unchanged, for use in a pipeline.
+  Finds the canonical tag named by `name`, resolving one stored alias.
+
+  This is a trusted composition lookup for changesets in other contexts; it
+  returns `nil` when the submitted name cannot identify a tag.
 
   ## Examples
 
-      iex> reindex_tags([%Tag{}, %Tag{}, ...])
-      [%Tag{}, %Tag{}, ...]
+      iex> find_canonical_tag_by_name("safe")
+      %Tag{}
+
+      iex> find_canonical_tag_by_name("nonexistent")
+      nil
 
   """
-  @spec reindex_tags([Tag.t()]) :: [Tag.t()]
-  def reindex_tags(tags) do
-    enqueue_tag_reindex(tags)
-  end
-
-  @doc """
-  Returns the list of associations to preload for tag indexing.
-
-  ## Examples
-
-      iex> indexing_preloads()
-      [:aliased_tag, :aliases, :implied_tags, :implied_by_tags]
-
-  """
-  def indexing_preloads do
-    [:aliased_tag, :aliases, :implied_tags, :implied_by_tags]
-  end
-
-  @doc """
-  Performs reindexing of tags based on a column condition.
-
-  Takes a column name and a list of values to match against that column,
-  then reindexes all matching tags.
-
-  ## Examples
-
-      iex> perform_reindex(:id, [1, 2, 3])
-      {:ok, []}
-
-      iex> perform_reindex(:name, ["safe", "suggestive"])
-      {:ok, []}
-
-  """
-  def perform_reindex(column, condition) do
+  @spec find_canonical_tag_by_name(String.t() | nil) :: Tag.t() | nil
+  def find_canonical_tag_by_name(name) when is_binary(name) do
     Tag
-    |> preload(^indexing_preloads())
-    |> where([t], field(t, ^column) in ^condition)
-    |> Search.reindex(Tag)
+    |> where(name: ^Tag.clean_tag_name(name))
+    |> preload(:aliased_tag)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      tag -> tag.aliased_tag || tag
+    end
+  end
+
+  def find_canonical_tag_by_name(_name), do: nil
+
+  @doc """
+  Applies `diff` to each tag's image count inside the caller's transaction.
+
+  Overlapping bulk updates must lock tag rows in ascending primary-key order.
+  PostgreSQL otherwise may acquire the update locks in different orders and
+  deadlock concurrent image writes; this invariant was reproduced by parallel
+  uploads in philomena-dev/philomena#483.
+
+  ## Examples
+
+      iex> update_image_counts(repo, 1, [12, 13])
+      2
+
+  """
+  @spec update_image_counts(module(), integer(), [integer()]) :: integer()
+  def update_image_counts(repo, diff, tag_ids)
+
+  def update_image_counts(_repo, _diff, []), do: 0
+
+  def update_image_counts(repo, diff, tag_ids) do
+    locked_tags = locked_tag_ids(tag_ids)
+
+    {rows_affected, _} =
+      Tag
+      |> where([t], t.id in subquery(locked_tags))
+      |> repo.update_all(inc: [images_count: diff])
+
+    rows_affected
+  end
+
+  @doc """
+  Adds tag copying from `source` to `target` to an image-merge transaction.
+
+  Only newly inserted target taggings increment tag image counters.
+
+  ## Examples
+
+      iex> put_copy_tags(multi, source_image, target_image)
+      %Philomena.Multi{}
+
+  """
+  @spec put_copy_tags(Multi.t(), Image.t(), Image.t()) :: Multi.t()
+  def put_copy_tags(%Multi{} = multi, %Image{} = source, %Image{} = target) do
+    source_taggings_query =
+      Tagging
+      |> where(image_id: ^source.id)
+      |> select([tagging], %{
+        image_id: type(^target.id, :integer),
+        tag_id: tagging.tag_id
+      })
+
+    multi
+    |> Multi.all(:source_taggings, source_taggings_query)
+    |> Multi.insert_all(
+      :target_taggings,
+      Tagging,
+      fn %{source_taggings: source_taggings} ->
+        source_taggings
+      end,
+      on_conflict: :nothing,
+      returning: [:tag_id]
+    )
+    |> Multi.run(:copied_tag_ids, fn _repo, %{target_taggings: {_count, target_taggings}} ->
+      {:ok, Enum.map(target_taggings, & &1.tag_id)}
+    end)
+    |> Multi.run(:update_image_counts, fn repo, %{copied_tag_ids: copied_tag_ids} ->
+      {:ok, update_image_counts(repo, 1, copied_tag_ids)}
+    end)
+    |> Multi.on_commit(fn %{copied_tag_ids: copied_tag_ids} ->
+      enqueue_tag_id_reindex(copied_tag_ids)
+    end)
+  end
+
+  @doc """
+  Worker entry point that deletes a queued tag and repairs dependent indexes.
+
+  The tag row and its database cascades commit before OpenSearch cleanup,
+  empty TagChanges cleanup, and affected-image reindexing run.
+
+  ## Examples
+
+      iex> perform_delete(42)
+      :ok
+
+  """
+  @spec perform_delete(integer()) :: :ok
+  def perform_delete(tag_id) do
+    tag = Repo.get!(Tag, tag_id)
+
+    image_ids_query =
+      Image
+      |> join(:inner, [image], _tag in assoc(image, :tags))
+      |> where([_image, joined_tag], joined_tag.id == ^tag.id)
+      |> select([image, _joined_tag], image.id)
+
+    Multi.new()
+    |> Multi.all(:image_ids, image_ids_query)
+    |> Multi.delete(:tag, tag)
+    |> Multi.on_commit(fn %{image_ids: image_ids, tag: tag} ->
+      Search.delete_document(tag.id, Tag)
+      TagChanges.cleanup_empty_for_tag_deletion()
+
+      Image
+      |> where([image], image.id in ^image_ids)
+      |> preload(^Images.indexing_preloads())
+      |> Search.reindex(Image)
+    end)
+    |> Multi.transact()
+    |> case do
+      {:ok, _changes} -> :ok
+      {:error, step, reason, _changes} -> raise "tag delete failed at #{step}: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
+  Worker entry point that migrates an alias's taggings to its target.
+
+  Taggings are moved in batches to avoid holding locks for the full migration.
+
+  ## Examples
+
+      iex> perform_alias(12, 13)
+      :ok
+
+  """
+  @spec perform_alias(integer(), integer()) :: :ok
+  def perform_alias(tag_id, target_tag_id) do
+    tag = Repo.get!(Tag, tag_id)
+    target_tag = Repo.get!(Tag, target_tag_id)
+
+    Tagging
+    |> where(tag_id: ^tag.id)
+    |> Batch.query_batches(batch_size: 10_000, id_field: :image_id)
+    |> Enum.each(fn batch_query ->
+      # Lock all images in the batch first to prevent image operations from racing tag updates.
+      image_query =
+        from image in Image,
+          where: image.id in subquery(select(batch_query, [tagging], tagging.image_id)),
+          order_by: [asc: :id]
+
+      # The image counter represents only the count of visible images.
+      # To preserve this meaning, the operation must be split into migrating
+      # taggings of visible and non-visible images.
+
+      {visible_taggings, visible_insert_all} =
+        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: false)
+
+      {hidden_taggings, hidden_insert_all} =
+        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: true)
+
+      Multi.new()
+      |> Multi.lock_all(:images, image_query)
+      |> Multi.insert_all(:new_visible, Tagging, visible_insert_all, on_conflict: :nothing)
+      |> Multi.insert_all(:new_hidden, Tagging, hidden_insert_all, on_conflict: :nothing)
+      |> Multi.delete_all(:old_visible, visible_taggings)
+      |> Multi.delete_all(:old_hidden, hidden_taggings)
+      |> Multi.update_all(
+        :target_tag,
+        fn %{new_visible: {count, _}} ->
+          Tag
+          |> where(id: ^target_tag.id)
+          |> update(inc: [images_count: ^count])
+        end,
+        []
+      )
+      |> Multi.update_all(
+        :source_tag,
+        fn %{old_visible: {count, _}} ->
+          Tag
+          |> where(id: ^tag.id)
+          |> update(inc: [images_count: ^(-count)])
+        end,
+        []
+      )
+      |> Multi.transact()
+    end)
+
+    enqueue_image_reindex(target_tag)
+    enqueue_tag_reindex([tag, target_tag])
+
+    :ok
+  end
+
+  @doc """
+  Performs reindexing of all images associated with a tag.
+
+  Updates the tag's image count to reflect the current number of non-hidden images,
+  then reindexes all associated images and filters that reference this tag.
+
+  ## Examples
+
+      iex> perform_reindex_images(123)
+
+  """
+  def perform_reindex_images(tag_id) do
+    tag = Repo.get!(Tag, tag_id)
+
+    # First recount the tag
+    Multi.new()
+    |> Multi.run(:image_count, fn repo, _changes ->
+      {:ok,
+       Image
+       |> join(:inner, [i], _ in assoc(i, :tags))
+       |> where([i, t], i.hidden_from_users == false and t.id == ^tag.id)
+       |> repo.aggregate(:count)}
+    end)
+    |> Multi.update_all(
+      :update_tag,
+      fn %{image_count: image_count} ->
+        Tag
+        |> where(id: ^tag.id)
+        |> update(set: [images_count: ^image_count])
+      end,
+      []
+    )
+    |> Multi.transact()
+
+    # Then reindex
+    Image
+    |> join(:inner, [i], _ in assoc(i, :tags))
+    |> where([_i, t], t.id == ^tag.id)
+    |> preload(^Images.indexing_preloads())
+    |> Search.reindex(Image)
+
+    Filter
+    |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
+    |> or_where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
+    |> preload(^Filters.indexing_preloads())
+    |> Search.reindex(Filter)
   end
 
   @doc """
@@ -1258,5 +1208,55 @@ defmodule Philomena.Tags do
     end
 
     {count, tag_ids}
+  end
+
+  @doc """
+  Queues a list of tags for search index updates.
+  Returns the list of tags unchanged, for use in a pipeline.
+
+  ## Examples
+
+      iex> reindex_tags([%Tag{}, %Tag{}, ...])
+      [%Tag{}, %Tag{}, ...]
+
+  """
+  @spec reindex_tags([Tag.t()]) :: [Tag.t()]
+  def reindex_tags(tags) do
+    enqueue_tag_reindex(tags)
+  end
+
+  @doc """
+  Returns the list of associations to preload for tag indexing.
+
+  ## Examples
+
+      iex> indexing_preloads()
+      [:aliased_tag, :aliases, :implied_tags, :implied_by_tags]
+
+  """
+  def indexing_preloads do
+    [:aliased_tag, :aliases, :implied_tags, :implied_by_tags]
+  end
+
+  @doc """
+  Performs reindexing of tags based on a column condition.
+
+  Takes a column name and a list of values to match against that column,
+  then reindexes all matching tags.
+
+  ## Examples
+
+      iex> perform_reindex(:id, [1, 2, 3])
+      {:ok, []}
+
+      iex> perform_reindex(:name, ["safe", "suggestive"])
+      {:ok, []}
+
+  """
+  def perform_reindex(column, condition) do
+    Tag
+    |> preload(^indexing_preloads())
+    |> where([t], field(t, ^column) in ^condition)
+    |> Search.reindex(Tag)
   end
 end
