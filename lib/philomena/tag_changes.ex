@@ -676,6 +676,21 @@ defmodule Philomena.TagChanges do
   end
 
   @doc """
+  Queues every tag change for worker reindexing.
+
+  ## Examples
+
+      iex> reindex_tag_changes([12, 13])
+      [12, 13]
+
+  """
+  @spec reindex_tag_changes([integer()]) :: [integer()]
+  def reindex_tag_changes(ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "id", ids])
+    ids
+  end
+
+  @doc """
   Returns the association projection required to serialize tag-change search
   documents.
 

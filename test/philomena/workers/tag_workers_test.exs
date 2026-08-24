@@ -13,6 +13,8 @@ defmodule Philomena.TagWorkersTest do
   alias Philomena.TagAliasWorker
   alias Philomena.TagDeleteWorker
   alias Philomena.TagReindexWorker
+  alias Philomena.TagChanges.TagChange
+  alias Philomena.TagChanges.TagChangeTag
   alias Philomena.Tags.Tag
   alias Philomena.Tags
   alias PhilomenaQuery.Search
@@ -110,6 +112,34 @@ defmodule Philomena.TagWorkersTest do
 
     assert Repo.get(Tag, tag.id) == nil
     refute tag.id in tag_ids(image)
+  end
+
+  test "the delete worker removes tag change tags before deleting the tag" do
+    patch(Search, :delete_document, :ok)
+
+    tag = tag_fixture(name: "worker delete history tag")
+    image = image_fixture()
+    attribution = actor()
+
+    tag_change =
+      Repo.insert!(%TagChange{
+        image_id: image.id,
+        ip: attribution.ip,
+        fingerprint: attribution.fingerprint
+      })
+
+    Repo.insert!(%TagChangeTag{
+      tag_change_id: tag_change.id,
+      tag_id: tag.id,
+      added: true
+    })
+
+    assert Repo.get_by(TagChangeTag, tag_change_id: tag_change.id, tag_id: tag.id)
+
+    assert :ok = TagDeleteWorker.perform(tag.id)
+
+    refute Repo.get_by(TagChangeTag, tag_change_id: tag_change.id, tag_id: tag.id)
+    refute Repo.get(TagChange, tag_change.id)
   end
 
   test "the tag reindex worker recounts visible images" do

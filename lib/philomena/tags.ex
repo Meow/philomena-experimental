@@ -33,6 +33,8 @@ defmodule Philomena.Tags do
   alias Philomena.TagDeleteWorker
   alias Philomena.TagReindexWorker
   alias Philomena.TagChanges
+  alias Philomena.TagChanges.TagChange
+  alias Philomena.TagChanges.TagChangeTag
   alias Philomena.Tags.Implication
   alias Philomena.Tags.QueryBuilder
   alias Philomena.Tags.QueryForm
@@ -141,28 +143,24 @@ defmodule Philomena.Tags do
     end
   end
 
-  defp filtered_taggings_for_alias(batch_query, target_tag, [
-         {:hidden_from_users, hidden_from_users}
-       ]) do
-    taggings =
-      from tagging in batch_query,
-        as: :tagging,
-        where:
-          tagging.image_id in subquery(
-            from image in Image,
-              where: image.id == parent_as(:tagging).image_id,
-              where: image.hidden_from_users == ^hidden_from_users,
-              select: image.id
-          )
+  defp filtered_taggings_for_batch(batch_query, [{:hidden_from_users, hidden_from_users}]) do
+    from tagging in batch_query,
+      as: :tagging,
+      where:
+        tagging.image_id in subquery(
+          from image in Image,
+            where: image.id == parent_as(:tagging).image_id,
+            where: image.hidden_from_users == ^hidden_from_users,
+            select: image.id
+        )
+  end
 
-    insert_all =
-      select(
-        taggings,
-        [tagging],
-        %{image_id: tagging.image_id, tag_id: type(^target_tag.id, :integer)}
-      )
-
-    {taggings, insert_all}
+  defp insert_all_for_alias(filtered_batch_query, target_tag) do
+    select(
+      filtered_batch_query,
+      [tagging],
+      %{image_id: tagging.image_id, tag_id: type(^target_tag.id, :integer)}
+    )
   end
 
   @doc """
@@ -967,8 +965,7 @@ defmodule Philomena.Tags do
   @doc """
   Worker entry point that deletes a queued tag and repairs dependent indexes.
 
-  The tag row and its database cascades commit before OpenSearch cleanup,
-  empty TagChanges cleanup, and affected-image reindexing run.
+  Taggings are deleted in batches to avoid holding locks for the full migration.
 
   ## Examples
 
@@ -980,29 +977,79 @@ defmodule Philomena.Tags do
   def perform_delete(tag_id) do
     tag = Repo.get!(Tag, tag_id)
 
-    image_ids_query =
-      Image
-      |> join(:inner, [image], _tag in assoc(image, :tags))
-      |> where([_image, joined_tag], joined_tag.id == ^tag.id)
-      |> select([image, _joined_tag], image.id)
+    # Clean up image taggings
 
-    Multi.new()
-    |> Multi.all(:image_ids, image_ids_query)
-    |> Multi.delete(:tag, tag)
-    |> Multi.on_commit(fn %{image_ids: image_ids, tag: tag} ->
-      Search.delete_document(tag.id, Tag)
-      TagChanges.cleanup_empty_for_tag_deletion()
+    Tagging
+    |> where(tag_id: ^tag.id)
+    |> Batch.query_batches(batch_size: 10_000, id_field: :image_id)
+    |> Enum.each(fn batch_query ->
+      # Lock all images in the batch first to prevent image operations from racing tag updates.
+      image_query =
+        from image in Image,
+          where: image.id in subquery(select(batch_query, [tagging], tagging.image_id)),
+          order_by: [asc: :id],
+          select: image.id
 
-      Image
-      |> where([image], image.id in ^image_ids)
-      |> preload(^Images.indexing_preloads())
-      |> Search.reindex(Image)
+      # The image counter represents only the count of visible images.
+      # To preserve this meaning, the operation must be split into deleting
+      # taggings of visible and non-visible images.
+      #
+      # The image counter is updated so the partial deletion state is resumable.
+
+      visible_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: false)
+      hidden_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: true)
+
+      Multi.new()
+      |> Multi.lock_all(:image_ids, image_query)
+      |> Multi.delete_all(:old_visible, visible_taggings)
+      |> Multi.delete_all(:old_hidden, hidden_taggings)
+      |> Multi.update_all(
+        :source_tag,
+        fn %{old_visible: {count, _}} ->
+          Tag
+          |> where(id: ^tag.id)
+          |> update(inc: [images_count: ^(-count)])
+        end,
+        []
+      )
+      |> Multi.on_commit(fn %{image_ids: image_ids} ->
+        Image
+        |> where([image], image.id in ^image_ids)
+        |> preload(^Images.indexing_preloads())
+        |> Search.reindex(Image)
+      end)
+      |> Multi.transact()
     end)
-    |> Multi.transact()
-    |> case do
-      {:ok, _changes} -> :ok
-      {:error, step, reason, _changes} -> raise "tag delete failed at #{step}: #{inspect(reason)}"
-    end
+
+    # Clean up tag changes
+
+    TagChangeTag
+    |> where(tag_id: ^tag.id)
+    |> Batch.query_batches(batch_size: 10_000, id_field: :tag_change_id)
+    |> Enum.each(fn batch_query ->
+      tag_change_query =
+        from tag_change in TagChange,
+          where: tag_change.id in subquery(select(batch_query, [t], t.tag_change_id)),
+          order_by: [asc: :id],
+          select: tag_change.id
+
+      Multi.new()
+      |> Multi.lock_all(:tag_change_ids, tag_change_query)
+      |> Multi.delete_all(:tag_change_tags, batch_query)
+      |> Multi.on_commit(fn %{tag_change_ids: tag_change_ids} ->
+        TagChanges.reindex_tag_changes(tag_change_ids)
+      end)
+      |> Multi.transact()
+    end)
+
+    # Deletion now proceeds
+
+    Repo.delete!(tag)
+    Search.delete_document(tag.id, Tag)
+
+    TagChanges.cleanup_empty_for_tag_deletion()
+
+    :ok
   end
 
   @doc """
@@ -1034,12 +1081,14 @@ defmodule Philomena.Tags do
       # The image counter represents only the count of visible images.
       # To preserve this meaning, the operation must be split into migrating
       # taggings of visible and non-visible images.
+      #
+      # The image counter is updated so the partial migration state is resumable.
 
-      {visible_taggings, visible_insert_all} =
-        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: false)
+      visible_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: false)
+      visible_insert_all = insert_all_for_alias(visible_taggings, target_tag)
 
-      {hidden_taggings, hidden_insert_all} =
-        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: true)
+      hidden_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: true)
+      hidden_insert_all = insert_all_for_alias(hidden_taggings, target_tag)
 
       Multi.new()
       |> Multi.lock_all(:images, image_query)
