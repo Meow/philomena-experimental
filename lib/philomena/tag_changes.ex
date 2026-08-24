@@ -329,7 +329,7 @@ defmodule Philomena.TagChanges do
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def tag_tag_changes(%Actor{} = actor, slug, params, pagination) when is_binary(slug) do
-    with {:ok, tag} <- Tags.load_visible_tag(actor, slug) do
+    with {:ok, tag} <- Tags.load_canonical_tag(actor, slug) do
       search_tag_changes(actor, tag, %{term: %{tag_id: tag.id}}, params, pagination)
     end
   end

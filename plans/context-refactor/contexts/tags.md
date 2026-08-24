@@ -3,6 +3,36 @@
 Source: `lib/philomena/tags.ex`; consumers: HTML/JSON tag search/show/edit/detail,
 alias/image/watch/reindex controllers, Images, workers, and autocomplete.
 
+## Implementation status
+
+Complete for wave 4.
+
+- Actor-first representation and canonical loaders state whether aliases remain
+  distinct or resolve to their target. Every controller-facing slug loader
+  fetches a real tag before action authorization, and malformed or missing
+  slugs are consistently not-found.
+- Search input is schema-backed and returns its query-form changeset alongside
+  a deterministically sorted page. Tag pages and staff usage details use typed
+  `TagPage` and `TagDetail` results, with representation preloads fixed at the
+  context boundary rather than exposed as caller options.
+- Edit loaders and mutations share write-access and action permissions. Tag
+  detail and moderation actions use named abilities; alias input is changeset
+  cast, self/incoming conflicts are rejected, and dealiasing a canonical tag is
+  a validation error instead of a crashing worker job.
+- Image merge composition copies integer tag IDs without a string round trip
+  and increments counters only for taggings actually inserted. Vectorized
+  counter updates retain the ordered row-lock invariant required to prevent
+  deadlocks between overlapping image writes.
+- Tag update, image, delete, alias, and dealias workflows keep database changes
+  and audit logs atomic and defer storage, indexing, and jobs until commit.
+  Worker and cross-context composition services have narrow documented
+  contracts; raw loaded-record mutation and single-record indexing APIs are no
+  longer public.
+- Empty-tag cleanup executes one delete query returning exact IDs for search
+  cleanup. Context, controller, job, and concurrency coverage pins alias
+  resolution, query errors, authorization, write bans, typed copying, counter
+  locking, cleanup IDs, image changes, watches, and missing-resource behavior.
+
 ## Findings
 
 - The module combines raw tag/alias/delete/count/index mechanics with

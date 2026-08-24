@@ -5,12 +5,15 @@ defmodule PhilomenaWeb.Api.Json.TagController do
   import PhilomenaWeb.Api.Json.NotFound
 
   def show(conn, %{"id" => slug}) do
-    case Tags.load_tag(slug) do
+    case Tags.load_tag(conn.assigns.actor, slug) do
       {:ok, tag} ->
         render(conn, "show.json", tag: tag)
 
       {:error, :not_found} ->
         not_found(conn)
+
+      error ->
+        error
     end
   end
 end

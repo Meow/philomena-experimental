@@ -101,6 +101,7 @@ defmodule Philomena.Tags.Tag do
     field :removed_image, :string, virtual: true
 
     field :implied_tag_list, :string, virtual: true
+    field :target_tag, :string, virtual: true
 
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
@@ -108,15 +109,15 @@ defmodule Philomena.Tags.Tag do
   @doc false
   def changeset(tag, attrs) do
     tag
-    |> cast(attrs, [:category, :description, :short_description, :mod_notes])
-    |> put_change(:implied_tag_list, Enum.map_join(tag.implied_tags, ",", & &1.name))
+    |> cast(attrs, [:category, :description, :short_description, :mod_notes, :implied_tag_list])
+    |> maybe_put_implied_tag_list(tag)
     |> validate_required([])
     |> validate_inclusion(:category, categories())
   end
 
   def changeset(tag, attrs, implied_tags) do
     tag
-    |> cast(attrs, [:category, :description, :short_description, :mod_notes])
+    |> cast(attrs, [:category, :description, :short_description, :mod_notes, :implied_tag_list])
     |> put_assoc(:implied_tags, implied_tags)
     |> validate_required([])
     |> validate_inclusion(:category, categories())
@@ -135,18 +136,33 @@ defmodule Philomena.Tags.Tag do
     |> put_change(:image, nil)
   end
 
-  def alias_changeset(tag, target_tag) do
-    change(tag)
+  def alias_form_changeset(tag, attrs \\ %{}) do
+    cast(tag, attrs, [:target_tag])
+  end
+
+  def alias_changeset(tag, attrs, target_tag) do
+    tag
+    |> cast(attrs, [:target_tag])
     |> put_assoc(:aliased_tag, target_tag)
-    |> validate_required([:aliased_tag])
+    |> validate_required([:target_tag, :aliased_tag])
     |> validate_not_aliased_to_self()
     |> validate_alias_not_transitive()
     |> validate_incoming_aliases()
   end
 
   def unalias_changeset(tag) do
-    change(tag, aliased_tag_id: nil)
+    tag
+    |> unalias_request_changeset()
+    |> put_change(:aliased_tag_id, nil)
   end
+
+  def unalias_request_changeset(%Tag{aliased_tag_id: nil} = tag) do
+    tag
+    |> change()
+    |> add_error(:aliased_tag, "is not aliased")
+  end
+
+  def unalias_request_changeset(%Tag{} = tag), do: change(tag)
 
   def creation_changeset(tag, attrs) do
     tag
@@ -160,6 +176,14 @@ defmodule Philomena.Tags.Tag do
     |> put_slug()
     |> put_name_and_namespace()
     |> put_namespace_category()
+  end
+
+  defp maybe_put_implied_tag_list(changeset, tag) do
+    if get_field(changeset, :implied_tag_list) do
+      changeset
+    else
+      put_change(changeset, :implied_tag_list, Enum.map_join(tag.implied_tags, ",", & &1.name))
+    end
   end
 
   def parse_tag_list(list) do

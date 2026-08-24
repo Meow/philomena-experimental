@@ -197,7 +197,7 @@ defmodule Philomena.ArtistLinks do
   def create_artist_link(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_authorized_profile(actor, :create_links, slug) do
-      tag = Tags.get_tag_or_alias_by_name(attrs["tag_name"])
+      tag = Tags.find_canonical_tag_by_name(attrs["tag_name"])
 
       %ArtistLink{}
       |> ArtistLink.creation_changeset(attrs, user, tag)
@@ -294,7 +294,7 @@ defmodule Philomena.ArtistLinks do
   def update_artist_link(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, artist_link} <- load_scoped_artist_link(actor, :update, slug, id) do
-      tag = Tags.get_tag_or_alias_by_name(attrs["tag_name"])
+      tag = Tags.find_canonical_tag_by_name(attrs["tag_name"])
 
       artist_link
       |> ArtistLink.edit_changeset(attrs, tag)

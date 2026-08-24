@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Tag.ImageController do
 
   def edit(conn, params) do
     with {:ok, {tag, changeset}} <-
-           Tags.load_tag_for_edit(conn.assigns.actor, params["tag_id"], preload: [:implied_tags]) do
+           Tags.load_tag_image_for_edit(conn.assigns.actor, params["tag_id"]) do
       render(conn, "edit.html",
         title: "Editing Tag Spoiler Image",
         tag: tag,

@@ -136,17 +136,14 @@ defmodule PhilomenaWeb.Tag.AliasControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Tag dealias queued"
     end
 
-    test "an unknown slug is the not-authorized redirect for a role_map moderator", %{
+    test "an unknown slug is the not-found redirect for a role_map moderator", %{
       conn: conn
     } do
-      # NOTE: a role-mod fails authorization on the nil resource, so the
-      # unauthorized handler fires - "can't access". An admin passes
-      # authorization and hits the not-found handler instead (next test).
       conn = log_in_role_moderator(conn, "Tag")
       conn = delete(conn, ~p"/tags/nonexistent-tag/alias")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "can't access"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
 
     test "an unknown slug is the not-found redirect for an admin", %{conn: conn} do

@@ -8,16 +8,18 @@ defmodule PhilomenaWeb.TagController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Tags.search_tags(params["tq"] || "*", conn.assigns.pagination,
-           page_size: 250,
-           sort: [%{images: :desc}, %{name: :asc}],
-           preload: []
-         ) do
-      {:ok, tags} ->
+    pagination = Map.put(conn.assigns.pagination, :page_size, 250)
+
+    case Tags.search_tags(conn.assigns.actor, %{"query" => params["tq"] || "*"}, pagination) do
+      {:ok, tags, _changeset} ->
         render(conn, "index.html", title: "Tags", tags: tags)
 
-      {:error, msg} ->
-        render(conn, "index.html", title: "Tags", tags: [], error: msg)
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {message, _options} = Keyword.fetch!(changeset.errors, :query)
+        render(conn, "index.html", title: "Tags", tags: [], error: message)
+
+      error ->
+        error
     end
   end
 

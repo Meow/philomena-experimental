@@ -126,14 +126,12 @@ defmodule Philomena.BackgroundJobsTest do
       ])
     end
 
-    test "tags enqueue one or many ids" do
+    test "tags enqueue a batch of ids" do
       tag = %Tag{id: 71}
       other_tag = %Tag{id: 72}
 
-      assert Tags.reindex_tag(tag) == tag
       assert Tags.reindex_tags([tag, other_tag]) == [tag, other_tag]
 
-      assert_enqueued("indexing", Philomena.IndexWorker, ["Tags", "id", [71]])
       assert_enqueued("indexing", Philomena.IndexWorker, ["Tags", "id", [71, 72]])
     end
 
@@ -189,12 +187,15 @@ defmodule Philomena.BackgroundJobsTest do
                Tags.alias_tag(actor(admin), alias_tag.slug, %{"target_tag" => target.name})
 
       assert {:ok, %Tag{id: ^alias_tag_id}} = Tags.unalias_tag(actor(admin), aliased.slug)
-      assert {:ok, %Tag{id: ^target_id}} = Tags.reindex_tag_images(target)
+
+      assert {:ok, %Tag{id: ^target_id}} =
+               Tags.reindex_tag_by_slug(actor(admin), target.slug)
 
       assert_enqueued("indexing", Philomena.TagDeleteWorker, [delete_tag_id])
       assert_enqueued("indexing", Philomena.TagAliasWorker, [alias_tag_id, target_id])
       assert_enqueued("indexing", Philomena.TagUnaliasWorker, [alias_tag_id])
       assert_enqueued("indexing", Philomena.TagReindexWorker, [target_id])
+      assert_enqueued("indexing", Philomena.IndexWorker, ["Tags", "id", [target_id]])
     end
   end
 

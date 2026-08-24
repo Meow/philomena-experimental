@@ -4,16 +4,25 @@ defmodule PhilomenaWeb.Api.Json.Search.TagController do
   alias Philomena.Tags
 
   def index(conn, params) do
-    case Tags.search_tags(params["q"], conn.assigns.pagination) do
-      {:ok, tags} ->
+    case Tags.search_tags(
+           conn.assigns.actor,
+           %{"query" => params["q"]},
+           conn.assigns.pagination
+         ) do
+      {:ok, tags, _changeset} ->
         conn
         |> put_view(PhilomenaWeb.Api.Json.TagView)
         |> render("index.json", tags: tags, total: tags.total_entries)
 
-      {:error, msg} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {message, _options} = Keyword.fetch!(changeset.errors, :query)
+
         conn
         |> put_status(:bad_request)
-        |> json(%{error: msg})
+        |> json(%{error: message})
+
+      error ->
+        error
     end
   end
 end

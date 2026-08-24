@@ -413,9 +413,7 @@ defmodule Philomena.Images do
         duplicate_of_image.first_seen_at
       )
     end)
-    |> Multi.run(:copy_tags, fn _, %{} ->
-      {:ok, Tags.copy_tags(image, duplicate_of_image)}
-    end)
+    |> Tags.put_copy_tags(image, duplicate_of_image)
     |> Multi.run(:migrate_sources, fn _, %{} ->
       {:ok, migrate_sources(image, duplicate_of_image)}
     end)

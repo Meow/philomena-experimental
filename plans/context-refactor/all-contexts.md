@@ -289,6 +289,15 @@ Wave 4 is underway.
   compose database work and audit logs transactionally with indexing after
   commit; empty-row cleanup returns exact IDs, and worker/reindex services have
   narrow documented boundaries.
+- Tags is complete. Actor-first representation and canonical loaders make alias
+  resolution explicit and load real resources before authorization. Search,
+  page, and detail results now have schema-backed or typed contracts; edit forms
+  and mutations share write-access and named abilities. Alias transitions are
+  changeset-validated, image merges copy typed tag IDs with exact counter
+  deltas, overlapping bulk counter updates preserve ordered row locks, and
+  cleanup returns exact deleted IDs. Database/audit work is transactional with
+  storage, jobs, and indexing deferred until commit, while raw mutation and
+  single-record indexing helpers are private.
 
 ### Wave 0: characterize and establish the contract
 

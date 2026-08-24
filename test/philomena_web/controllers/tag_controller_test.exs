@@ -87,11 +87,11 @@ defmodule PhilomenaWeb.TagControllerTest do
                ~s|This tag ("test aliased tag") has been aliased into the tag "test target tag".|
     end
 
-    test "redirects to / for an unknown slug", %{conn: conn} do
+    test "redirects to / with not-found for an unknown slug", %{conn: conn} do
       conn = get(conn, ~p"/tags/nonexistent-tag")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
   end
 
@@ -165,16 +165,12 @@ defmodule PhilomenaWeb.TagControllerTest do
       assert Repo.get!(Tag, tag.id).short_description == "short desc"
     end
 
-    test "an unknown slug is the not-authorized redirect for a moderator", %{conn: conn} do
-      # NOTE: update_tag's changeset has no required fields, so there is no
-      # reachable validation failure; the failure surface is the unknown slug.
-      # A moderator fails authorization on the nil resource, so the
-      # unauthorized handler fires - "can't access".
+    test "an unknown slug is the not-found redirect for a moderator", %{conn: conn} do
       conn = log_in_user(conn, moderator_user_fixture())
       conn = put(conn, ~p"/tags/nonexistent-tag", %{"tag" => %{"category" => "character"}})
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "can't access"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
 
     test "an unknown slug is the not-found redirect for an admin", %{conn: conn} do

@@ -67,6 +67,14 @@ defimpl Canada.Can, for: Philomena.Users.User do
     :delete_poll_vote
   ]
   @post_moderation_actions [:edit, :update, :hide, :unhide, :approve]
+  @tag_moderation_actions [
+    :edit,
+    :update,
+    :edit_image,
+    :update_image,
+    :delete_image,
+    :show_details
+  ]
   @dnp_entry_class_actions [:index, :new, :create, :select_any_tag]
   @dnp_entry_member_actions [
     :show,
@@ -233,8 +241,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
 
   def can?(%User{role: "moderator"}, :create_post, %Topic{}), do: true
 
-  # Edit tags
-  def can?(%User{role: "moderator"}, :edit, %Tag{}), do: true
+  # Moderate tags
+  def can?(%User{role: "moderator"}, action, %Tag{})
+      when action in @tag_moderation_actions,
+      do: true
 
   # Award badges
   def can?(%User{role: "moderator"}, action, %Award{})
@@ -523,8 +533,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
       do: true
 
   # Tag assistant actions
-  def can?(%User{role: "assistant", role_map: %{"Tag" => %{"moderator" => _}}}, :edit, %Tag{}),
-    do: true
+  def can?(%User{role: "assistant", role_map: %{"Tag" => %{"moderator" => _}}}, action, %Tag{})
+      when action in @tag_moderation_actions,
+      do: true
 
   def can?(
         %User{role: "assistant", role_map: %{"Tag" => %{"moderator" => _}}},
@@ -657,6 +668,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{}, action, DuplicateReport) when action in [:create, :search], do: true
   def can?(%User{}, :show, %DuplicateReport{}), do: true
 
+  def can?(%User{}, :index, Tag), do: true
   def can?(%User{}, :show, %Tag{}), do: true
 
   # Comment on images where that is allowed
@@ -775,6 +787,7 @@ defimpl Canada.Can, for: Atom do
   # Anonymous / non-logged-in users can...
 
   def can?(_user, :index, TagChange), do: true
+  def can?(_user, :index, Tag), do: true
   #
 
   # View the assembled homepage

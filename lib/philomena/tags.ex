@@ -1,80 +1,86 @@
 defmodule Philomena.Tags do
   @moduledoc """
-  The Tags context.
+  Tag discovery, metadata moderation, aliasing, and indexing services.
+
+  Controller-facing APIs resolve a real slug before authorization and name
+  whether aliases remain distinct or resolve to their canonical target. Bulk
+  counter, alias, deletion, and reindex operations are explicit composition or
+  worker services.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
-  alias Philomena.Multi
-  alias Philomena.Repo
-  alias Philomena.Attribution.Actor
-  alias Philomena.Loader
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
-  alias PhilomenaQuery.Search
-  alias Philomena.IndexWorker
-  alias Philomena.TagAliasWorker
-  alias Philomena.TagUnaliasWorker
-  alias Philomena.TagReindexWorker
-  alias Philomena.TagDeleteWorker
-  alias Philomena.Tags.Implication
-  alias Philomena.Tags.Tag
-  alias Philomena.Tags.TagPage
-  alias Philomena.Tags.Uploader
+  alias Philomena.ArtistLinks.ArtistLink
+  alias Philomena.Attribution.Actor
+  alias Philomena.Channels.Channel
+  alias Philomena.DnpEntries.DnpEntry
+  alias Philomena.Filters
+  alias Philomena.Filters.Filter
   alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
+  alias Philomena.Images.Tagging
+  alias Philomena.IndexWorker
   alias Philomena.Interactions
+  alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
+  alias Philomena.Multi
+  alias Philomena.Repo
+  alias Philomena.TagAliasWorker
+  alias Philomena.TagDeleteWorker
+  alias Philomena.TagReindexWorker
+  alias Philomena.TagUnaliasWorker
+  alias Philomena.TagChanges
+  alias Philomena.Tags.Implication
+  alias Philomena.Tags.QueryBuilder
+  alias Philomena.Tags.QueryForm
+  alias Philomena.Tags.Tag
+  alias Philomena.Tags.TagDetail
+  alias Philomena.Tags.TagPage
+  alias Philomena.Tags.Uploader
   alias Philomena.Users
   alias Philomena.Users.User
-  alias Philomena.Filters
-  alias Philomena.Filters.Filter
-  alias Philomena.Images.Tagging
-  alias Philomena.ArtistLinks.ArtistLink
-  alias Philomena.DnpEntries.DnpEntry
-  alias Philomena.Channels.Channel
-  alias Philomena.TagChanges
+  alias PhilomenaQuery.Search
 
-  # There is a really delicate nuance that must be known to avoid deadlocks in
-  # vectorized mutation queries such as `INSERT ON CONFLICT UPDATE`, `UPDATE`,
-  # `DELETE`, `SELECT FOR [NO KEY] UPDATE` that touch multiple records. Note that
-  # `INSERT ON CONFLICT DO NOTHING` doesn't lock the conflicting records, so this
-  # nuance doesn't apply in that case (https://dba.stackexchange.com/questions/322912/will-insert-on-conflict-do-nothing-lock-the-row-in-case-of-conflict)
-  #
-  # If a vectorized mutation is run without a consistent locking order of the records,
-  # it can end up with a deadlock where one transaction locks a set of records
-  # that overlap with the other transaction while the other transaction locks
-  # the other set that overlaps with the first transaction. Thus, both transactions
-  # wait for each other to release the locks on records they locked resulting in
-  # a deadlock.
-  #
-  # For raw `UPDATE/DELETE ... WHERE ... IN (...)` queries, the items inside `IN (...)`
-  # don't influence the order of locking. These queries also don't have an `ORDER BY`
-  # clause. Thus, this function returns a `SELECT [lock_type]` query that establishes a
-  # consistent order of records by primary keys that must be used with all vectorized
-  # mutation queries to avoid deadlocks. This query can be used as a subquery in
-  # the `WHERE` clause for the vectorized mutation.
-  #
-  # If no locking order is set, the deadlock can appear randomly and its probability
-  # increases with the amount of items in the vectorized mutation query and with
-  # the number of overlapping records in concurrent transactions.
-  #
-  # This phenomena was discovered when @MareStare was trying to parallelize
-  # the image creation process for seeding the images during development, where
-  # tons of image uploads are issued in parallel with many overlapping tags
-  # (https://github.com/philomena-dev/philomena/pull/481).
-  #
-  # Big thanks to this StackOverflow post for explanations:
-  # https://stackoverflow.com/questions/27262900/postgres-update-and-lock-ordering/27263824#27263824
-  defmacrop vectorized_mutation_lock(lock_type, tag_ids) do
-    quote do
-      Tag
-      |> select([t], t.id)
-      |> lock(unquote(lock_type))
-      |> where([t], t.id in ^unquote(tag_ids))
-      |> order_by([t], t.id)
+  @show_preloads [
+    :aliases,
+    :aliased_tag,
+    :implied_tags,
+    :implied_by_tags,
+    :dnp_entries,
+    :channels,
+    public_links: :user,
+    hidden_links: :user
+  ]
+
+  @api_preloads [:aliased_tag, :aliases, :implied_tags, :implied_by_tags, :dnp_entries]
+  @alias_preloads [:implied_tags, :aliased_tag]
+  @image_preloads [:implied_tags]
+
+  defp locked_tag_ids(tag_ids) do
+    Tag
+    |> where([tag], tag.id in ^tag_ids)
+    |> order_by([tag], tag.id)
+    |> select([tag], tag.id)
+    |> lock("FOR NO KEY UPDATE")
+  end
+
+  defp tag_by_slug(slug, preloads) when is_binary(slug) do
+    Tag
+    |> where(slug: ^slug)
+    |> preload(^preloads)
+    |> Loader.one()
+  end
+
+  defp tag_by_slug(_slug, _preloads), do: {:error, :not_found}
+
+  defp load_tag_for_action(actor, action, slug, preloads) do
+    with {:ok, tag} <- tag_by_slug(slug, preloads),
+         :ok <- authorize(actor, action, tag) do
+      {:ok, tag}
     end
   end
 
@@ -86,141 +92,145 @@ defmodule Philomena.Tags do
     |> Repo.insert()
   end
 
-  # Updates a tag.
-  defp update_tag(%Tag{} = tag, attrs) do
-    tag_input = Tag.parse_tag_list(attrs["implied_tag_list"])
+  defp tag_changeset(%Tag{} = tag, attrs) do
+    tag_input =
+      tag
+      |> Tag.changeset(attrs)
+      |> Ecto.Changeset.get_field(:implied_tag_list)
+      |> Tag.parse_tag_list()
 
     implied_tags =
       Tag
       |> where([t], t.name in ^tag_input)
       |> Repo.all()
 
-    tag
-    |> Tag.changeset(attrs, implied_tags)
-    |> Repo.update()
-    |> reindex_after_update(tag)
+    Tag.changeset(tag, attrs, implied_tags)
   end
 
-  defp reindex_after_update(result, old_tag) do
-    case result do
-      {:ok, tag} ->
-        if tag.category != old_tag.category do
-          reindex_tag_images(tag)
-        end
-
-        reindex_tag(tag)
-        {:ok, tag}
-
-      error ->
-        error
+  defp reindex_updated_tag(tag, old_tag) do
+    if tag.category != old_tag.category do
+      enqueue_image_reindex(tag)
     end
+
+    enqueue_tag_reindex(tag)
   end
 
-  # Updates a tag's associated image.
-  #
-  # Takes a tag and image upload attributes, analyzes the upload,
-  # persists it, and removes the old tag image if successful.
-  defp update_tag_image(%Tag{} = tag, attrs) do
-    tag
-    |> Uploader.analyze_upload(attrs)
-    |> Repo.update()
-    |> case do
-      {:ok, tag} ->
-        Uploader.persist_upload(tag)
-        Uploader.unpersist_old_upload(tag)
+  defp tag_image_changeset(%Tag{} = tag, attrs), do: Uploader.analyze_upload(tag, attrs)
 
-        {:ok, tag}
+  defp remove_tag_image_changeset(%Tag{} = tag), do: Tag.remove_image_changeset(tag)
 
-      error ->
-        error
-    end
-  end
-
-  # Removes a tag's associated image.
-  defp remove_tag_image(%Tag{} = tag) do
-    tag
-    |> Tag.remove_image_changeset()
-    |> Repo.update()
-    |> case do
-      {:ok, tag} ->
-        Uploader.unpersist_old_upload(tag)
-
-        {:ok, tag}
-
-      error ->
-        error
-    end
-  end
-
-  # Deletes a tag.
-  defp delete_tag(%Tag{} = tag) do
+  defp enqueue_delete(%Tag{} = tag) do
     Exq.enqueue(Exq, "indexing", TagDeleteWorker, [tag.id])
-
-    {:ok, tag}
-  end
-
-  # Performs the actual deletion of a tag.
-  #
-  # Removes the tag from the database, deletes its search index,
-  # reindexes all images that were tagged with it, and cleans up
-  # any empty tag changes.
-  @doc false
-  def perform_delete(tag_id) do
-    tag = get_tag!(tag_id)
-
-    image_ids =
-      Image
-      |> join(:inner, [i], _ in assoc(i, :tags))
-      |> where([_i, t], t.id == ^tag.id)
-      |> select([i, _t], i.id)
-      |> Repo.all()
-
-    {:ok, tag} = Repo.delete(tag)
-
-    Search.delete_document(tag.id, Tag)
-
-    TagChanges.cleanup_empty_for_tag_deletion()
-
-    Image
-    |> where([i], i.id in ^image_ids)
-    |> preload(^Images.indexing_preloads())
-    |> Search.reindex(Image)
-  end
-
-  # Creates an alias from one tag to another.
-  #
-  # Takes a source tag and target tag name, creating an alias relationship
-  # where the source tag becomes an alias of the target tag. Once the alias
-  # is created, a job is queued to finish processing the alias.
-  @doc false
-  def alias_tag(%Tag{} = tag, attrs) do
-    target_tag = Repo.get_by(Tag, name: String.downcase(attrs["target_tag"]))
-
     tag
-    |> Repo.preload(:aliased_tag)
-    |> Tag.alias_changeset(target_tag)
-    |> Repo.update()
+  end
+
+  @doc """
+  Worker entry point that deletes a queued tag and repairs dependent indexes.
+
+  The tag row and its database cascades commit before OpenSearch cleanup,
+  empty TagChanges cleanup, and affected-image reindexing run.
+
+  ## Examples
+
+      iex> perform_delete(42)
+      :ok
+
+  """
+  @spec perform_delete(integer()) :: :ok
+  def perform_delete(tag_id) do
+    tag = Repo.get!(Tag, tag_id)
+
+    image_ids_query =
+      Image
+      |> join(:inner, [image], _tag in assoc(image, :tags))
+      |> where([_image, joined_tag], joined_tag.id == ^tag.id)
+      |> select([image, _joined_tag], image.id)
+
+    Multi.new()
+    |> Multi.all(:image_ids, image_ids_query)
+    |> Multi.delete(:tag, tag)
+    |> Multi.on_commit(fn %{image_ids: image_ids, tag: tag} ->
+      Search.delete_document(tag.id, Tag)
+      TagChanges.cleanup_empty_for_tag_deletion()
+
+      Image
+      |> where([image], image.id in ^image_ids)
+      |> preload(^Images.indexing_preloads())
+      |> Search.reindex(Image)
+    end)
+    |> Multi.transact()
     |> case do
-      {:ok, tag} ->
-        Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
-
-        {:ok, tag}
-
-      error ->
-        error
+      {:ok, _changes} -> :ok
+      {:error, step, reason, _changes} -> raise "tag delete failed at #{step}: #{inspect(reason)}"
     end
   end
 
-  # Performs the actual tag aliasing operation.
-  #
-  # Transfers all associations from the source tag to the target tag,
-  # including image taggings, filters, user watches, and other relationships.
-  # Updates counters and reindexes affected records.
-  @doc false
-  def perform_alias(tag_id, target_tag_id) do
-    tag = get_tag!(tag_id)
-    target_tag = get_tag!(target_tag_id)
+  defp tag_alias_changeset(%Tag{} = tag, attrs) do
+    form = Tag.alias_form_changeset(tag, attrs)
+    target_name = Ecto.Changeset.get_field(form, :target_tag)
+    target_tag = find_canonical_tag_by_name(target_name)
 
+    Tag.alias_changeset(tag, attrs, target_tag)
+  end
+
+  defp enqueue_alias(%Tag{aliased_tag: %Tag{} = target_tag} = tag) do
+    Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
+    tag
+  end
+
+  defp enqueue_unalias(%Tag{} = tag) do
+    Exq.enqueue(Exq, "indexing", TagUnaliasWorker, [tag.id])
+    tag
+  end
+
+  defp enqueue_image_reindex(%Tag{} = tag) do
+    Exq.enqueue(Exq, "indexing", TagReindexWorker, [tag.id])
+    tag
+  end
+
+  defp enqueue_tag_reindex(%Tag{} = tag) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Tags", "id", [tag.id]])
+    tag
+  end
+
+  defp enqueue_tag_reindex(tags) when is_list(tags) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Tags", "id", Enum.map(tags, & &1.id)])
+    tags
+  end
+
+  @doc """
+  Worker entry point that migrates an alias's associations to its target.
+
+  Taggings, filters, watches, links, DNP entries, channels, and the alias row
+  move in one transaction. Image and tag indexing begins only after commit.
+
+  ## Examples
+
+      iex> perform_alias(12, 13)
+      :ok
+
+  """
+  @spec perform_alias(integer(), integer()) :: :ok
+  def perform_alias(tag_id, target_tag_id) do
+    tag = Repo.get!(Tag, tag_id)
+    target_tag = Repo.get!(Tag, target_tag_id)
+
+    Multi.new()
+    |> Multi.run(:alias, fn repo, _changes ->
+      perform_alias_transaction(repo, tag, target_tag)
+    end)
+    |> Multi.on_commit(fn _changes ->
+      enqueue_image_reindex(target_tag)
+      enqueue_tag_reindex([tag, target_tag])
+    end)
+    |> Multi.transact()
+    |> case do
+      {:ok, _changes} -> :ok
+      {:error, :alias, reason, _changes} -> raise "tag alias failed: #{inspect(reason)}"
+    end
+  end
+
+  defp perform_alias_transaction(repo, tag, target_tag) do
     filters_hidden =
       where(Filter, [f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
 
@@ -230,9 +240,9 @@ defmodule Philomena.Tags do
     users_watching =
       where(User, [u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
 
-    array_replace(filters_hidden, :hidden_tag_ids, tag.id, target_tag.id)
-    array_replace(filters_spoilered, :spoilered_tag_ids, tag.id, target_tag.id)
-    array_replace(users_watching, :watched_tag_ids, tag.id, target_tag.id)
+    array_replace(repo, filters_hidden, :hidden_tag_ids, tag.id, target_tag.id)
+    array_replace(repo, filters_spoilered, :spoilered_tag_ids, tag.id, target_tag.id)
+    array_replace(repo, users_watching, :watched_tag_ids, tag.id, target_tag.id)
 
     # Create taggings with the new tag ID on images where the old tag ID is used.
     retag_query =
@@ -242,65 +252,64 @@ defmodule Philomena.Tags do
         select: %{image_id: i.id, tag_id: ^target_tag.id},
         where: it.tag_id == ^tag.id
 
-    Repo.insert_all(Tagging, retag_query, on_conflict: :nothing)
+    repo.insert_all(Tagging, retag_query, on_conflict: :nothing)
 
     # Delete taggings on the source tag
     Tagging
     |> where(tag_id: ^tag.id)
-    |> Repo.delete_all()
+    |> repo.delete_all()
 
     # Update other associations
     ArtistLink
     |> where(tag_id: ^tag.id)
-    |> Repo.update_all(set: [tag_id: target_tag.id])
+    |> repo.update_all(set: [tag_id: target_tag.id])
 
     DnpEntry
     |> where(tag_id: ^tag.id)
-    |> Repo.update_all(set: [tag_id: target_tag.id])
+    |> repo.update_all(set: [tag_id: target_tag.id])
 
     Channel
     |> where(associated_artist_tag_id: ^tag.id)
-    |> Repo.update_all(set: [associated_artist_tag_id: target_tag.id])
+    |> repo.update_all(set: [associated_artist_tag_id: target_tag.id])
 
     # Update counter
     Tag
     |> where(id: ^tag.id)
-    |> Repo.update_all(
-      set: [images_count: 0, aliased_tag_id: target_tag.id, updated_at: DateTime.utc_now()]
+    |> repo.update_all(
+      set: [images_count: 0, aliased_tag_id: target_tag.id, updated_at: DateTime.utc_now(:second)]
     )
 
-    # Finally, reindex
-    reindex_tag_images(target_tag)
-    reindex_tags([tag, target_tag])
-
-    :ok
+    {:ok, :ok}
   end
 
-  # Performs removal of a tag alias.
-  #
-  # Removes the alias relationship between two tags and reindexes
-  # the images of the formerly aliased tag.
-  @doc false
+  @doc """
+  Worker entry point that removes a queued alias and repairs its indexes.
+
+  ## Examples
+
+      iex> perform_unalias(12)
+      {:ok, %Tag{}}
+
+  """
+  @spec perform_unalias(integer()) :: {:ok, Tag.t()} | {:error, Ecto.Changeset.t()}
   def perform_unalias(tag_id) do
-    tag = get_tag!(tag_id)
+    tag = Repo.get!(Tag, tag_id)
     former_alias = Repo.preload(tag, :aliased_tag).aliased_tag
 
-    tag
-    |> Tag.unalias_changeset()
-    |> Repo.update()
+    Multi.new()
+    |> Multi.update(:tag, Tag.unalias_changeset(tag))
+    |> Multi.on_commit(fn %{tag: tag} ->
+      enqueue_image_reindex(former_alias)
+      enqueue_tag_reindex([tag, former_alias])
+    end)
+    |> Multi.transact()
     |> case do
-      {:ok, _} = result ->
-        reindex_tag_images(former_alias)
-        reindex_tags([tag, former_alias])
-
-        result
-
-      result ->
-        result
+      {:ok, %{tag: tag}} -> {:ok, tag}
+      {:error, :tag, changeset, _changes} -> {:error, changeset}
     end
   end
 
-  defp array_replace(queryable, column, old_value, new_value) do
+  defp array_replace(repo, queryable, column, old_value, new_value) do
     queryable
     |> update(
       [q],
@@ -311,58 +320,70 @@ defmodule Philomena.Tags do
         }
       ]
     )
-    |> Repo.update_all([])
+    |> repo.update_all([])
   end
 
-  # Copies tags from one image to another.
-  #
-  # Creates new taggings on the target image for all tags present on the source image,
-  # updates tag counters, and returns the list of copied tags.
-  @doc false
-  def copy_tags(source, target) do
-    # TODO: is this still a bug? can it work with type-casting in the select line?
-
-    # Ecto bug:
-    # ** (DBConnection.EncodeError) Postgrex expected a binary, got 5.
-    #
-    # what I would like to do:
-    #   |> select([t], %{image_id: ^target.id, tag_id: t.tag_id})
-    #
-    # what I have to do instead:
-
+  defp copy_tags(repo, source, target) do
     taggings =
       Tagging
       |> where(image_id: ^source.id)
-      |> select([t], %{image_id: ^to_string(target.id), tag_id: t.tag_id})
-      |> Repo.all()
-      |> Enum.map(&%{&1 | image_id: String.to_integer(&1.image_id)})
+      |> select([tagging], %{
+        image_id: type(^target.id, :integer),
+        tag_id: tagging.tag_id
+      })
+      |> repo.all()
 
-    {:ok, tag_ids} =
-      Repo.transaction(fn ->
-        {_count, taggings} =
-          Repo.insert_all(Tagging, taggings, on_conflict: :nothing, returning: [:tag_id])
+    {_count, inserted_taggings} =
+      repo.insert_all(Tagging, taggings, on_conflict: :nothing, returning: [:tag_id])
 
-        tag_ids = Enum.map(taggings, & &1.tag_id)
-
-        update_image_counts(Repo, 1, tag_ids)
-
-        tag_ids
-      end)
+    tag_ids = Enum.map(inserted_taggings, & &1.tag_id)
+    update_image_counts(repo, 1, tag_ids)
 
     Tag
     |> where([t], t.id in ^tag_ids)
-    |> Repo.all()
+    |> repo.all()
   end
 
-  # Accepts IDs of tags and increments their `images_count` by 1.
-  @doc false
+  @doc """
+  Adds tag copying from `source` to `target` to an image-merge transaction.
+
+  Only newly inserted target taggings increment tag image counters. The result
+  is stored under `:copy_tags` as the copied canonical tags.
+
+  ## Examples
+
+      iex> put_copy_tags(multi, source_image, target_image)
+      %Philomena.Multi{}
+
+  """
+  @spec put_copy_tags(Multi.t(), Image.t(), Image.t()) :: Multi.t()
+  def put_copy_tags(%Multi{} = multi, %Image{} = source, %Image{} = target) do
+    Multi.run(multi, :copy_tags, fn repo, _changes ->
+      {:ok, copy_tags(repo, source, target)}
+    end)
+  end
+
+  @doc """
+  Applies `diff` to each tag's image count inside the caller's transaction.
+
+  Overlapping bulk updates must lock tag rows in ascending primary-key order.
+  PostgreSQL otherwise may acquire the update locks in different orders and
+  deadlock concurrent image writes; this invariant was reproduced by parallel
+  uploads in philomena-dev/philomena#483.
+
+  ## Examples
+
+      iex> update_image_counts(repo, 1, [12, 13])
+      2
+
+  """
   @spec update_image_counts(module(), integer(), [integer()]) :: integer()
   def update_image_counts(repo, diff, tag_ids)
 
   def update_image_counts(_repo, _diff, []), do: 0
 
   def update_image_counts(repo, diff, tag_ids) do
-    locked_tags = vectorized_mutation_lock("FOR NO KEY UPDATE", tag_ids)
+    locked_tags = locked_tag_ids(tag_ids)
 
     {rows_affected, _} =
       Tag
@@ -459,134 +480,82 @@ defmodule Philomena.Tags do
     |> Enum.uniq_by(& &1.id)
   end
 
-  # Associations loaded when showing, editing, or updating a tag.
-  @show_preloads [
-    :aliases,
-    :aliased_tag,
-    :implied_tags,
-    :implied_by_tags,
-    :dnp_entries,
-    :channels,
-    public_links: :user,
-    hidden_links: :user
-  ]
-
-  # Associations loaded when aliasing or reindexing a tag.
-  @alias_preloads [:implied_tags, :aliased_tag]
-
-  # Associations loaded when editing a tag's spoiler image.
-  @image_preloads [:implied_tags]
-
   @doc """
-  Loads the tag named by `slug`, with its aliases, implications, and DNP
-  entries preloaded.
+  Loads the visible tag named by `slug` without resolving aliases.
 
-  Lookup is strictly by slug. An unknown slug is `{:error, :not_found}`; an
-  aliased tag is returned as itself, its `:aliased_tag` carrying the target.
-
-  Returns `{:ok, tag}` or `{:error, :not_found}`.
+  The JSON representation uses this API so an alias remains independently
+  addressable. Missing and malformed slugs are not found before `:show`
+  authorization.
 
   ## Examples
 
-      iex> load_tag("safe")
+      iex> load_tag(actor, "safe")
       {:ok, %Tag{}}
 
-      iex> load_tag("nonexistent")
+      iex> load_tag(actor, "nonexistent")
       {:error, :not_found}
 
   """
-  @spec load_tag(String.t()) :: {:ok, Tag.t()} | {:error, :not_found}
-  def load_tag(slug) do
-    Tag
-    |> where(slug: ^slug)
-    |> preload([:aliased_tag, :aliases, :implied_tags, :implied_by_tags, :dnp_entries])
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      tag -> {:ok, tag}
-    end
+  @spec load_tag(Actor.t(), String.t()) ::
+          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+  def load_tag(%Actor{} = actor, slug) do
+    load_tag_for_action(actor, :show, slug, @api_preloads)
   end
 
   @doc """
-  Loads the visible canonical tag named by `slug` for an actor-scoped
-  cross-context read.
+  Loads the visible canonical tag named by `slug`.
 
-  Aliases resolve to their target. Missing tags are always not found. A real
-  tag the actor may not show is unauthorized.
+  Aliases resolve to their target before `:show` authorization. TagChanges uses
+  this boundary for history links. Missing and malformed slugs are not found.
 
   ## Examples
 
-      iex> load_visible_tag(actor, "safe")
+      iex> load_canonical_tag(actor, "safe")
       {:ok, %Tag{}}
 
-      iex> load_visible_tag(actor, "missing")
+      iex> load_canonical_tag(actor, "missing")
       {:error, :not_found}
+
   """
-  @spec load_visible_tag(Actor.t(), String.t()) ::
+  @spec load_canonical_tag(Actor.t(), String.t()) ::
           {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
-  def load_visible_tag(%Actor{} = actor, slug) when is_binary(slug) do
-    with {:ok, tag} <- Tag |> where(slug: ^slug) |> preload(:aliased_tag) |> Loader.one(),
+  def load_canonical_tag(%Actor{} = actor, slug) do
+    with {:ok, tag} <- tag_by_slug(slug, :aliased_tag),
          tag = tag.aliased_tag || tag,
          :ok <- authorize(actor, :show, tag) do
       {:ok, tag}
     end
   end
 
-  def load_visible_tag(%Actor{}, _slug), do: {:error, :not_found}
-
   @doc """
-  Searches tags with the query string `query_string` and `pagination`, sorted
-  by image count descending.
+  Searches the tag index on behalf of `actor`.
 
-  An empty or missing `query_string` compiles to a match-none query, returning
-  an empty page. Returns `{:ok, tags}`, or `{:error, msg}` when `query_string`
-  fails to compile.
-
-  ## Options
-
-    * `:preload` - associations loaded onto the results. Defaults to the
-      aliases, implications, and DNP entries the tag API representation
-      renders.
-    * `:sort` - the search sort to apply. Defaults to image count descending.
-    * `:page_size` - fixes the result window, overriding the page size
-      requested in `pagination`.
+  `params["query"]` owns the query language input. Invalid syntax returns its
+  rejected query-form changeset; missing input intentionally compiles to the
+  established match-none query. Results sort by image count, name, then ID and
+  carry the associations needed by the public tag representation.
 
   ## Examples
 
-      iex> search_tags("artist:*", pagination)
-      {:ok, %Scrivener.Page{}}
+      iex> search_tags(actor, %{"query" => "artist:*"}, pagination)
+      {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
-      iex> search_tags(")", pagination)
-      {:error, "Imbalanced parentheses."}
+      iex> search_tags(actor, %{"query" => ")"}, pagination)
+      {:error, %Ecto.Changeset{}}
 
   """
-  @spec search_tags(String.t() | nil, map(), Keyword.t()) ::
-          {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_tags(query_string, pagination, opts \\ []) do
-    preloads =
-      Keyword.get(opts, :preload, [
-        :aliased_tag,
-        :aliases,
-        :implied_tags,
-        :implied_by_tags,
-        :dnp_entries
-      ])
-
-    sort = Keyword.get(opts, :sort, %{images: :desc})
-
-    pagination =
-      case Keyword.fetch(opts, :page_size) do
-        {:ok, page_size} -> Map.put(pagination, :page_size, page_size)
-        :error -> pagination
-      end
-
-    with {:ok, query} <- Philomena.Tags.Query.compile(query_string) do
+  @spec search_tags(Actor.t(), map(), Search.pagination_params()) ::
+          {:ok, Scrivener.Page.t(), Ecto.Changeset.t()}
+          | {:error, :unauthorized | Ecto.Changeset.t()}
+  def search_tags(%Actor{} = actor, params, pagination) do
+    with :ok <- authorize(actor, :index, Tag),
+         {:ok, body, query_form} <- QueryBuilder.build_query(params) do
       tags =
         Tag
-        |> Search.search_definition(%{query: query, sort: sort}, pagination)
-        |> Search.search_records(preload(Tag, ^preloads))
+        |> Search.search_definition(body, pagination)
+        |> Search.search_records(preload(Tag, ^@api_preloads))
 
-      {:ok, tags}
+      {:ok, tags, QueryForm.changeset(query_form)}
     end
   end
 
@@ -594,9 +563,8 @@ defmodule Philomena.Tags do
   Assembles the `TagPage` for the viewer described by `scope`, loading the
   tag named by `slug`.
 
-  Loads the tag with its preloads and authorizes `:show`. An unknown
-  slug the viewer may act on (an admin) is `{:error, :not_found}`; otherwise it
-  is `{:error, :unauthorized}`. A tag that is aliased into another is
+  Loads the tag before `:show` authorization. Missing and malformed slugs are
+  always not found. A tag that is aliased into another is
   `{:aliased_to, tag}`, its `:aliased_tag` association carrying the target.
   Otherwise the page carries the tag, the executed page of
   images tagged with it, the viewer's interactions, and the escaped search
@@ -617,10 +585,7 @@ defmodule Philomena.Tags do
   @spec load_tag_page(Actor.t(), Scope.t(), String.t()) ::
           {:ok, TagPage.t()} | {:aliased_to, Tag.t()} | {:error, :not_found | :unauthorized}
   def load_tag_page(%Actor{} = actor, %Scope{} = scope, slug) do
-    tag = tag_by_slug(slug, @show_preloads)
-
-    with :ok <- authorize(actor, :show, tag),
-         %Tag{} <- tag do
+    with {:ok, tag} <- load_tag_for_action(actor, :show, slug, @show_preloads) do
       case tag do
         %{aliased_tag: %Tag{}} ->
           {:aliased_to, tag}
@@ -637,20 +602,14 @@ defmodule Philomena.Tags do
              search_query: maybe_escape_name(tag)
            }}
       end
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
     end
   end
 
   @doc """
   Loads the tag named by `slug` for editing, on behalf of `actor`.
 
-  Authorizes `:edit`. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
-
-  The tag carries the associations named by `opts[:preload]`, defaulting to
-  the full show preloads.
+  Write access and `:edit` authorization match the update action. Missing and
+  malformed slugs are always not found.
 
   Returns `{:ok, {tag, changeset}}`, `{:error, :not_found}`, or
   `{:error, :unauthorized}`.
@@ -661,17 +620,42 @@ defmodule Philomena.Tags do
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_tag_for_edit(Actor.t(), String.t(), Keyword.t()) ::
-          {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
-  def load_tag_for_edit(%Actor{} = actor, slug, opts \\ []) do
-    load_tag_changeset(actor, :edit, slug, Keyword.get(opts, :preload, @show_preloads))
+  @spec load_tag_for_edit(Actor.t(), String.t()) ::
+          {:ok, {Tag.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :not_found | :unauthorized}
+  def load_tag_for_edit(%Actor{} = actor, slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :edit, slug, @show_preloads) do
+      {:ok, {tag, change_tag(tag)}}
+    end
+  end
+
+  @doc """
+  Loads the tag spoiler-image form on behalf of `actor`.
+
+  Write access and `:edit_image` authorization match both image mutations.
+
+  ## Examples
+
+      iex> load_tag_image_for_edit(moderator, "safe")
+      {:ok, {%Tag{}, %Ecto.Changeset{}}}
+
+  """
+  @spec load_tag_image_for_edit(Actor.t(), String.t()) ::
+          {:ok, {Tag.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :not_found | :unauthorized}
+  def load_tag_image_for_edit(%Actor{} = actor, slug) do
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :edit_image, slug, @image_preloads) do
+      {:ok, {tag, change_tag(tag)}}
+    end
   end
 
   @doc """
   Loads the tag named by `slug` for editing its aliasing, on behalf of `actor`.
 
-  Authorizes `:alias`. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
+  Write access and `:edit_alias` authorization match alias mutations. Missing
+  and malformed slugs are always not found.
 
   Returns `{:ok, {tag, changeset}}`, `{:error, :not_found}`, or
   `{:error, :unauthorized}`.
@@ -683,22 +667,12 @@ defmodule Philomena.Tags do
 
   """
   @spec load_tag_alias_for_edit(Actor.t(), String.t()) ::
-          {:ok, {Tag.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
+          {:ok, {Tag.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :not_found | :unauthorized}
   def load_tag_alias_for_edit(%Actor{} = actor, slug) do
-    load_tag_changeset(actor, :alias, slug, @alias_preloads)
-  end
-
-  # Authorization runs before the nil check, so an unknown slug is not-found
-  # only for an actor the rule permits acting on the nil load.
-  defp load_tag_changeset(actor, action, slug, preloads) do
-    tag = tag_by_slug(slug, preloads)
-
-    with :ok <- authorize(actor, action, tag),
-         %Tag{} <- tag do
-      {:ok, {tag, change_tag(tag)}}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :edit_alias, slug, @alias_preloads) do
+      {:ok, {tag, Tag.alias_form_changeset(tag)}}
     end
   end
 
@@ -706,61 +680,48 @@ defmodule Philomena.Tags do
   Assembles the tag usage detail for the tag named by `slug`, on behalf of
   `actor`.
 
-  Authorizes `:edit` on tags first. On success the result carries the
+  Authorizes `:show_details` on the loaded tag. On success the result carries the
   tag, the filters that spoiler it, the filters that hide it, and the users
   watching it.
-
-  Returns `{:ok, %{tag:, filters_spoilering:, filters_hiding:, users_watching:}}`,
-  `{:error, :not_found}`, or `{:error, :unauthorized}`.
 
   ## Examples
 
       iex> tag_detail(moderator, "safe")
-      {:ok, %{tag: %Tag{}, filters_spoilering: [], filters_hiding: [], users_watching: []}}
+      {:ok, %TagDetail{tag: %Tag{}}}
 
   """
   @spec tag_detail(Actor.t(), String.t()) ::
-          {:ok, map()} | {:error, :not_found | :unauthorized}
+          {:ok, TagDetail.t()} | {:error, :not_found | :unauthorized}
   def tag_detail(%Actor{} = actor, slug) do
-    # TODO: should make a result structure for this function
-    with :ok <- authorize(actor, :edit, %Tag{}) do
-      case tag_by_slug(slug, []) do
-        nil ->
-          {:error, :not_found}
+    with {:ok, tag} <- load_tag_for_action(actor, :show_details, slug, []) do
+      filters_spoilering =
+        Filter
+        |> where(
+          [filter],
+          fragment("? @> ARRAY[?]::integer[]", filter.spoilered_tag_ids, ^tag.id)
+        )
+        |> preload(:user)
+        |> Repo.all()
 
-        tag ->
-          filters_spoilering =
-            Filter
-            |> where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
-            |> preload(:user)
-            |> Repo.all()
+      filters_hiding =
+        Filter
+        |> where([filter], fragment("? @> ARRAY[?]::integer[]", filter.hidden_tag_ids, ^tag.id))
+        |> preload(:user)
+        |> Repo.all()
 
-          filters_hiding =
-            Filter
-            |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
-            |> preload(:user)
-            |> Repo.all()
+      users_watching =
+        User
+        |> where([user], fragment("? @> ARRAY[?]::integer[]", user.watched_tag_ids, ^tag.id))
+        |> Repo.all()
 
-          users_watching =
-            User
-            |> where([u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
-            |> Repo.all()
-
-          {:ok,
-           %{
-             tag: tag,
-             filters_spoilering: filters_spoilering,
-             filters_hiding: filters_hiding,
-             users_watching: users_watching
-           }}
-      end
+      {:ok,
+       %TagDetail{
+         tag: tag,
+         filters_spoilering: filters_spoilering,
+         filters_hiding: filters_hiding,
+         users_watching: users_watching
+       }}
     end
-  end
-
-  defp tag_by_slug(slug, preloads) do
-    Tag
-    |> preload(^preloads)
-    |> Repo.get_by(slug: slug)
   end
 
   # Computes the search query that lists the tag's images. A tag whose name
@@ -806,44 +767,48 @@ defmodule Philomena.Tags do
     end
   end
 
-  # Gets a single tag.
-  defp get_tag!(id), do: Repo.get!(Tag, id)
-
   @doc """
-  Gets a single tag by its name.
+  Finds the tag whose canonical stored name matches `name`, without resolving
+  aliases.
 
-  Returns nil if the Tag does not exist.
+  This is a trusted composition lookup for changesets in other contexts; it
+  returns `nil` when the submitted name cannot identify a tag.
 
   ## Examples
 
-      iex> get_tag_by_name("safe")
+      iex> find_tag_by_name("safe")
       %Tag{}
 
-      iex> get_tag_by_name("nonexistent")
+      iex> find_tag_by_name("nonexistent")
       nil
 
   """
-  def get_tag_by_name(name), do: Repo.get_by(Tag, name: name)
+  @spec find_tag_by_name(String.t() | nil) :: Tag.t() | nil
+  def find_tag_by_name(name) when is_binary(name) do
+    Repo.get_by(Tag, name: Tag.clean_tag_name(name))
+  end
+
+  def find_tag_by_name(_name), do: nil
 
   @doc """
-  Gets a single tag by its name, or the tag it is aliased to, if it is aliased.
+  Finds the canonical tag named by `name`, resolving one stored alias.
 
-  Returns nil if the tag does not exist.
+  This is a trusted composition lookup for changesets in other contexts; it
+  returns `nil` when the submitted name cannot identify a tag.
 
   ## Examples
 
-      iex> get_tag_or_alias_by_name("safe")
+      iex> find_canonical_tag_by_name("safe")
       %Tag{}
 
-      iex> get_tag_or_alias_by_name("nonexistent")
+      iex> find_canonical_tag_by_name("nonexistent")
       nil
 
   """
-  def get_tag_or_alias_by_name(nil), do: nil
-
-  def get_tag_or_alias_by_name(name) do
+  @spec find_canonical_tag_by_name(String.t() | nil) :: Tag.t() | nil
+  def find_canonical_tag_by_name(name) when is_binary(name) do
     Tag
-    |> where(name: ^name)
+    |> where(name: ^Tag.clean_tag_name(name))
     |> preload(:aliased_tag)
     |> Repo.one()
     |> case do
@@ -851,6 +816,8 @@ defmodule Philomena.Tags do
       tag -> tag.aliased_tag || tag
     end
   end
+
+  def find_canonical_tag_by_name(_name), do: nil
 
   @doc """
   Adds the tag named by `slug` to `actor`'s watched tags.
@@ -868,12 +835,10 @@ defmodule Philomena.Tags do
 
   """
   @spec watch_tag(Actor.t(), String.t()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+          {:ok, User.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def watch_tag(%Actor{} = actor, slug) do
-    case tag_by_slug(slug, []) do
-      nil -> {:error, :not_found}
-      tag -> Users.watch_tag(actor, tag)
-    end
+    with {:ok, tag} <- load_canonical_tag(actor, slug), do: Users.watch_tag(actor, tag)
   end
 
   @doc """
@@ -892,22 +857,17 @@ defmodule Philomena.Tags do
 
   """
   @spec unwatch_tag(Actor.t(), String.t()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+          {:ok, User.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def unwatch_tag(%Actor{} = actor, slug) do
-    case tag_by_slug(slug, []) do
-      nil -> {:error, :not_found}
-      tag -> Users.unwatch_tag(actor, tag)
-    end
+    with {:ok, tag} <- load_canonical_tag(actor, slug), do: Users.unwatch_tag(actor, tag)
   end
 
   @doc """
   Updates the tag named by `slug` on behalf of `actor`.
 
-  Authorizes `:edit` first. On success a moderation log is written attributing
-  the update to `actor`.
-
-  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
-  or `{:error, :unauthorized}`.
+  Write access, `:update` authorization, the tag update, and its audit log share
+  one workflow. Search and affected-image reindexing run only after commit.
 
   ## Examples
 
@@ -917,37 +877,29 @@ defmodule Philomena.Tags do
   """
   @spec update_tag(Actor.t(), String.t(), map()) ::
           {:ok, Tag.t()}
-          | {:error, Ecto.Changeset.t()}
-          | {:error, :not_found | :unauthorized}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_tag(%Actor{} = actor, slug, attrs) do
-    tag = tag_by_slug(slug, @show_preloads)
-
-    with :ok <- authorize(actor, :edit, tag),
-         %Tag{} <- tag,
-         {:ok, tag} <- update_tag(tag, attrs) do
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Tag:update",
-        Paths.tag_path(tag),
-        "Updated details on tag '#{tag.name}'"
-      )
-
-      {:ok, tag}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-      {:error, %Ecto.Changeset{}} = error -> error
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :update, slug, @show_preloads) do
+      Multi.new()
+      |> Multi.update(:tag, tag_changeset(tag, attrs))
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag: tag} ->
+        {"Tag:update", Paths.tag_path(tag), "Updated details on tag '#{tag.name}'"}
+      end)
+      |> Multi.on_commit(fn %{tag: updated_tag} -> reindex_updated_tag(updated_tag, tag) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{tag: tag}} -> {:ok, tag}
+        {:error, :tag, changeset, _changes} -> {:error, changeset}
+      end
     end
   end
 
   @doc """
   Updates the spoiler image of the tag named by `slug`, on behalf of `actor`.
 
-  Authorizes `:edit` first. On success a moderation log is written attributing
-  the update to `actor`.
-
-  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
-  or `{:error, :unauthorized}`.
+  Write access, `:update_image` authorization, the database update, and its
+  audit log share one transaction. Object persistence occurs after commit.
 
   ## Examples
 
@@ -957,37 +909,32 @@ defmodule Philomena.Tags do
   """
   @spec update_tag_image(Actor.t(), String.t(), map()) ::
           {:ok, Tag.t()}
-          | {:error, Ecto.Changeset.t()}
-          | {:error, :not_found | :unauthorized}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_tag_image(%Actor{} = actor, slug, attrs) do
-    tag = tag_by_slug(slug, @image_preloads)
-
-    with :ok <- authorize(actor, :edit, tag),
-         %Tag{} <- tag,
-         {:ok, tag} <- update_tag_image(tag, attrs) do
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Tag.Image:update",
-        Paths.tag_path(tag),
-        "Updated image on tag '#{tag.name}'"
-      )
-
-      {:ok, tag}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-      {:error, %Ecto.Changeset{}} = error -> error
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :update_image, slug, @image_preloads) do
+      Multi.new()
+      |> Multi.update(:tag, tag_image_changeset(tag, attrs))
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag: tag} ->
+        {"Tag.Image:update", Paths.tag_path(tag), "Updated image on tag '#{tag.name}'"}
+      end)
+      |> Multi.on_commit(fn %{tag: tag} ->
+        Uploader.persist_upload(tag)
+        Uploader.unpersist_old_upload(tag)
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{tag: tag}} -> {:ok, tag}
+        {:error, :tag, changeset, _changes} -> {:error, changeset}
+      end
     end
   end
 
   @doc """
   Removes the spoiler image of the tag named by `slug`, on behalf of `actor`.
 
-  Authorizes `:edit` first. On success a moderation log is written attributing
-  the removal to `actor`.
-
-  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
-  or `{:error, :unauthorized}`.
+  Write access, `:delete_image` authorization, the database update, and its
+  audit log share one transaction. Object deletion occurs after commit.
 
   ## Examples
 
@@ -997,36 +944,29 @@ defmodule Philomena.Tags do
   """
   @spec remove_tag_image(Actor.t(), String.t()) ::
           {:ok, Tag.t()}
-          | {:error, Ecto.Changeset.t()}
-          | {:error, :not_found | :unauthorized}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def remove_tag_image(%Actor{} = actor, slug) do
-    tag = tag_by_slug(slug, @image_preloads)
-
-    with :ok <- authorize(actor, :edit, tag),
-         %Tag{} <- tag,
-         {:ok, tag} <- remove_tag_image(tag) do
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Tag.Image:delete",
-        Paths.tag_path(tag),
-        "Removed image on tag '#{tag.name}'"
-      )
-
-      {:ok, tag}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-      {:error, %Ecto.Changeset{}} = error -> error
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :delete_image, slug, @image_preloads) do
+      Multi.new()
+      |> Multi.update(:tag, remove_tag_image_changeset(tag))
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag: tag} ->
+        {"Tag.Image:delete", Paths.tag_path(tag), "Removed image on tag '#{tag.name}'"}
+      end)
+      |> Multi.on_commit(fn %{tag: tag} -> Uploader.unpersist_old_upload(tag) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{tag: tag}} -> {:ok, tag}
+        {:error, :tag, changeset, _changes} -> {:error, changeset}
+      end
     end
   end
 
   @doc """
   Queues the tag named by `slug` for deletion on behalf of `actor`.
 
-  Authorizes `:delete` first. On success a moderation log is written
-  attributing the deletion to `actor`.
-
-  Returns `{:ok, tag}`, `{:error, :not_found}`, or `{:error, :unauthorized}`.
+  Write access and `:delete` authorization precede an atomic audit insert. The
+  destructive worker is released only after that audit commits.
 
   ## Examples
 
@@ -1035,36 +975,33 @@ defmodule Philomena.Tags do
 
   """
   @spec delete_tag(Actor.t(), String.t()) ::
-          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+          {:ok, Tag.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def delete_tag(%Actor{} = actor, slug) do
-    tag = tag_by_slug(slug, @show_preloads)
-
-    with :ok <- authorize(actor, :delete, tag),
-         %Tag{} <- tag do
-      {:ok, tag} = delete_tag(tag)
-
-      ModerationLogs.create_moderation_log(
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :delete, slug, @show_preloads) do
+      Multi.new()
+      |> ModerationLogs.put_log(
+        :moderation_log,
         actor,
         "Tag:delete",
         Paths.tag_path(tag),
         "Deleted tag '#{tag.name}'"
       )
-
-      {:ok, tag}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
+      |> Multi.on_commit(fn _changes -> enqueue_delete(tag) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, _changes} -> {:ok, tag}
+        {:error, :moderation_log, changeset, _changes} -> {:error, changeset}
+      end
     end
   end
 
   @doc """
   Aliases the tag named by `slug` on behalf of `actor`.
 
-  Authorizes `:alias` first. On success a moderation log is written
-  attributing the alias to `actor`.
-
-  Returns `{:ok, tag}`, `{:error, %Ecto.Changeset{}}`, `{:error, :not_found}`,
-  or `{:error, :unauthorized}`.
+  Write access, `:alias` authorization, the alias relation, and its audit log
+  share one transaction. Association migration is queued after commit.
 
   ## Examples
 
@@ -1074,52 +1011,34 @@ defmodule Philomena.Tags do
   """
   @spec alias_tag(Actor.t(), String.t(), map()) ::
           {:ok, Tag.t()}
-          | {:error, Ecto.Changeset.t()}
-          | {:error, :not_found | :unauthorized}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def alias_tag(%Actor{} = actor, slug, attrs) do
-    tag = tag_by_slug(slug, @alias_preloads)
-
-    with :ok <- authorize(actor, :alias, tag),
-         %Tag{} <- tag,
-         {:ok, tag} <- alias_tag(tag, attrs) do
-      ModerationLogs.create_moderation_log(
-        actor,
-        "Tag.Alias:update",
-        Paths.tag_path(tag),
-        "Aliased tag '#{tag.name}' into '#{tag.aliased_tag.name}'"
-      )
-
-      {:ok, tag}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
-      {:error, %Ecto.Changeset{}} = error -> error
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :alias, slug, @alias_preloads) do
+      Multi.new()
+      |> Multi.update(:tag, tag_alias_changeset(tag, attrs))
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag: tag} ->
+        {
+          "Tag.Alias:update",
+          Paths.tag_path(tag),
+          "Aliased tag '#{tag.name}' into '#{tag.aliased_tag.name}'"
+        }
+      end)
+      |> Multi.on_commit(fn %{tag: tag} -> enqueue_alias(tag) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{tag: tag}} -> {:ok, tag}
+        {:error, :tag, changeset, _changes} -> {:error, changeset}
+      end
     end
-  end
-
-  @doc """
-  Enqueues reindexing of all images associated with a tag.
-
-  ## Examples
-
-      iex> reindex_tag_images(tag)
-      {:ok, %Tag{}}
-
-  """
-  def reindex_tag_images(%Tag{} = tag) do
-    Exq.enqueue(Exq, "indexing", TagReindexWorker, [tag.id])
-
-    {:ok, tag}
   end
 
   @doc """
   Enqueues reindexing of the tag named by `slug` and its images, on behalf of
   `actor`.
 
-  Authorizes `:alias` first. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`.
-
-  Returns `{:ok, tag}`, `{:error, :not_found}`, or `{:error, :unauthorized}`.
+  Write access and `:reindex` authorization precede both jobs. Missing and
+  malformed slugs are always not found.
 
   ## Examples
 
@@ -1128,19 +1047,14 @@ defmodule Philomena.Tags do
 
   """
   @spec reindex_tag_by_slug(Actor.t(), String.t()) ::
-          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+          {:ok, Tag.t()} | {:error, :ban | :not_found | :unauthorized}
   def reindex_tag_by_slug(%Actor{} = actor, slug) do
-    tag = tag_by_slug(slug, @alias_preloads)
-
-    with :ok <- authorize(actor, :alias, tag),
-         %Tag{} <- tag do
-      {:ok, tag} = reindex_tag_images(tag)
-      reindex_tag(tag)
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :reindex, slug, @alias_preloads) do
+      enqueue_image_reindex(tag)
+      enqueue_tag_reindex(tag)
 
       {:ok, tag}
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
     end
   end
 
@@ -1156,7 +1070,7 @@ defmodule Philomena.Tags do
 
   """
   def perform_reindex_images(tag_id) do
-    tag = get_tag!(tag_id)
+    tag = Repo.get!(Tag, tag_id)
 
     # First recount the tag
     image_count =
@@ -1184,28 +1098,10 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Enqueues removal of a tag alias.
-
-  ## Examples
-
-      iex> unalias_tag(tag)
-      {:ok, %Tag{}}
-
-  """
-  def unalias_tag(%Tag{} = tag) do
-    Exq.enqueue(Exq, "indexing", TagUnaliasWorker, [tag.id])
-
-    {:ok, tag}
-  end
-
-  @doc """
   Queues removal of the alias on the tag named by `slug`, on behalf of `actor`.
 
-  Authorizes `:alias` first. An unknown slug the actor may act on (an admin) is
-  `{:error, :not_found}`; otherwise it is `{:error, :unauthorized}`. On success
-  a moderation log is written attributing the dealias to `actor`.
-
-  Returns `{:ok, tag}`, `{:error, :not_found}`, or `{:error, :unauthorized}`.
+  Write access and `:unalias` authorization precede an atomic audit insert. The
+  worker is released only after the audit commits.
 
   ## Examples
 
@@ -1214,42 +1110,30 @@ defmodule Philomena.Tags do
 
   """
   @spec unalias_tag(Actor.t(), String.t()) ::
-          {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
+          {:ok, Tag.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def unalias_tag(%Actor{} = actor, slug) do
-    tag = tag_by_slug(slug, @alias_preloads)
-
-    with :ok <- authorize(actor, :alias, tag),
-         %Tag{} <- tag do
-      {:ok, tag} = unalias_tag(tag)
-
-      ModerationLogs.create_moderation_log(
+    with :ok <- verify_write_access(actor),
+         {:ok, tag} <- load_tag_for_action(actor, :unalias, slug, @alias_preloads),
+         %Ecto.Changeset{valid?: true} <- Tag.unalias_request_changeset(tag) do
+      Multi.new()
+      |> ModerationLogs.put_log(
+        :moderation_log,
         actor,
         "Tag.Alias:delete",
         Paths.tag_path(tag),
         "Dealiased tag '#{tag.name}'"
       )
-
-      {:ok, tag}
+      |> Multi.on_commit(fn _changes -> enqueue_unalias(tag) end)
+      |> Multi.transact()
+      |> case do
+        {:ok, _changes} -> {:ok, tag}
+        {:error, :moderation_log, changeset, _changes} -> {:error, changeset}
+      end
     else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      nil -> {:error, :not_found}
+      %Ecto.Changeset{} = changeset -> {:error, changeset}
+      error -> error
     end
-  end
-
-  @doc """
-  Queues a single tag for search index updates.
-  Returns the tag struct unchanged, for use in a pipeline.
-
-  ## Examples
-
-      iex> reindex_tag(tag)
-      %Tag{}
-
-  """
-  def reindex_tag(%Tag{} = tag) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Tags", "id", [tag.id]])
-
-    tag
   end
 
   @doc """
@@ -1262,10 +1146,9 @@ defmodule Philomena.Tags do
       [%Tag{}, %Tag{}, ...]
 
   """
+  @spec reindex_tags([Tag.t()]) :: [Tag.t()]
   def reindex_tags(tags) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["Tags", "id", Enum.map(tags, & &1.id)])
-
-    tags
+    enqueue_tag_reindex(tags)
   end
 
   @doc """
@@ -1327,30 +1210,25 @@ defmodule Philomena.Tags do
 
   """
   def cleanup! do
-    # TODO: Couldn't this be a single delete statement that returns the ids?
-    tag_ids =
-      from(t in Tag,
+    cleanup_query =
+      from(tag in Tag,
         as: :tag,
-        where: t.description == "",
-        where: is_nil(t.short_description) or t.short_description == "",
-        where: is_nil(t.category) or t.category == "",
-        where: is_nil(t.mod_notes) or t.mod_notes == "",
-        where: is_nil(t.image),
-        where: is_nil(t.aliased_tag_id),
+        where: tag.description == "",
+        where: is_nil(tag.short_description) or tag.short_description == "",
+        where: is_nil(tag.category) or tag.category == "",
+        where: is_nil(tag.mod_notes) or tag.mod_notes == "",
+        where: is_nil(tag.image),
+        where: is_nil(tag.aliased_tag_id),
         where: not exists(where(Images.Tagging, tag_id: parent_as(:tag).id)),
         where: not exists(where(Tag, aliased_tag_id: parent_as(:tag).id)),
         where: not exists(where(Implication, tag_id: parent_as(:tag).id)),
         where: not exists(where(Implication, implied_tag_id: parent_as(:tag).id)),
         where: not exists(where(ArtistLink, tag_id: parent_as(:tag).id)),
         where: not exists(where(DnpEntry, tag_id: parent_as(:tag).id)),
-        select: t.id
+        select: tag.id
       )
-      |> Repo.all()
 
-    {count, _} =
-      Tag
-      |> where([t], t.id in ^tag_ids)
-      |> Repo.delete_all()
+    {count, tag_ids} = Repo.delete_all(cleanup_query)
 
     if count > 0 do
       PhilomenaQuery.Search.delete_documents(tag_ids, Tag)
