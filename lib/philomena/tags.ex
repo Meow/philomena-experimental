@@ -402,11 +402,6 @@ defmodule Philomena.Tags do
     rows_affected
   end
 
-  # Returns an `%Ecto.Changeset{}` for tracking tag changes.
-  defp change_tag(%Tag{} = tag) do
-    Tag.changeset(tag, %{})
-  end
-
   @doc """
   Gets existing tags or creates new ones from a tag list string.
 
@@ -635,7 +630,7 @@ defmodule Philomena.Tags do
   def load_tag_for_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :edit, slug, @show_preloads) do
-      {:ok, {tag, change_tag(tag)}}
+      {:ok, {tag, Tag.changeset(tag)}}
     end
   end
 
@@ -656,7 +651,7 @@ defmodule Philomena.Tags do
   def load_tag_image_for_edit(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :edit_image, slug, @image_preloads) do
-      {:ok, {tag, change_tag(tag)}}
+      {:ok, {tag, Tag.changeset(tag)}}
     end
   end
 
@@ -775,29 +770,6 @@ defmodule Philomena.Tags do
       |> String.replace("\"", "\\\"")
     end
   end
-
-  @doc """
-  Finds the tag whose canonical stored name matches `name`, without resolving
-  aliases.
-
-  This is a trusted composition lookup for changesets in other contexts; it
-  returns `nil` when the submitted name cannot identify a tag.
-
-  ## Examples
-
-      iex> find_tag_by_name("safe")
-      %Tag{}
-
-      iex> find_tag_by_name("nonexistent")
-      nil
-
-  """
-  @spec find_tag_by_name(String.t() | nil) :: Tag.t() | nil
-  def find_tag_by_name(name) when is_binary(name) do
-    Repo.get_by(Tag, name: Tag.clean_tag_name(name))
-  end
-
-  def find_tag_by_name(_name), do: nil
 
   @doc """
   Finds the canonical tag named by `name`, resolving one stored alias.
@@ -1086,7 +1058,7 @@ defmodule Philomena.Tags do
       Image
       |> join(:inner, [i], _ in assoc(i, :tags))
       |> where([i, t], i.hidden_from_users == false and t.id == ^tag.id)
-      |> Repo.aggregate(:count, :id)
+      |> Repo.aggregate(:count)
 
     Tag
     |> where(id: ^tag.id)

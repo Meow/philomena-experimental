@@ -28,7 +28,7 @@ defmodule Philomena.Channels do
         Channel.artist_tag_changeset(changeset, artist_tag_name, nil)
 
       {:ok, artist_tag_name} ->
-        tag = Tags.find_tag_by_name(artist_tag_name)
+        tag = Tags.find_canonical_tag_by_name(artist_tag_name)
         Channel.artist_tag_changeset(changeset, artist_tag_name, tag)
 
       _error ->

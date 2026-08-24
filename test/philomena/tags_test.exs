@@ -113,7 +113,7 @@ defmodule Philomena.TagsTest do
     test "assembles the page for a real tag, carrying its tagged image" do
       created_at = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)
       image = image_fixture(tags: "safe", created_at: created_at)
-      tag = Tags.find_tag_by_name("safe")
+      tag = Tags.find_canonical_tag_by_name("safe")
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %TagPage{} = page} = Tags.load_tag_page(actor(), scope(nil), tag.slug)
@@ -732,13 +732,13 @@ defmodule Philomena.TagsTest do
 
       shared =
         "copy shared"
-        |> Tags.find_tag_by_name()
+        |> Tags.find_canonical_tag_by_name()
         |> Ecto.Changeset.change(images_count: 2)
         |> Repo.update!()
 
       source_only =
         "copy source only"
-        |> Tags.find_tag_by_name()
+        |> Tags.find_canonical_tag_by_name()
         |> Ecto.Changeset.change(images_count: 1)
         |> Repo.update!()
 
@@ -823,7 +823,7 @@ defmodule Philomena.TagsTest do
       tags = Tags.get_or_create_tags("safe, #{oversized}")
 
       assert [%Tag{name: "safe"}] = tags
-      assert Tags.find_tag_by_name(oversized) == nil
+      assert Tags.find_canonical_tag_by_name(oversized) == nil
     end
   end
 end

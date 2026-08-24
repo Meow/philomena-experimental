@@ -107,7 +107,7 @@ defmodule Philomena.Tags.Tag do
   end
 
   @doc false
-  def changeset(tag, attrs) do
+  def changeset(tag, attrs \\ %{}) do
     tag
     |> cast(attrs, [:category, :description, :short_description, :mod_notes, :implied_tag_list])
     |> maybe_put_implied_tag_list(tag)
