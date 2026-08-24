@@ -452,9 +452,6 @@ defmodule Philomena.Images do
     |> Multi.run(:tags, fn repo, %{image: image} ->
       image = Repo.preload(image, :tags, force: true)
 
-      # I'm not convinced this is a good idea. It leads
-      # to way too much drift, and the index has to be
-      # maintained.
       tag_ids = Enum.map(image.tags, & &1.id)
 
       Tags.update_image_counts(repo, -1, tag_ids)
