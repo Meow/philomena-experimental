@@ -40,6 +40,12 @@ defmodule Philomena.TagChanges do
 
   @history_preloads [:user, image: [:user, :sources, tags: :aliases], tags: [:tag]]
 
+  defp tags_to_tag_change(_tag_change, nil, _added), do: []
+
+  defp tags_to_tag_change(tag_change, tags, added) do
+    Enum.map(tags, &%{tag_change_id: tag_change.id, tag_id: &1.id, added: added})
+  end
+
   defp cast_ip(ip) do
     case EctoNetwork.INET.cast(ip) do
       {:ok, ip} ->
@@ -94,12 +100,6 @@ defmodule Philomena.TagChanges do
 
       {:ok, page, QueryForm.changeset(query_form)}
     end
-  end
-
-  defp tags_to_tag_change(_tag_change, nil, _added), do: []
-
-  defp tags_to_tag_change(tag_change, tags, added) do
-    Enum.map(tags, &%{tag_change_id: tag_change.id, tag_id: &1.id, added: added})
   end
 
   defp revert_ids(ids, attributes) do
@@ -559,27 +559,31 @@ defmodule Philomena.TagChanges do
           {:ok, TagChange.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def delete_tag_change(%Actor{} = actor, id) do
-    query = preload(TagChange, [:user, :image, tags: [:tag]])
+    with {:ok, tag_change} <-
+           TagChange
+           |> preload([:user, :image, tags: [:tag]])
+           |> Loader.fetch_and_authorize(actor, :delete, id) do
+      author = if tag_change.user, do: tag_change.user.name, else: "an anonymous user"
 
-    with {:ok, tag_change} <- Loader.fetch_and_authorize(query, actor, :delete, id) do
       Multi.new()
       |> Multi.delete(:tag_change, tag_change)
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag_change: tag_change} ->
-        author = if tag_change.user, do: tag_change.user.name, else: "an anonymous user"
-
-        {
-          "TagChange:delete",
-          Paths.image_path(tag_change.image),
-          "Deleted tag change by #{author} containing #{length(tag_change.tags)} tags on image #{tag_change.image_id} from history"
-        }
-      end)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "TagChange:delete",
+        Paths.image_path(tag_change.image),
+        "Deleted tag change by #{author} containing #{length(tag_change.tags)} tags on image #{tag_change.image_id} from history"
+      )
       |> Multi.on_commit(fn %{tag_change: tag_change} ->
         Search.delete_document(tag_change.id, TagChange)
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{tag_change: tag_change}} -> {:ok, tag_change}
-        {:error, :tag_change, changeset, _changes} -> {:error, changeset}
+        {:ok, %{tag_change: %TagChange{} = tag_change}} ->
+          {:ok, tag_change}
+
+        {:error, :tag_change, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -670,7 +674,7 @@ defmodule Philomena.TagChanges do
       [image: image_query, tags: [tag: tag_query], user: user_query]
 
   """
-  @spec indexing_preloads() :: keyword()
+  @spec indexing_preloads() :: list()
   def indexing_preloads do
     alias_tags_query = select(Tag, [:aliased_tag_id, :name])
 
@@ -724,11 +728,16 @@ defmodule Philomena.TagChanges do
     queryable
     |> Batch.query_batches(batch_size: batch_size, id_field: :image_id)
     |> Enum.reduce_while(:ok, fn queryable, :ok ->
-      ids = Repo.all(select(queryable, [tag_change], tag_change.id))
+      queryable
+      |> select([tag_change], tag_change.id)
+      |> Repo.all()
+      |> revert_for_worker(attributes)
+      |> case do
+        {:ok, _tag_changes} ->
+          {:cont, :ok}
 
-      case revert_for_worker(ids, attributes) do
-        {:ok, _tag_changes} -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
   end
