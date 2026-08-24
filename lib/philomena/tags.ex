@@ -262,6 +262,30 @@ defmodule Philomena.Tags do
     |> Enum.uniq_by(& &1.id)
   end
 
+  defp filtered_taggings_for_alias(batch_query, target_tag, [
+         {:hidden_from_users, hidden_from_users}
+       ]) do
+    taggings =
+      from tagging in batch_query,
+        as: :tagging,
+        where:
+          tagging.image_id in subquery(
+            from image in Image,
+              where: image.id == parent_as(:tagging).image_id,
+              where: image.hidden_from_users == ^hidden_from_users,
+              select: image.id
+          )
+
+    insert_all =
+      select(
+        taggings,
+        [tagging],
+        %{image_id: tagging.image_id, tag_id: type(^target_tag.id, :integer)}
+      )
+
+    {taggings, insert_all}
+  end
+
   @doc """
   Worker entry point that deletes a queued tag and repairs dependent indexes.
 
@@ -307,7 +331,6 @@ defmodule Philomena.Tags do
   Worker entry point that migrates an alias's taggings to its target.
 
   Taggings are moved in batches to avoid holding locks for the full migration.
-  The alias is finalized only after all batches have completed.
 
   ## Examples
 
@@ -371,91 +394,6 @@ defmodule Philomena.Tags do
     enqueue_tag_reindex([tag, target_tag])
 
     :ok
-  end
-
-  defp filtered_taggings_for_alias(batch_query, target_tag, [
-         {:hidden_from_users, hidden_from_users}
-       ]) do
-    taggings =
-      from tagging in batch_query,
-        as: :tagging,
-        where:
-          tagging.image_id in subquery(
-            from image in Image,
-              where: image.id == parent_as(:tagging).image_id,
-              where: image.hidden_from_users == ^hidden_from_users,
-              select: image.id
-          )
-
-    insert_all =
-      select(
-        taggings,
-        [tagging],
-        %{image_id: tagging.image_id, tag_id: type(^target_tag.id, :integer)}
-      )
-
-    {taggings, insert_all}
-  end
-
-  defp alias_association_multi(multi, tag, target_tag) do
-    hidden_filters_query =
-      Filter
-      |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
-      |> prepare_array_replace(:hidden_tag_ids, tag.id, target_tag.id)
-
-    spoilered_filters_query =
-      Filter
-      |> where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
-      |> prepare_array_replace(:spoilered_tag_ids, tag.id, target_tag.id)
-
-    users_watching_query =
-      User
-      |> where([u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
-      |> prepare_array_replace(:watched_tag_ids, tag.id, target_tag.id)
-
-    artist_links_query =
-      ArtistLink
-      |> where(tag_id: ^tag.id)
-      |> update(set: [tag_id: ^target_tag.id])
-
-    conflicting_artist_links_query =
-      from source in ArtistLink,
-        join: target in ArtistLink,
-        on:
-          target.tag_id == ^target_tag.id and
-            target.uri == source.uri and
-            target.user_id == source.user_id,
-        where:
-          source.tag_id == ^tag.id and
-            source.aasm_state != "rejected" and
-            target.aasm_state != "rejected",
-        select: source.id
-
-    conflicting_artist_links_delete_query =
-      from artist_link in ArtistLink,
-        where: artist_link.id in subquery(conflicting_artist_links_query)
-
-    dnp_entries_query =
-      DnpEntry
-      |> where(tag_id: ^tag.id)
-      |> update(set: [tag_id: ^target_tag.id])
-
-    channels_query =
-      Channel
-      |> where(associated_artist_tag_id: ^tag.id)
-      |> update(set: [associated_artist_tag_id: ^target_tag.id])
-
-    multi
-    |> Multi.update_all(:update_hidden_filters, hidden_filters_query, [])
-    |> Multi.update_all(:update_spoilered_filters, spoilered_filters_query, [])
-    |> Multi.update_all(:update_users_watching, users_watching_query, [])
-    |> Multi.delete_all(
-      :delete_conflicting_artist_links,
-      conflicting_artist_links_delete_query
-    )
-    |> Multi.update_all(:update_artist_links, artist_links_query, [])
-    |> Multi.update_all(:update_dnp_entries, dnp_entries_query, [])
-    |> Multi.update_all(:update_channels, channels_query, [])
   end
 
   @doc """
@@ -1052,13 +990,69 @@ defmodule Philomena.Tags do
          {:ok, tag} =
            tag
            |> Tag.alias_form_changeset(attrs)
-           |> Ecto.Changeset.apply_action(:update) do
-      target_tag = find_canonical_tag_by_name(tag.target_tag)
-      alias_changeset = Tag.alias_changeset(tag, target_tag)
+           |> Ecto.Changeset.apply_action(:update),
+         target_tag = find_canonical_tag_by_name(tag.target_tag),
+         alias_changeset = Tag.alias_changeset(tag, target_tag),
+         {:ok, _tag} <- Ecto.Changeset.apply_action(alias_changeset, :update) do
+      hidden_filters_query =
+        Filter
+        |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
+        |> prepare_array_replace(:hidden_tag_ids, tag.id, target_tag.id)
+
+      spoilered_filters_query =
+        Filter
+        |> where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
+        |> prepare_array_replace(:spoilered_tag_ids, tag.id, target_tag.id)
+
+      users_watching_query =
+        User
+        |> where([u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
+        |> prepare_array_replace(:watched_tag_ids, tag.id, target_tag.id)
+
+      artist_links_query =
+        ArtistLink
+        |> where(tag_id: ^tag.id)
+        |> update(set: [tag_id: ^target_tag.id])
+
+      conflicting_artist_links_query =
+        from source in ArtistLink,
+          join: target in ArtistLink,
+          on:
+            target.tag_id == ^target_tag.id and
+              target.uri == source.uri and
+              target.user_id == source.user_id,
+          where:
+            source.tag_id == ^tag.id and
+              source.aasm_state != "rejected" and
+              target.aasm_state != "rejected",
+          select: source.id
+
+      conflicting_artist_links_delete_query =
+        from artist_link in ArtistLink,
+          where: artist_link.id in subquery(conflicting_artist_links_query)
+
+      dnp_entries_query =
+        DnpEntry
+        |> where(tag_id: ^tag.id)
+        |> update(set: [tag_id: ^target_tag.id])
+
+      channels_query =
+        Channel
+        |> where(associated_artist_tag_id: ^tag.id)
+        |> update(set: [associated_artist_tag_id: ^target_tag.id])
 
       Multi.new()
       |> Multi.update(:tag, alias_changeset)
-      |> alias_association_multi(tag, target_tag)
+      |> Multi.update_all(:update_hidden_filters, hidden_filters_query, [])
+      |> Multi.update_all(:update_spoilered_filters, spoilered_filters_query, [])
+      |> Multi.update_all(:update_users_watching, users_watching_query, [])
+      |> Multi.delete_all(
+        :delete_conflicting_artist_links,
+        conflicting_artist_links_delete_query
+      )
+      |> Multi.update_all(:update_artist_links, artist_links_query, [])
+      |> Multi.update_all(:update_dnp_entries, dnp_entries_query, [])
+      |> Multi.update_all(:update_channels, channels_query, [])
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -1071,11 +1065,11 @@ defmodule Philomena.Tags do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, _changes} ->
-          {:ok, Ecto.Changeset.apply_changes(alias_changeset)}
+        {:ok, %{tag: %Tag{} = tag}} ->
+          {:ok, tag}
 
-        {:error, _step, reason, _changes} ->
-          raise "tag alias failed: #{inspect(reason)}"
+        {:error, :tag, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
