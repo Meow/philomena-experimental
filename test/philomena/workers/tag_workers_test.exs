@@ -42,6 +42,42 @@ defmodule Philomena.TagWorkersTest do
     assert Repo.reload!(source).aliased_tag_id == target.id
   end
 
+  test "the alias worker moves visible image counts from source to target" do
+    source = tag_fixture(name: "worker visible count source")
+    target = tag_fixture(name: "worker visible count target")
+    _image = image_fixture(tags: source.name)
+
+    source = source |> Ecto.Changeset.change(images_count: 1) |> Repo.update!()
+    target = target |> Ecto.Changeset.change(images_count: 0) |> Repo.update!()
+
+    source
+    |> Ecto.Changeset.change(aliased_tag_id: target.id)
+    |> Repo.update!()
+
+    assert :ok = TagAliasWorker.perform(source.id, target.id)
+
+    assert Repo.reload!(source).images_count == 0
+    assert Repo.reload!(target).images_count == 1
+  end
+
+  test "the alias worker does not count hidden images when moving taggings" do
+    source = tag_fixture(name: "worker hidden count source")
+    target = tag_fixture(name: "worker hidden count target")
+    _image = image_fixture(tags: source.name, hidden_from_users: true)
+
+    source = source |> Ecto.Changeset.change(images_count: 0) |> Repo.update!()
+    target = target |> Ecto.Changeset.change(images_count: 0) |> Repo.update!()
+
+    source
+    |> Ecto.Changeset.change(aliased_tag_id: target.id)
+    |> Repo.update!()
+
+    assert :ok = TagAliasWorker.perform(source.id, target.id)
+
+    assert Repo.reload!(source).images_count == 0
+    assert Repo.reload!(target).images_count == 0
+  end
+
   test "aliasing deletes conflicting artist links before the worker runs" do
     admin = admin_user_fixture()
     user = confirmed_user_fixture()
@@ -61,7 +97,7 @@ defmodule Philomena.TagWorkersTest do
 
     refute Repo.get(ArtistLink, source_link.id)
     assert Repo.get!(ArtistLink, target_link.id).tag_id == target.id
-    assert Repo.reload!(source).aliased_tag_id == nil
+    assert Repo.reload!(source).aliased_tag_id == target.id
   end
 
   test "the unalias worker removes the alias relationship" do

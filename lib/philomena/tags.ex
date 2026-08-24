@@ -125,14 +125,6 @@ defmodule Philomena.Tags do
     tag
   end
 
-  defp tag_alias_changeset(%Tag{} = tag, attrs) do
-    form = Tag.alias_form_changeset(tag, attrs)
-    target_name = Ecto.Changeset.get_field(form, :target_tag)
-    target_tag = find_canonical_tag_by_name(target_name)
-
-    Tag.alias_changeset(tag, attrs, target_tag)
-  end
-
   defp enqueue_unalias(%Tag{} = tag) do
     Exq.enqueue(Exq, "indexing", TagUnaliasWorker, [tag.id])
     tag
@@ -325,35 +317,84 @@ defmodule Philomena.Tags do
   """
   @spec perform_alias(integer(), integer()) :: :ok
   def perform_alias(tag_id, target_tag_id) do
-    tag = Repo.get!(Tag, tag_id) |> Repo.preload(:aliased_tag)
+    tag = Repo.get!(Tag, tag_id)
     target_tag = Repo.get!(Tag, target_tag_id)
 
-    taggings_query = where(Tagging, tag_id: ^tag.id)
+    Tagging
+    |> where(tag_id: ^tag.id)
+    |> Batch.query_batches(batch_size: 10_000, id_field: :image_id)
+    |> Enum.each(fn batch_query ->
+      # Lock all images in the batch first to prevent image operations from racing tag updates.
+      image_query =
+        from image in Image,
+          where: image.id in subquery(select(batch_query, [tagging], tagging.image_id)),
+          order_by: [asc: :id]
 
-    Batch.query_batches(taggings_query, batch_size: 10_000, id_field: :image_id)
-    |> Enum.each(&migrate_alias_taggings(&1, target_tag.id))
+      # The image counter represents only the count of visible images.
+      # To preserve this meaning, the operation must be split into migrating
+      # taggings of visible and non-visible images.
 
-    case tag
-         |> Tag.alias_changeset(%{target_tag: target_tag.name}, target_tag)
-         |> Repo.update() do
-      {:ok, _tag} ->
-        enqueue_image_reindex(target_tag)
-        enqueue_tag_reindex([tag, target_tag])
-        :ok
+      {visible_taggings, visible_insert_all} =
+        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: false)
 
-      {:error, reason} ->
-        raise "tag alias finalization failed: #{inspect(reason)}"
-    end
+      {hidden_taggings, hidden_insert_all} =
+        filtered_taggings_for_alias(batch_query, target_tag, hidden_from_users: true)
+
+      Multi.new()
+      |> Multi.lock_all(:images, image_query)
+      |> Multi.insert_all(:new_visible, Tagging, visible_insert_all, on_conflict: :nothing)
+      |> Multi.insert_all(:new_hidden, Tagging, hidden_insert_all, on_conflict: :nothing)
+      |> Multi.delete_all(:old_visible, visible_taggings)
+      |> Multi.delete_all(:old_hidden, hidden_taggings)
+      |> Multi.update_all(
+        :target_tag,
+        fn %{new_visible: {count, _}} ->
+          Tag
+          |> where(id: ^target_tag.id)
+          |> update(inc: [images_count: ^count])
+        end,
+        []
+      )
+      |> Multi.update_all(
+        :source_tag,
+        fn %{old_visible: {count, _}} ->
+          Tag
+          |> where(id: ^tag.id)
+          |> update(inc: [images_count: ^(-count)])
+        end,
+        []
+      )
+      |> Multi.transact()
+    end)
+
+    enqueue_image_reindex(target_tag)
+    enqueue_tag_reindex([tag, target_tag])
+
+    :ok
   end
 
-  defp migrate_alias_taggings(batch_query, target_tag_id) do
+  defp filtered_taggings_for_alias(batch_query, target_tag, [
+         {:hidden_from_users, hidden_from_users}
+       ]) do
     taggings =
-      batch_query
-      |> select([tagging], %{image_id: tagging.image_id, tag_id: type(^target_tag_id, :integer)})
-      |> Repo.all()
+      from tagging in batch_query,
+        as: :tagging,
+        where:
+          tagging.image_id in subquery(
+            from image in Image,
+              where: image.id == parent_as(:tagging).image_id,
+              where: image.hidden_from_users == ^hidden_from_users,
+              select: image.id
+          )
 
-    Repo.insert_all(Tagging, taggings, on_conflict: :nothing)
-    Repo.delete_all(batch_query)
+    insert_all =
+      select(
+        taggings,
+        [tagging],
+        %{image_id: tagging.image_id, tag_id: type(^target_tag.id, :integer)}
+      )
+
+    {taggings, insert_all}
   end
 
   defp alias_association_multi(multi, tag, target_tag) do
@@ -1007,38 +1048,34 @@ defmodule Philomena.Tags do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def alias_tag(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, tag} <- load_tag_for_action(actor, :alias, slug, @alias_preloads) do
-      alias_changeset = tag_alias_changeset(tag, attrs)
+         {:ok, tag} <- load_tag_for_action(actor, :alias, slug, @alias_preloads),
+         {:ok, tag} =
+           tag
+           |> Tag.alias_form_changeset(attrs)
+           |> Ecto.Changeset.apply_action(:update) do
+      target_tag = find_canonical_tag_by_name(tag.target_tag)
+      alias_changeset = Tag.alias_changeset(tag, target_tag)
 
-      case Ecto.Changeset.apply_action(alias_changeset, :update) do
-        {:ok, _tag} ->
-          target_tag = Ecto.Changeset.get_field(alias_changeset, :aliased_tag)
+      Multi.new()
+      |> Multi.update(:tag, alias_changeset)
+      |> alias_association_multi(tag, target_tag)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Tag.Alias:update",
+        Paths.tag_path(tag),
+        "Aliased tag '#{tag.name}' into '#{target_tag.name}'"
+      )
+      |> Multi.on_commit(fn _changes ->
+        Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, _changes} ->
+          {:ok, Ecto.Changeset.apply_changes(alias_changeset)}
 
-          alias_association_multi(Multi.new(), tag, target_tag)
-          |> ModerationLogs.put_log(
-            :moderation_log,
-            actor,
-            "Tag.Alias:update",
-            Paths.tag_path(tag),
-            "Aliased tag '#{tag.name}' into '#{target_tag.name}'"
-          )
-          |> Multi.on_commit(fn _changes ->
-            Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
-          end)
-          |> Multi.transact()
-          |> case do
-            {:ok, _changes} ->
-              {:ok, Ecto.Changeset.apply_changes(alias_changeset)}
-
-            {:error, :moderation_log, changeset, _changes} ->
-              {:error, changeset}
-
-            {:error, _step, reason, _changes} ->
-              raise "tag alias failed: #{inspect(reason)}"
-          end
-
-        {:error, changeset} ->
-          {:error, changeset}
+        {:error, _step, reason, _changes} ->
+          raise "tag alias failed: #{inspect(reason)}"
       end
     end
   end

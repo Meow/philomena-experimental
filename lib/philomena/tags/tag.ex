@@ -137,14 +137,16 @@ defmodule Philomena.Tags.Tag do
   end
 
   def alias_form_changeset(tag, attrs \\ %{}) do
-    cast(tag, attrs, [:target_tag])
-  end
-
-  def alias_changeset(tag, attrs, target_tag) do
     tag
     |> cast(attrs, [:target_tag])
+    |> validate_required(:target_tag)
+  end
+
+  def alias_changeset(tag, target_tag) do
+    tag
+    |> change()
     |> put_assoc(:aliased_tag, target_tag)
-    |> validate_required([:target_tag, :aliased_tag])
+    |> validate_required(:aliased_tag)
     |> validate_not_aliased_to_self()
     |> validate_alias_not_transitive()
     |> validate_incoming_aliases()
