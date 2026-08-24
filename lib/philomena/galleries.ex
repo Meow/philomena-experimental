@@ -77,6 +77,9 @@ defmodule Philomena.Galleries do
     # gallery FK cascade locks and deletes the interaction rows instead.
     gallery_query = where(Gallery, id: ^gallery.id)
 
+    # FIXME: there is intentionally not any limit to how many images can be
+    # added to a gallery. The delete operation might lock hundreds of
+    # thousands of rows and effectively downtime the site
     interactions_query =
       Interaction
       |> where(gallery_id: ^gallery.id)

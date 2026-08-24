@@ -742,7 +742,7 @@ defmodule Philomena.TagsTest do
         |> Ecto.Changeset.change(images_count: 1)
         |> Repo.update!()
 
-      assert {:ok, %{copy_tags: [%Tag{id: copied_id}]}} =
+      assert {:ok, %{copied_tag_ids: [copied_id]}} =
                Multi.new()
                |> Tags.put_copy_tags(source, target)
                |> Multi.transact()

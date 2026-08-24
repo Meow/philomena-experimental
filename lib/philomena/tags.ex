@@ -198,6 +198,19 @@ defmodule Philomena.Tags do
     tags
   end
 
+  defp enqueue_tag_id_reindex(tag_ids) when is_list(tag_ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Tags", "id", tag_ids])
+    tag_ids
+  end
+
+  defp prepare_array_replace(queryable, column, old_value, new_value) do
+    update(queryable, [q],
+      set: [
+        {^column, fragment("array_replace(?, ?, ?)", field(q, ^column), ^old_value, ^new_value)}
+      ]
+    )
+  end
+
   @doc """
   Worker entry point that migrates an alias's associations to its target.
 
@@ -215,71 +228,78 @@ defmodule Philomena.Tags do
     tag = Repo.get!(Tag, tag_id)
     target_tag = Repo.get!(Tag, target_tag_id)
 
-    Multi.new()
-    |> Multi.run(:alias, fn repo, _changes ->
-      perform_alias_transaction(repo, tag, target_tag)
-    end)
-    |> Multi.on_commit(fn _changes ->
-      enqueue_image_reindex(target_tag)
-      enqueue_tag_reindex([tag, target_tag])
-    end)
-    |> Multi.transact()
-    |> case do
-      {:ok, _changes} -> :ok
-      {:error, :alias, reason, _changes} -> raise "tag alias failed: #{inspect(reason)}"
-    end
-  end
+    hidden_filters_query =
+      Filter
+      |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
+      |> prepare_array_replace(:hidden_tag_ids, tag.id, target_tag.id)
 
-  defp perform_alias_transaction(repo, tag, target_tag) do
-    filters_hidden =
-      where(Filter, [f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^tag.id))
+    spoilered_filters_query =
+      Filter
+      |> where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
+      |> prepare_array_replace(:spoilered_tag_ids, tag.id, target_tag.id)
 
-    filters_spoilered =
-      where(Filter, [f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^tag.id))
+    users_watching_query =
+      User
+      |> where([u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
+      |> prepare_array_replace(:watched_tag_ids, tag.id, target_tag.id)
 
-    users_watching =
-      where(User, [u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^tag.id))
+    # FIXME: constraint index_artist_links_on_uri_tag_id_user_id
+    artist_links_query =
+      ArtistLink
+      |> where(tag_id: ^tag.id)
+      |> update(set: [tag_id: ^target_tag.id])
 
-    array_replace(repo, filters_hidden, :hidden_tag_ids, tag.id, target_tag.id)
-    array_replace(repo, filters_spoilered, :spoilered_tag_ids, tag.id, target_tag.id)
-    array_replace(repo, users_watching, :watched_tag_ids, tag.id, target_tag.id)
+    dnp_entries_query =
+      DnpEntry
+      |> where(tag_id: ^tag.id)
+      |> update(set: [tag_id: ^target_tag.id])
 
-    # Create taggings with the new tag ID on images where the old tag ID is used.
-    retag_query =
+    channels_query =
+      Channel
+      |> where(associated_artist_tag_id: ^tag.id)
+      |> update(set: [associated_artist_tag_id: ^target_tag.id])
+
+    # FIXME: there is intentionally not any limit to how many images can be
+    # added to a tag. The delete operation might lock hundreds of
+    # thousands of rows and effectively downtime the site
+    new_taggings_query =
       from i in Image,
         inner_join: it in Tagging,
         on: it.image_id == i.id,
         select: %{image_id: i.id, tag_id: ^target_tag.id},
         where: it.tag_id == ^tag.id
 
-    repo.insert_all(Tagging, retag_query, on_conflict: :nothing)
+    old_taggings_query =
+      where(Tagging, tag_id: ^tag.id)
 
-    # Delete taggings on the source tag
-    Tagging
-    |> where(tag_id: ^tag.id)
-    |> repo.delete_all()
-
-    # Update other associations
-    ArtistLink
-    |> where(tag_id: ^tag.id)
-    |> repo.update_all(set: [tag_id: target_tag.id])
-
-    DnpEntry
-    |> where(tag_id: ^tag.id)
-    |> repo.update_all(set: [tag_id: target_tag.id])
-
-    Channel
-    |> where(associated_artist_tag_id: ^tag.id)
-    |> repo.update_all(set: [associated_artist_tag_id: target_tag.id])
-
-    # Update counter
-    Tag
-    |> where(id: ^tag.id)
-    |> repo.update_all(
-      set: [images_count: 0, aliased_tag_id: target_tag.id, updated_at: DateTime.utc_now(:second)]
+    Multi.new()
+    |> Multi.update_all(:update_hidden_filters, hidden_filters_query, [])
+    |> Multi.update_all(:update_spoilered_filters, spoilered_filters_query, [])
+    |> Multi.update_all(:update_users_watching, users_watching_query, [])
+    |> Multi.update_all(:update_artist_links, artist_links_query, [])
+    |> Multi.update_all(:update_dnp_entries, dnp_entries_query, [])
+    |> Multi.update_all(:update_channels, channels_query, [])
+    |> Multi.insert_all(:insert_new_taggings, Tagging, new_taggings_query, on_conflict: :nothing)
+    |> Multi.delete_all(:delete_old_taggings, old_taggings_query)
+    |> Multi.update_all(:finalize_alias, where(Tag, id: ^tag.id),
+      set: [
+        images_count: 0,
+        aliased_tag_id: target_tag.id,
+        updated_at: DateTime.utc_now(:second)
+      ]
     )
+    |> Multi.on_commit(fn _changes ->
+      enqueue_image_reindex(target_tag)
+      enqueue_tag_reindex([tag, target_tag])
+    end)
+    |> Multi.transact()
+    |> case do
+      {:ok, _changes} ->
+        :ok
 
-    {:ok, :ok}
+      {:error, step, reason, _changes} ->
+        raise "tag alias failed at #{step}: #{inspect(reason)}"
+    end
   end
 
   @doc """
@@ -309,46 +329,10 @@ defmodule Philomena.Tags do
     end
   end
 
-  defp array_replace(repo, queryable, column, old_value, new_value) do
-    queryable
-    |> update(
-      [q],
-      set: [
-        {
-          ^column,
-          fragment("array_replace(?, ?, ?)", field(q, ^column), ^old_value, ^new_value)
-        }
-      ]
-    )
-    |> repo.update_all([])
-  end
-
-  defp copy_tags(repo, source, target) do
-    taggings =
-      Tagging
-      |> where(image_id: ^source.id)
-      |> select([tagging], %{
-        image_id: type(^target.id, :integer),
-        tag_id: tagging.tag_id
-      })
-      |> repo.all()
-
-    {_count, inserted_taggings} =
-      repo.insert_all(Tagging, taggings, on_conflict: :nothing, returning: [:tag_id])
-
-    tag_ids = Enum.map(inserted_taggings, & &1.tag_id)
-    update_image_counts(repo, 1, tag_ids)
-
-    Tag
-    |> where([t], t.id in ^tag_ids)
-    |> repo.all()
-  end
-
   @doc """
   Adds tag copying from `source` to `target` to an image-merge transaction.
 
-  Only newly inserted target taggings increment tag image counters. The result
-  is stored under `:copy_tags` as the copied canonical tags.
+  Only newly inserted target taggings increment tag image counters.
 
   ## Examples
 
@@ -358,8 +342,33 @@ defmodule Philomena.Tags do
   """
   @spec put_copy_tags(Multi.t(), Image.t(), Image.t()) :: Multi.t()
   def put_copy_tags(%Multi{} = multi, %Image{} = source, %Image{} = target) do
-    Multi.run(multi, :copy_tags, fn repo, _changes ->
-      {:ok, copy_tags(repo, source, target)}
+    source_taggings_query =
+      Tagging
+      |> where(image_id: ^source.id)
+      |> select([tagging], %{
+        image_id: type(^target.id, :integer),
+        tag_id: tagging.tag_id
+      })
+
+    multi
+    |> Multi.all(:source_taggings, source_taggings_query)
+    |> Multi.insert_all(
+      :target_taggings,
+      Tagging,
+      fn %{source_taggings: source_taggings} ->
+        source_taggings
+      end,
+      on_conflict: :nothing,
+      returning: [:tag_id]
+    )
+    |> Multi.run(:copied_tag_ids, fn _repo, %{target_taggings: {_count, target_taggings}} ->
+      {:ok, Enum.map(target_taggings, & &1.tag_id)}
+    end)
+    |> Multi.run(:update_image_counts, fn repo, %{copied_tag_ids: copied_tag_ids} ->
+      {:ok, update_image_counts(repo, 1, copied_tag_ids)}
+    end)
+    |> Multi.on_commit(fn %{copied_tag_ids: copied_tag_ids} ->
+      enqueue_tag_id_reindex(copied_tag_ids)
     end)
   end
 

@@ -532,7 +532,6 @@ defmodule Philomena.Images do
         Tags.reindex_tags(tags)
         Galleries.reindex_galleries(gallery_ids)
         reindex_image(image)
-        reindex_copied_tags(result)
 
         {:ok, result}
 
@@ -540,9 +539,6 @@ defmodule Philomena.Images do
         error
     end
   end
-
-  defp reindex_copied_tags(%{copy_tags: tags}), do: Tags.reindex_tags(tags)
-  defp reindex_copied_tags(_result), do: nil
 
   defp reindex_merged_galleries(%{
          migrated_gallery_interactions: {_, migrated_gallery_ids},
