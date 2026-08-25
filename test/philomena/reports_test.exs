@@ -83,15 +83,18 @@ defmodule Philomena.ReportsTest do
   describe "report form boundary" do
     test "new_report/2 returns a typed form for every reportable locator" do
       actor = actor(moderator_user_fixture())
+      reportable_rule = rule_fixture()
 
       for {locator, schema, foreign_key, target_id} <- target_matrix() do
-        assert {:ok, %ReportForm{target: target, changeset: changeset}} =
+        assert {:ok, %ReportForm{target: target, changeset: changeset, rules: rules}} =
                  Reports.new_report(actor, locator)
 
         assert target.__struct__ == schema
         assert target.id == target_id
         assert %Report{} = changeset.data
         assert Map.fetch!(changeset.data, foreign_key) == target_id
+        assert reportable_rule.id in Enum.map(rules, & &1.id)
+        refute Enum.any?(rules, & &1.internal)
       end
     end
 
@@ -194,7 +197,8 @@ defmodule Philomena.ReportsTest do
     test "validation returns the loaded target in a ReportForm" do
       image = image_fixture()
 
-      assert {:error, %ReportForm{target: %Image{id: image_id}, changeset: changeset}} =
+      assert {:error,
+              %ReportForm{target: %Image{id: image_id}, changeset: changeset, rules: rules}} =
                Reports.create_report(
                  actor(),
                  {:image, image.id},
@@ -204,6 +208,7 @@ defmodule Philomena.ReportsTest do
       assert image_id == image.id
       refute changeset.valid?
       assert changeset.errors[:reason]
+      assert Enum.any?(rules)
     end
 
     test "the target gate runs before the open-report limit" do

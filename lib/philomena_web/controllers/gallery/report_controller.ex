@@ -21,6 +21,7 @@ defmodule PhilomenaWeb.Gallery.ReportController do
         title: "Reporting Gallery",
         subject: gallery,
         changeset: form.changeset,
+        rules: form.rules,
         action: action
       )
     end

@@ -42,7 +42,8 @@ defmodule PhilomenaWeb.Conversation.MessageController do
         title: "Showing Conversation",
         conversation: page.conversation,
         messages: messages,
-        changeset: changeset
+        changeset: changeset,
+        trusted?: Conversations.trusted_sender?(conn.assigns.actor)
       )
     end
   end

@@ -22,6 +22,7 @@ defmodule PhilomenaWeb.Conversation.ReportController do
         title: "Reporting Conversation",
         subject: conversation,
         changeset: form.changeset,
+        rules: form.rules,
         action: action
       )
     end

@@ -21,6 +21,7 @@ defmodule PhilomenaWeb.Image.ReportController do
         title: "Reporting Image",
         subject: image,
         changeset: form.changeset,
+        rules: form.rules,
         action: action
       )
     end

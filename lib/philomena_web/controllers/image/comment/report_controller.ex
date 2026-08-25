@@ -23,6 +23,7 @@ defmodule PhilomenaWeb.Image.Comment.ReportController do
         title: "Reporting Comment",
         subject: comment,
         changeset: form.changeset,
+        rules: form.rules,
         action: action
       )
     end

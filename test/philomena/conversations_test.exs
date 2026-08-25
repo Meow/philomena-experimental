@@ -221,6 +221,15 @@ defmodule Philomena.ConversationsTest do
     end
   end
 
+  describe "trusted_sender?/1" do
+    test "uses conversation approval eligibility for anonymous, new, and verified actors" do
+      refute Conversations.trusted_sender?(actor())
+      refute Conversations.trusted_sender?(actor(confirmed_user_fixture()))
+      assert Conversations.trusted_sender?(actor(verified_user_fixture()))
+      assert Conversations.trusted_sender?(actor(moderator_user_fixture()))
+    end
+  end
+
   describe "create_conversation/2" do
     test "a signed-in actor creates a conversation and its first message" do
       user = confirmed_user_fixture()

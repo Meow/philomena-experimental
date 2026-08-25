@@ -1533,6 +1533,14 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Returns whether `image` matches the viewer's compiled hide/spoiler policy.
+  """
+  @spec filter_or_spoiler_hits?(Image.t(), Philomena.Filters.ImageFilter.t()) :: boolean()
+  def filter_or_spoiler_hits?(%Image{} = image, image_filter) do
+    Filtering.filter_or_spoiler_hits?(image, image_filter)
+  end
+
+  @doc """
   Marks the image named by `image_id` as the current featured image, on behalf
   of `actor`.
 

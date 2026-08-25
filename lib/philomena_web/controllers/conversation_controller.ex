@@ -42,14 +42,19 @@ defmodule PhilomenaWeb.ConversationController do
         title: "Showing Conversation",
         conversation: page.conversation,
         messages: messages,
-        changeset: page.changeset
+        changeset: page.changeset,
+        trusted?: Conversations.trusted_sender?(conn.assigns.actor)
       )
     end
   end
 
   def new(conn, params) do
     with {:ok, changeset} <- Conversations.new_conversation(conn.assigns.actor, params) do
-      render(conn, "new.html", title: "New Conversation", changeset: changeset)
+      render(conn, "new.html",
+        title: "New Conversation",
+        changeset: changeset,
+        trusted?: Conversations.trusted_sender?(conn.assigns.actor)
+      )
     end
   end
 
@@ -61,7 +66,10 @@ defmodule PhilomenaWeb.ConversationController do
         |> redirect(to: ~p"/conversations/#{conversation}")
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        render(conn, "new.html", changeset: changeset)
+        render(conn, "new.html",
+          changeset: changeset,
+          trusted?: Conversations.trusted_sender?(conn.assigns.actor)
+        )
 
       {:error, :rate_limited} ->
         RateLimitedResponse.call(conn, "You may only create a conversation once every minute.")

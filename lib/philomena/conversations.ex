@@ -20,9 +20,16 @@ defmodule Philomena.Conversations do
   alias Philomena.RateLimiter
   alias Philomena.Repo
   alias Philomena.Reports
+  alias Philomena.Schema.Approval
   alias Philomena.Users
 
   @conversation_create_window 60
+
+  @doc """
+  Returns whether the actor may send image embeds without approval review.
+  """
+  @spec trusted_sender?(Actor.t()) :: boolean()
+  def trusted_sender?(%Actor{user: user}), do: Approval.trusted?(user)
 
   defp load_conversation(%Actor{} = actor, slug, action, preloads \\ []) do
     Conversation

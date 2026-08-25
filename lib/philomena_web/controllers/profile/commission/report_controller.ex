@@ -22,6 +22,7 @@ defmodule PhilomenaWeb.Profile.Commission.ReportController do
         title: "Reporting Commission",
         subject: commission,
         changeset: form.changeset,
+        rules: form.rules,
         action: action
       )
     end

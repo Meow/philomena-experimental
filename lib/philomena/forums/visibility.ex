@@ -8,8 +8,10 @@ defmodule Philomena.Forums.Visibility do
   """
 
   import Ecto.Query, warn: false
+  import Philomena.Authorization, only: [authorize: 3]
 
   alias Philomena.Attribution.Actor
+  alias Philomena.Posts.Post
   alias Philomena.Users.User
 
   @doc """
@@ -53,11 +55,13 @@ defmodule Philomena.Forums.Visibility do
     do: from(topic in queryable, where: topic.hidden_from_users == false)
 
   @doc """
-  Restricts a post query to posts visible to `actor`.
+  Restricts a post collection query to posts visible to `actor`.
 
   Moderators, administrators, and topic-moderator assistants may see hidden
-  posts. The caller remains responsible for constraining and authorizing the
-  parent forum and topic.
+  posts and unavailable moderation states. Other actors receive approved,
+  non-destroyed posts plus their own pending posts by account or IP. The caller
+  remains responsible for constraining and authorizing the parent forum and
+  topic.
 
   ## Examples
 
@@ -66,24 +70,31 @@ defmodule Philomena.Forums.Visibility do
 
   """
   @spec visible_posts(Ecto.Queryable.t(), Actor.t()) :: Ecto.Query.t()
-  def visible_posts(queryable, %Actor{user: %User{role: role}})
-      when role in ["admin", "moderator"],
-      do: from(post in queryable)
-
-  def visible_posts(
-        queryable,
-        %Actor{user: %User{role: "assistant", role_map: %{"Topic" => %{"moderator" => _}}}}
-      ),
-      do: from(post in queryable)
-
-  def visible_posts(queryable, %Actor{}),
-    do: from(post in queryable, where: post.hidden_from_users == false)
+  def visible_posts(queryable, %Actor{} = actor) do
+    queryable
+    |> maybe_exclude_hidden_posts(actor)
+    |> available_posts(actor)
+  end
 
   @doc """
-  Generates an OpenSearch boolean `filter` clause to select posts visible to `actor`.
+  Restricts a post query to approved, non-destroyed posts plus the actor's own
+  pending posts. Staff with post-moderation access retain unavailable posts.
 
-  Moderators, administrators, and topic moderator assistants may see hidden
-  posts.
+  Unlike `visible_posts/2`, this scope leaves hidden-post authorization to a
+  member loader so forbidden existing records remain distinguishable from
+  missing records.
+  """
+  @spec available_posts(Ecto.Queryable.t(), Actor.t()) :: Ecto.Query.t()
+  def available_posts(queryable, %Actor{} = actor) do
+    maybe_exclude_unavailable_posts(queryable, actor)
+  end
+
+  @doc """
+  Generates OpenSearch boolean `filter` clauses to select posts visible to
+  `actor`.
+
+  The clauses mirror `visible_posts/2`, including forum access, hidden state,
+  approval ownership, IP ownership, and destroyed-content policy.
 
   ## Examples
 
@@ -95,20 +106,78 @@ defmodule Philomena.Forums.Visibility do
 
   """
   @spec search_filters(Actor.t()) :: list()
-  def search_filters(actor)
-
-  def search_filters(%Actor{user: %User{role: role}})
-      when role in ["moderator", "admin"],
-      do: []
-
-  def search_filters(%Actor{user: %User{role: "assistant"}}) do
-    [%{terms: %{access_level: ["normal", "assistant"]}}]
+  def search_filters(%Actor{} = actor) do
+    search_access_filters(actor) ++ search_availability_filters(actor)
   end
 
-  def search_filters(%Actor{}) do
+  defp maybe_exclude_hidden_posts(query, actor) do
+    if authorize(actor, :show, %Post{hidden_from_users: true}) == :ok do
+      query
+    else
+      where(query, [post], post.hidden_from_users == false)
+    end
+  end
+
+  defp maybe_exclude_unavailable_posts(query, actor) do
+    if authorize(actor, :hide, %Post{}) == :ok do
+      query
+    else
+      visible_to_actor(query, actor)
+    end
+  end
+
+  defp visible_to_actor(query, %Actor{user: %User{id: user_id}, ip: ip}) do
+    where(
+      query,
+      [post],
+      post.destroyed_content == false and
+        (post.approved == true or post.user_id == ^user_id or post.ip == ^ip)
+    )
+  end
+
+  defp visible_to_actor(query, %Actor{ip: ip}) do
+    where(
+      query,
+      [post],
+      post.destroyed_content == false and (post.approved == true or post.ip == ^ip)
+    )
+  end
+
+  defp search_access_filters(%Actor{user: %User{role: role}})
+       when role in ["moderator", "admin"],
+       do: []
+
+  defp search_access_filters(%Actor{user: %User{role: "assistant"}}),
+    do: [%{terms: %{access_level: ["normal", "assistant"]}}]
+
+  defp search_access_filters(%Actor{}),
+    do: [%{term: %{access_level: "normal"}}, %{term: %{hidden_from_users: false}}]
+
+  defp search_availability_filters(actor) do
+    if authorize(actor, :hide, %Post{}) == :ok do
+      []
+    else
+      [
+        %{term: %{destroyed_content: false}},
+        %{
+          bool: %{
+            should: availability_should(actor),
+            minimum_should_match: 1
+          }
+        }
+      ]
+    end
+  end
+
+  defp availability_should(%Actor{user: %User{id: user_id}, ip: ip}) do
     [
-      %{term: %{access_level: "normal"}},
-      %{term: %{hidden_from_users: false}}
+      %{term: %{approved: true}},
+      %{term: %{true_author_id: user_id}},
+      %{term: %{ip: to_string(ip)}}
     ]
+  end
+
+  defp availability_should(%Actor{ip: ip}) do
+    [%{term: %{approved: true}}, %{term: %{ip: to_string(ip)}}]
   end
 end

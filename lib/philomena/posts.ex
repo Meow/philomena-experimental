@@ -38,6 +38,7 @@ defmodule Philomena.Posts do
     with {:ok, post_id} <- Loader.parse_id(post_id) do
       Post
       |> where(topic_id: ^topic.id, id: ^post_id)
+      |> Visibility.available_posts(actor)
       |> preload(topic: :forum, user: [awards: :badge])
       |> Loader.one_and_authorize(actor, action)
     end
@@ -178,7 +179,13 @@ defmodule Philomena.Posts do
   @spec load_post(Actor.t(), Loader.integer_id()) ::
           {:ok, Post.t()} | {:error, :not_found | :unauthorized}
   def load_post(%Actor{} = actor, post_id) do
-    with {:ok, post} <- Loader.fetch(Post, post_id, [:user, topic: :forum]),
+    with {:ok, post_id} <- Loader.parse_id(post_id),
+         {:ok, post} <-
+           Post
+           |> where(id: ^post_id)
+           |> Visibility.available_posts(actor)
+           |> preload([:user, topic: :forum])
+           |> Loader.one(),
          :ok <- authorize(actor, :show, post.topic.forum),
          :ok <- authorize(actor, :show, post.topic),
          :ok <- authorize(actor, :show, post) do

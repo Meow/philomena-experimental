@@ -110,6 +110,63 @@ defmodule Philomena.PostsTest do
     Posts.destroy_post(actor, forum_slug, topic_slug, post_id)
   end
 
+  describe "communication visibility" do
+    test "a pending post is visible only to its author, matching IP, and staff", %{
+      forum: forum,
+      topic: topic
+    } do
+      {post, author} = unapproved_post(topic)
+      other = confirmed_user_fixture()
+
+      assert {:ok, loaded} =
+               Posts.load_topic_post(actor(author), forum.short_name, topic.slug, post.id)
+
+      assert loaded.id == post.id
+
+      assert Posts.load_topic_post(actor(other), forum.short_name, topic.slug, post.id) ==
+               {:error, :not_found}
+
+      assert {:ok, _loaded} =
+               Posts.load_topic_post(
+                 actor(other, ip: post.ip),
+                 forum.short_name,
+                 topic.slug,
+                 post.id
+               )
+
+      assert {:ok, _loaded} =
+               Posts.load_topic_post(
+                 actor(moderator_user_fixture()),
+                 forum.short_name,
+                 topic.slug,
+                 post.id
+               )
+    end
+
+    test "a destroyed post is unavailable to ordinary viewers but remains visible to staff", %{
+      forum: forum,
+      topic: topic
+    } do
+      post =
+        post_fixture(topic, confirmed_user_fixture())
+        |> Ecto.Changeset.change(destroyed_content: true)
+        |> Repo.update!()
+
+      assert Posts.load_topic_post(actor(), forum.short_name, topic.slug, post.id) ==
+               {:error, :not_found}
+
+      assert {:ok, loaded} =
+               Posts.load_topic_post(
+                 actor(moderator_user_fixture()),
+                 forum.short_name,
+                 topic.slug,
+                 post.id
+               )
+
+      assert loaded.id == post.id
+    end
+  end
+
   describe "parent scoping" do
     test "moderation actions cannot address a post through another topic", %{
       forum: forum,

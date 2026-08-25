@@ -21,6 +21,7 @@ defmodule PhilomenaWeb.Profile.ReportController do
         title: "Reporting User",
         subject: user,
         changeset: form.changeset,
+        rules: form.rules,
         action: action
       )
     end

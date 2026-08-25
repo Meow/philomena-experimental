@@ -1077,6 +1077,76 @@ defmodule Philomena.TopicsTest do
       assert %Ecto.Changeset{} = page.topic_changeset
     end
 
+    test "applies pending and destroyed post visibility before presentation" do
+      viewer = confirmed_user_fixture()
+      {forum, topic} = visible_topic()
+
+      approved = post_fixture(topic, confirmed_user_fixture(), %{"body" => "approved"})
+
+      own_pending =
+        post_fixture(topic, viewer, %{"body" => "own pending"})
+        |> Ecto.Changeset.change(approved: false)
+        |> Repo.update!()
+
+      ip_pending =
+        post_fixture(topic, confirmed_user_fixture(), %{"body" => "same ip pending"})
+        |> Ecto.Changeset.change(approved: false, ip: actor(viewer).ip)
+        |> Repo.update!()
+
+      other_pending =
+        post_fixture(topic, confirmed_user_fixture(), %{"body" => "other pending"})
+        |> Ecto.Changeset.change(approved: false, ip: random_ip())
+        |> Repo.update!()
+
+      destroyed =
+        post_fixture(topic, confirmed_user_fixture(), %{"body" => "destroyed"})
+        |> Ecto.Changeset.change(destroyed_content: true)
+        |> Repo.update!()
+
+      assert {:ok, page} =
+               Topics.load_topic_page(
+                 actor(viewer),
+                 forum.short_name,
+                 topic.slug,
+                 nil,
+                 @first_page
+               )
+
+      ids = Enum.map(page.posts.entries, & &1.id)
+      assert approved.id in ids
+      assert own_pending.id in ids
+      assert ip_pending.id in ids
+      refute other_pending.id in ids
+      refute destroyed.id in ids
+    end
+
+    test "a moderator receives pending and destroyed posts from the page loader" do
+      {forum, topic} = visible_topic()
+
+      pending =
+        post_fixture(topic, confirmed_user_fixture())
+        |> Ecto.Changeset.change(approved: false)
+        |> Repo.update!()
+
+      destroyed =
+        post_fixture(topic, confirmed_user_fixture())
+        |> Ecto.Changeset.change(destroyed_content: true)
+        |> Repo.update!()
+
+      assert {:ok, page} =
+               Topics.load_topic_page(
+                 actor(moderator_user_fixture()),
+                 forum.short_name,
+                 topic.slug,
+                 nil,
+                 @first_page
+               )
+
+      ids = Enum.map(page.posts.entries, & &1.id)
+      assert pending.id in ids
+      assert destroyed.id in ids
+    end
+
     test "a hidden topic is unauthorized for a regular user" do
       user = confirmed_user_fixture()
       {forum, topic} = hidden_topic()

@@ -20,7 +20,12 @@ defmodule PhilomenaWeb.Topic.Post.ReportController do
 
       conn
       |> put_view(ReportView)
-      |> render("new.html", subject: post, changeset: form.changeset, action: action)
+      |> render("new.html",
+        subject: post,
+        changeset: form.changeset,
+        rules: form.rules,
+        action: action
+      )
     end
   end
 

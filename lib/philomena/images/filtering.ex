@@ -9,6 +9,7 @@ defmodule Philomena.Images.Filtering do
 
   alias Philomena.Attribution.Actor
   alias Philomena.Filters.Filter
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Images.{Image, Query}
   alias Philomena.Repo
   alias Philomena.Users.User
@@ -77,6 +78,21 @@ defmodule Philomena.Images.Filtering do
       orig_sha512_hash: image.image_orig_sha512_hash,
       description: image.description
     }
+  end
+
+  @doc """
+  Returns whether an image matches the viewer's current hidden or spoiler
+  display policy.
+
+  The image's tags and aliases must be preloaded.
+  """
+  @spec filter_or_spoiler_hits?(Image.t(), ImageFilter.t()) :: boolean()
+  def filter_or_spoiler_hits?(%Image{} = image, %ImageFilter{} = image_filter) do
+    image_tag_ids = MapSet.new(image.tags, & &1.id)
+    display_tag_ids = MapSet.new(image_filter.display_tag_ids)
+
+    not MapSet.disjoint?(image_tag_ids, display_tag_ids) or
+      Evaluator.hits?(document(image), image_filter.display_query)
   end
 
   @doc """

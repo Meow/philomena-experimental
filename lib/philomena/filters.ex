@@ -11,6 +11,7 @@ defmodule Philomena.Filters do
   alias Philomena.Loader
 
   alias Philomena.Filters.Filter
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Filters.FilterPage
   alias Philomena.Filters.FilterSelection
   alias Philomena.Filters.Query
@@ -110,6 +111,19 @@ defmodule Philomena.Filters do
     current_filter = ensure_current_filter(user)
 
     {:ok, %{current_filter: current_filter, forced_filter: user.forced_filter}}
+  end
+
+  @doc """
+  Compiles the effective image-filter policy for `actor`.
+
+  The current filter supplies hidden and spoiler rules; a forced filter adds
+  hidden rules. Invalid stored expressions are returned explicitly with the
+  offending filter and field instead of broadening them to `match_all`.
+  """
+  @spec compile_image_filter(Actor.t(), Filter.t() | nil, Filter.t() | nil) ::
+          {:ok, ImageFilter.t()} | {:error, ImageFilter.compile_error()}
+  def compile_image_filter(%Actor{} = actor, current_filter, forced_filter) do
+    ImageFilter.compile(actor, current_filter, forced_filter)
   end
 
   @doc """

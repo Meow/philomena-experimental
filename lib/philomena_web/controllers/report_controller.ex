@@ -38,7 +38,7 @@ defmodule PhilomenaWeb.ReportController do
         )
         |> redirect(to: "/")
 
-      {:error, %ReportForm{target: target, changeset: changeset}} ->
+      {:error, %ReportForm{target: target, changeset: changeset, rules: rules}} ->
         # The calling controllers are thin wrappers with no view of their own,
         # so Phoenix's default view - derived from the caller's name - does
         # not exist. Name the shared one explicitly.
@@ -47,6 +47,7 @@ defmodule PhilomenaWeb.ReportController do
         |> render("new.html",
           subject: target,
           changeset: changeset,
+          rules: rules,
           action: action_for_target.(target)
         )
 

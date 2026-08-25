@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.ImageView do
   use PhilomenaWeb, :view
 
   alias Philomena.Tags.Tag
+  alias Philomena.Images
   alias Philomena.Images.Thumbnailer
 
   def show_vote_counts?(%{settings: %{hide_vote_counts: true}}), do: false
@@ -266,34 +267,8 @@ defmodule PhilomenaWeb.ImageView do
   defp thumb_format(_, :rendered, _download), do: "png"
   defp thumb_format(format, _name, _download), do: format
 
-  def image_filter_data(image) do
-    Philomena.Images.Filtering.document(image)
-  end
-
   def filter_or_spoiler_hits?(conn, image) do
-    tag_filter_or_spoiler_hits?(conn, image) or complex_filter_or_spoiler_hits?(conn, image)
-  end
-
-  defp tag_filter_or_spoiler_hits?(conn, image) do
-    filter = conn.assigns.current_filter
-    filtered_tag_ids = MapSet.new(filter.spoilered_tag_ids ++ filter.hidden_tag_ids)
-    image_tag_ids = MapSet.new(image.tags, & &1.id)
-
-    MapSet.size(MapSet.intersection(filtered_tag_ids, image_tag_ids)) > 0
-  end
-
-  defp complex_filter_or_spoiler_hits?(conn, image) do
-    doc = image_filter_data(image)
-    complex_filter = conn.assigns.compiled_complex_filter
-    complex_spoiler = conn.assigns.compiled_complex_spoiler
-
-    query = %{
-      bool: %{
-        should: [complex_filter, complex_spoiler]
-      }
-    }
-
-    PhilomenaQuery.Parse.Evaluator.hits?(doc, query)
+    Images.filter_or_spoiler_hits?(image, conn.assigns.image_filter)
   end
 
   def image_source_icon(nil), do: "fa fa-link"

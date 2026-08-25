@@ -31,7 +31,7 @@ h1 = @conversation.title
   .block__header.block__header--light.page__header
     .page__pagination = pagination
 
-= if not trusted?(@conn.assigns.current_user) do
+= if not @trusted? do
   .block.block--fixed.block--warning.hidden.js-hidden-warning
     h2 Warning!
     p

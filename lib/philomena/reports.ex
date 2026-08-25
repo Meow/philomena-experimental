@@ -352,7 +352,12 @@ defmodule Philomena.Reports do
         |> Ecto.build_assoc(:reports)
         |> Report.changeset()
 
-      {:ok, %ReportForm{target: target, changeset: changeset}}
+      {:ok,
+       %ReportForm{
+         target: target,
+         changeset: changeset,
+         rules: Rules.list_reportable_rules()
+       }}
     end
   end
 
@@ -401,7 +406,12 @@ defmodule Philomena.Reports do
           {:ok, report}
 
         {:error, :report, changeset, _changes} ->
-          {:error, %ReportForm{target: target, changeset: changeset}}
+          {:error,
+           %ReportForm{
+             target: target,
+             changeset: changeset,
+             rules: Rules.list_reportable_rules()
+           }}
       end
     end
   end

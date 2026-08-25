@@ -17,12 +17,15 @@ defmodule Philomena.FiltersTest do
 
   import Philomena.AttributionFixtures
   import Philomena.FiltersFixtures
+  import Philomena.ImagesFixtures
   import Philomena.TagsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Filters
   alias Philomena.Filters.Filter
   alias Philomena.Filters.FilterPage
+  alias Philomena.Filters.ImageFilter
+  alias Philomena.Images
   alias Philomena.Repo
   alias Philomena.Users.User
   alias PhilomenaQuery.Search
@@ -43,6 +46,58 @@ defmodule Philomena.FiltersTest do
   setup do
     Search.clear_index!(Filter)
     :ok
+  end
+
+  describe "compile_image_filter/3" do
+    test "compiles the effective search and display policy" do
+      image = image_fixture(tags: "safe") |> Repo.preload(tags: :aliases)
+      [safe] = image.tags
+
+      current = %Filter{
+        hidden_tag_ids: [],
+        spoilered_tag_ids: [safe.id],
+        hidden_complex_str: "score.lt:0",
+        spoilered_complex_str: "faves.gt:10"
+      }
+
+      forced = %Filter{hidden_tag_ids: [safe.id], hidden_complex_str: "upvotes.lt:0"}
+
+      assert {:ok, %ImageFilter{} = image_filter} =
+               Filters.compile_image_filter(actor(), current, forced)
+
+      assert safe.id in image_filter.display_tag_ids
+      assert Images.filter_or_spoiler_hits?(image, image_filter)
+
+      assert %{bool: %{should: [%{terms: %{tag_ids: [safe_id]}}, _complex]}} =
+               image_filter.query
+
+      assert safe_id == safe.id
+    end
+
+    test "returns invalid stored expressions explicitly" do
+      filter = %Filter{id: 42, hidden_complex_str: "("}
+
+      assert {:error, {:invalid_filter, ^filter, :hidden_complex_str, reason}} =
+               Filters.compile_image_filter(actor(), filter, nil)
+
+      assert is_binary(reason)
+    end
+
+    test "an empty selection excludes and spoilers nothing" do
+      assert {:ok, %ImageFilter{} = image_filter} =
+               Filters.compile_image_filter(actor(), nil, nil)
+
+      assert image_filter.display_tag_ids == []
+
+      assert image_filter.query == %{
+               bool: %{
+                 should: [
+                   %{terms: %{tag_ids: []}},
+                   %{bool: %{should: [%{match_none: %{}}, %{match_none: %{}}]}}
+                 ]
+               }
+             }
+    end
   end
 
   describe "index_filters/1" do

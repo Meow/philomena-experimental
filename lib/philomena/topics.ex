@@ -58,6 +58,7 @@ defmodule Philomena.Topics do
     page_number =
       Post
       |> where(topic_id: ^topic.id)
+      |> Visibility.available_posts(actor)
       |> Loader.fetch_and_authorize(actor, :show, post_id)
       |> case do
         {:ok, post} ->
@@ -70,10 +71,15 @@ defmodule Philomena.Topics do
     %{pagination | page_number: page_number}
   end
 
-  defp load_topic_posts(%Topic{} = topic, %{page_number: page_number, page_size: page_size}) do
+  defp load_topic_posts(
+         %Actor{} = actor,
+         %Topic{} = topic,
+         %{page_number: page_number, page_size: page_size}
+       ) do
     entries =
       Post
       |> where(topic_id: ^topic.id)
+      |> Visibility.available_posts(actor)
       |> where([p], p.topic_position >= ^(page_size * (page_number - 1)))
       |> where([p], p.topic_position < ^(page_size * page_number))
       |> order_by(asc: :created_at, asc: :id)
@@ -253,9 +259,11 @@ defmodule Philomena.Topics do
   containing that post (by its position over the page size), but only when the
   post belongs to the loaded topic. Otherwise `pagination` is used as-is.
 
-  The `posts` field is a `Scrivener.Page` of raw `Post` structs, ordered by
-  creation, with the topic, forum, and author preloaded); their Markdown bodies
-  are left raw for the caller.
+  The `posts` field is a `Scrivener.Page` of available `Post` structs, ordered
+  by creation, with the topic, forum, and author preloaded. Pending posts are
+  limited to the actor's account or IP and destroyed posts are limited to
+  moderators. Hidden posts remain in the page so callers can render their
+  redacted representation. Markdown bodies are left raw for the caller.
 
   Returns `{:ok, %TopicPage{}}`, `{:error, :unauthorized}` when the forum or the
   topic is not visible to `actor`, or `{:error, :not_found}` when the forum
@@ -287,7 +295,7 @@ defmodule Philomena.Topics do
        %TopicPage{
          forum: forum,
          topic: topic,
-         posts: load_topic_posts(topic, pagination),
+         posts: load_topic_posts(actor, topic, pagination),
          watching: subscribed?(topic, actor.user),
          voted: PollVotes.voted?(actor, topic.poll),
          poll_active: Polls.active?(topic.poll),

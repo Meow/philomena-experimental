@@ -76,6 +76,82 @@ defmodule PhilomenaWeb.PostControllerTest do
       refute response =~ "Test hidden post body"
     end
 
+    test "does not render another author's pending or destroyed posts", %{conn: conn} do
+      forum = forum_fixture()
+
+      pending =
+        topic_with_post(
+          forum,
+          "Test pending post body",
+          confirmed_user_fixture()
+        )
+        |> Ecto.Changeset.change(approved: false)
+        |> Repo.update!()
+
+      destroyed =
+        topic_with_post(
+          forum,
+          "Test destroyed post body",
+          confirmed_user_fixture()
+        )
+        |> Ecto.Changeset.change(destroyed_content: true)
+        |> Repo.update!()
+
+      SearchHelpers.reindex_all!(Post)
+
+      response = conn |> get(~p"/posts") |> html_response(200)
+
+      refute response =~ pending.body
+      refute response =~ destroyed.body
+    end
+
+    test "renders pending and destroyed posts to moderators", %{conn: conn} do
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+      forum = forum_fixture()
+
+      pending =
+        topic_with_post(
+          forum,
+          "Moderator pending post body",
+          confirmed_user_fixture()
+        )
+        |> Ecto.Changeset.change(approved: false)
+        |> Repo.update!()
+
+      destroyed =
+        topic_with_post(
+          forum,
+          "Moderator destroyed post body",
+          confirmed_user_fixture()
+        )
+        |> Ecto.Changeset.change(destroyed_content: true)
+        |> Repo.update!()
+
+      SearchHelpers.reindex_all!(Post)
+
+      response = conn |> get(~p"/posts") |> html_response(200)
+
+      assert response =~ pending.body
+      assert response =~ destroyed.body
+    end
+
+    test "renders a signed-in author's own pending post", %{conn: conn} do
+      author = confirmed_user_fixture()
+      conn = log_in_user(conn, author)
+      forum = forum_fixture()
+
+      pending =
+        topic_with_post(forum, "Author pending post body", author)
+        |> Ecto.Changeset.change(approved: false)
+        |> Repo.update!()
+
+      SearchHelpers.reindex_all!(Post)
+
+      response = conn |> get(~p"/posts") |> html_response(200)
+
+      assert response =~ pending.body
+    end
+
     test "filters posts with the pq parameter", %{conn: conn} do
       forum = forum_fixture()
       _matching = topic_with_post(forum, "Test grapefruit post")

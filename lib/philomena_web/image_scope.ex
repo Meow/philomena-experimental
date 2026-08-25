@@ -21,7 +21,7 @@ defmodule PhilomenaWeb.ImageScope do
   """
   def search_scope(conn) do
     Scope.new(
-      conn.assigns.compiled_filter,
+      conn.assigns.image_filter.query,
       conn.assigns.image_pagination,
       conn.params
     )
