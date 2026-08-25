@@ -65,6 +65,25 @@ defmodule Philomena.Channels do
   end
 
   @doc """
+  Counts channels which are currently live.
+
+  This aggregate includes live channels even when they have not yet been
+  stamped by the automatic fetcher.
+
+  ## Examples
+
+      iex> count_live_channels()
+      2
+
+  """
+  @spec count_live_channels() :: non_neg_integer()
+  def count_live_channels do
+    Channel
+    |> where(is_live: true)
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
   Loads the livestream listing and the acting user's subscription state.
 
   Only channels the fetcher has stamped (`last_fetched_at` set) are listed,

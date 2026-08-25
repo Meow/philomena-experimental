@@ -28,6 +28,16 @@ defmodule Philomena.ChannelsTest do
 
   @pagination %{page_number: 1, page_size: 25}
 
+  describe "count_live_channels/0" do
+    test "counts only live channels" do
+      listed_channel_fixture(%{}, %{is_live: true})
+      listed_channel_fixture(%{}, %{is_live: true})
+      listed_channel_fixture(%{}, %{is_live: false})
+
+      assert Channels.count_live_channels() == 2
+    end
+  end
+
   describe "load_channels/4" do
     test "lists only channels the fetcher has stamped" do
       fetched = listed_channel_fixture()

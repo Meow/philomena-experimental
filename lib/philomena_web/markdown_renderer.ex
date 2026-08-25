@@ -1,10 +1,8 @@
 defmodule PhilomenaWeb.MarkdownRenderer do
   alias Philomena.Markdown
-  alias Philomena.Images.Image
-  alias Philomena.Repo
+  alias Philomena.Images
   alias PhilomenaWeb.ImageView
   import Phoenix.HTML.Link
-  import Ecto.Query
 
   # TODO: collection_renderer pattern is a weird inversion of control
   # that is no longer needed. It should flow one way from context to web
@@ -75,10 +73,8 @@ defmodule PhilomenaWeb.MarkdownRenderer do
   defp load_images(images) do
     ids = Enum.map(images, fn m -> Enum.at(m, 0) end)
 
-    Image
-    |> where([i], i.id in ^ids)
-    |> preload([:sources, tags: :aliases])
-    |> Repo.all()
+    ids
+    |> Images.list_images_by_ids()
     |> Map.new(&{&1.id, &1})
   end
 

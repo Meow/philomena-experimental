@@ -63,6 +63,80 @@ defmodule Philomena.TagsTest do
 
   defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
 
+  describe "list_tags_by_ids/1" do
+    test "loads matching tags and omits unknown IDs" do
+      first = tag_fixture(name: "bulk first")
+      second = tag_fixture(name: "bulk second")
+
+      loaded = Tags.list_tags_by_ids([first.id, 2_147_483_647, second.id])
+
+      assert Enum.sort(Enum.map(loaded, & &1.id)) == Enum.sort([first.id, second.id])
+    end
+  end
+
+  describe "autocomplete_tags/2" do
+    test "prefix-matches tags and uses current PostgreSQL counts for ranking" do
+      lower =
+        tag_fixture(name: "autocomplete lower")
+        |> Ecto.Changeset.change(images_count: 4)
+        |> Repo.update!()
+
+      higher =
+        tag_fixture(name: "autocomplete higher")
+        |> Ecto.Changeset.change(images_count: 12)
+        |> Repo.update!()
+
+      zero = tag_fixture(name: "autocomplete zero")
+      SearchHelpers.reindex_all!(Tag)
+
+      assert [first, second] = Tags.autocomplete_tags("autocomplete", 2)
+      assert {first.canonical, first.images} == {higher.name, 12}
+      assert {second.canonical, second.images} == {lower.name, 4}
+      refute Enum.any?([first, second], &(&1.canonical == zero.name))
+    end
+
+    test "identifies aliases and reports their canonical tag data" do
+      canonical =
+        tag_fixture(name: "suggestion target")
+        |> Ecto.Changeset.change(images_count: 8)
+        |> Repo.update!()
+
+      alias_tag =
+        tag_fixture(name: "suggestion alias")
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      SearchHelpers.reindex_all!(Tag)
+
+      assert [suggestion] = Tags.autocomplete_tags("suggestion alias", 1)
+      assert suggestion.alias == alias_tag.name
+      assert suggestion.canonical == canonical.name
+      assert suggestion.images == 8
+    end
+  end
+
+  describe "quick_tag_table/0" do
+    test "computes quick-tag data and caches it until refreshed" do
+      on_exit(fn -> :persistent_term.erase({Philomena.Tags.QuickTagTable, :table}) end)
+
+      safe = tag_fixture(name: "safe")
+      SearchHelpers.reindex_all!(Tag)
+
+      table = Tags.refresh_quick_tag_table()
+      assert table.tags["safe"].id == safe.id
+      assert Ecto.assoc_loaded?(table.tags["safe"].implied_tags)
+
+      safe
+      |> Ecto.Changeset.change(short_description: "changed after caching")
+      |> Repo.update!()
+
+      assert Tags.quick_tag_table().tags["safe"].short_description == ""
+
+      assert Tags.refresh_quick_tag_table().tags["safe"].short_description ==
+               "changed after caching"
+    end
+  end
+
   describe "search_tags/3" do
     test "finds an indexed tag by a wildcard query, carrying the default preloads" do
       tag = tag_fixture()

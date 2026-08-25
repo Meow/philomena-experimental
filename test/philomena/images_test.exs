@@ -166,6 +166,18 @@ defmodule Philomena.ImagesTest do
     %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => url}}}
   end
 
+  describe "list_images_by_ids/1" do
+    test "loads matching images with rich-text representation associations" do
+      image = image_fixture(tags: "safe", sources: ["https://example.com/source"])
+
+      assert [loaded] = Images.list_images_by_ids([image.id, 2_147_483_647])
+      assert loaded.id == image.id
+      assert Ecto.assoc_loaded?(loaded.sources)
+      assert Ecto.assoc_loaded?(loaded.tags)
+      assert Enum.all?(loaded.tags, &Ecto.assoc_loaded?(&1.aliases))
+    end
+  end
+
   defp tag_names(image) do
     image
     |> Repo.preload(:tags, force: true)

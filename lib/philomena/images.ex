@@ -1513,6 +1513,26 @@ defmodule Philomena.Images do
   end
 
   @doc """
+  Loads images by ID with the associations required by rich text references.
+
+  Unknown IDs are omitted. Results are not guaranteed to follow the input
+  order; callers which need keyed access should index them by ID.
+
+  ## Examples
+
+      iex> list_images_by_ids([42, 999_999_999])
+      [%Image{id: 42}]
+
+  """
+  @spec list_images_by_ids([integer()]) :: [Image.t()]
+  def list_images_by_ids(ids) when is_list(ids) do
+    Image
+    |> where([image], image.id in ^ids)
+    |> preload([:sources, tags: :aliases])
+    |> Repo.all()
+  end
+
+  @doc """
   Marks the image named by `image_id` as the current featured image, on behalf
   of `actor`.
 

@@ -176,6 +176,38 @@ defmodule Philomena.StaticPages do
     end
   end
 
+  @doc """
+  Creates or replaces the generated statistics page body.
+
+  This service is used by the periodic site-statistics renderer and does not
+  create staff-authored page versions.
+
+  ## Examples
+
+      iex> upsert_statistics_page("There are 42 images.")
+      {1, nil}
+
+  """
+  @spec upsert_statistics_page(String.t()) :: {non_neg_integer(), nil | [term()]}
+  def upsert_statistics_page(body) when is_binary(body) do
+    now = DateTime.utc_now(:second)
+
+    Repo.insert_all(
+      StaticPage,
+      [
+        %{
+          title: "Statistics",
+          slug: "stats",
+          body: body,
+          created_at: now,
+          updated_at: now
+        }
+      ],
+      on_conflict: {:replace, [:body, :updated_at]},
+      conflict_target: :slug
+    )
+  end
+
   # Loads and authorizes the page named by `slug` for `action`. Authorization
   # runs against the loaded record, nil included, before the not-found decision:
   # an unknown slug the viewer may not act on comes back unauthorized, and one it

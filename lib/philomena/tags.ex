@@ -38,9 +38,11 @@ defmodule Philomena.Tags do
   alias Philomena.Tags.Implication
   alias Philomena.Tags.QueryBuilder
   alias Philomena.Tags.QueryForm
+  alias Philomena.Tags.QuickTagTable
   alias Philomena.Tags.Tag
   alias Philomena.Tags.TagDetail
   alias Philomena.Tags.TagPage
+  alias Philomena.Tags.TagSuggestion
   alias Philomena.Tags.Uploader
   alias Philomena.Users
   alias Philomena.Users.User
@@ -293,6 +295,104 @@ defmodule Philomena.Tags do
       {:ok, tags, QueryForm.changeset(query_form)}
     end
   end
+
+  @doc """
+  Loads the tags matching the supplied integer IDs.
+
+  Unknown IDs are omitted and results are not guaranteed to follow input
+  order. Request parsing and request-specific limits remain the caller's
+  responsibility.
+
+  ## Examples
+
+      iex> list_tags_by_ids([42, 999_999_999])
+      [%Tag{id: 42}]
+
+  """
+  @spec list_tags_by_ids([integer()]) :: [Tag.t()]
+  def list_tags_by_ids(ids) when is_list(ids) do
+    Tag
+    |> where([tag], tag.id in ^ids)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns tag suggestions for a normalized search-as-you-type term.
+
+  Canonical names and aliases are prefix-matched in OpenSearch. PostgreSQL is
+  authoritative for image counts, so results are filtered and re-sorted after
+  loading to tolerate temporary index desynchronization. At most ten indexed
+  candidates are considered.
+
+  ## Examples
+
+      iex> autocomplete_tags("pon", 2)
+      [%TagSuggestion{alias: nil, canonical: "pony", images: 42}]
+
+  """
+  @spec autocomplete_tags(String.t(), 1..10) :: [TagSuggestion.t()]
+  def autocomplete_tags(term, limit \\ 10)
+
+  def autocomplete_tags(term, limit)
+      when is_binary(term) and is_integer(limit) and limit > 0 and limit <= 10 do
+    Tag
+    |> Search.search_definition(
+      %{
+        query: %{
+          bool: %{
+            should: [
+              %{prefix: %{name: term}},
+              %{prefix: %{name_in_namespace: term}}
+            ]
+          }
+        },
+        sort: %{images: :desc}
+      },
+      %{page_size: 10}
+    )
+    |> Search.search_records(preload(Tag, :aliased_tag))
+    |> Enum.map(fn tag ->
+      canonical = tag.aliased_tag || tag
+
+      %TagSuggestion{
+        alias: if(tag.aliased_tag, do: tag.name),
+        canonical: canonical.name,
+        images: canonical.images_count
+      }
+    end)
+    |> Enum.filter(&(&1.images > 0))
+    |> Enum.sort_by(& &1.images, :desc)
+    |> Enum.take(limit)
+  end
+
+  @doc """
+  Returns the cached data used to render the quick-tag table.
+
+  The cache is stored in `:persistent_term` because the table is read on many
+  requests and changes only when explicitly refreshed or the VM restarts.
+
+  ## Examples
+
+      iex> table = quick_tag_table()
+      iex> is_map(table.tags) and is_map(table.shipping)
+      true
+
+  """
+  @spec quick_tag_table() :: QuickTagTable.t()
+  def quick_tag_table, do: QuickTagTable.get()
+
+  @doc """
+  Recomputes and replaces the cached quick-tag table data.
+
+  ## Examples
+
+      iex> table = refresh_quick_tag_table()
+      iex> is_map(table.data)
+      true
+
+  """
+  @spec refresh_quick_tag_table() :: QuickTagTable.t()
+  def refresh_quick_tag_table, do: QuickTagTable.refresh()
 
   @doc """
   Assembles the `TagPage` for the viewer described by `scope`, loading the

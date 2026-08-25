@@ -16,8 +16,23 @@ defmodule Philomena.StaticPagesTest do
   import Philomena.StaticPagesFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Repo
   alias Philomena.StaticPages
   alias Philomena.StaticPages.StaticPage
+
+  describe "upsert_statistics_page/1" do
+    test "creates and replaces the generated statistics page" do
+      assert {1, nil} = StaticPages.upsert_statistics_page("first snapshot")
+      assert Repo.get_by!(StaticPage, slug: "stats").body == "first snapshot"
+
+      assert {1, nil} = StaticPages.upsert_statistics_page("second snapshot")
+
+      page = Repo.get_by!(StaticPage, slug: "stats")
+      assert page.title == "Statistics"
+      assert page.body == "second snapshot"
+      assert Repo.aggregate(StaticPage, :count, :id) == 1
+    end
+  end
 
   describe "load_page_listing/1" do
     test "an admin gets the list of static pages" do
