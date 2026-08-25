@@ -70,6 +70,26 @@ defmodule Philomena.SourceChanges do
   end
 
   @doc """
+  Builds a lateral query that counts source changes for the image in the
+  parent query.
+
+  The returned query expects an `:image` parent binding and is intended for
+  use with `Ecto.Query.subquery/1`.
+
+  ## Examples
+
+      iex> SourceChanges.count_query()
+      #Ecto.Query<...>
+
+  """
+  @spec count_query() :: Ecto.Query.t()
+  def count_query do
+    SourceChange
+    |> where(image_id: parent_as(:image).id)
+    |> select(%{count: count()})
+  end
+
+  @doc """
   Loads a page of source changes for the image named by `image_id`.
 
   Images owns target loading and `:show` authorization. Malformed and absent

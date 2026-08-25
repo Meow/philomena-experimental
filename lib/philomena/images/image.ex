@@ -100,6 +100,10 @@ defmodule Philomena.Images.Image do
     field :uploaded_image, :string, virtual: true
     field :removed_image, :string, virtual: true
 
+    field :tag_change_count, :integer, virtual: true
+    field :tag_change_tag_count, :integer, virtual: true
+    field :source_change_count, :integer, virtual: true
+
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
 
@@ -287,13 +291,20 @@ defmodule Philomena.Images.Image do
     |> validate_required([:deletion_reason])
   end
 
-  def merge_changeset(image, duplicate_of_image) do
-    change(image)
+  def merge_source_changeset(image, duplicate_of_image) do
+    image
+    |> change()
     |> validate_not_hidden()
     |> validate_merge_target(duplicate_of_image)
     |> put_change(:duplicate_id, duplicate_of_image.id)
     |> put_change(:hidden_image_key, create_key())
     |> put_change(:hidden_from_users, true)
+  end
+
+  def merge_target_changeset(image, duplicate_of_image) do
+    [image.first_seen_at, duplicate_of_image.first_seen_at]
+    |> Enum.min(DateTime)
+    |> then(&change(duplicate_of_image, first_seen_at: &1))
   end
 
   def unhide_changeset(image) do

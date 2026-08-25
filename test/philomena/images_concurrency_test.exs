@@ -23,7 +23,12 @@ defmodule Philomena.ImagesConcurrencyTest do
       ])
 
     assert Enum.count(results, &match?({:ok, %Image{}}, &1)) == 1
-    assert Enum.count(results, &(&1 == {:error, :already_approved})) == 1
+
+    assert Enum.count(
+             results,
+             &match?({:error, %{errors: [approved: {"must be false", []}]}}, &1)
+           ) == 1
+
     assert Repo.get!(Image, image.id).approved
     assert Repo.reload!(uploader).images_count == initial_count + 1
     assert Repo.aggregate(ModerationLog, :count) == 1

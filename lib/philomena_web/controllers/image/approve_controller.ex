@@ -12,12 +12,12 @@ defmodule PhilomenaWeb.Image.ApproveController do
         |> put_flash(:info, "Image has been approved.")
         |> redirect(to: ~p"/admin/approvals")
 
-      {:error, :already_approved} ->
+      {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Someone else already approved this image.")
         |> redirect(to: ~p"/admin/approvals")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

@@ -150,14 +150,14 @@ defmodule Philomena.Images.NavigationTest do
   end
 
   describe "find_image_index_page/2" do
-    test "returns the page number as a string" do
+    test "returns the page number as an integer" do
       {older, newer} = two_images()
 
       # Listed by descending id, the newer image has no images ahead of it, so
       # it sits on page one; the older image trails it but still on page one at
       # the default page size.
-      assert Images.find_image_index_page(actor(), scope(), to_string(newer.id)) == {:ok, "1"}
-      assert Images.find_image_index_page(actor(), scope(), to_string(older.id)) == {:ok, "1"}
+      assert Images.find_image_index_page(actor(), scope(), to_string(newer.id)) == {:ok, 1}
+      assert Images.find_image_index_page(actor(), scope(), to_string(older.id)) == {:ok, 1}
     end
 
     test "the scope's page size drives the page number" do
@@ -166,13 +166,13 @@ defmodule Philomena.Images.NavigationTest do
       # One image precedes the older one; a page size of one puts it on page two.
       scope = scope(pagination: %{page_number: 1, page_size: 1})
 
-      assert Images.find_image_index_page(actor(), scope, to_string(older.id)) == {:ok, "2"}
+      assert Images.find_image_index_page(actor(), scope, to_string(older.id)) == {:ok, 2}
     end
 
     test "accepts an integer id" do
       {_older, newer} = two_images()
 
-      assert Images.find_image_index_page(actor(), scope(), newer.id) == {:ok, "1"}
+      assert Images.find_image_index_page(actor(), scope(), newer.id) == {:ok, 1}
     end
 
     test "an unknown well-formed id is not found for an anonymous viewer" do

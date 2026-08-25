@@ -141,13 +141,13 @@ defmodule Philomena.Images.Search do
   Executes a definition, returning the record page.
 
   Records are loaded with the standard listing preloads
-  (`[:sources, tags: :aliases]`); pass `:queryable` to override. With
-  `hits: true` each record is paired with its raw hit, for listings that need
-  sort cursors.
+  (`[:sources, tags: :aliases]`); pass `:preload` to override. With `hits: true`
+  each record is paired with its raw hit, for listings that need sort cursors.
   """
   @spec execute(definition(), Keyword.t()) :: Enumerable.t()
   def execute(definition, opts \\ []) do
-    queryable = Keyword.get(opts, :queryable, preload(Image, [:sources, tags: :aliases]))
+    preloads = Keyword.get(opts, :preload, [:sources, tags: :aliases])
+    queryable = preload(Image, ^preloads)
 
     if opts[:hits] do
       Search.search_records_with_hits(definition, queryable)

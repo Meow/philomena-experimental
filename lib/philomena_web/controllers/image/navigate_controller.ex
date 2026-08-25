@@ -34,7 +34,7 @@ defmodule PhilomenaWeb.Image.NavigateController do
              ImageScope.search_scope(conn),
              params["image_id"]
            ) do
-      redirect(conn, to: ~p"/search?#{[q: "*", page: page_num, sf: "id"]}")
+      redirect(conn, to: ~p"/search?#{[q: "*", page: to_string(page_num), sf: "id"]}")
     end
   end
 end

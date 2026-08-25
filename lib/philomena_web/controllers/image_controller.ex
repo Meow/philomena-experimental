@@ -56,8 +56,16 @@ defmodule PhilomenaWeb.ImageController do
     assigns = [
       image: image,
       comments: comments,
-      image_changeset: page.image_changeset,
       comment_changeset: page.comment_changeset,
+      description_changeset: page.description_changeset,
+      tag_changeset: page.tag_changeset,
+      source_changeset: page.source_changeset,
+      file_changeset: page.file_changeset,
+      hide_changeset: page.hide_changeset,
+      feature_changeset: page.feature_changeset,
+      repair_changeset: page.repair_changeset,
+      hash_changeset: page.hash_changeset,
+      uploader_changeset: page.uploader_changeset,
       user_galleries: page.user_galleries,
       description: description,
       interactions: page.interactions,
@@ -87,25 +95,25 @@ defmodule PhilomenaWeb.ImageController do
         |> put_flash(:info, "Image created successfully.")
         |> redirect(to: ~p"/images/#{image}")
 
-      {:error, :image, changeset, _} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
 
       {:error, :rate_limited} ->
         RateLimitedResponse.call(conn, "You may only upload images once every 5 seconds.")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
 
   defp load_image(conn, _opts) do
     case Images.load_image_for_show(conn.assigns.actor, conn.params["id"]) do
-      {:ok, %{image: image} = loaded} ->
+      {:ok, image} ->
         conn
         |> assign(:image, image)
-        |> assign(:tag_change_count, loaded.tag_change_count)
-        |> assign(:tag_change_tag_count, loaded.tag_change_tag_count)
-        |> assign(:source_change_count, loaded.source_change_count)
+        |> assign(:tag_change_count, image.tag_change_count)
+        |> assign(:tag_change_tag_count, image.tag_change_tag_count)
+        |> assign(:source_change_count, image.source_change_count)
 
       {:duplicate_of, image} ->
         conn

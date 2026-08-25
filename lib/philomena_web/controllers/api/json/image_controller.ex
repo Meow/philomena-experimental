@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
       {:ok, %{image: image}} ->
         render(conn, "show.json", image: image, interactions: [])
 
-      {:error, :image, changeset, _} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         conn
         |> put_status(:bad_request)
         |> render("error.json", changeset: changeset)

@@ -72,21 +72,6 @@ defmodule Philomena.Images do
     Loader.fetch_and_authorize(Image, actor, action, image_id, preloads)
   end
 
-  defp load_writable_image_member(actor, action, image_id, preloads \\ []) do
-    with :ok <- verify_write_access(actor) do
-      load_image_member(actor, action, image_id, preloads)
-    end
-  end
-
-  defp featured_image_query do
-    Image
-    |> join(:inner, [i], f in ImageFeature, on: [image_id: i.id])
-    |> where([i], i.hidden_from_users == false)
-    |> order_by([_i, f], desc: f.created_at)
-    |> limit(1)
-    |> preload([:user, :intensity, :sources, tags: :aliases])
-  end
-
   defp maybe_exclude_viewer_hides(query, %Actor{user: nil}, _include_hidden?), do: query
   defp maybe_exclude_viewer_hides(query, %Actor{}, true), do: query
 
@@ -100,13 +85,6 @@ defmodule Philomena.Images do
         ^user.id
       )
     )
-  end
-
-  defp load_featured_image(query) do
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      image -> {:ok, image}
-    end
   end
 
   @doc """
@@ -128,53 +106,21 @@ defmodule Philomena.Images do
   @spec featured_image(Actor.t(), boolean()) :: {:ok, Image.t()} | {:error, :not_found}
   def featured_image(%Actor{} = actor, include_hidden?) when is_boolean(include_hidden?) do
     with :ok <- authorize(actor, :index, Image) do
-      featured_image_query()
+      Image
       |> maybe_exclude_viewer_hides(actor, include_hidden?)
-      |> load_featured_image()
-    end
-  end
+      |> join(:inner, [i], f in ImageFeature, on: [image_id: i.id])
+      |> where([i], i.hidden_from_users == false)
+      |> order_by([_i, f], desc: f.created_at)
+      |> limit(1)
+      |> preload([:user, :intensity, :sources, tags: :aliases])
+      |> Repo.one()
+      |> case do
+        nil ->
+          {:error, :not_found}
 
-  # Creates an image. Visible for testing.
-  defp create_image(%Actor{user: user} = actor, attrs) do
-    tags = Tags.get_or_create_tags(attrs["tag_input"])
-    sources = attrs["sources"]
-
-    image =
-      %Image{}
-      |> Image.creation_changeset(attrs, actor)
-      |> Image.source_changeset(attrs, [], sources)
-      |> Image.tag_changeset(attrs, [], tags)
-      |> Image.dnp_changeset(user)
-      |> Uploader.analyze_upload(attrs)
-
-    Multi.new()
-    |> Multi.insert(:image, image)
-    |> Multi.run(:added_tag_count, fn repo, %{image: image} ->
-      tag_ids = image.added_tags |> Enum.map(& &1.id)
-
-      count = Tags.update_image_counts(repo, 1, tag_ids)
-
-      {:ok, count}
-    end)
-    |> maybe_subscribe_on(:image, user, :watch_on_upload)
-    |> put_reindex_image(:image)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{image: image}} ->
-        upload_pid = async_upload(image, attrs["image"])
-        Tags.reindex_tags(image.added_tags)
-        image = maybe_approve_image(image, user) |> preload_created_image()
-
-        broadcast_image_create(image)
-
-        # Return the upload PID along with the created image so that the caller
-        # can control the lifecycle of the upload if needed. It's useful, for
-        # example for the seeding process to know when to delete the temp file
-        # used for uploading.
-        {:ok, %{image: image, upload_pid: upload_pid}}
-
-      result ->
-        result
+        image ->
+          {:ok, image}
+      end
     end
   end
 
@@ -228,7 +174,16 @@ defmodule Philomena.Images do
     broadcast_image_update(image)
   end
 
-  defp preload_created_image(image), do: Repo.preload(image, tags: :aliases)
+  defp broadcast_image_merge(image, duplicate_of_image) do
+    Endpoint.broadcast!(
+      "firehose",
+      "image:merge",
+      %{
+        image: ImageView.render("image.json", %{image: image}),
+        duplicate_of_image: ImageView.render("image.json", %{image: duplicate_of_image})
+      }
+    )
+  end
 
   defp moderation_image_result({:ok, %{image: image}}), do: {:ok, image}
 
@@ -237,122 +192,17 @@ defmodule Philomena.Images do
 
   defp moderation_image_result(error), do: error
 
-  # Updates an image's description.
-  defp update_description(%Image{} = image, attrs) do
-    image
-    |> Image.description_changeset(attrs)
-    |> Repo.update()
-    |> reindex_after_update()
-  end
-
-  # Approves an image for public viewing.
-  #
-  # This will make the image visible to users and update necessary statistics.
-  defp approve_image(image) do
-    Multi.new()
-    |> Multi.update(:image, Image.approve_changeset(image))
-    |> UserStatistics.put_increment(image.user_id, :images_count)
-    |> put_reindex_image(:image)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{image: image}} ->
-        maybe_suggest_user_verification(image.user_id)
-
-        {:ok, image}
-
-      {:error, :image, changeset, _changes} ->
-        {:error, changeset}
-    end
-  end
-
-  # Hides the given already-loaded image from public view.
-  #
-  # This will:
-  # 1. Mark the image as hidden
-  # 2. Close all reports and duplicate reports
-  # 3. Delete all gallery interactions containing the image
-  # 4. Decrement all tag counts with the image
-  # 5. Hide the image's thumbnails and purge them from the CDN
-  # 6. Reindex the image and all of its comments
-  #
-  # Visible for testing.
-  defp put_hide_loaded_image(%Multi{} = multi, %Image{} = image, user, attrs) do
-    duplicate_reports =
-      DuplicateReport
-      |> where(state: "open")
-      |> where([d], d.image_id == ^image.id or d.duplicate_of_image_id == ^image.id)
-      |> update(set: [state: "rejected"])
-
-    fn %{locked_image: image} -> Image.hide_changeset(image, attrs, user) end
-    |> hide_image_multi(image, user, multi)
-    |> remove_gallery_interactions_multi(image)
-    |> Multi.update_all(:duplicate_reports, duplicate_reports, [])
-  end
-
-  # Idempontently unhides an image, making it visible to users again.
-  #
-  # If the image is hidden, this will:
-  # 1. Remove the hidden status from the image
-  # 2. Increment tag counts
-  # 3. Unhide thumbnails
-  # 4. Reindex the image and related content
-  #
-  # Otherwise, it will do nothing.
-  defp restore_image(image, actor) do
-    Multi.new()
-    |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-    |> Multi.run(:restore_metadata, fn _repo, %{locked_image: image} ->
-      {:ok, {image.hidden_from_users, image.hidden_image_key}}
-    end)
-    |> Multi.run(:image, fn repo, %{locked_image: image} ->
-      if image.hidden_from_users do
-        repo.update(Image.unhide_changeset(image))
-      else
-        {:ok, image}
-      end
-    end)
-    |> Multi.run(:tags, fn repo, %{locked_image: locked_image, image: image} ->
-      if locked_image.hidden_from_users do
-        image = repo.preload(image, :tags, force: true)
-        tag_ids = Enum.map(image.tags, & &1.id)
-        query = where(Tag, [t], t.id in ^tag_ids)
-
-        repo.update_all(query, inc: [images_count: 1])
-
-        {:ok, image.tags}
-      else
-        {:ok, []}
-      end
-    end)
-    |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
-      {"Image.Delete:delete", Paths.image_path(image), "Restored image #{image.id}"}
-    end)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{image: image, tags: tags, restore_metadata: {true, key}}} ->
-        spawn(fn -> Thumbnailer.unhide_thumbnails(image, key) end)
-        reindex_image(image)
-        purge_files(image, key)
-        Comments.reindex_comments_on_image(image)
-        Tags.reindex_tags(tags)
-
-        {:ok, image}
-
-      {:ok, %{image: image, restore_metadata: {false, _key}}} ->
-        {:ok, image}
-
-      error ->
-        error
-    end
-  end
-
   @doc """
   Adds a loaded-image merge to `multi` without transacting it.
 
-  The caller owns authorization and must lock the two images before composing
+  The caller owns authorization and must lock the two images before **merging**
   this service when their current state controls the operation. PostgreSQL
   mutations join the caller's transaction; thumbnail work, indexing, and the
   firehose broadcast run only after that transaction commits.
+
+  TODO: read the locked images out of the multi changes map, instead of relying
+  on the user to read the documentation which requires the multi to be merged
+  instead of simply composed
 
   ## Examples
 
@@ -373,17 +223,16 @@ defmodule Philomena.Images do
     duplicate_of_image =
       Repo.preload(duplicate_of_image, [:user, :intensity, :sources, tags: :aliases])
 
-    image
-    |> Image.merge_changeset(duplicate_of_image)
-    |> hide_image_multi(image, user, multi)
+    source_changeset =
+      Image.merge_source_changeset(image, duplicate_of_image)
+
+    target_changeset =
+      Image.merge_target_changeset(image, duplicate_of_image)
+
+    multi
+    |> put_hide_image(source_changeset, image, user)
     |> migrate_gallery_interactions_multi(image, duplicate_of_image)
-    |> Multi.run(:first_seen_at, fn _, %{} ->
-      update_first_seen_at(
-        duplicate_of_image,
-        image.first_seen_at,
-        duplicate_of_image.first_seen_at
-      )
-    end)
+    |> Multi.update(:target_image, target_changeset)
     |> Tags.put_copy_tags(image, duplicate_of_image)
     |> Multi.run(:migrate_sources, fn _, %{} ->
       {:ok, migrate_sources(image, duplicate_of_image)}
@@ -396,26 +245,18 @@ defmodule Philomena.Images do
     end)
     |> Interactions.migrate_loaded_images(image, duplicate_of_image)
     |> Multi.run(:notification, &notify_merge(&1, &2, image, duplicate_of_image))
-    |> Multi.on_commit(&after_merge(&1, duplicate_of_image))
+    |> put_process_after_hide()
+    |> Multi.on_commit(fn result ->
+      # TODO: these aren't ordered steps and some could be separate post-commit hooks
+      # to emulate the pipeline style
+      reindex_image(duplicate_of_image)
+      Comments.reindex_comments_on_image(duplicate_of_image)
+      reindex_merged_galleries(result)
+      broadcast_image_merge(result.image, duplicate_of_image)
+    end)
   end
 
-  defp after_merge(result, duplicate_of_image) do
-    process_after_hide({:ok, result})
-    reindex_image(duplicate_of_image)
-    Comments.reindex_comments_on_image(duplicate_of_image)
-    reindex_merged_galleries(result)
-
-    Endpoint.broadcast!(
-      "firehose",
-      "image:merge",
-      %{
-        image: ImageView.render("image.json", %{image: result.image}),
-        duplicate_of_image: ImageView.render("image.json", %{image: duplicate_of_image})
-      }
-    )
-  end
-
-  defp hide_image_multi(changeset, image, user, multi) do
+  defp put_hide_image(multi, changeset, image, user) do
     multi
     |> Multi.update(:image, changeset)
     |> Reports.put_close_reports(:reports, user, image_id: image.id)
@@ -482,29 +323,18 @@ defmodule Philomena.Images do
     end)
   end
 
-  defp process_after_hide(result) do
-    case result do
-      {:ok,
-       %{
-         image: image,
-         tags: tags,
-         galleries: {_, gallery_ids}
-       } = result} ->
-        spawn(fn ->
-          Thumbnailer.hide_thumbnails(image, image.hidden_image_key)
-          purge_files(image, image.hidden_image_key)
-        end)
+  defp put_process_after_hide(multi) do
+    Multi.on_commit(multi, fn %{image: image, tags: tags, galleries: {_, gallery_ids}} ->
+      spawn(fn ->
+        Thumbnailer.hide_thumbnails(image, image.hidden_image_key)
+        purge_files(image, image.hidden_image_key)
+      end)
 
-        Comments.reindex_comments_on_image(image)
-        Tags.reindex_tags(tags)
-        Galleries.reindex_galleries(gallery_ids)
-        reindex_image(image)
-
-        {:ok, result}
-
-      error ->
-        error
-    end
+      Comments.reindex_comments_on_image(image)
+      Tags.reindex_tags(tags)
+      Galleries.reindex_galleries(gallery_ids)
+      reindex_image(image)
+    end)
   end
 
   defp reindex_merged_galleries(%{
@@ -512,20 +342,6 @@ defmodule Philomena.Images do
          galleries: {_, removed_gallery_ids}
        }) do
     Galleries.reindex_galleries(Enum.uniq(migrated_gallery_ids ++ removed_gallery_ids))
-  end
-
-  defp update_first_seen_at(image, time_1, time_2) do
-    min_time =
-      case DateTime.compare(time_1, time_2) do
-        :gt -> time_2
-        _ -> time_1
-      end
-
-    Image
-    |> where(id: ^image.id)
-    |> Repo.update_all(set: [first_seen_at: min_time])
-
-    {:ok, image}
   end
 
   defp update_loaded_sources(%Image{} = image, %Actor{} = actor, attrs) do
@@ -799,17 +615,13 @@ defmodule Philomena.Images do
   @spec search_images(Actor.t(), Scope.t(), Keyword.t()) ::
           {:ok, %{images: Scrivener.Page.t(), tags: [Tag.t()]}} | {:error, String.t()}
   def search_images(%Actor{} = actor, scope, opts \\ []) do
-    execute_opts =
-      case Keyword.fetch(opts, :preload) do
-        {:ok, preloads} -> [queryable: preload(Image, ^preloads)]
-        :error -> []
-      end
-      |> Keyword.put(:hits, Keyword.get_lazy(opts, :hits, fn -> custom_ordering?(scope) end))
-
     with :ok <- authorize(actor, :index, Image),
          {:ok, {definition, tags}} <-
            ImageSearch.search_string(actor, scope, scope.q) do
-      images = ImageSearch.execute(definition, execute_opts)
+      preload = Keyword.get(opts, :preload, [:sources, tags: :aliases])
+      hits = Keyword.get(opts, :hits, custom_ordering?(scope))
+
+      images = ImageSearch.execute(definition, preload: preload, hits: hits)
 
       {:ok, %{images: images, tags: tags}}
     end
@@ -855,17 +667,17 @@ defmodule Philomena.Images do
   def watched_images(%Actor{} = actor, scope) do
     with :ok <- authorize(actor, :index, Image),
          {:ok, {definition, _tags}} <- ImageSearch.search_string(actor, scope, "my:watched") do
-      {:ok, Search.search_records(definition, preload(Image, [:sources, tags: :aliases]))}
+      {:ok, ImageSearch.execute(definition)}
     end
   end
 
   @doc """
   Loads the image named by `id` for showing, on behalf of `actor`.
 
-  The image carries its preloads plus these counts: distinct tag changes, tags
-  touched by those changes, and source changes. The real image is authorized
-  for `:show`; a forbidden hidden image returns `{:error, :unauthorized}`.
-  However, an image merged into a duplicate is
+  The image carries its preloads plus virtual fields for these counts: distinct
+  tag changes, tags touched by those changes, and source changes. The real
+  image is authorized for `:show`; a forbidden hidden image returns
+  `{:error, :unauthorized}`. However, an image merged into a duplicate is
   redirected for viewers not permitted to show it, returning
   `{:duplicate_of, image}` so the caller can act on `image.duplicate_id`. A
   malformed or unknown id is `{:error, :not_found}`.
@@ -873,7 +685,7 @@ defmodule Philomena.Images do
   ## Examples
 
       iex> load_image_for_show(actor, "1")
-      {:ok, %{image: %Image{}, tag_change_count: 2, tag_change_tag_count: 5, source_change_count: 1}}
+      {:ok, %Image{tag_change_count: 2, tag_change_tag_count: 5, source_change_count: 1}}
 
       iex> load_image_for_show(actor, "2")
       {:duplicate_of, %Image{}}
@@ -883,81 +695,42 @@ defmodule Philomena.Images do
 
   """
   @spec load_image_for_show(Actor.t(), IntegerId.integer_id()) ::
-          {:ok,
-           %{
-             image: Image.t(),
-             tag_change_count: non_neg_integer(),
-             tag_change_tag_count: non_neg_integer(),
-             source_change_count: non_neg_integer()
-           }}
+          {:ok, Image.t()}
           | {:duplicate_of, Image.t()}
           | {:error, :unauthorized | :not_found}
   def load_image_for_show(%Actor{} = actor, id) do
-    with {:ok, id} <- Loader.parse_id(id) do
-      fetch_image_for_show(actor, id)
-    end
-  end
+    with {:ok, image} <-
+           Image
+           |> from(as: :image)
+           |> join(:inner_lateral, [], subquery(TagChanges.count_query()), on: true)
+           |> join(:inner_lateral, [], subquery(SourceChanges.count_query()), on: true)
+           |> preload([:deleter, :locked_tags, :sources, user: [awards: :badge], tags: :aliases])
+           |> select([image, tag_changes, source_changes], %{
+             image
+             | tag_change_count: tag_changes.change_count,
+               tag_change_tag_count: tag_changes.tag_count,
+               source_change_count: source_changes.count
+           })
+           |> Loader.fetch(id) do
+      case authorize(actor, :show, image) do
+        :ok ->
+          {:ok, image}
 
-  defp fetch_image_for_show(actor, id) do
-    Image
-    |> from(as: :image)
-    |> where(id: ^id)
-    |> join(
-      :inner_lateral,
-      [],
-      subquery(
-        TagChange
-        |> where(image_id: parent_as(:image).id)
-        |> join(:left, [c], t in assoc(c, :tag_change_tags))
-        |> select([c, t], %{
-          change_count: count(c, :distinct),
-          tag_count: count(t)
-        })
-      ),
-      on: true
-    )
-    |> join(
-      :inner_lateral,
-      [],
-      subquery(
-        SourceChange
-        |> where(image_id: parent_as(:image).id)
-        |> select(%{count: count()})
-      ),
-      on: true
-    )
-    |> preload([:deleter, :locked_tags, :sources, user: [awards: :badge], tags: :aliases])
-    |> select([i, t, s], {i, t.change_count, t.tag_count, s.count})
-    |> Repo.one()
-    |> case do
-      nil ->
-        {:error, :not_found}
+        {:error, :unauthorized} when not is_nil(image.duplicate_id) ->
+          # NOTE: the result contains the *source* image, not the target.
+          {:duplicate_of, image}
 
-      {image, tag_change_count, tag_change_tag_count, source_change_count} ->
-        case authorize(actor, :show, image) do
-          :ok ->
-            {:ok,
-             %{
-               image: image,
-               tag_change_count: tag_change_count,
-               tag_change_tag_count: tag_change_tag_count,
-               source_change_count: source_change_count
-             }}
-
-          {:error, :unauthorized} when not is_nil(image.duplicate_id) ->
-            {:duplicate_of, image}
-
-          {:error, :unauthorized} = error ->
-            error
-        end
+        {:error, :unauthorized} ->
+          {:error, :unauthorized}
+      end
     end
   end
 
   @doc """
   Assembles the `ImagePage` for `actor`: the visible page of comments,
   the viewer's subscription state, their galleries paired with membership of
-  this image, their interactions, and changesets for adding a comment and
-  editing its metadata.
+  this image, their interactions, and changesets for each action available on
+  the page.
 
   Clears the viewer's notification for the image as a side effect, so the
   caller must read any notification counts afterwards. `comment_pagination`
@@ -965,9 +738,9 @@ defmodule Philomena.Images do
   prefer jumping to the newest comments land on the last page unless they
   asked for a specific one. Interaction controls and comment changesets are
   omitted when the actor is banned, lacks write access, the image is hidden or
-  forced-filtered, or the corresponding action is forbidden. Image changesets
-  follow metadata-edit authorization so authorized moderators can still render
-  management controls for hidden images.
+  forced-filtered, or the corresponding action is forbidden. Moderation
+  changesets follow their own action authorization so authorized staff can
+  still render management controls for hidden images.
 
   ## Examples
 
@@ -990,10 +763,17 @@ defmodule Philomena.Images do
       watching: subscribed?(image, user),
       can_interact: can_interact,
       user_galleries: gallery_choices,
-      interactions:
-        if(can_interact, do: Interactions.user_interactions(actor, [image]), else: []),
+      interactions: Interactions.user_interactions(actor, [image]),
       comment_changeset: comment_changeset_for(actor, image),
-      image_changeset: image_changeset_for(actor, image)
+      description_changeset: image_changeset_for(actor, image, :edit_description),
+      tag_changeset: image_changeset_for(actor, image, :edit_metadata),
+      source_changeset: image_changeset_for(actor, image, :edit_metadata),
+      file_changeset: image_changeset_for(actor, image, :replace_file),
+      hide_changeset: image_changeset_for(actor, image, :hide),
+      feature_changeset: image_changeset_for(actor, image, :feature),
+      repair_changeset: image_changeset_for(actor, image, :repair),
+      hash_changeset: image_changeset_for(actor, image, :remove_hash),
+      uploader_changeset: uploader_changeset_for(actor, image)
     }
   end
 
@@ -1022,18 +802,23 @@ defmodule Philomena.Images do
     end
   end
 
-  defp image_changeset_for(actor, image) do
-    permitted? =
-      Enum.any?([:edit_metadata, :edit_description, :hide], fn action ->
-        authorize(actor, action, image) == :ok
-      end)
-
+  defp image_changeset_for(actor, image, action) do
     with :ok <- verify_write_access(actor),
-         true <- permitted?,
+         :ok <- authorize(actor, action, image),
          :ok <- Filtering.verify_not_forced(actor, image) do
       change_image(%{image | sources: sources_for_edit(image.sources)})
     else
       _error -> nil
+    end
+  end
+
+  defp uploader_changeset_for(actor, image) do
+    case authorize(actor, :show, :identity_metadata) do
+      :ok ->
+        image_changeset_for(actor, image, :update_uploader)
+
+      _error ->
+        nil
     end
   end
 
@@ -1087,7 +872,8 @@ defmodule Philomena.Images do
   5 seconds gets `{:error, :rate_limited}`.
 
   Upon success, the image row has been created and processing continues in the
-  background.
+  background. Approved uploads increment the uploader's image count and may
+  create a verification report in the same transaction.
 
   ## Examples
 
@@ -1100,18 +886,156 @@ defmodule Philomena.Images do
   """
   @spec upload_image(Actor.t(), map() | nil) ::
           {:ok, image_upload()}
-          | {:error, :ban}
-          | {:error, :unauthorized}
-          | {:error, :rate_limited}
-          | Ecto.Multi.failure()
-  def upload_image(%Actor{} = actor, params) do
+          | {:error, :ban | :unauthorized | :rate_limited | Ecto.Changeset.t()}
+  def upload_image(%Actor{user: user} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Image),
-         :ok <- RateLimiter.check_rate_limit(actor, :image_create),
-         {:ok, result} <- create_image(actor, params) do
-      RateLimiter.record_action(actor, :image_create, @image_create_window)
-      {:ok, result}
+         :ok <- RateLimiter.check_rate_limit(actor, :image_create) do
+      tags = Tags.get_or_create_tags(params["tag_input"])
+      sources = params["sources"]
+
+      image =
+        %Image{}
+        |> Image.creation_changeset(params, actor)
+        |> Image.source_changeset(params, [], sources)
+        |> Image.tag_changeset(params, [], tags)
+        |> Image.dnp_changeset(user)
+        |> Uploader.analyze_upload(params)
+        |> maybe_approve_image(user)
+
+      Multi.new()
+      |> Multi.insert(:image, image)
+      |> Multi.run(:added_tag_count, fn repo, %{image: image} ->
+        tag_ids = Enum.map(image.added_tags, & &1.id)
+        count = Tags.update_image_counts(repo, 1, tag_ids)
+
+        {:ok, count}
+      end)
+      |> maybe_subscribe_on(:image, user, :watch_on_upload)
+      |> put_approval_steps()
+      |> put_reindex_image(:image)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          RateLimiter.record_action(actor, :image_create, @image_create_window)
+
+          upload_pid = async_upload(image, params["image"])
+
+          # FIXME: put_reindex_tags
+          Tags.reindex_tags(image.added_tags)
+
+          image = Repo.preload(image, tags: :aliases)
+
+          broadcast_image_create(image)
+
+          # Return the upload PID along with the created image so that the caller
+          # can control the lifecycle of the upload if needed. It's useful, for
+          # example for the seeding process to know when to delete the temp file
+          # used for uploading.
+          {:ok, %{image: image, upload_pid: upload_pid}}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
+  end
+
+  @typedoc """
+  Result of the `upload_image/2` function. The image was created in the DB but an
+  upload process could still be running in the background with its PID given in the
+  `upload_pid` field.
+  """
+  @type image_upload :: %{
+          image: %Image{},
+          upload_pid: pid
+        }
+
+  defp async_upload(image, plug_upload) do
+    linked_pid =
+      spawn(fn ->
+        # Make sure task will finish before VM exit
+        Process.flag(:trap_exit, true)
+
+        # Wait to be freed up by the caller
+        receive do
+          :ready -> nil
+        end
+
+        # Start trying to upload
+        try_upload(image, 0)
+      end)
+
+    # Give the upload to the linked process
+    Plug.Upload.give_away(plug_upload, linked_pid, self())
+
+    # Free up the linked process
+    send(linked_pid, :ready)
+
+    linked_pid
+  end
+
+  defp try_upload(image, retry_count) when retry_count < 100 do
+    try do
+      Uploader.persist_upload(image)
+      repair_image(image)
+    rescue
+      e ->
+        Logger.error("Upload failed: #{inspect(e)} [try ##{retry_count}]")
+        Process.sleep(5000)
+        try_upload(image, retry_count + 1)
+    end
+  end
+
+  defp try_upload(image, retry_count) do
+    Logger.error("Aborting upload of #{image.id} after #{retry_count} retries")
+  end
+
+  defp maybe_approve_image(changeset, nil), do: changeset
+
+  defp maybe_approve_image(changeset, %User{verified: false, role: "user"}), do: changeset
+
+  defp maybe_approve_image(changeset, _user) do
+    Image.approve_changeset(changeset)
+  end
+
+  defp put_approval_steps(%Multi{} = multi) do
+    multi
+    |> UserStatistics.put_increment(
+      fn %{image: image} ->
+        if image.approved, do: image.user_id
+      end,
+      :images_count
+    )
+    |> Multi.merge(fn
+      %{image: %{approved: true, user_id: user_id}} when user_id != nil ->
+        put_suggest_user_verification(Multi.new(), user_id)
+
+      _changes ->
+        Multi.new()
+    end)
+  end
+
+  defp put_suggest_user_verification(%Multi{} = multi, user_id) do
+    multi
+    |> Multi.one(:verification_candidate, where(User, id: ^user_id))
+    |> Multi.merge(fn
+      %{verification_candidate: %{images_count: 5, verified: false}} ->
+        # TODO: verification occurs at exactly 5 images to prevent subsequent
+        # approved uploads from generating redundant user verification reports.
+        # This may result in some users not receiving verification reports.
+        # It would be better to check to see if the verification report has
+        # been created instead and then create it if it has not been
+        Reports.put_create_system_report(
+          Multi.new(),
+          "Verification",
+          "User has uploaded enough approved images to be considered for verification.",
+          :reported_user_id,
+          user_id
+        )
+
+      _changes ->
+        Multi.new()
+    end)
   end
 
   @doc """
@@ -1143,42 +1067,8 @@ defmodule Philomena.Images do
     end
   end
 
-  @doc """
-  Returns the 1-based page number (as a string) on which the image `image_id`
-  names appears when all images are listed by descending id, on behalf of
-  `actor`.
-
-  Loading and authorization follow `find_consecutive_image/3`.
-
-  ## Examples
-
-      iex> find_image_index_page(actor, scope, "42")
-      {:ok, "3"}
-
-  """
-  @spec find_image_index_page(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
-          {:ok, String.t()} | {:error, :unauthorized | :not_found}
-  def find_image_index_page(%Actor{} = actor, scope, image_id) do
-    with {:ok, image} <- load_image_for_navigation(actor, image_id) do
-      pagination = %{scope.pagination | page_number: 1}
-
-      {definition, _tags} =
-        ImageSearch.query(actor, scope, %{range: %{id: %{gt: image.id}}}, pagination: pagination)
-
-      images = ImageSearch.execute(definition, queryable: Image)
-
-      {:ok, page_for_offset(pagination.page_size, images.total_entries)}
-    end
-  end
-
-  defp page_for_offset(per_page, offset) do
-    offset
-    |> div(per_page)
-    |> Kernel.+(1)
-    |> to_string()
-  end
-
   defp navigation_query(actor, scope) do
+    # TODO: probably should make this its own form
     scope.q
     |> match_all_if_blank()
     |> ImageQuery.compile(user: actor.user)
@@ -1191,6 +1081,34 @@ defmodule Philomena.Images do
       "*"
     else
       input
+    end
+  end
+
+  @doc """
+  Returns the 1-based page number on which the image `image_id`
+  names appears when all images are listed by descending id, on behalf of
+  `actor`.
+
+  Loading and authorization follow `find_consecutive_image/3`.
+
+  ## Examples
+
+      iex> find_image_index_page(actor, scope, "42")
+      {:ok, 3}
+
+  """
+  @spec find_image_index_page(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
+          {:ok, pos_integer()} | {:error, :unauthorized | :not_found}
+  def find_image_index_page(%Actor{} = actor, scope, image_id) do
+    with {:ok, image} <- load_image_for_navigation(actor, image_id) do
+      pagination = %{scope.pagination | page_number: 1}
+
+      {definition, _tags} =
+        ImageSearch.query(actor, scope, %{range: %{id: %{gt: image.id}}}, pagination: pagination)
+
+      images = ImageSearch.execute(definition, preload: [])
+
+      {:ok, div(images.total_entries, pagination.page_size) + 1}
     end
   end
 
@@ -1287,9 +1205,15 @@ defmodule Philomena.Images do
              pagination: %{page_size: 1},
              sorts: &ImageSearch.parse_sort(%{"sf" => "random"}, &1)
            ) do
-      case definition |> ImageSearch.execute(queryable: Image) |> Enum.to_list() do
-        [image] -> {:ok, image.id}
-        [] -> {:ok, nil}
+      definition
+      |> ImageSearch.execute(preload: [])
+      |> Enum.to_list()
+      |> case do
+        [image] ->
+          {:ok, image.id}
+
+        [] ->
+          {:ok, nil}
       end
     end
   end
@@ -1355,63 +1279,15 @@ defmodule Philomena.Images do
     update_loaded_sources(image, actor, attrs)
   end
 
-  @typedoc """
-  Result of the `create_image/3` function. The image was created in a DB but an
-  upload process could still be running in the background with its PID given in the
-  `upload_pid` field.
-  """
-  @type image_upload :: %{
-          image: %Image{},
-          upload_pid: pid
-        }
-
-  defp async_upload(image, plug_upload) do
-    linked_pid =
-      spawn(fn ->
-        # Make sure task will finish before VM exit
-        Process.flag(:trap_exit, true)
-
-        # Wait to be freed up by the caller
-        receive do
-          :ready -> nil
-        end
-
-        # Start trying to upload
-        try_upload(image, 0)
-      end)
-
-    # Give the upload to the linked process
-    Plug.Upload.give_away(plug_upload, linked_pid, self())
-
-    # Free up the linked process
-    send(linked_pid, :ready)
-
-    linked_pid
-  end
-
-  defp try_upload(image, retry_count) when retry_count < 100 do
-    try do
-      Uploader.persist_upload(image)
-      repair_image(image)
-    rescue
-      e ->
-        Logger.error("Upload failed: #{inspect(e)} [try ##{retry_count}]")
-        Process.sleep(5000)
-        try_upload(image, retry_count + 1)
-    end
-  end
-
-  defp try_upload(image, retry_count) do
-    Logger.error("Aborting upload of #{image.id} after #{retry_count} retries")
-  end
-
   @doc """
   Approves the image named by `image_id` for public viewing, on behalf of
   `actor`.
 
-  An image that is already approved is `{:error, :already_approved}` and is left
+  An image that is already approved returns an error changeset and is left
   untouched. On success the image is made visible, statistics are updated, the
-  image is reindexed, and a moderation log is written attributing the approval to `actor`.
+  image is reindexed, and a moderation log is written attributing the approval
+  to `actor`. Approval at the uploader's fifth approved image also creates a
+  verification report in the same transaction.
 
   Returns `{:ok, image}` with the approved image.
 
@@ -1425,67 +1301,35 @@ defmodule Philomena.Images do
 
   """
   @spec approve_image(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :already_approved}
+          {:ok, Image.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found}
   def approve_image(%Actor{} = actor, image_id) do
-    with {:ok, image} <- load_writable_image_member(actor, :approve, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :approve, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-      |> Multi.run(:state, fn
-        _repo, %{locked_image: %Image{approved: false}} -> {:ok, :unapproved}
-        _repo, %{locked_image: %Image{approved: true}} -> {:error, :already_approved}
-      end)
       |> Multi.update(:image, fn %{locked_image: image} -> Image.approve_changeset(image) end)
-      |> UserStatistics.put_increment(image.user_id, :images_count)
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
-        {"Image.Approve:create", Paths.image_path(image), "Approved image #{image.id}"}
-      end)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Image.Approve:create",
+        Paths.image_path(image),
+        "Approved image #{image.id}"
+      )
+      |> put_approval_steps()
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: image}} ->
-          maybe_suggest_user_verification(image.user_id)
+        {:ok, %{image: %Image{} = image}} ->
           {:ok, image}
 
-        {:error, :image, changeset, _changes} ->
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
-
-        {:error, :state, :already_approved, _changes} ->
-          {:error, :already_approved}
 
         error ->
           error
       end
-    end
-  end
-
-  defp maybe_approve_image(image, nil), do: image
-
-  defp maybe_approve_image(image, %User{verified: false, role: role}) when role == "user",
-    do: image
-
-  defp maybe_approve_image(image, _user) do
-    case approve_image(image) do
-      {:ok, image} -> image
-      {:error, _changeset} -> image
-    end
-  end
-
-  defp maybe_suggest_user_verification(nil), do: false
-
-  defp maybe_suggest_user_verification(user_id) do
-    case Repo.get(User, user_id) do
-      %User{images_count: 5, verified: false} ->
-        Multi.new()
-        |> Reports.put_create_system_report(
-          "Verification",
-          "User has uploaded enough approved images to be considered for verification.",
-          :reported_user_id,
-          user_id
-        )
-        |> Multi.transact()
-
-      _user ->
-        false
     end
   end
 
@@ -1562,7 +1406,8 @@ defmodule Philomena.Images do
   @spec feature_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, ImageFeature.t()} | {:error, :ban | :unauthorized | :not_found | :deleted}
   def feature_image(%Actor{} = actor, image_id) do
-    with {:ok, image} <- load_writable_image_member(actor, :feature, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :feature, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.run(:state, fn
@@ -1613,7 +1458,8 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
   def destroy_image(%Actor{} = actor, image_id) do
-    with {:ok, image} <- load_writable_image_member(actor, :destroy, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :destroy, image_id) do
       result =
         Multi.new()
         |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
@@ -1666,7 +1512,8 @@ defmodule Philomena.Images do
   @spec set_comment_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def set_comment_locked(%Actor{} = actor, image_id, locked?) do
-    with {:ok, image} <- load_writable_image_member(actor, :lock_comments, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :lock_comments, image_id) do
       {log_type, log_body} =
         if locked? do
           {"Image.CommentLock:create", "Locked comments on image #{image.id}"}
@@ -1710,7 +1557,8 @@ defmodule Philomena.Images do
   @spec set_description_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def set_description_locked(%Actor{} = actor, image_id, locked?) do
-    with {:ok, image} <- load_writable_image_member(actor, :lock_description, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :lock_description, image_id) do
       {log_type, log_body} =
         if locked? do
           {"Image.DescriptionLock:create", "Locked description editing on image #{image.id}"}
@@ -1754,7 +1602,8 @@ defmodule Philomena.Images do
   @spec set_tag_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def set_tag_locked(%Actor{} = actor, image_id, locked?) do
-    with {:ok, image} <- load_writable_image_member(actor, :lock_tags, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :lock_tags, image_id) do
       {log_type, log_body} =
         if locked? do
           {"Image.TagLock:create", "Locked tags on image #{image.id}"}
@@ -1798,7 +1647,8 @@ defmodule Philomena.Images do
   @spec remove_image_hash(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def remove_image_hash(%Actor{} = actor, image_id) do
-    with {:ok, image} <- load_writable_image_member(actor, :remove_hash, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :remove_hash, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} -> Image.remove_hash_changeset(image) end)
@@ -1832,7 +1682,9 @@ defmodule Philomena.Images do
   @spec load_hidable_image(Actor.t(), IntegerId.integer_id(), Keyword.t()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def load_hidable_image(%Actor{} = actor, image_id, opts \\ []) do
-    load_writable_image_member(actor, :hide, image_id, Keyword.get(opts, :preload, []))
+    with :ok <- verify_write_access(actor) do
+      load_image_member(actor, :hide, image_id, Keyword.get(opts, :preload, []))
+    end
   end
 
   @doc """
@@ -1857,7 +1709,8 @@ defmodule Philomena.Images do
   @spec update_scratchpad(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def update_scratchpad(%Actor{} = actor, image_id, attrs) do
-    with {:ok, image} <- load_writable_image_member(actor, :edit_scratchpad, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :edit_scratchpad, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -1898,8 +1751,9 @@ defmodule Philomena.Images do
   @spec remove_source_history(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def remove_source_history(%Actor{} = actor, image_id) do
-    with {:ok, image} <-
-           load_writable_image_member(actor, :remove_source_history, image_id, [:source_changes]) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <-
+           load_image_member(actor, :remove_source_history, image_id, [:source_changes]) do
       query = Image |> where(id: ^image.id) |> preload(:source_changes)
 
       Multi.new()
@@ -1942,7 +1796,8 @@ defmodule Philomena.Images do
   @spec repair_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def repair_image(%Actor{} = actor, image_id) do
-    with {:ok, image} <- load_writable_image_member(actor, :repair, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :repair, image_id) do
       query = where(Image, id: ^image.id)
 
       Multi.new()
@@ -2013,7 +1868,8 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :deleted | Ecto.Changeset.t()}
   def update_file(%Actor{} = actor, image_id, attrs) do
-    with {:ok, image} <- load_writable_image_member(actor, :replace_file, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :replace_file, image_id) do
       result =
         Multi.new()
         |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
@@ -2072,15 +1928,28 @@ defmodule Philomena.Images do
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_description(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, %Image{description: old_description} = image} <-
+         {:ok, image} <-
            load_image_member(actor, :edit_description, image_id, [
              :user,
              :sources,
              tags: :aliases
-           ]),
-         {:ok, image} <- update_description(image, attrs) do
-      broadcast_description_update(image, old_description)
-      {:ok, {image, old_description}}
+           ]) do
+      old_description = image.description
+
+      image
+      |> Image.description_changeset(attrs)
+      |> Repo.update()
+      # FIXME Multi, put_reindex_image
+      |> reindex_after_update()
+      |> case do
+        {:ok, image} ->
+          broadcast_description_update(image, old_description)
+
+          {:ok, {image, old_description}}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -2177,7 +2046,8 @@ defmodule Philomena.Images do
   @spec update_locked_tags(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def update_locked_tags(%Actor{} = actor, image_id, attrs) do
-    with {:ok, image} <- load_writable_image_member(actor, :lock_tags, image_id, [:locked_tags]) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]) do
       new_tags = Tags.get_or_create_tags(attrs["tag_input"])
 
       query = Image |> where(id: ^image.id) |> preload(:locked_tags)
@@ -2338,7 +2208,8 @@ defmodule Philomena.Images do
           | {:error, :ban | :unauthorized | :not_found | :invalid_params | Ecto.Changeset.t()}
   def update_uploader(%Actor{} = actor, image_id, image_params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
-         {:ok, image} <- load_writable_image_member(actor, :update_uploader, image_id),
+         :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :update_uploader, image_id),
          true <- is_map(image_params) do
       result =
         Multi.new()
@@ -2392,7 +2263,8 @@ defmodule Philomena.Images do
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def update_anonymous(%Actor{} = actor, image_id, anonymous?) do
     with :ok <- authorize(actor, :show, :identity_metadata),
-         {:ok, image} <- load_writable_image_member(actor, :update_anonymous, image_id) do
+         :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :update_anonymous, image_id) do
       log_type = if anonymous?, do: "Image.Anonymous:create", else: "Image.Anonymous:delete"
 
       Multi.new()
@@ -2434,7 +2306,8 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
   def update_hide_reason(%Actor{} = actor, image_id, attrs) do
-    with {:ok, image} <- load_writable_image_member(actor, :update_hide_reason, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :update_hide_reason, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.run(:state, fn
@@ -2495,11 +2368,22 @@ defmodule Philomena.Images do
   """
   @spec hide_image(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
-  def hide_image(%Actor{} = actor, image_id, attrs) do
-    with {:ok, image} <- load_writable_image_member(actor, :hide, image_id) do
+  def hide_image(%Actor{user: user} = actor, image_id, attrs) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :hide, image_id) do
+      duplicate_reports_query =
+        DuplicateReport
+        |> where(state: "open")
+        |> where([d], d.image_id == ^image.id or d.duplicate_of_image_id == ^image.id)
+        |> update(set: [state: "rejected"])
+
+      changeset_fun = fn %{locked_image: image} -> Image.hide_changeset(image, attrs, user) end
+
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-      |> put_hide_loaded_image(image, actor.user, attrs)
+      |> put_hide_image(changeset_fun, image, user)
+      |> remove_gallery_interactions_multi(image)
+      |> Multi.update_all(:duplicate_reports, duplicate_reports_query, [])
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: hidden} ->
         {
           "Image.Delete:create",
@@ -2507,8 +2391,8 @@ defmodule Philomena.Images do
           "Deleted image #{hidden.id} (#{hidden.deletion_reason})"
         }
       end)
+      |> put_process_after_hide()
       |> Multi.transact()
-      |> process_after_hide()
       |> case do
         {:ok, %{image: hidden}} -> {:ok, hidden}
         {:error, _op, _changeset, _changes} -> {:error, :hide_failed}
@@ -2539,8 +2423,54 @@ defmodule Philomena.Images do
   @spec unhide_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def unhide_image(%Actor{} = actor, image_id) do
-    with {:ok, image} <- load_writable_image_member(actor, :unhide, image_id) do
-      restore_image(image, actor)
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :unhide, image_id) do
+      Multi.new()
+      |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
+      |> Multi.run(:restore_metadata, fn _repo, %{locked_image: image} ->
+        {:ok, {image.hidden_from_users, image.hidden_image_key}}
+      end)
+      |> Multi.run(:image, fn repo, %{locked_image: image} ->
+        # FIXME: don't allow unhiding visible images
+        if image.hidden_from_users do
+          repo.update(Image.unhide_changeset(image))
+        else
+          {:ok, image}
+        end
+      end)
+      |> Multi.run(:tags, fn repo, %{locked_image: locked_image, image: image} ->
+        if locked_image.hidden_from_users do
+          image = repo.preload(image, :tags, force: true)
+          tag_ids = Enum.map(image.tags, & &1.id)
+          query = where(Tag, [t], t.id in ^tag_ids)
+
+          repo.update_all(query, inc: [images_count: 1])
+
+          {:ok, image.tags}
+        else
+          {:ok, []}
+        end
+      end)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
+        {"Image.Delete:delete", Paths.image_path(image), "Restored image #{image.id}"}
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{image: image, tags: tags, restore_metadata: {true, key}}} ->
+          spawn(fn -> Thumbnailer.unhide_thumbnails(image, key) end)
+          reindex_image(image)
+          purge_files(image, key)
+          Comments.reindex_comments_on_image(image)
+          Tags.reindex_tags(tags)
+
+          {:ok, image}
+
+        {:ok, %{image: image, restore_metadata: {false, _key}}} ->
+          {:ok, image}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -2900,7 +2830,8 @@ defmodule Philomena.Images do
         ) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def delete_user_vote(%Actor{} = actor, image_id, user_id) do
-    with {:ok, image} <- load_writable_image_member(actor, :tamper, image_id),
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :tamper, image_id),
          {:ok, user} <- load_vote_user(user_id) do
       Multi.new()
       |> ImageVotes.delete_vote_for_loaded_image(image, user)

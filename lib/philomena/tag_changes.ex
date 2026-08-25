@@ -646,6 +646,30 @@ defmodule Philomena.TagChanges do
   end
 
   @doc """
+  Builds a lateral query that counts tag-change batches and changed tags for
+  the image in the parent query.
+
+  The returned query expects an `:image` parent binding and is intended for
+  use with `Ecto.Query.subquery/1`.
+
+  ## Examples
+
+      iex> TagChanges.count_query()
+      #Ecto.Query<...>
+
+  """
+  @spec count_query() :: Ecto.Query.t()
+  def count_query do
+    TagChange
+    |> where(image_id: parent_as(:image).id)
+    |> join(:left, [tag_change], tag_change_tag in assoc(tag_change, :tag_change_tags))
+    |> select([tag_change, tag], %{
+      change_count: count(tag_change, :distinct),
+      tag_count: count(tag)
+    })
+  end
+
+  @doc """
   Updates tag-change search documents after a user rename.
 
   ## Examples

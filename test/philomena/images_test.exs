@@ -19,6 +19,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.Notifications
   alias Philomena.Notifications.ImageCommentNotification
   alias Philomena.Notifications.ImageMergeNotification
+  alias Philomena.Reports.Report
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.TagChanges.Limits
   alias Philomena.TagChanges.TagChange
@@ -36,6 +37,7 @@ defmodule Philomena.ImagesTest do
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
   import Philomena.CommentsFixtures
+  import Philomena.RulesFixtures
   import Philomena.TagsFixtures
 
   # A truthy ban value in the shape production passes (the result of
@@ -238,7 +240,7 @@ defmodule Philomena.ImagesTest do
 
       attrs = %{"image" => png_upload(), "tag_input" => "safe, solo, mare"}
 
-      assert {:error, :image, changeset, _changes} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                Images.upload_image(actor(user), attrs)
 
       assert "has already been uploaded: it's image #{existing.id}" in errors_on(changeset).image
@@ -1323,20 +1325,44 @@ defmodule Philomena.ImagesTest do
       assert approved.id == image.id
     end
 
-    test "an already-approved image is already_approved with no log or state change" do
+    test "suggests verification when approval reaches the uploader's fifth image" do
+      moderator = moderator_user_fixture()
+      uploader = confirmed_user_fixture()
+      rule_fixture(name: "Verification")
+
+      uploader
+      |> Ecto.Changeset.change(images_count: 4)
+      |> Repo.update!()
+
+      image = image_fixture(approved: false, user_id: uploader.id)
+
+      assert {:ok, approved} = Images.approve_image(actor(moderator), image.id)
+      assert approved.approved
+      assert Repo.reload!(uploader).images_count == 5
+
+      assert %Report{reported_user_id: uploader_id, reason: reason, system: true} =
+               Repo.one!(from report in Report, where: report.reported_user_id == ^uploader.id)
+
+      assert uploader_id == uploader.id
+
+      assert reason ==
+               "User has uploaded enough approved images to be considered for verification."
+    end
+
+    test "an already-approved image returns a changeset error with no log or state change" do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: true)
 
-      assert Images.approve_image(actor(moderator), to_string(image.id)) ==
-               {:error, :already_approved}
+      assert {:error, %{errors: [approved: {"must be false", []}]}} =
+               Images.approve_image(actor(moderator), to_string(image.id))
 
       assert Repo.reload!(image).approved
       assert moderation_log_count() == 0
     end
 
-    test "a regular user on an already-approved image is unauthorized, not already_approved" do
+    test "a regular user on an already-approved image is unauthorized" do
       # Authorization runs before the approved-state check, so a regular user
-      # fails :approve and never reaches the already_approved branch.
+      # fails :approve and never reaches the approved-state validation.
       user = confirmed_user_fixture()
       image = image_fixture(approved: true)
 
@@ -4132,11 +4158,11 @@ defmodule Philomena.ImagesTest do
     test "an anonymous viewer loads a visible image with zero change counts" do
       image = image_fixture()
 
-      assert {:ok, result} = Images.load_image_for_show(actor(), to_string(image.id))
-      assert result.image.id == image.id
-      assert result.tag_change_count == 0
-      assert result.tag_change_tag_count == 0
-      assert result.source_change_count == 0
+      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(image.id))
+      assert loaded.id == image.id
+      assert loaded.tag_change_count == 0
+      assert loaded.tag_change_tag_count == 0
+      assert loaded.source_change_count == 0
     end
 
     test "the change counts reflect recorded tag and source changes" do
@@ -4145,16 +4171,16 @@ defmodule Philomena.ImagesTest do
       source_change_fixture(image)
       source_change_fixture(image)
 
-      assert {:ok, result} = Images.load_image_for_show(actor(), to_string(image.id))
-      assert result.tag_change_count == 1
-      assert result.tag_change_tag_count == 2
-      assert result.source_change_count == 2
+      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(image.id))
+      assert loaded.tag_change_count == 1
+      assert loaded.tag_change_tag_count == 2
+      assert loaded.source_change_count == 2
     end
 
     test "the show preloads are populated on the loaded image" do
       image = image_fixture(sources: ["https://example.com/a"])
 
-      assert {:ok, %{image: loaded}} = Images.load_image_for_show(actor(), to_string(image.id))
+      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(image.id))
       assert Ecto.assoc_loaded?(loaded.tags)
       assert Ecto.assoc_loaded?(loaded.sources)
       assert Ecto.assoc_loaded?(loaded.locked_tags)
@@ -4163,7 +4189,7 @@ defmodule Philomena.ImagesTest do
     test "accepts an integer id" do
       image = image_fixture()
 
-      assert {:ok, %{image: loaded}} = Images.load_image_for_show(actor(), image.id)
+      assert {:ok, loaded} = Images.load_image_for_show(actor(), image.id)
       assert loaded.id == image.id
     end
 
@@ -4193,8 +4219,7 @@ defmodule Philomena.ImagesTest do
       original = image_fixture()
       duplicate = image_fixture(duplicate_id: original.id)
 
-      assert {:ok, %{image: loaded}} =
-               Images.load_image_for_show(actor(), to_string(duplicate.id))
+      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(duplicate.id))
 
       assert loaded.id == duplicate.id
     end
@@ -4204,7 +4229,7 @@ defmodule Philomena.ImagesTest do
       original = image_fixture()
       duplicate = image_fixture(duplicate_id: original.id, hidden_from_users: true)
 
-      assert {:ok, %{image: loaded}} =
+      assert {:ok, loaded} =
                Images.load_image_for_show(actor(moderator), to_string(duplicate.id))
 
       assert loaded.id == duplicate.id
@@ -4243,7 +4268,15 @@ defmodule Philomena.ImagesTest do
       assert is_list(page.user_galleries)
       assert is_list(page.interactions)
       assert %Ecto.Changeset{} = page.comment_changeset
-      assert %Ecto.Changeset{} = page.image_changeset
+      assert %Ecto.Changeset{} = page.tag_changeset
+      assert %Ecto.Changeset{} = page.source_changeset
+      refute page.description_changeset
+      refute page.hide_changeset
+      refute page.file_changeset
+      refute page.feature_changeset
+      refute page.repair_changeset
+      refute page.hash_changeset
+      refute page.uploader_changeset
     end
 
     test "assembles the page struct for an anonymous viewer" do
@@ -4267,7 +4300,15 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.image_changeset == nil
+      assert page.description_changeset == nil
+      assert page.tag_changeset == nil
+      assert page.source_changeset == nil
+      assert page.file_changeset == nil
+      assert page.hide_changeset == nil
+      assert page.feature_changeset == nil
+      assert page.repair_changeset == nil
+      assert page.hash_changeset == nil
+      assert page.uploader_changeset == nil
     end
 
     test "a forced-filtered image gets no write controls or mutation changesets" do
@@ -4281,7 +4322,15 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.image_changeset == nil
+      assert page.description_changeset == nil
+      assert page.tag_changeset == nil
+      assert page.source_changeset == nil
+      assert page.file_changeset == nil
+      assert page.hide_changeset == nil
+      assert page.feature_changeset == nil
+      assert page.repair_changeset == nil
+      assert page.hash_changeset == nil
+      assert page.uploader_changeset == nil
     end
 
     test "a hidden image gets no interaction controls even for a moderator" do
@@ -4293,7 +4342,44 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert %Ecto.Changeset{} = page.image_changeset
+      assert %Ecto.Changeset{} = page.description_changeset
+      assert %Ecto.Changeset{} = page.tag_changeset
+      assert %Ecto.Changeset{} = page.source_changeset
+      assert %Ecto.Changeset{} = page.file_changeset
+      assert %Ecto.Changeset{} = page.hide_changeset
+      assert %Ecto.Changeset{} = page.feature_changeset
+      assert %Ecto.Changeset{} = page.repair_changeset
+      assert %Ecto.Changeset{} = page.hash_changeset
+      assert %Ecto.Changeset{} = page.uploader_changeset
+    end
+
+    test "an image uploader can edit the description" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id)
+
+      page = Images.load_image_page(actor(uploader), image, page: 1, page_size: 25)
+
+      assert %Ecto.Changeset{} = page.description_changeset
+      assert %Ecto.Changeset{} = page.tag_changeset
+      assert %Ecto.Changeset{} = page.source_changeset
+      refute page.hide_changeset
+    end
+
+    test "staff gets changesets for image management actions" do
+      staff = moderator_user_fixture()
+      image = image_fixture()
+
+      page = Images.load_image_page(actor(staff), image, page: 1, page_size: 25)
+
+      assert %Ecto.Changeset{} = page.description_changeset
+      assert %Ecto.Changeset{} = page.tag_changeset
+      assert %Ecto.Changeset{} = page.source_changeset
+      assert %Ecto.Changeset{} = page.file_changeset
+      assert %Ecto.Changeset{} = page.hide_changeset
+      assert %Ecto.Changeset{} = page.feature_changeset
+      assert %Ecto.Changeset{} = page.repair_changeset
+      assert %Ecto.Changeset{} = page.hash_changeset
+      assert %Ecto.Changeset{} = page.uploader_changeset
     end
 
     test "watching is true once the viewer is subscribed" do
@@ -4410,6 +4496,32 @@ defmodule Philomena.ImagesTest do
       }
 
       assert image_id == image.id
+      await_async_upload()
+    end
+
+    test "a trusted actor's approved upload increments the count and suggests verification" do
+      user = admin_user_fixture()
+      rule_fixture(name: "Verification")
+
+      user
+      |> Ecto.Changeset.change(images_count: 4)
+      |> Repo.update!()
+
+      assert {:ok, %{image: image, upload_pid: pid}} =
+               Images.upload_image(actor(user), %{
+                 "image" => png_upload(),
+                 "tag_input" => "safe, solo, pony"
+               })
+
+      assert image.approved
+      assert Repo.reload!(user).images_count == 5
+
+      assert %Report{reported_user_id: user_id, system: true} =
+               Repo.one!(from report in Report, where: report.reported_user_id == ^user.id)
+
+      assert user_id == user.id
+
+      Sandbox.allow(Repo, self(), pid)
       await_async_upload()
     end
 
