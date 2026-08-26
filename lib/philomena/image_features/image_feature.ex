@@ -17,7 +17,7 @@ defmodule Philomena.ImageFeatures.ImageFeature do
   end
 
   @doc false
-  def changeset(image_feature, attrs) do
+  def changeset(image_feature, attrs \\ %{}) do
     image_feature
     |> cast(attrs, [])
     |> validate_required([])

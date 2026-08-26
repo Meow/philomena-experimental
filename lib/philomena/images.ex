@@ -1388,8 +1388,7 @@ defmodule Philomena.Images do
   Marks the image named by `image_id` as the current featured image, on behalf
   of `actor`.
 
-  The image is loaded by id and authorized for `:feature`. A deleted image (hidden from users)
-  cannot be featured and is `{:error, :deleted}`, left untouched. On success the feature is
+  The image is loaded by id and authorized for `:feature`. On success the feature is
   recorded and a moderation log is written attributing it to `actor`.
 
   Returns `{:ok, feature}` with the created feature.
@@ -1404,31 +1403,31 @@ defmodule Philomena.Images do
 
   """
   @spec feature_image(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, ImageFeature.t()} | {:error, :ban | :unauthorized | :not_found | :deleted}
+          {:ok, ImageFeature.t()} | {:error, :ban | :unauthorized | :not_found}
   def feature_image(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :feature, image_id) do
+      feature_changeset =
+        %ImageFeature{user_id: actor.user.id, image_id: image.id}
+        |> ImageFeature.changeset()
+
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-      |> Multi.run(:state, fn
-        _repo, %{locked_image: %Image{hidden_from_users: false}} -> {:ok, :visible}
-        _repo, %{locked_image: %Image{hidden_from_users: true}} -> {:error, :deleted}
-      end)
-      |> Multi.insert(
-        :feature,
-        fn %{locked_image: image} ->
-          ImageFeature.changeset(%ImageFeature{user_id: actor.user.id, image_id: image.id}, %{})
-        end
+      |> Multi.insert(:feature, feature_changeset)
+      |> ModerationLogs.put_log(
+        :moderation_log,
+        actor,
+        "Image.Feature:create",
+        Paths.image_path(image),
+        "Featured image #{image.id}"
       )
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{locked_image: image} ->
-        {"Image.Feature:create", Paths.image_path(image), "Featured image #{image.id}"}
-      end)
       |> Multi.transact()
       |> case do
-        {:ok, %{feature: feature}} -> {:ok, feature}
-        {:error, :feature, changeset, _changes} -> {:error, changeset}
-        {:error, :state, :deleted, _changes} -> {:error, :deleted}
-        error -> error
+        {:ok, %{feature: %ImageFeature{} = feature}} ->
+          {:ok, feature}
+
+        {:error, :feature, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
