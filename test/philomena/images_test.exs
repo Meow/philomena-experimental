@@ -2376,13 +2376,13 @@ defmodule Philomena.ImagesTest do
       assert Repo.reload!(image).image == nil
     end
 
-    test "a visible image is not_deleted with the file intact and no log" do
+    test "a visible image is not deleted with the file intact and no log" do
       # The precondition requires a hidden image; a still-visible one is refused
       # before any change.
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: false)
 
-      assert Images.destroy_image(actor(admin), to_string(image.id)) == {:error, :not_deleted}
+      assert {:error, %Ecto.Changeset{}} = Images.destroy_image(actor(admin), to_string(image.id))
       assert Repo.reload!(image).image == image.image
       assert moderation_log_count() == 0
     end

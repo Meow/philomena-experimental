@@ -1277,6 +1277,8 @@ defmodule Philomena.Users do
   @doc """
   Updates a user's spoiler type settings.
 
+  Unlike most writes, banned users are permitted to set spoiler type.
+
   ## Examples
 
       iex> update_spoiler_type(actor, %{spoiler_type: "click"})
@@ -1288,12 +1290,10 @@ defmodule Philomena.Users do
   """
   @spec update_spoiler_type(Actor.t(), map()) ::
           {:ok, Settings.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def update_spoiler_type(%Actor{user: %User{} = user} = actor, attrs) do
-    with :ok <- verify_write_access(actor) do
-      user.settings
-      |> Settings.spoiler_type_changeset(attrs)
-      |> Repo.update()
-    end
+  def update_spoiler_type(%Actor{user: %User{} = user}, attrs) do
+    user.settings
+    |> Settings.spoiler_type_changeset(attrs)
+    |> Repo.update()
   end
 
   @doc group: "Settings"

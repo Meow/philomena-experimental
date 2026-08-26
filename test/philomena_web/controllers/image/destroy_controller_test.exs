@@ -71,8 +71,7 @@ defmodule PhilomenaWeb.Image.DestroyControllerTest do
       assert Repo.reload!(image).image == nil
     end
 
-    # verify_deleted halts when the image is not currently hidden.
-    test "on a non-deleted image redirects with the not-deleted flash", %{conn: conn} do
+    test "on a non-deleted image redirects with an error flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_admin(%{conn: conn})
       image = image_fixture()
 
@@ -81,7 +80,7 @@ defmodule PhilomenaWeb.Image.DestroyControllerTest do
       assert redirected_to(conn) == ~p"/images/#{image}"
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
-               "Cannot destroy a non-deleted image!"
+               "Failed to destroy image."
 
       assert Repo.reload!(image).image != nil
     end

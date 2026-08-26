@@ -208,8 +208,10 @@ defmodule Philomena.Images.Image do
 
   def remove_image_changeset(image) do
     image
-    |> change(removed_image: image.image)
-    |> change(image: nil)
+    |> change()
+    |> validate_hidden()
+    |> validate_not_destroyed()
+    |> change(destroyed_content: true, removed_image: image.image, image: nil)
   end
 
   def source_changeset(image, attrs, old_sources, new_sources) do
@@ -401,6 +403,14 @@ defmodule Philomena.Images.Image do
   defp validate_not_approved(changeset) do
     if get_field(changeset, :approved) do
       add_error(changeset, :approved, "must be false")
+    else
+      changeset
+    end
+  end
+
+  defp validate_not_destroyed(changeset) do
+    if get_field(changeset, :destroyed_content) do
+      add_error(changeset, :destroyed_content, "must be false")
     else
       changeset
     end

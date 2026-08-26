@@ -1310,13 +1310,9 @@ defmodule Philomena.Images do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} -> Image.approve_changeset(image) end)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        "Image.Approve:create",
-        Paths.image_path(image),
-        "Approved image #{image.id}"
-      )
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{locked_image: image} ->
+        {"Image.Approve:create", Paths.image_path(image), "Approved image #{image.id}"}
+      end)
       |> put_approval_steps()
       |> put_reindex_image(:image)
       |> Multi.transact()
@@ -1414,20 +1410,13 @@ defmodule Philomena.Images do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.insert(:feature, feature_changeset)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        "Image.Feature:create",
-        Paths.image_path(image),
-        "Featured image #{image.id}"
-      )
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{locked_image: image} ->
+        {"Image.Feature:create", Paths.image_path(image), "Featured image #{image.id}"}
+      end)
       |> Multi.transact()
       |> case do
         {:ok, %{feature: %ImageFeature{} = feature}} ->
           {:ok, feature}
-
-        {:error, :feature, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
       end
     end
   end
@@ -1455,36 +1444,29 @@ defmodule Philomena.Images do
   """
   @spec destroy_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def destroy_image(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :destroy, image_id) do
-      result =
-        Multi.new()
-        |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-        |> Multi.run(:state, fn
-          _repo, %{locked_image: %Image{hidden_from_users: true}} -> {:ok, :deleted}
-          _repo, %{locked_image: %Image{hidden_from_users: false}} -> {:error, :not_deleted}
-        end)
-        |> Multi.update(:image, fn %{locked_image: image} ->
-          Image.remove_image_changeset(image)
-        end)
-        |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
-          {"Image.Destroy:create", Paths.image_path(image), "Hard-deleted image #{image.id}"}
-        end)
-        |> put_reindex_image(:image)
-        |> Multi.transact()
-        |> case do
-          {:ok, %{image: image}} -> {:ok, image}
-          {:error, :image, changeset, _changes} -> {:error, changeset}
-          {:error, :state, :not_deleted, _changes} -> {:error, :not_deleted}
-          error -> error
-        end
+      Multi.new()
+      |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
+      |> Multi.update(:image, fn %{locked_image: image} ->
+        Image.remove_image_changeset(image)
+      end)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
+        {"Image.Destroy:create", Paths.image_path(image), "Hard-deleted image #{image.id}"}
+      end)
+      |> put_reindex_image(:image)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          purge_files(image, image.hidden_image_key)
+          Thumbnailer.destroy_thumbnails(image)
 
-      with {:ok, image} <- result do
-        purge_files(image, image.hidden_image_key)
-        Thumbnailer.destroy_thumbnails(image)
-        {:ok, image}
+          {:ok, image}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
