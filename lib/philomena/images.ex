@@ -91,21 +91,6 @@ defmodule Philomena.Images do
     load_image_member(actor, :show, image_id, preloads)
   end
 
-  # The target user is loaded with no authorization: an unknown or non-castable
-  # id is a plain not-found.
-  defp load_vote_user(user_id) do
-    with {:ok, id} <- Loader.parse_id(user_id),
-         %User{} = user <- Repo.get(User, id) do
-      {:ok, user}
-    else
-      _ -> {:error, :not_found}
-    end
-  end
-
-  defp image_id_from(image_or_id) do
-    if is_struct(image_or_id, Image), do: image_or_id.id, else: image_or_id
-  end
-
   ## Query helpers
 
   defp maybe_exclude_viewer_hides(query, %Actor{user: nil}, _include_hidden?), do: query
@@ -1285,7 +1270,7 @@ defmodule Philomena.Images do
     |> Comments.put_migrate_image_comments(image, duplicate_of_image)
     |> put_image_counter_delta(
       :migrated_comment_count,
-      duplicate_of_image,
+      duplicate_of_image.id,
       :comments_count,
       fn %{migrated_comments: {count, nil}} -> count end
     )
@@ -1331,50 +1316,53 @@ defmodule Philomena.Images do
   Adds a denormalized image counter adjustment to `multi`.
 
   Image interactions and other contexts use this function instead of updating
-  the `images` table themselves. `amount_callback` reads the exact delta from
-  prior Multi changes when it is known only after a delete.
+  the `images` table themselves. `amount_or_callback` reads the exact delta
+  from prior Multi changes when it is known only after a delete.
   """
   @spec put_image_counter_delta(
           Multi.t(),
           Multi.name(),
-          Image.t() | integer(),
+          integer(),
           atom(),
-          (Multi.changes() -> integer())
+          integer() | (Multi.changes() -> integer())
         ) :: Multi.t()
   def put_image_counter_delta(
         %Multi{} = multi,
         step,
-        image_or_id,
+        image_id,
         field,
-        amount_callback
+        amount_or_callback
       )
-      when is_atom(field) do
-    put_image_counter_deltas(multi, step, image_or_id, fn changes ->
-      %{field => amount_callback.(changes)}
+      when is_atom(field) and is_integer(image_id) do
+    put_image_counter_deltas(multi, step, image_id, fn changes ->
+      cond do
+        is_function(amount_or_callback, 1) -> %{field => amount_or_callback.(changes)}
+        is_integer(amount_or_callback) -> %{field => amount_or_callback}
+      end
     end)
   end
 
   @doc group: "Cross-context transaction helpers"
   @doc """
-  Adds multiple denormalized image-counter adjustments to `multi`.
+  Adds multiple denormalized image counter adjustments to `multi`.
 
   The owner attaches one image reindex after commit for the complete update.
   """
   @spec put_image_counter_deltas(
           Multi.t(),
           Multi.name(),
-          Image.t() | integer(),
+          integer(),
           (Multi.changes() -> %{atom() => integer()})
         ) :: Multi.t()
-  def put_image_counter_deltas(%Multi{} = multi, step, image_or_id, increments_callback) do
-    multi
-    |> Multi.run(step, fn repo, changes ->
-      image_id = image_id_from(image_or_id)
+  def put_image_counter_deltas(%Multi{} = multi, step, image_id, increments_callback) do
+    Multi.run(multi, step, fn repo, changes ->
       increments = increments_callback.(changes)
+
       {count, _} = repo.update_all(where(Image, id: ^image_id), inc: Map.to_list(increments))
+
       {:ok, count}
     end)
-    |> Multi.on_commit(fn _changes -> reindex_images([image_id_from(image_or_id)]) end)
+    |> Multi.on_commit(fn _changes -> reindex_images([image_id]) end)
   end
 
   @doc group: "Cross-context transaction helpers"
@@ -2167,7 +2155,7 @@ defmodule Philomena.Images do
   def delete_user_vote(%Actor{} = actor, image_id, user_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :tamper, image_id),
-         {:ok, user} <- load_vote_user(user_id) do
+         {:ok, user} <- Loader.fetch(User, user_id) do
       Multi.new()
       |> ImageVotes.delete_vote_for_loaded_image(image, user)
       |> ModerationLogs.put_log(:moderation_log, actor, fn changes ->

@@ -154,7 +154,7 @@ defmodule Philomena.Interactions do
     |> ImageVotes.put_migrate_image_interactions(target, :interaction_downvotes, false)
     |> Images.put_image_counter_deltas(
       :interaction_image,
-      target,
+      target.id,
       fn %{
            interaction_hides: hides,
            interaction_faves: {faves, _},

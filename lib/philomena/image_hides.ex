@@ -23,12 +23,9 @@ defmodule Philomena.ImageHides do
 
     multi
     |> Multi.delete_all(:unhide, hide_query)
-    |> Images.put_image_counter_delta(
-      :dec_hides_count,
-      image,
-      :hides_count,
-      fn %{unhide: {hides, nil}} -> -hides end
-    )
+    |> Images.put_image_counter_delta(:dec_hides_count, image.id, :hides_count, fn
+      %{unhide: {hides, nil}} -> -hides
+    end)
   end
 
   @doc """
@@ -57,12 +54,7 @@ defmodule Philomena.ImageHides do
     multi
     |> delete_hide_steps(image, user)
     |> Multi.insert(:hide, hide)
-    |> Images.put_image_counter_delta(
-      :inc_hides_count,
-      image,
-      :hides_count,
-      fn _changes -> 1 end
-    )
+    |> Images.put_image_counter_delta(:inc_hides_count, image.id, :hides_count, 1)
   end
 
   @doc """

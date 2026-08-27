@@ -27,24 +27,15 @@ defmodule Philomena.ImageVotes do
     multi
     |> Multi.delete_all(:unupvote, where(user_vote_query, up: true))
     |> Multi.delete_all(:undownvote, where(user_vote_query, up: false))
-    |> Images.put_image_counter_delta(
-      :dec_upvotes_count,
-      image,
-      :upvotes_count,
-      fn %{unupvote: {upvotes, nil}} -> -upvotes end
-    )
-    |> Images.put_image_counter_delta(
-      :dec_downvotes_count,
-      image,
-      :downvotes_count,
-      fn %{undownvote: {downvotes, nil}} -> -downvotes end
-    )
-    |> Images.put_image_counter_delta(
-      :dec_score,
-      image,
-      :score,
-      fn %{unupvote: {upvotes, nil}, undownvote: {downvotes, nil}} -> downvotes - upvotes end
-    )
+    |> Images.put_image_counter_delta(:dec_upvotes_count, image.id, :upvotes_count, fn
+      %{unupvote: {upvotes, nil}} -> -upvotes
+    end)
+    |> Images.put_image_counter_delta(:dec_downvotes_count, image.id, :downvotes_count, fn
+      %{undownvote: {downvotes, nil}} -> -downvotes
+    end)
+    |> Images.put_image_counter_delta(:dec_score, image.id, :score, fn
+      %{unupvote: {upvotes, nil}, undownvote: {downvotes, nil}} -> downvotes - upvotes
+    end)
     |> Multi.merge(fn %{unupvote: {upvotes, nil}, undownvote: {downvotes, nil}} ->
       UserStatistics.put_increment(Multi.new(), user, :image_votes_count, -(upvotes + downvotes))
     end)
@@ -80,24 +71,9 @@ defmodule Philomena.ImageVotes do
     multi
     |> delete_vote_steps(image, user)
     |> Multi.insert(:vote, vote)
-    |> Images.put_image_counter_delta(
-      :inc_upvotes_count,
-      image,
-      :upvotes_count,
-      fn _changes -> upvotes end
-    )
-    |> Images.put_image_counter_delta(
-      :inc_downvotes_count,
-      image,
-      :downvotes_count,
-      fn _changes -> downvotes end
-    )
-    |> Images.put_image_counter_delta(
-      :inc_score,
-      image,
-      :score,
-      fn _changes -> upvotes - downvotes end
-    )
+    |> Images.put_image_counter_delta(:inc_upvotes_count, image.id, :upvotes_count, upvotes)
+    |> Images.put_image_counter_delta(:inc_downvotes_count, image.id, :downvotes_count, downvotes)
+    |> Images.put_image_counter_delta(:inc_score, image.id, :score, upvotes - downvotes)
     |> UserStatistics.put_increment(user, :image_votes_count, 1)
   end
 

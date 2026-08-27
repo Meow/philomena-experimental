@@ -26,12 +26,9 @@ defmodule Philomena.ImageFaves do
 
     multi
     |> Multi.delete_all(:unfave, fave_query)
-    |> Images.put_image_counter_delta(
-      :dec_faves_count,
-      image,
-      :faves_count,
-      fn %{unfave: {faves, nil}} -> -faves end
-    )
+    |> Images.put_image_counter_delta(:dec_faves_count, image.id, :faves_count, fn
+      %{unfave: {faves, nil}} -> -faves
+    end)
     |> Multi.merge(fn %{unfave: {faves, nil}} ->
       UserStatistics.put_increment(Multi.new(), user, :image_faves_count, -faves)
     end)
@@ -64,12 +61,7 @@ defmodule Philomena.ImageFaves do
     multi
     |> delete_fave_steps(image, user)
     |> Multi.insert(:fave, fave)
-    |> Images.put_image_counter_delta(
-      :inc_faves_count,
-      image,
-      :faves_count,
-      fn _changes -> 1 end
-    )
+    |> Images.put_image_counter_delta(:inc_faves_count, image.id, :faves_count, 1)
     |> UserStatistics.put_increment(user, :image_faves_count, 1)
   end
 

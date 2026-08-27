@@ -386,12 +386,7 @@ defmodule Philomena.Comments do
       Multi.new()
       |> put_lock_image(actor, image.id, :create_comment)
       |> Multi.insert(:comment, comment_changeset)
-      |> Images.put_image_counter_delta(
-        :update_image,
-        image,
-        :comments_count,
-        fn _changes -> 1 end
-      )
+      |> Images.put_image_counter_delta(:update_image, image.id, :comments_count, 1)
       |> Multi.run(:notification, &notify_comment/2)
       |> Images.maybe_subscribe_on(:locked_image, creator, :watch_on_reply)
       |> Images.put_reindex_image(:locked_image)
@@ -704,12 +699,7 @@ defmodule Philomena.Comments do
       |> Multi.update(:comment, fn %{locked_comment: comment} ->
         Comment.destroy_changeset(comment)
       end)
-      |> Images.put_image_counter_delta(
-        :update_image,
-        image,
-        :comments_count,
-        fn _changes -> -1 end
-      )
+      |> Images.put_image_counter_delta(:update_image, image.id, :comments_count, -1)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -818,12 +808,7 @@ defmodule Philomena.Comments do
       |> Comment.hide_changeset(%{deletion_reason: "Site abuse"}, moderator)
       |> Comment.destroy_changeset()
     end)
-    |> Images.put_image_counter_delta(
-      :update_image,
-      comment.image_id,
-      :comments_count,
-      fn _changes -> -1 end
-    )
+    |> Images.put_image_counter_delta(:update_image, comment.image_id, :comments_count, -1)
     |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
     |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
     |> Images.put_reindex_image(:locked_image)
