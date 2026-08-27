@@ -24,6 +24,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.TagChanges.Limits
   alias Philomena.TagChanges.TagChange
   alias Philomena.Images.Image
+  alias Philomena.Images.Tagging
   alias Philomena.Images.ImagePage
   alias Philomena.Images.Search.Scope
   alias Philomena.Tags.Tag
@@ -4725,6 +4726,39 @@ defmodule Philomena.ImagesTest do
 
       log = only_moderation_log!()
       assert log.body == "Batch tagged 'batchadd' on 1 images"
+    end
+  end
+
+  describe "batch_update/4" do
+    test "updates hidden images without including them in tag image counts" do
+      admin = admin_user_fixture()
+      attribution = actor(admin)
+      visible = image_fixture()
+      hidden = image_fixture(hidden_from_users: true)
+      tag = tag_fixture(%{name: "batch hidden tag"})
+      attributes = %{user_id: admin.id, ip: attribution.ip, fingerprint: attribution.fingerprint}
+
+      assert {:ok, matched_ids} =
+               Images.batch_update([hidden.id, visible.id], [tag], [], attributes)
+
+      assert Enum.sort(matched_ids) == Enum.sort([hidden.id, visible.id])
+      assert Repo.reload!(tag).images_count == 1
+
+      assert Repo.exists?(
+               from t in Tagging, where: t.image_id == ^hidden.id and t.tag_id == ^tag.id
+             )
+
+      assert Repo.exists?(
+               from t in Tagging, where: t.image_id == ^visible.id and t.tag_id == ^tag.id
+             )
+
+      assert {:ok, matched_ids} = Images.batch_update([hidden.id], [], [tag], attributes)
+      assert matched_ids == [hidden.id]
+      assert Repo.reload!(tag).images_count == 1
+
+      refute Repo.exists?(
+               from t in Tagging, where: t.image_id == ^hidden.id and t.tag_id == ^tag.id
+             )
     end
   end
 

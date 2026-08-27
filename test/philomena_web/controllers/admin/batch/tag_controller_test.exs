@@ -120,7 +120,7 @@ defmodule PhilomenaWeb.Admin.Batch.TagControllerTest do
       refute Repo.exists?(where(Tagging, image_id: 2_000_000_000))
     end
 
-    test "reports a hidden image's id as failed without tagging it", %{conn: conn} do
+    test "adds a tag to a hidden image", %{conn: conn} do
       image = image_fixture(hidden_from_users: true)
       tag = tag_fixture(name: "batch-hidden-tag")
 
@@ -130,10 +130,10 @@ defmodule PhilomenaWeb.Admin.Batch.TagControllerTest do
           image_ids: [to_string(image.id)]
         )
 
-      assert json_response(conn, 200) == %{"succeeded" => [], "failed" => [image.id]}
+      assert json_response(conn, 200) == %{"succeeded" => [image.id], "failed" => []}
 
-      # The hidden image never receives the tagging.
-      refute Repo.exists?(where(Tagging, image_id: ^image.id, tag_id: ^tag.id))
+      # The hidden image receives the tagging.
+      assert Repo.exists?(where(Tagging, image_id: ^image.id, tag_id: ^tag.id))
     end
 
     # NOTE: a tag list that resolves to zero actual tag changes (here a tag

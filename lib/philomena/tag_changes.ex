@@ -716,56 +716,68 @@ defmodule Philomena.TagChanges do
   @doc """
   Records tag changes from inserted and deleted image tagging rows in `multi`.
 
-  Images supplies the two prior Multi steps; TagChanges owns both the history
-  and join-row insertions and queues the affected history after commit.
+  Images supplies the two prior Multi steps. This function generates the tag
+  changes and queues the affected rows after commit.
   """
   @spec put_batch_tag_changes(Multi.t(), Multi.name(), Multi.name(), map()) :: Multi.t()
   def put_batch_tag_changes(%Multi{} = multi, inserted_step, deleted_step, attributes) do
     multi
-    |> Multi.run(:batch_tag_changes, fn repo, changes ->
-      inserted =
-        changes
-        |> Map.fetch!(inserted_step)
-        |> elem(1)
-        |> Enum.map(&[&1.image_id, &1.tag_id])
+    |> Multi.run(:batch_tag_changes, fn
+      repo,
+      %{
+        ^inserted_step => {_inserted_count, inserted_taggings},
+        ^deleted_step => {_deleted_count, deleted_taggings}
+      } ->
+        inserted =
+          Enum.map(inserted_taggings, fn %{image_id: image_id, tag_id: tag_id} ->
+            %{image_id: image_id, tag_id: tag_id, added: true}
+          end)
 
-      deleted = changes |> Map.fetch!(deleted_step) |> elem(1)
-      changed = inserted ++ deleted
-      now = DateTime.utc_now(:second)
+        deleted =
+          Enum.map(deleted_taggings, fn [image_id, tag_id] ->
+            %{image_id: image_id, tag_id: tag_id, added: false}
+          end)
 
-      # Create tag change batches for every image ID.
-      tag_changes =
-        changed
-        |> Enum.uniq_by(&hd/1)
-        |> Enum.map(fn [image_id, _tag_id] ->
-          {:ok, tag_change} =
-            %TagChange{
+        changes = Enum.concat(inserted, deleted)
+        now = DateTime.utc_now(:second)
+
+        # Create tag change batches for every image ID.
+        tag_change_rows =
+          changes
+          |> Enum.uniq_by(& &1.image_id)
+          |> Enum.map(fn %{image_id: image_id} ->
+            %{
               image_id: image_id,
               user_id: attributes[:user_id],
               ip: attributes[:ip],
               fingerprint: attributes[:fingerprint],
               created_at: now
             }
-            |> repo.insert()
-
-          {image_id, tag_change}
-        end)
-        |> Map.new()
-
-      # Create tags belonging to tag changes.
-      # Generate data for TagChanges.TagChangeTag rows.
-      rows =
-        Enum.map(inserted, fn [image_id, tag_id] ->
-          %{tag_change_id: tag_changes[image_id].id, tag_id: tag_id, added: true}
-        end) ++
-          Enum.map(deleted, fn [image_id, tag_id] ->
-            %{tag_change_id: tag_changes[image_id].id, tag_id: tag_id, added: false}
           end)
 
-      {_, _} = repo.insert_all(TagChangeTag, rows)
-      {:ok, Map.keys(tag_changes)}
+        {_count, tag_changes} =
+          repo.insert_all(TagChange, tag_change_rows, returning: [:image_id, :id])
+
+        tag_change_ids = Enum.map(tag_changes, & &1.id)
+        tag_change_ids_by_image_id = Map.new(tag_changes, &{&1.image_id, &1.id})
+
+        # Create tags belonging to tag changes.
+        tag_change_tag_rows =
+          Enum.map(changes, fn %{image_id: image_id, tag_id: tag_id, added: added} ->
+            %{
+              tag_change_id: tag_change_ids_by_image_id[image_id],
+              tag_id: tag_id,
+              added: added
+            }
+          end)
+
+        {_count, nil} = repo.insert_all(TagChangeTag, tag_change_tag_rows)
+
+        {:ok, tag_change_ids}
     end)
-    |> Multi.on_commit(fn %{batch_tag_changes: image_ids} -> reindex_for_images(image_ids) end)
+    |> Multi.on_commit(fn %{batch_tag_changes: tag_change_ids} ->
+      reindex_tag_changes(tag_change_ids)
+    end)
   end
 
   @doc """
@@ -781,21 +793,6 @@ defmodule Philomena.TagChanges do
   def user_name_reindex(old_name, new_name) do
     data = SearchIndex.user_name_update_by_query(old_name, new_name)
     Search.update_by_query(TagChange, data.query, data.set_replacements, data.replacements)
-  end
-
-  @doc """
-  Queues every tag change associated with `image_ids` for worker reindexing.
-
-  ## Examples
-
-      iex> reindex_for_images([12, 13])
-      [12, 13]
-
-  """
-  @spec reindex_for_images([integer()]) :: [integer()]
-  def reindex_for_images(image_ids) do
-    Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "image_id", image_ids])
-    image_ids
   end
 
   @doc """

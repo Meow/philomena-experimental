@@ -525,13 +525,19 @@ defmodule Philomena.Images do
   defp batch_update(changes, attributes, after_changes) do
     changes = merge_change_batches(changes)
 
-    image_ids =
+    requested_image_ids = Enum.map(changes, & &1.image_id)
+
+    image_query =
       Image
-      |> where([i], i.id in ^Enum.map(changes, & &1.image_id) and i.hidden_from_users == false)
+      |> where([i], i.id in ^requested_image_ids)
+      |> order_by([i], asc: i.id)
+
+    image_ids =
+      image_query
       |> select([i], i.id)
       |> Repo.all()
 
-    # Window insertions to the matched (existing, non-hidden) images, like
+    # Window insertions to the matched (existing) images, like
     # the removals below: unmatched ids must never receive taggings, and
     # ids naming no image at all would violate the foreign key.
     matched_ids = MapSet.new(image_ids)
@@ -554,6 +560,8 @@ defmodule Philomena.Images do
       |> select([t], [t.image_id, t.tag_id])
 
     Multi.new()
+    |> Multi.lock_all(:locked_images, image_query)
+    |> Multi.all(:visible_images, where(image_query, [i], i.hidden_from_users == false))
     |> Multi.insert_all(
       :inserted_taggings,
       Tagging,
@@ -563,7 +571,11 @@ defmodule Philomena.Images do
     )
     |> Multi.delete_all(:deleted_taggings, to_delete)
     |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
-    |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings)
+    |> Tags.put_batch_image_count_changes(
+      :inserted_taggings,
+      :deleted_taggings,
+      :visible_images
+    )
     |> Multi.run(:after_changes, fn _repo, _changes ->
       case after_changes.(image_ids) do
         :ok -> {:ok, nil}
@@ -576,7 +588,6 @@ defmodule Philomena.Images do
     |> Multi.on_commit(fn %{matched_image_ids: image_ids} ->
       reindex_images(image_ids)
       Comments.reindex_comments_on_images(image_ids)
-      image_ids
     end)
     |> Multi.transact()
     |> case do
@@ -2789,7 +2800,7 @@ defmodule Philomena.Images do
 
   On success returns `{:ok, result}` where `result` is a map with:
 
-    * `:succeeded` - ids the batch matched (existing, non-hidden images);
+    * `:succeeded` - ids the batch matched (existing images);
     * `:failed` - ids that matched no such image plus the unparsable ids;
     * `:added` / `:removed` - the resolved tag names, for the firehose broadcast.
 
@@ -2844,7 +2855,7 @@ defmodule Philomena.Images do
 
       case batch_update(image_ids, added_tags, removed_tags, attributes, log_batch) do
         {:ok, matched_ids} ->
-          # Ids which parsed but matched no existing, non-hidden image were
+          # Ids which parsed but matched no existing image were
           # never touched by the batch, so they are reported as failed.
           unmatched_ids = image_ids -- matched_ids
 
@@ -2883,7 +2894,7 @@ defmodule Philomena.Images do
   ## Return value
 
   On success, returns `{:ok, image_ids}` where `image_ids` are the ids of
-  the images the batch actually matched (existing, non-hidden images);
+  the images the batch actually matched (existing images);
   requested ids that matched no such image are absent from the list.
 
   ## Examples

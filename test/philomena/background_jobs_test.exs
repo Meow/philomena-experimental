@@ -98,12 +98,6 @@ defmodule Philomena.BackgroundJobsTest do
       assert_enqueued("indexing", Philomena.IndexWorker, ["Posts", "topic_id", [52]])
     end
 
-    test "tag changes enqueue image ids" do
-      assert TagChanges.reindex_for_images([61, 62]) == [61, 62]
-
-      assert_enqueued("indexing", Philomena.IndexWorker, ["TagChanges", "image_id", [61, 62]])
-    end
-
     test "persisted tag changes enqueue their generated id after commit" do
       user = confirmed_user_fixture()
       tags = "safe, background base one, background base two"

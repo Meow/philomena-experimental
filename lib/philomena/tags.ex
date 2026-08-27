@@ -1056,60 +1056,70 @@ defmodule Philomena.Tags do
   Upserts image count deltas for bulk image tag changes inside `multi`.
 
   Images supplies inserted and deleted tagging steps. This function
-  updates image counts and queues every affected tag for indexing after
-  commit.
+  updates image counts for visible images and queues every affected tag for
+  indexing after commit. `visible_image_step` must resolve to the images
+  matching the `hidden_from_users == false` precondition.
   """
-  @spec put_batch_image_count_changes(Multi.t(), Multi.name(), Multi.name()) :: Multi.t()
-  def put_batch_image_count_changes(%Multi{} = multi, inserted_step, deleted_step) do
+  @spec put_batch_image_count_changes(Multi.t(), Multi.name(), Multi.name(), Multi.name()) ::
+          Multi.t()
+  def put_batch_image_count_changes(
+        %Multi{} = multi,
+        inserted_step,
+        deleted_step,
+        visible_image_step
+      ) do
     multi
-    |> Multi.run(:batch_tag_counts, fn repo, changes ->
-      inserted =
-        changes
-        |> Map.fetch!(inserted_step)
-        |> elem(1)
-        |> Enum.map(&[&1.image_id, &1.tag_id])
+    |> Multi.run(:batch_tag_counts, fn
+      repo,
+      %{
+        ^visible_image_step => visible_images,
+        ^inserted_step => {_inserted_count, inserted_taggings},
+        ^deleted_step => {_deleted_count, deleted_taggings}
+      } ->
+        visible_image_ids = MapSet.new(visible_images, & &1.id)
 
-      deleted = changes |> Map.fetch!(deleted_step) |> elem(1)
-      now = DateTime.utc_now(:second)
+        inserted =
+          inserted_taggings
+          |> Enum.filter(&MapSet.member?(visible_image_ids, &1.image_id))
+          |> Enum.map(fn %{tag_id: tag_id} -> {tag_id, 1} end)
 
-      # In order to merge into the existing tables here in one go, insert_all
-      # is used with a query that is guaranteed to conflict on every row by
-      # using the primary key. This will update the image counts via the
-      # ON CONFLICT DO UPDATE clause.
-      rows =
-        (tag_upsert_data(inserted, now, true) ++ tag_upsert_data(deleted, now, false))
-        |> Enum.group_by(& &1.id)
-        |> Enum.map(fn {_id, [first | rest]} ->
-          Enum.reduce(rest, first, fn row, acc ->
-            %{acc | images_count: acc.images_count + row.images_count}
+        deleted =
+          deleted_taggings
+          |> Enum.filter(fn [image_id, _] -> MapSet.member?(visible_image_ids, image_id) end)
+          |> Enum.map(fn [_, tag_id] -> {tag_id, -1} end)
+
+        now = DateTime.utc_now(:second)
+
+        # In order to merge into the existing tables here in one go, insert_all
+        # is used with a query that is guaranteed to conflict on every row by
+        # using the primary key. This will update the image counts via the
+        # ON CONFLICT DO UPDATE clause.
+        rows =
+          inserted
+          |> Enum.concat(deleted)
+          |> Enum.reduce(%{}, fn {tag_id, delta}, acc ->
+            Map.update(acc, tag_id, delta, &(&1 + delta))
           end)
-        end)
+          |> Enum.map(fn {tag_id, delta} ->
+            %{
+              id: tag_id,
+              name: "",
+              slug: "",
+              created_at: now,
+              updated_at: now,
+              images_count: delta
+            }
+          end)
 
-      {_, _} =
-        repo.insert_all(Tag, rows,
-          on_conflict: update(Tag, inc: [images_count: fragment("EXCLUDED.images_count")]),
-          conflict_target: [:id]
-        )
+        {_count, nil} =
+          repo.insert_all(Tag, rows,
+            on_conflict: update(Tag, inc: [images_count: fragment("EXCLUDED.images_count")]),
+            conflict_target: [:id]
+          )
 
-      {:ok, Enum.uniq(Enum.map(rows, & &1.id))}
+        {:ok, Enum.map(rows, & &1.id)}
     end)
     |> Multi.on_commit(fn %{batch_tag_counts: tag_ids} -> reindex_tag_ids(tag_ids) end)
-  end
-
-  # Generate data for inserts/updates of the Tags.Tag struct.
-  defp tag_upsert_data(changes, now, added) do
-    changes
-    |> Enum.group_by(fn [_image_id, tag_id] -> tag_id end)
-    |> Enum.map(fn {tag_id, instances} ->
-      %{
-        id: tag_id,
-        name: "",
-        slug: "",
-        created_at: now,
-        updated_at: now,
-        images_count: if(added, do: length(instances), else: -length(instances))
-      }
-    end)
   end
 
   @doc """
