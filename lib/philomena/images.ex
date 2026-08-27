@@ -532,9 +532,14 @@ defmodule Philomena.Images do
       |> where([i], i.id in ^requested_image_ids)
       |> order_by([i], asc: i.id)
 
-    to_delete_ids =
-      Enum.flat_map(changes, fn change ->
-        Enum.map(change.removed_tags, & &1.id)
+    added_pairs =
+      Enum.flat_map(changes, fn %{image_id: image_id, added_tags: added_tags} ->
+        Enum.map(added_tags, &%{image_id: image_id, tag_id: &1.id})
+      end)
+
+    removed_pairs =
+      Enum.flat_map(changes, fn %{image_id: image_id, removed_tags: removed_tags} ->
+        Enum.map(removed_tags, &%{image_id: image_id, tag_id: &1.id})
       end)
 
     Multi.new()
@@ -545,11 +550,7 @@ defmodule Philomena.Images do
       Tagging,
       fn %{locked_image_ids: image_ids} ->
         # Scope insertions to existing, requested images.
-        changes
-        |> Enum.filter(&(&1.image_id in image_ids))
-        |> Enum.flat_map(fn change ->
-          Enum.map(change.added_tags, &%{tag_id: &1.id, image_id: change.image_id})
-        end)
+        Enum.filter(added_pairs, &(&1.image_id in image_ids))
       end,
       on_conflict: :nothing,
       returning: [:image_id, :tag_id]
@@ -557,10 +558,22 @@ defmodule Philomena.Images do
     |> Multi.delete_all(
       :deleted_taggings,
       fn %{locked_image_ids: image_ids} ->
-        # Scope deletions to requested images.
-        Tagging
-        |> where([t], t.image_id in ^image_ids and t.tag_id in ^to_delete_ids)
-        |> select([t], [t.image_id, t.tag_id])
+        # Scope deletions to existing, requested images.
+        removed_pairs
+        |> Enum.filter(&(&1.image_id in image_ids))
+        |> case do
+          [] ->
+            # The values API rejects an empty list.
+            from t in Tagging,
+              where: false,
+              select: [t.image_id, t.tag_id]
+
+          pairs ->
+            from t in Tagging,
+              join: pair in values(pairs, %{image_id: :integer, tag_id: :integer}),
+              on: t.image_id == pair.image_id and t.tag_id == pair.tag_id,
+              select: [t.image_id, t.tag_id]
+        end
       end
     )
     |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)

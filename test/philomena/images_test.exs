@@ -4730,6 +4730,31 @@ defmodule Philomena.ImagesTest do
   end
 
   describe "batch_update/4" do
+    test "removes only the tags paired with each image" do
+      user = confirmed_user_fixture()
+      attribution = actor(user)
+      first = image_fixture(tags: "safe, remove first, remove second")
+      second = image_fixture(tags: "safe, remove first, remove second")
+      remove_first = Repo.get_by!(Tag, name: "remove first")
+      remove_second = Repo.get_by!(Tag, name: "remove second")
+
+      changes = [
+        %{image_id: first.id, added_tags: [], removed_tags: [remove_first]},
+        %{image_id: second.id, added_tags: [], removed_tags: [remove_second]}
+      ]
+
+      assert {:ok, matched_ids} =
+               Images.batch_update(changes, %{
+                 user_id: user.id,
+                 ip: attribution.ip,
+                 fingerprint: attribution.fingerprint
+               })
+
+      assert matched_ids == Enum.sort([first.id, second.id])
+      assert tag_names(first) == ["remove second", "safe"]
+      assert tag_names(second) == ["remove first", "safe"]
+    end
+
     test "updates hidden images without including them in tag image counts" do
       admin = admin_user_fixture()
       attribution = actor(admin)
