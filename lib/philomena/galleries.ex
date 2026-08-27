@@ -873,7 +873,9 @@ defmodule Philomena.Galleries do
 
   Image hiding composes this operation after taking the image lock. Gallery
   counters and interaction rows therefore change atomically in the caller's
-  transaction. Affected galleries are reindexed after the transaction commits.
+  transaction.
+
+  Affected galleries are reindexed after the transaction commits.
   """
   @spec put_remove_image_interactions(Multi.t(), Image.t()) :: Multi.t()
   def put_remove_image_interactions(%Multi{} = multi, %Image{} = image) do

@@ -247,7 +247,9 @@ defmodule Philomena.Images do
       end
     end)
     |> Multi.on_commit(fn %{image: {image, added, removed}} ->
-      if Enum.any?(added) or Enum.any?(removed), do: reindex_image(image)
+      if Enum.any?(added) or Enum.any?(removed) do
+        reindex_image(image)
+      end
     end)
     |> Multi.transact()
   end
@@ -275,22 +277,7 @@ defmodule Philomena.Images do
       check_tag_change_limits_before_commit(image, actor)
     end)
     |> TagChanges.put_tag_change(actor)
-    |> Tags.put_image_count_delta(
-      :added_tag_count,
-      fn
-        %{image: {%{hidden_from_users: true}, _added, _removed}} -> []
-        %{image: {_image, added_tags, _removed}} -> Enum.map(added_tags, & &1.id)
-      end,
-      1
-    )
-    |> Tags.put_image_count_delta(
-      :removed_tag_count,
-      fn
-        %{image: {%{hidden_from_users: true}, _added, _removed}} -> []
-        %{image: {_image, _added, removed_tags}} -> Enum.map(removed_tags, & &1.id)
-      end,
-      -1
-    )
+    |> Tags.put_image_tag_count_changes()
     |> Multi.merge(fn %{image: {_image, added, removed}} ->
       if Enum.any?(added ++ removed) do
         UserStatistics.put_increment(Multi.new(), actor.user, :metadata_updates_count)

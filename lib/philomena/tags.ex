@@ -166,6 +166,38 @@ defmodule Philomena.Tags do
     )
   end
 
+  defp image_count_deltas(%Image{hidden_from_users: true}, _added_tags, _removed_tags),
+    do: []
+
+  defp image_count_deltas(%Image{}, added_tags, removed_tags) do
+    deltas = %{}
+
+    deltas =
+      Enum.reduce(added_tags, deltas, fn tag, deltas ->
+        Map.update(deltas, tag.id, 1, &(&1 + 1))
+      end)
+
+    deltas =
+      Enum.reduce(removed_tags, deltas, fn tag, deltas ->
+        Map.update(deltas, tag.id, -1, &(&1 - 1))
+      end)
+
+    deltas
+    |> Enum.reject(fn {_tag_id, delta} -> delta == 0 end)
+    |> Enum.sort_by(fn {tag_id, _delta} -> tag_id end)
+  end
+
+  defp update_image_count_changes(repo, {image, added_tags, removed_tags}) do
+    image
+    |> image_count_deltas(added_tags, removed_tags)
+    |> Enum.map(fn {tag_id, delta} ->
+      update_image_counts(repo, delta, [tag_id])
+
+      # Return the tag id for reindexing.
+      tag_id
+    end)
+  end
+
   @doc """
   Gets existing tags or creates new ones from a tag list string.
 
@@ -974,9 +1006,37 @@ defmodule Philomena.Tags do
   end
 
   @doc """
+  Adds tag image count maintenance to `multi`.
+
+  `image_step` must resolve to `{image, added_tags, removed_tags}`. Tags owns
+  its image count update rule: hidden images do not contribute to tag image
+  counts. Counter updates are performed in ascending tag ID order and affected
+  tags are reindexed after the transaction commits.
+
+  ## Examples
+
+      iex> Multi.new() |> put_image_tag_count_changes()
+      %Philomena.Multi{}
+
+  """
+  @spec put_image_tag_count_changes(Multi.t(), Multi.name()) :: Multi.t()
+  def put_image_tag_count_changes(%Multi{} = multi, image_step \\ :image) do
+    multi
+    |> Multi.run(:image_tag_counts_tag_ids, fn repo, changes ->
+      image_changes = Map.fetch!(changes, image_step)
+      {:ok, update_image_count_changes(repo, image_changes)}
+    end)
+    |> Multi.on_commit(fn %{image_tag_counts_tag_ids: tag_ids} ->
+      reindex_tag_ids(tag_ids)
+    end)
+  end
+
+  @doc """
   Adds a tag image-count adjustment to `multi`.
 
-  The callback form allows reading tag IDs from prior Multi changes.
+  The callback form allows reading tag IDs from prior Multi changes. For an
+  image tag change result, use `put_image_tag_count_changes/2` so Tags can
+  apply its visibility rule and combine the additions and removals.
   """
   @spec put_image_count_delta(
           Multi.t(),
