@@ -873,7 +873,7 @@ defmodule Philomena.Galleries do
 
   Image hiding composes this operation after taking the image lock. Gallery
   counters and interaction rows therefore change atomically in the caller's
-  transaction.
+  transaction. Affected galleries are reindexed after the transaction commits.
   """
   @spec put_remove_image_interactions(Multi.t(), Image.t()) :: Multi.t()
   def put_remove_image_interactions(%Multi{} = multi, %Image{} = image) do
@@ -886,6 +886,7 @@ defmodule Philomena.Galleries do
     multi
     |> Multi.update_all(:galleries, galleries, [])
     |> Multi.delete_all(:gallery_interactions, where(Interaction, image_id: ^image.id), [])
+    |> Multi.on_commit(fn %{galleries: {_, gallery_ids}} -> reindex_galleries(gallery_ids) end)
   end
 
   @doc """
@@ -894,6 +895,8 @@ defmodule Philomena.Galleries do
   Existing target memberships win; leftover source memberships are deleted and
   affected gallery counters are adjusted. Image merge workflows must hold both
   image locks before composing this operation.
+
+  Affected galleries are reindexed after the transaction commits.
   """
   @spec put_migrate_image_interactions(Multi.t(), Image.t(), Image.t()) :: Multi.t()
   def put_migrate_image_interactions(%Multi{} = multi, %Image{} = source, %Image{} = target) do
@@ -924,6 +927,12 @@ defmodule Philomena.Galleries do
         |> repo.update_all(inc: [image_count: -1])
 
       {:ok, {count, gallery_ids}}
+    end)
+    |> Multi.on_commit(fn %{
+                            migrated_gallery_interactions: {_, migrated_gallery_ids},
+                            galleries: {_, removed_gallery_ids}
+                          } ->
+      reindex_galleries(Enum.uniq(migrated_gallery_ids ++ removed_gallery_ids))
     end)
   end
 

@@ -70,27 +70,6 @@ defmodule Philomena.Images do
     Loader.fetch_and_authorize(Image, actor, action, image_id, preloads)
   end
 
-  # Shared loader for the per-user hide interaction: a banned actor is rejected
-  # first, then the image is loaded by id and authorized for `:vote`.
-  defp load_image_for_hide(actor, image_id) do
-    with :ok <- verify_write_access(actor) do
-      load_image_member(actor, :vote, image_id)
-    end
-  end
-
-  defp load_image_for_interaction(actor, image_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, image} <-
-           load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
-         :ok <- Filtering.verify_not_forced(actor, image) do
-      {:ok, image}
-    end
-  end
-
-  defp load_image_for_navigation(actor, image_id, preloads \\ []) do
-    load_image_member(actor, :show, image_id, preloads)
-  end
-
   ## Query helpers
 
   defp maybe_exclude_viewer_hides(query, %Actor{user: nil}, _include_hidden?), do: query
@@ -227,30 +206,15 @@ defmodule Philomena.Images do
       fn %{tags: tags} -> Enum.map(tags, & &1.id) end,
       -1
     )
-  end
-
-  defp remove_gallery_interactions_multi(multi, image),
-    do: Galleries.put_remove_image_interactions(multi, image)
-
-  defp put_process_after_hide(multi) do
-    Multi.on_commit(multi, fn %{image: image, tags: tags, galleries: {_, gallery_ids}} ->
+    |> Multi.on_commit(fn %{image: image} ->
       spawn(fn ->
         Thumbnailer.hide_thumbnails(image, image.hidden_image_key)
         purge_files(image, image.hidden_image_key)
       end)
 
       Comments.reindex_comments_on_image(image)
-      Tags.reindex_tags(tags)
-      Galleries.reindex_galleries(gallery_ids)
       reindex_image(image)
     end)
-  end
-
-  defp reindex_merged_galleries(%{
-         migrated_gallery_interactions: {_, migrated_gallery_ids},
-         galleries: {_, removed_gallery_ids}
-       }) do
-    Galleries.reindex_galleries(Enum.uniq(migrated_gallery_ids ++ removed_gallery_ids))
   end
 
   ## Metadata editing
@@ -1017,7 +981,7 @@ defmodule Philomena.Images do
           {:ok, {Image.t(), {Image.t(), map()} | nil}}
           | {:error, :unauthorized | :not_found}
   def find_consecutive_image(%Actor{} = actor, scope, image_id) do
-    with {:ok, image} <- load_image_for_navigation(actor, image_id),
+    with {:ok, image} <- load_image_member(actor, :show, image_id),
          {:ok, query} <- navigation_query(actor, scope) do
       {:ok, {image, ImageSearch.find_consecutive(actor, scope, image, query)}}
     end
@@ -1040,7 +1004,7 @@ defmodule Philomena.Images do
   @spec find_image_index_page(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, pos_integer()} | {:error, :unauthorized | :not_found}
   def find_image_index_page(%Actor{} = actor, scope, image_id) do
-    with {:ok, image} <- load_image_for_navigation(actor, image_id) do
+    with {:ok, image} <- load_image_member(actor, :show, image_id) do
       pagination = %{scope.pagination | page_number: 1}
 
       {definition, _tags} =
@@ -1073,7 +1037,7 @@ defmodule Philomena.Images do
           {:ok, {Image.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
   def related_images(%Actor{} = actor, scope, image_id) do
     with {:ok, image} <-
-           load_image_for_navigation(actor, image_id, [:faves, :sources, tags: :aliases]) do
+           load_image_member(actor, :show, image_id, [:faves, :sources, tags: :aliases]) do
       tags_to_match =
         image.tags
         |> Enum.reject(&(&1.category == "rating"))
@@ -1280,13 +1244,9 @@ defmodule Philomena.Images do
     |> Notifications.put_migrate_image_notifications(image, duplicate_of_image)
     |> Interactions.migrate_loaded_images(image, duplicate_of_image)
     |> Multi.run(:notification, &notify_merge(&1, &2, image, duplicate_of_image))
-    |> put_process_after_hide()
     |> Multi.on_commit(fn result ->
-      # TODO: these aren't ordered steps and some could be separate post-commit hooks
-      # to emulate the pipeline style
       reindex_image(duplicate_of_image)
       Comments.reindex_comments_on_image(duplicate_of_image)
-      reindex_merged_galleries(result)
       broadcast_image_merge(result.image, duplicate_of_image)
     end)
   end
@@ -2029,7 +1989,7 @@ defmodule Philomena.Images do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> put_hide_image(changeset_fun, image, user)
-      |> remove_gallery_interactions_multi(image)
+      |> Galleries.put_remove_image_interactions(image)
       |> DuplicateReports.put_reject_image_reports(:duplicate_reports, image.id)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: hidden} ->
         {
@@ -2038,7 +1998,6 @@ defmodule Philomena.Images do
           "Deleted image #{hidden.id} (#{hidden.deletion_reason})"
         }
       end)
-      |> put_process_after_hide()
       |> Multi.transact()
       |> case do
         {:ok, %{image: hidden}} -> {:ok, hidden}
@@ -3131,7 +3090,8 @@ defmodule Philomena.Images do
   @spec create_image_hide(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
   def create_image_hide(actor, image_id) do
-    with {:ok, image} <- load_image_for_hide(actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :vote, image_id) do
       Multi.new()
       |> ImageHides.put_hide_for_loaded_image(image, actor.user)
       |> Multi.transact()
@@ -3159,7 +3119,8 @@ defmodule Philomena.Images do
   @spec delete_image_hide(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
   def delete_image_hide(actor, image_id) do
-    with {:ok, image} <- load_image_for_hide(actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :vote, image_id) do
       Multi.new()
       |> ImageHides.delete_hide_for_loaded_image(image, actor.user)
       |> Multi.transact()
@@ -3185,7 +3146,10 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
   def create_fave(%Actor{user: user} = actor, image_id) do
-    with {:ok, image} <- load_image_for_interaction(actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <-
+           load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
+         :ok <- Filtering.verify_not_forced(actor, image) do
       Multi.new()
       |> ImageFaves.put_fave_for_loaded_image(image, user)
       |> ImageVotes.put_vote_for_loaded_image(image, user, true)
@@ -3212,7 +3176,10 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
   def delete_fave(%Actor{user: user} = actor, image_id) do
-    with {:ok, image} <- load_image_for_interaction(actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <-
+           load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
+         :ok <- Filtering.verify_not_forced(actor, image) do
       Multi.new()
       |> ImageFaves.delete_fave_for_loaded_image(image, user)
       |> Multi.transact()
@@ -3246,7 +3213,10 @@ defmodule Philomena.Images do
              | :invalid_vote
              | :interaction_failed}
   def create_vote(%Actor{user: user} = actor, image_id, up) do
-    with {:ok, image} <- load_image_for_interaction(actor, image_id),
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <-
+           load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
+         :ok <- Filtering.verify_not_forced(actor, image),
          {:ok, up} <- parse_vote(up) do
       Multi.new()
       |> ImageVotes.put_vote_for_loaded_image(image, user, up)
@@ -3273,7 +3243,10 @@ defmodule Philomena.Images do
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
   def delete_vote(%Actor{user: user} = actor, image_id) do
-    with {:ok, image} <- load_image_for_interaction(actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <-
+           load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
+         :ok <- Filtering.verify_not_forced(actor, image) do
       Multi.new()
       |> ImageVotes.delete_vote_for_loaded_image(image, user)
       |> Multi.transact()
