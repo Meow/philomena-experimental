@@ -532,67 +532,57 @@ defmodule Philomena.Images do
       |> where([i], i.id in ^requested_image_ids)
       |> order_by([i], asc: i.id)
 
-    image_ids =
-      image_query
-      |> select([i], i.id)
-      |> Repo.all()
-
-    # Window insertions to the matched (existing) images, like
-    # the removals below: unmatched ids must never receive taggings, and
-    # ids naming no image at all would violate the foreign key.
-    matched_ids = MapSet.new(image_ids)
-
-    to_insert =
-      changes
-      |> Enum.filter(&MapSet.member?(matched_ids, &1.image_id))
-      |> Enum.flat_map(fn change ->
-        Enum.map(change.added_tags, &%{tag_id: &1.id, image_id: change.image_id})
-      end)
-
     to_delete_ids =
       Enum.flat_map(changes, fn change ->
         Enum.map(change.removed_tags, & &1.id)
       end)
 
-    to_delete =
-      Tagging
-      |> where([t], t.image_id in ^image_ids and t.tag_id in ^to_delete_ids)
-      |> select([t], [t.image_id, t.tag_id])
-
     Multi.new()
-    |> Multi.lock_all(:locked_images, image_query)
+    |> Multi.lock_all(:locked_image_ids, select(image_query, [i], i.id))
     |> Multi.all(:visible_images, where(image_query, [i], i.hidden_from_users == false))
     |> Multi.insert_all(
       :inserted_taggings,
       Tagging,
-      to_insert,
+      fn %{locked_image_ids: image_ids} ->
+        # Scope insertions to existing, requested images.
+        changes
+        |> Enum.filter(&(&1.image_id in image_ids))
+        |> Enum.flat_map(fn change ->
+          Enum.map(change.added_tags, &%{tag_id: &1.id, image_id: change.image_id})
+        end)
+      end,
       on_conflict: :nothing,
       returning: [:image_id, :tag_id]
     )
-    |> Multi.delete_all(:deleted_taggings, to_delete)
-    |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
-    |> Tags.put_batch_image_count_changes(
-      :inserted_taggings,
+    |> Multi.delete_all(
       :deleted_taggings,
-      :visible_images
+      fn %{locked_image_ids: image_ids} ->
+        # Scope deletions to requested images.
+        Tagging
+        |> where([t], t.image_id in ^image_ids and t.tag_id in ^to_delete_ids)
+        |> select([t], [t.image_id, t.tag_id])
+      end
     )
-    |> Multi.run(:after_changes, fn _repo, _changes ->
+    |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
+    |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings, :visible_images)
+    |> Multi.run(:after_changes, fn _repo, %{locked_image_ids: image_ids} ->
       case after_changes.(image_ids) do
         :ok -> {:ok, nil}
         {:ok, value} -> {:ok, value}
         {:error, reason} -> {:error, reason}
       end
     end)
-    # Report the ids the batch actually matched back to the caller.
-    |> Multi.put(:matched_image_ids, image_ids)
-    |> Multi.on_commit(fn %{matched_image_ids: image_ids} ->
+    |> Multi.on_commit(fn %{locked_image_ids: image_ids} ->
       reindex_images(image_ids)
       Comments.reindex_comments_on_images(image_ids)
     end)
     |> Multi.transact()
     |> case do
-      {:ok, %{matched_image_ids: image_ids}} -> {:ok, image_ids}
-      error -> error
+      {:ok, %{locked_image_ids: image_ids}} ->
+        {:ok, image_ids}
+
+      error ->
+        error
     end
   end
 
