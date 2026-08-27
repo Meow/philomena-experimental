@@ -1053,10 +1053,11 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Upserts image-count deltas for bulk image tag changes inside `multi`.
+  Upserts image count deltas for bulk image tag changes inside `multi`.
 
-  Images supplies inserted and deleted tagging steps. Tags owns the tag-table
-  upsert and queues every affected tag for indexing after commit.
+  Images supplies inserted and deleted tagging steps. This function
+  updates image counts and queues every affected tag for indexing after
+  commit.
   """
   @spec put_batch_image_count_changes(Multi.t(), Multi.name(), Multi.name()) :: Multi.t()
   def put_batch_image_count_changes(%Multi{} = multi, inserted_step, deleted_step) do

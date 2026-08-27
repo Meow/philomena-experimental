@@ -445,11 +445,12 @@ defmodule Philomena.Images do
     |> Multi.one(:verification_candidate, where(User, id: ^user_id))
     |> Multi.merge(fn
       %{verification_candidate: %{images_count: 5, verified: false}} ->
-        # TODO: verification occurs at exactly 5 images to prevent subsequent
+        # TODO: this report occurs at exactly 5 images to prevent subsequent
         # approved uploads from generating redundant user verification reports.
         # This may result in some users not receiving verification reports.
-        # It would be better to check to see if the verification report has
-        # been created instead and then create it if it has not been
+        # It would be better to check existence of the verification report,
+        # and then create it if no report exists for any approved image 5 or
+        # greater.
         Reports.put_create_system_report(
           Multi.new(),
           "Verification",
@@ -481,22 +482,6 @@ defmodule Philomena.Images do
 
   defp queue("video/webm"), do: "videos"
   defp queue(_mime_type), do: "images"
-
-  ## Search indexing
-
-  defp reindex_after_update(result) do
-    case result do
-      {:ok, image} ->
-        reindex_image(image)
-
-        {:ok, image}
-
-      error ->
-        error
-    end
-  end
-
-  ## File cleanup
 
   defp purge_files(image, hidden_key) do
     files =
@@ -1746,7 +1731,10 @@ defmodule Philomena.Images do
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+      end
     end
   end
 
@@ -1792,7 +1780,10 @@ defmodule Philomena.Images do
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+      end
     end
   end
 
@@ -1838,7 +1829,10 @@ defmodule Philomena.Images do
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+      end
     end
   end
 
@@ -2159,7 +2153,10 @@ defmodule Philomena.Images do
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+      end
     end
   end
 
@@ -2184,7 +2181,7 @@ defmodule Philomena.Images do
 
   """
   @spec update_scratchpad(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_scratchpad(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_scratchpad, image_id) do
@@ -2202,7 +2199,13 @@ defmodule Philomena.Images do
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -2248,7 +2251,10 @@ defmodule Philomena.Images do
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+      end
     end
   end
 
@@ -2348,20 +2354,20 @@ defmodule Philomena.Images do
              tags: :aliases
            ]) do
       old_description = image.description
+      changeset = Image.description_changeset(image, attrs)
 
-      image
-      |> Image.description_changeset(attrs)
-      |> Repo.update()
-      # FIXME Multi, put_reindex_image
-      |> reindex_after_update()
+      Multi.new()
+      |> Multi.update(:image, changeset)
+      |> put_reindex_image(:image)
+      |> Multi.transact()
       |> case do
-        {:ok, image} ->
+        {:ok, %{image: %Image{} = image}} ->
           broadcast_description_update(image, old_description)
 
           {:ok, {image, old_description}}
 
-        error ->
-          error
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -2465,7 +2471,7 @@ defmodule Philomena.Images do
 
   """
   @spec update_locked_tags(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_locked_tags(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]) do
@@ -2487,7 +2493,13 @@ defmodule Philomena.Images do
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -2697,14 +2709,17 @@ defmodule Philomena.Images do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
-        Image.anonymous_changeset(image, %{"anonymous" => anonymous?})
+        Image.anonymous_changeset(image, %{anonymous: anonymous?})
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {log_type, Paths.image_path(image), "Updated anonymity of image #{image.id}"}
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
-      |> moderation_image_result()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+      end
     end
   end
 
