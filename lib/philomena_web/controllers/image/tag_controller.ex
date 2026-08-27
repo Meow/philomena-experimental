@@ -48,10 +48,7 @@ defmodule PhilomenaWeb.Image.TagController do
           "Too many tags changed. Change fewer tags or try again later."
         )
 
-      {:error, :update_failed} ->
-        RateLimitedResponse.call(conn, "Failed to update tags!")
-
-      {:error, _} = error ->
+      error ->
         error
     end
   end

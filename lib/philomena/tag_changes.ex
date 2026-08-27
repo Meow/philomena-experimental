@@ -424,10 +424,10 @@ defmodule Philomena.TagChanges do
   @doc """
   Adds tag-change creation to an Images update transaction.
 
-  `image_step` must return `{image, added_tags, removed_tags}`. This helper adds
-  `:tag_change` and `:tag_changes` steps; the latter preserves the existing
-  `{added_count, removed_count}` result. An update with no changed tags records
-  no history. Search indexing is deferred until the owning transaction commits.
+  `image_step` must resolve to an `%Image{}` with added and removed tag lists.
+  This helper adds `:tag_change` and `:tag_changes` steps; the latter preserves
+  the existing `{added_count, removed_count}` result. Search indexing is
+  deferred until the owning transaction commits.
 
   ## Examples
 
@@ -440,41 +440,25 @@ defmodule Philomena.TagChanges do
     user_id = if actor.user, do: actor.user.id
 
     multi
-    |> Multi.run(:tag_change, fn repo, changes ->
-      case Map.fetch!(changes, image_step) do
-        {_image, [], []} ->
-          {:ok, nil}
-
-        {image, _added_tags, _removed_tags} ->
-          repo.insert(%TagChange{
-            image_id: image.id,
-            user_id: user_id,
-            ip: actor.ip,
-            fingerprint: actor.fingerprint
-          })
-      end
+    |> Multi.insert(:tag_change, fn %{^image_step => image} ->
+      %TagChange{
+        image_id: image.id,
+        user_id: user_id,
+        ip: actor.ip,
+        fingerprint: actor.fingerprint
+      }
     end)
-    |> Multi.run(:tag_changes, fn repo, changes ->
-      case {Map.fetch!(changes, :tag_change), Map.fetch!(changes, image_step)} do
-        {nil, _image_result} ->
-          {:ok, {0, 0}}
+    |> Multi.run(:tag_changes, fn repo, %{^image_step => image, tag_change: tag_change} ->
+      {added_count, nil} =
+        repo.insert_all(TagChangeTag, tag_change_tag_rows(tag_change, image.added_tags, true))
 
-        {tag_change, {_image, added_tags, removed_tags}} ->
-          {added_count, nil} =
-            repo.insert_all(TagChangeTag, tag_change_tag_rows(tag_change, added_tags, true))
+      {removed_count, nil} =
+        repo.insert_all(TagChangeTag, tag_change_tag_rows(tag_change, image.removed_tags, false))
 
-          {removed_count, nil} =
-            repo.insert_all(TagChangeTag, tag_change_tag_rows(tag_change, removed_tags, false))
-
-          {:ok, {added_count, removed_count}}
-      end
+      {:ok, {added_count, removed_count}}
     end)
-    |> Multi.on_commit(fn
-      %{tag_change: %TagChange{} = tag_change} ->
-        Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "id", [tag_change.id]])
-
-      %{tag_change: nil} ->
-        nil
+    |> Multi.on_commit(fn %{tag_change: tag_change} ->
+      Exq.enqueue(Exq, "indexing", IndexWorker, ["TagChanges", "id", [tag_change.id]])
     end)
   end
 

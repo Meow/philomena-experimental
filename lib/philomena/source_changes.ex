@@ -300,15 +300,13 @@ defmodule Philomena.SourceChanges do
   @spec put_record_image_changes(Multi.t(), Actor.t(), Multi.name()) :: Multi.t()
   def put_record_image_changes(%Multi{} = multi, %Actor{} = actor, image_step \\ :image) do
     multi
-    |> Multi.run(:added_source_changes, fn repo,
-                                           %{^image_step => {image, added_sources, _removed}} ->
-      rows = Enum.map(added_sources, &source_change_attributes(actor, image, &1, true))
+    |> Multi.run(:added_source_changes, fn repo, %{^image_step => image} ->
+      rows = Enum.map(image.added_sources, &source_change_attributes(actor, image, &1, true))
       {count, nil} = repo.insert_all(SourceChange, rows)
       {:ok, count}
     end)
-    |> Multi.run(:removed_source_changes, fn repo,
-                                             %{^image_step => {image, _added, removed_sources}} ->
-      rows = Enum.map(removed_sources, &source_change_attributes(actor, image, &1, false))
+    |> Multi.run(:removed_source_changes, fn repo, %{^image_step => image} ->
+      rows = Enum.map(image.removed_sources, &source_change_attributes(actor, image, &1, false))
       {count, nil} = repo.insert_all(SourceChange, rows)
       {:ok, count}
     end)

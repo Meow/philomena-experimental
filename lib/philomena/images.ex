@@ -224,34 +224,31 @@ defmodule Philomena.Images do
     new_sources = attrs["sources"]
 
     Multi.new()
-    |> Multi.run(:image, fn repo, _chg ->
+    |> Multi.run(:image, fn repo, _changes ->
       image = repo.preload(image, [:sources])
 
-      image
-      |> Image.source_changeset(%{}, old_sources, new_sources)
-      |> repo.update()
-      |> case do
-        {:ok, image} ->
-          {:ok, {image, image.added_sources, image.removed_sources}}
+      changeset = Image.source_changeset(image, old_sources, new_sources)
 
-        error ->
-          error
+      if Image.meaningful_source_update?(changeset) do
+        repo.update(changeset)
+      else
+        {:error, :no_change}
       end
     end)
     |> SourceChanges.put_record_image_changes(actor)
-    |> Multi.merge(fn %{image: {_image, added, removed}} ->
-      if Enum.any?(added) or Enum.any?(removed) do
-        UserStatistics.put_increment(Multi.new(), actor.user, :metadata_updates_count)
-      else
-        Multi.new()
-      end
-    end)
-    |> Multi.on_commit(fn %{image: {image, added, removed}} ->
-      if Enum.any?(added) or Enum.any?(removed) do
-        reindex_image(image)
-      end
-    end)
+    |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
+    |> put_reindex_image(:image)
     |> Multi.transact()
+    |> case do
+      {:ok, %{image: %Image{} = image}} ->
+        {:ok, image}
+
+      {:error, :image, :no_change, _changes} ->
+        {:error, :no_change}
+
+      {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+        {:error, changeset}
+    end
   end
 
   defp update_loaded_tags(%Image{} = image, %Actor{} = actor, attrs) do
@@ -262,36 +259,39 @@ defmodule Philomena.Images do
     |> Multi.run(:image, fn repo, _chg ->
       image = repo.preload(image, [:tags, :locked_tags])
 
-      image
-      |> Image.tag_changeset(%{}, old_tags, new_tags, image.locked_tags)
-      |> repo.update()
-      |> case do
-        {:ok, image} ->
-          {:ok, {image, image.added_tags, image.removed_tags}}
+      changeset = Image.tag_changeset(image, old_tags, new_tags, image.locked_tags)
 
-        error ->
-          error
+      if Image.meaningful_tag_update?(changeset) do
+        repo.update(changeset)
+      else
+        {:error, :no_change}
       end
     end)
-    |> Multi.run(:check_limits, fn _repo, %{image: {image, _added, _removed}} ->
+    |> Multi.run(:check_limits, fn _repo, %{image: image} ->
       check_tag_change_limits_before_commit(image, actor)
     end)
     |> TagChanges.put_tag_change(actor)
     |> Tags.put_image_tag_count_changes()
-    |> Multi.merge(fn %{image: {_image, added, removed}} ->
-      if Enum.any?(added ++ removed) do
-        UserStatistics.put_increment(Multi.new(), actor.user, :metadata_updates_count)
-      else
-        Multi.new()
-      end
-    end)
-    |> Multi.on_commit(fn %{image: {image, added, removed}} ->
-      reindex_image(image)
+    |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
+    |> put_reindex_image(:image)
+    |> Multi.on_commit(fn %{image: image} ->
       Comments.reindex_comments_on_image(image)
       update_tag_change_limits_after_commit(image, actor)
-      {added, removed}
     end)
     |> Multi.transact()
+    |> case do
+      {:ok, %{image: %Image{} = image}} ->
+        {:ok, image}
+
+      {:error, :image, :no_change, _changes} ->
+        {:error, :no_change}
+
+      {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+        {:error, changeset}
+
+      {:error, :check_limits, _reason, _changes} ->
+        {:error, :rate_limited}
+    end
   end
 
   defp check_tag_change_limits_before_commit(image, %Actor{ip: ip, user: user}) do
@@ -1249,13 +1249,19 @@ defmodule Philomena.Images do
   ## Examples
 
       iex> revert_source_change_for_erasure(image, system_actor, attrs)
-      {:ok, %{image: {%Image{}, added, removed}}}
+      {:ok, %Image{}}
 
   """
   @spec revert_source_change_for_erasure(Image.t(), Actor.t(), map()) ::
           {:ok, map()} | Multi.failure()
   def revert_source_change_for_erasure(%Image{} = image, %Actor{} = actor, attrs) do
-    update_loaded_sources(image, actor, attrs)
+    case update_loaded_sources(image, actor, attrs) do
+      {:ok, image} ->
+        {:ok, image}
+
+      {:error, :no_change} ->
+        {:ok, image}
+    end
   end
 
   @doc group: "Cross-context transaction helpers"
@@ -1480,8 +1486,8 @@ defmodule Philomena.Images do
       image =
         %Image{}
         |> Image.creation_changeset(params, actor)
-        |> Image.source_changeset(params, [], sources)
-        |> Image.tag_changeset(params, [], tags)
+        |> Image.source_changeset([], sources)
+        |> Image.tag_changeset([], tags)
         |> Image.dnp_changeset(user)
         |> Uploader.analyze_upload(params)
         |> maybe_approve_image(user)
@@ -2432,28 +2438,39 @@ defmodule Philomena.Images do
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :source_update),
          {:ok, image} <-
-           load_image_member(actor, :edit_metadata, image_id, [:user, :sources, tags: :aliases]),
-         {:ok, %{image: {image, added, removed}}} <-
-           update_loaded_sources(image, actor, attrs) do
-      RateLimiter.record_action(actor, :source_update, @source_update_window)
+           load_image_member(actor, :edit_metadata, image_id, [:user, :sources, tags: :aliases]) do
+      image
+      |> update_loaded_sources(actor, attrs)
+      |> case do
+        {:ok, %Image{} = image} ->
+          RateLimiter.record_action(actor, :source_update, @source_update_window)
 
-      image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
-      broadcast_source_update(image, added, removed)
+          # TODO: broadcast should move to update_loaded_sources
+          image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
+          added = image.added_sources
+          removed = image.removed_sources
+          broadcast_source_update(image, added, removed)
 
-      {:ok,
-       %{
-         image: image,
-         added: added,
-         removed: removed,
-         source_change_count: SourceChanges.count_for_image(image)
-       }}
-    else
-      {:error, :ban} -> {:error, :ban}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      {:error, :rate_limited} -> {:error, :rate_limited}
-      # Normalize the loaded update engine's legacy empty-result shapes.
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :image, changeset, _changes} -> {:error, changeset}
+          {:ok,
+           %{
+             image: image,
+             added: added,
+             removed: removed,
+             source_change_count: SourceChanges.count_for_image(image)
+           }}
+
+        {:error, :no_change} ->
+          {:ok,
+           %{
+             image: image,
+             added: [],
+             removed: [],
+             source_change_count: SourceChanges.count_for_image(image)
+           }}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -2531,11 +2548,10 @@ defmodule Philomena.Images do
 
   - `{:error, %Ecto.Changeset{}}` when the update is rejected (e.g. the
     image would drop below the minimum tag count)
-  - `{:error, :update_failed}` for any other rollback
   - `{:error, :rate_limited}` from either of two independent
     counters - the once-per-window check above, or the
-    in-transaction `TagChanges.Limits` check that caps the number of tag and rating
-    changes over ten minutes and rolls back at the
+    in-transaction `TagChanges.Limits` check that caps the number of tag and
+    rating changes over ten minutes and rolls back at the
     `:check_limits` step.
 
   All failures leave the image untouched.
@@ -2560,7 +2576,6 @@ defmodule Philomena.Images do
              | :unauthorized
              | :not_found
              | :rate_limited
-             | :update_failed
              | Ecto.Changeset.t()}
   def update_tags(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
@@ -2571,35 +2586,48 @@ defmodule Philomena.Images do
              :locked_tags,
              :sources,
              tags: :aliases
-           ]),
-         {:ok, %{image: {image, added, removed}}} <-
-           update_loaded_tags(image, actor, attrs) do
-      RateLimiter.record_action(actor, :tag_update, @tag_update_window)
+           ]) do
+      image
+      |> update_loaded_tags(actor, attrs)
+      |> case do
+        {:ok, %Image{} = image} ->
+          RateLimiter.record_action(actor, :tag_update, @tag_update_window)
 
-      {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
-      image = Repo.preload(image, [:sources, tags: :aliases], force: true)
+          # TODO: broadcast should move to update_loaded_tags
+          image = Repo.preload(image, [:sources, tags: :aliases], force: true)
+          added = image.added_tags
+          removed = image.removed_tags
+          broadcast_tag_update(image, added, removed)
 
-      broadcast_tag_update(image, added, removed)
+          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
 
-      {:ok,
-       %{
-         image: image,
-         added: added,
-         removed: removed,
-         tag_change_count: tag_change_count,
-         tag_change_tag_count: tag_change_tag_count
-       }}
-    else
-      {:error, :ban} -> {:error, :ban}
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      # The once-per-window check, distinct from the tag-count `:check_limits`
-      # rollback below.
-      {:error, :rate_limited} -> {:error, :rate_limited}
-      # Normalize the loaded update engine's legacy empty-result shapes.
-      shape when shape in [{:error, :not_found}, :error, nil] -> {:error, :not_found}
-      {:error, :image, changeset, _changes} -> {:error, changeset}
-      {:error, :check_limits, _value, _changes} -> {:error, :rate_limited}
-      _other -> {:error, :update_failed}
+          {:ok,
+           %{
+             image: image,
+             added: added,
+             removed: removed,
+             tag_change_count: tag_change_count,
+             tag_change_tag_count: tag_change_tag_count
+           }}
+
+        {:error, :no_change} ->
+          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
+
+          {:ok,
+           %{
+             image: image,
+             added: [],
+             removed: [],
+             tag_change_count: tag_change_count,
+             tag_change_tag_count: tag_change_tag_count
+           }}
+
+        {:error, :rate_limited} ->
+          {:error, :rate_limited}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, changeset}
+      end
     end
   end
 

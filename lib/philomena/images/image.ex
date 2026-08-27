@@ -214,11 +214,18 @@ defmodule Philomena.Images.Image do
     |> change(destroyed_content: true, removed_image: image.image, image: nil)
   end
 
-  def source_changeset(image, attrs, old_sources, new_sources) do
+  def source_changeset(image, old_sources, new_sources) do
     image
-    |> cast(attrs, [])
+    |> change()
     |> SourceDiffer.diff_input(old_sources, new_sources)
     |> validate_length(:sources, max: 15)
+  end
+
+  def meaningful_source_update?(changeset) do
+    added = get_field(changeset, :added_sources)
+    removed = get_field(changeset, :removed_sources)
+
+    not (Enum.empty?(added) and Enum.empty?(removed))
   end
 
   def sources_changeset(image, new_sources) do
@@ -227,11 +234,18 @@ defmodule Philomena.Images.Image do
     |> validate_length(:sources, max: 15)
   end
 
-  def tag_changeset(image, attrs, old_tags, new_tags, excluded_tags \\ []) do
+  def tag_changeset(image, old_tags, new_tags, excluded_tags \\ []) do
     image
-    |> cast(attrs, [])
+    |> change()
     |> TagDiffer.diff_input(old_tags, new_tags, excluded_tags)
     |> TagValidator.validate_tags()
+  end
+
+  def meaningful_tag_update?(changeset) do
+    added = get_field(changeset, :added_tags)
+    removed = get_field(changeset, :removed_tags)
+
+    not (Enum.empty?(added) and Enum.empty?(removed))
   end
 
   def locked_tags_changeset(image, attrs, locked_tags) do

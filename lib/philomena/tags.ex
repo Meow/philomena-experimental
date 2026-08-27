@@ -166,19 +166,19 @@ defmodule Philomena.Tags do
     )
   end
 
-  defp image_count_deltas(%Image{hidden_from_users: true}, _added_tags, _removed_tags),
+  defp image_count_deltas(%Image{hidden_from_users: true}),
     do: []
 
-  defp image_count_deltas(%Image{}, added_tags, removed_tags) do
+  defp image_count_deltas(%Image{} = image) do
     deltas = %{}
 
     deltas =
-      Enum.reduce(added_tags, deltas, fn tag, deltas ->
+      Enum.reduce(image.added_tags, deltas, fn tag, deltas ->
         Map.update(deltas, tag.id, 1, &(&1 + 1))
       end)
 
     deltas =
-      Enum.reduce(removed_tags, deltas, fn tag, deltas ->
+      Enum.reduce(image.removed_tags, deltas, fn tag, deltas ->
         Map.update(deltas, tag.id, -1, &(&1 - 1))
       end)
 
@@ -187,9 +187,9 @@ defmodule Philomena.Tags do
     |> Enum.sort_by(fn {tag_id, _delta} -> tag_id end)
   end
 
-  defp update_image_count_changes(repo, {image, added_tags, removed_tags}) do
+  defp update_image_count_changes(repo, image) do
     image
-    |> image_count_deltas(added_tags, removed_tags)
+    |> image_count_deltas()
     |> Enum.map(fn {tag_id, delta} ->
       update_image_counts(repo, delta, [tag_id])
 
@@ -1008,10 +1008,10 @@ defmodule Philomena.Tags do
   @doc """
   Adds tag image count maintenance to `multi`.
 
-  `image_step` must resolve to `{image, added_tags, removed_tags}`. Tags owns
-  its image count update rule: hidden images do not contribute to tag image
-  counts. Counter updates are performed in ascending tag ID order and affected
-  tags are reindexed after the transaction commits.
+  `image_step` must resolve to an `%Image{}` with added and removed tag lists.
+  Tags owns its image count update rule: hidden images do not contribute to tag
+  image counts. Counter updates are performed in ascending tag ID order and
+  affected tags are reindexed after the transaction commits.
 
   ## Examples
 
@@ -1022,9 +1022,8 @@ defmodule Philomena.Tags do
   @spec put_image_tag_count_changes(Multi.t(), Multi.name()) :: Multi.t()
   def put_image_tag_count_changes(%Multi{} = multi, image_step \\ :image) do
     multi
-    |> Multi.run(:image_tag_counts_tag_ids, fn repo, changes ->
-      image_changes = Map.fetch!(changes, image_step)
-      {:ok, update_image_count_changes(repo, image_changes)}
+    |> Multi.run(:image_tag_counts_tag_ids, fn repo, %{^image_step => image} ->
+      {:ok, update_image_count_changes(repo, image)}
     end)
     |> Multi.on_commit(fn %{image_tag_counts_tag_ids: tag_ids} ->
       reindex_tag_ids(tag_ids)
