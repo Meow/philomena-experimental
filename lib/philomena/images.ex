@@ -82,6 +82,7 @@ defmodule Philomena.Images do
     )
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads the most recent featured image visible to `actor`.
 
@@ -187,6 +188,7 @@ defmodule Philomena.Images do
 
   defp moderation_image_result(error), do: error
 
+  @doc group: "Cross-context transaction helpers"
   @doc """
   Adds a loaded-image merge to `multi` without transacting it.
 
@@ -431,6 +433,7 @@ defmodule Philomena.Images do
     |> Repo.update()
   end
 
+  @doc group: "Forms and uploads"
   @doc """
   Returns an `%Ecto.Changeset{}` for tracking image changes.
 
@@ -445,6 +448,7 @@ defmodule Philomena.Images do
     Image.changeset(image, %{})
   end
 
+  @doc group: "Forms and uploads"
   @doc """
   Gets the tag list for a single image.
   """
@@ -455,6 +459,7 @@ defmodule Philomena.Images do
     |> Enum.map_join(", ", & &1.name)
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads the default image listing page for the viewer's search `scope`.
 
@@ -476,6 +481,7 @@ defmodule Philomena.Images do
     ImageSearch.execute(definition)
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Returns the paginated approval queue for `actor`: unapproved images, oldest
   first, with the listing preloads.
@@ -506,6 +512,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Runs the search the scope's "q" parameter describes for `actor`.
 
@@ -551,6 +558,7 @@ defmodule Philomena.Images do
   defp custom_ordering?(%{sf: sf}) when sf not in [nil, "id", "first_seen_at"], do: true
   defp custom_ordering?(_scope), do: false
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads an image representation for the JSON API or oEmbed on behalf of
   `actor`.
@@ -573,6 +581,7 @@ defmodule Philomena.Images do
     load_image_member(actor, :show, image_id, [:user, :intensity, :sources, tags: :aliases])
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Runs the "my:watched" search for the viewer scope, with the watched-feed
   preloads, and returns the record page.
@@ -592,6 +601,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads the image named by `id` for showing, on behalf of `actor`.
 
@@ -647,6 +657,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Assembles the `ImagePage` for `actor`: the visible page of comments,
   the viewer's subscription state, their galleries paired with membership of
@@ -760,6 +771,7 @@ defmodule Philomena.Images do
   defp sources_for_edit([]), do: [%Source{}]
   defp sources_for_edit(sources), do: sources
 
+  @doc group: "Forms and uploads"
   @doc """
   Builds the changeset for a new image upload, on behalf of `actor`.
 
@@ -786,6 +798,7 @@ defmodule Philomena.Images do
 
   @image_create_window 5
 
+  @doc group: "Forms and uploads"
   @doc """
   Uploads a new image on behalf of `actor`, who must pass the write-access
   check: banned actors get `{:error, :ban}` and actors without a fingerprint
@@ -955,6 +968,7 @@ defmodule Philomena.Images do
     end)
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Finds the image adjacent to the one `image_id` names in the listing the
   scope's parameters describe, for prev/next navigation, on behalf of
@@ -1001,6 +1015,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Returns the 1-based page number on which the image `image_id`
   names appears when all images are listed by descending id, on behalf of
@@ -1029,6 +1044,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads images related to the one `image_id` names. Related images share its
   lowest-population tags, weighted towards its most distinctive ones and the
@@ -1096,6 +1112,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Picks a random image id from the listing the scope's "q" parameter
   describes (everything when absent), respecting the scope's filter and
@@ -1139,6 +1156,7 @@ defmodule Philomena.Images do
     load_image_member(actor, :show, image_id, preloads)
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads the image named by `image_id`, applying `preloads`, and authorizes
   `actor` for `:show` on it.
@@ -1160,6 +1178,7 @@ defmodule Philomena.Images do
     load_image_member(actor, :show, image_id, preloads)
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads an image as a report target on behalf of `actor`.
 
@@ -1177,6 +1196,7 @@ defmodule Philomena.Images do
     load_image_member(actor, :show, image_id, [:sources, tags: :aliases])
   end
 
+  @doc group: "Cross-context transaction helpers"
   @doc """
   Reverts one loaded image source change during account erasure.
 
@@ -1196,6 +1216,7 @@ defmodule Philomena.Images do
     update_loaded_sources(image, actor, attrs)
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Approves the image named by `image_id` for public viewing, on behalf of
   `actor`.
@@ -1246,6 +1267,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Counts the number of images pending approval that a user can moderate.
 
@@ -1269,6 +1291,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Browsing and discovery"
   @doc """
   Loads images by ID with the associations required by rich text references.
 
@@ -1289,6 +1312,7 @@ defmodule Philomena.Images do
     |> Repo.all()
   end
 
+  @doc group: "Visibility and filtering"
   @doc """
   Returns whether `image` matches the viewer's compiled hide/spoiler policy.
   """
@@ -1297,6 +1321,7 @@ defmodule Philomena.Images do
     Filtering.filter_or_spoiler_hits?(image, image_filter)
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Marks the image named by `image_id` as the current featured image, on behalf
   of `actor`.
@@ -1338,6 +1363,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Hard-deletes the contents of the image named by `image_id`, on behalf of
   `actor`, purging its stored file and thumbnails.
@@ -1388,6 +1414,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Locks (`locked?` true) or unlocks (`locked?` false) comments on the image
   named by `image_id`, on behalf of `actor`.
@@ -1433,6 +1460,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Locks (`locked?` true) or unlocks (`locked?` false) description editing on the
   image named by `image_id`, on behalf of `actor`.
@@ -1478,6 +1506,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Locks (`locked?` true) or unlocks (`locked?` false) tag editing on the image
   named by `image_id`, on behalf of `actor`.
@@ -1523,6 +1552,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Clears the original SHA-512 hash of the image named by `image_id`, on behalf
   of `actor`, allowing the same file to be uploaded again.
@@ -1559,6 +1589,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Loads the image named by `image_id` for moderation, on behalf of `actor`.
 
@@ -1585,6 +1616,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Updates the moderation notes on the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with a `"scratchpad"` key).
@@ -1627,6 +1659,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Deletes the source change history of the image named by `image_id`, on behalf
   of `actor`.
@@ -1672,6 +1705,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Repairs the image named by `image_id`, on behalf of `actor`, by regenerating
   its thumbnails and purging its cached files.
@@ -1739,6 +1773,7 @@ defmodule Philomena.Images do
   defp queue("video/webm"), do: "videos"
   defp queue(_mime_type), do: "images"
 
+  @doc group: "Metadata editing"
   @doc """
   Replaces the file content of the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with an `"image"` upload).
@@ -1797,6 +1832,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Updates the description of the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with a `"description"` key).
@@ -1853,6 +1889,7 @@ defmodule Philomena.Images do
 
   @source_update_window 5
 
+  @doc group: "Metadata editing"
   @doc """
   Updates the sources of the image named by `image_id`, on behalf of `actor`,
   from `attrs` (`"old_sources"`/`"sources"` maps),
@@ -1917,6 +1954,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Updates the locked tag list of the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with a `"tag_input"` key).
@@ -1965,6 +2003,7 @@ defmodule Philomena.Images do
 
   @tag_update_window 5
 
+  @doc group: "Metadata editing"
   @doc """
   Updates the tags of the image named by `image_id`, on behalf of `actor`, from
   `attrs` (`"old_tag_input"`/`"tag_input"`), recording tag
@@ -2061,6 +2100,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Reassigns the uploader of the image named by `image_id`, on behalf of `actor`,
   from `image_params`.
@@ -2123,6 +2163,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Sets or clears the anonymity status of the image named by `image_id`,
   on behalf of `actor`.
@@ -2166,6 +2207,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Metadata editing"
   @doc """
   Updates the deletion reason of the image named by `image_id`, on behalf of
   `actor`, from `attrs`.
@@ -2230,6 +2272,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Hides (soft-deletes) the image named by `image_id` from public view, on behalf
   of `actor`, recording the deletion reason from `attrs`.
@@ -2279,6 +2322,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Restores (unhides) the image named by `image_id` from moderation hiding, on
   behalf of `actor`.
@@ -2355,6 +2399,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Bulk operations"
   @doc """
   Applies a batch tag edit to `image_ids` on behalf of `actor`.
 
@@ -2451,6 +2496,7 @@ defmodule Philomena.Images do
     {Enum.map(parsed, fn {_id, {:ok, int}} -> int end), Enum.map(unparsable, &elem(&1, 0))}
   end
 
+  @doc group: "Bulk operations"
   @doc """
   Performs a batch update on multiple images, adding and removing tags.
 
@@ -2500,6 +2546,7 @@ defmodule Philomena.Images do
     )
   end
 
+  @doc group: "Bulk operations"
   @spec batch_update([map()], map()) :: {:ok, [integer()]} | {:error, term()}
   def batch_update(changes, attributes) do
     batch_update(changes, attributes, fn _image_ids -> :ok end)
@@ -2599,6 +2646,7 @@ defmodule Philomena.Images do
     |> Enum.reject(&(Enum.empty?(&1.added_tags) && Enum.empty?(&1.removed_tags)))
   end
 
+  @doc group: "Search indexing"
   @doc """
   Updates image search indices when a user's name changes.
 
@@ -2615,6 +2663,7 @@ defmodule Philomena.Images do
     Search.update_by_query(Image, data.query, data.set_replacements, data.replacements)
   end
 
+  @doc group: "Moderation and lifecycle"
   @doc """
   Removes the vote cast by the user named by `user_id` on the image named by
   `image_id`, on behalf of `actor`.
@@ -2681,6 +2730,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Search indexing"
   @doc """
   Adds an after-commit image reindex step to a transaction workflow.
 
@@ -2692,6 +2742,7 @@ defmodule Philomena.Images do
     Multi.on_commit(multi, fn %{^step => image} -> reindex_image(image) end)
   end
 
+  @doc group: "Search indexing"
   @doc """
   Loads an image for an invariant-enforced indexing job.
 
@@ -2709,6 +2760,7 @@ defmodule Philomena.Images do
     Repo.one!(Image |> where(id: ^image_id) |> preload(:tags))
   end
 
+  @doc group: "Search indexing"
   @doc """
   Queues a single image for search index updates.
   Returns the image struct unchanged, for use in a pipeline.
@@ -2726,6 +2778,7 @@ defmodule Philomena.Images do
     image
   end
 
+  @doc group: "Search indexing"
   @doc """
   Queues all listed image IDs for search index updates.
   Returns the list unchanged, for use in a pipeline.
@@ -2743,6 +2796,7 @@ defmodule Philomena.Images do
     image_ids
   end
 
+  @doc group: "Search indexing"
   @doc """
   Returns the preload configuration for image indexing.
 
@@ -2780,6 +2834,7 @@ defmodule Philomena.Images do
     ]
   end
 
+  @doc group: "Search indexing"
   @doc """
   Performs the worker-side search reindex operation for images matching the
   given criteria. PostgreSQL is the source of truth; OpenSearch is updated
@@ -2815,6 +2870,7 @@ defmodule Philomena.Images do
     Exq.enqueue(Exq, "indexing", ImagePurgeWorker, [files])
   end
 
+  @doc group: "Background jobs"
   @doc """
   Executes the worker-side CDN purge operation for image files.
 
@@ -2849,6 +2905,7 @@ defmodule Philomena.Images do
     Notifications.broadcast_image_merge(target, source)
   end
 
+  @doc group: "Subscriptions and notifications"
   @doc """
   Subscribes `actor` to the image named by `image_id`, so they are notified of
   new comments on it.
@@ -2878,6 +2935,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Subscriptions and notifications"
   @doc """
   Unsubscribes `actor` from the image named by `image_id`.
 
@@ -2903,6 +2961,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "User interactions"
   @doc """
   Records a personal hide of the image named by `image_id` for `actor`, so the
   image is filtered out of `actor`'s browsing. This is the per-user hide
@@ -2933,6 +2992,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "User interactions"
   @doc """
   Removes `actor`'s personal hide of the image named by `image_id`. This is the
   per-user unhide interaction, distinct from the moderator unhide `unhide_image/2`.
@@ -2986,6 +3046,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Visibility and filtering"
   @doc """
   Verifies the Images-owned forced-filter prerequisite for a loaded image.
 
@@ -3004,6 +3065,7 @@ defmodule Philomena.Images do
     Filtering.verify_not_forced(actor, image)
   end
 
+  @doc group: "User interactions"
   @doc """
   Records `actor`'s fave of `image_id`, which also casts an implicit upvote
   (replacing an existing downvote). Faving is idempotent.
@@ -3030,6 +3092,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "User interactions"
   @doc """
   Removes `actor`'s fave of `image_id`, leaving any upvote in place. Unfaving is
   idempotent and enforces the same prerequisites as `create_fave/2`.
@@ -3055,6 +3118,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "User interactions"
   @doc """
   Records `actor`'s vote on `image_id`—an upvote when `up` is `true` or
   `"true"`, and a downvote when it is `false` or `"false"`—replacing any
@@ -3089,6 +3153,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "User interactions"
   @doc """
   Removes `actor`'s vote on `image_id`. Unvoting is idempotent and enforces the
   same prerequisites as `create_vote/3`.
@@ -3119,6 +3184,7 @@ defmodule Philomena.Images do
 
   defp interaction_result(_error, _image), do: {:error, :interaction_failed}
 
+  @doc group: "User interactions"
   @doc """
   Assembles the interaction listing for the image named by `image_id`, on behalf
   of `actor`.
@@ -3155,6 +3221,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Subscriptions and notifications"
   @doc """
   Clears `actor`'s unread notifications for the image named by `image_id`.
 
@@ -3182,6 +3249,7 @@ defmodule Philomena.Images do
     end
   end
 
+  @doc group: "Cross-context transaction helpers"
   @doc """
   Adds a denormalized image counter adjustment to `multi`.
 
@@ -3209,6 +3277,7 @@ defmodule Philomena.Images do
     end)
   end
 
+  @doc group: "Cross-context transaction helpers"
   @doc """
   Adds multiple denormalized image-counter adjustments to `multi`.
 
@@ -3235,6 +3304,7 @@ defmodule Philomena.Images do
     if is_struct(image_or_id, Image), do: image_or_id.id, else: image_or_id
   end
 
+  @doc group: "Background jobs"
   @doc """
   Persists metadata calculated by the thumbnail worker.
 
@@ -3253,6 +3323,7 @@ defmodule Philomena.Images do
     |> Repo.update!()
   end
 
+  @doc group: "Background jobs"
   @doc """
   Replaces attribution data on a user's images in batches.
   """
@@ -3266,6 +3337,7 @@ defmodule Philomena.Images do
     :ok
   end
 
+  @doc group: "Background jobs"
   @doc """
   Decrements vote counters for the supplied images after user vote cleanup.
   """
@@ -3282,6 +3354,7 @@ defmodule Philomena.Images do
     )
   end
 
+  @doc group: "Background jobs"
   @doc """
   Decrements favorite counters for the supplied images after user favorite
   cleanup.
@@ -3291,6 +3364,7 @@ defmodule Philomena.Images do
     Repo.update_all(where(Image, [image], image.id in ^image_ids), inc: [faves_count: -1])
   end
 
+  @doc group: "Cross-context transaction helpers"
   @doc """
   Adds deletion of image taggings represented by `query` to `multi`.
 
@@ -3307,6 +3381,7 @@ defmodule Philomena.Images do
     |> Multi.on_commit(fn %{^image_ids_step => image_ids} -> reindex_images(image_ids) end)
   end
 
+  @doc group: "Cross-context transaction helpers"
   @doc """
   Adds insertion of image taggings represented by `entries` to `multi`.
 
@@ -3339,6 +3414,7 @@ defmodule Philomena.Images do
     |> Multi.on_commit(fn %{^image_ids_step => image_ids} -> reindex_images(image_ids) end)
   end
 
+  @doc group: "Cross-context transaction helpers"
   @doc """
   Copies an image's taggings to another image inside `multi`.
 

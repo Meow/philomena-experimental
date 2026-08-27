@@ -1,6 +1,4 @@
 defmodule Philomena.Tags.QuickTagTable do
-  @moduledoc false
-
   import Ecto.Query, warn: false
 
   alias Philomena.Config
