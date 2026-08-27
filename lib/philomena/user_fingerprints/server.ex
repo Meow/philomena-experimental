@@ -6,11 +6,7 @@ defmodule Philomena.UserFingerprints.Server do
 
   use GenServer
 
-  import Ecto.Query
-
-  alias Philomena.Repo
   alias Philomena.UserFingerprints
-  alias Philomena.UserFingerprints.UserFingerprint
 
   @timeout 0
   @flush_interval to_timeout(second: 60)
@@ -57,34 +53,8 @@ defmodule Philomena.UserFingerprints.Server do
   @impl true
   @doc false
   def handle_info(:timeout, user_fingerprints) do
-    flush(user_fingerprints)
+    UserFingerprints.persist_usage_batch(user_fingerprints)
+
     {:noreply, %{}, @flush_interval}
-  end
-
-  defp flush(user_fingerprints) do
-    if map_size(user_fingerprints) > 0 do
-      update_query =
-        update(UserFingerprint,
-          inc: [uses: 1],
-          set: [updated_at: fragment("EXCLUDED.updated_at")]
-        )
-
-      Repo.insert_all(
-        UserFingerprint,
-        Enum.map(user_fingerprints, &into_insert_all/1),
-        on_conflict: update_query,
-        conflict_target: [:user_id, :fingerprint]
-      )
-    end
-  end
-
-  defp into_insert_all({{user_id, fingerprint}, updated_at}) do
-    %{
-      user_id: user_id,
-      fingerprint: fingerprint,
-      uses: 1,
-      created_at: updated_at,
-      updated_at: updated_at
-    }
   end
 end

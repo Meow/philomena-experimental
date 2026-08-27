@@ -156,4 +156,42 @@ defmodule Philomena.UserIps do
     |> select([u], u.ip)
     |> Repo.one()
   end
+
+  @doc """
+  Deletes all stored IP history for a user.
+  """
+  @spec delete_for_user!(integer()) :: :ok
+  def delete_for_user!(user_id) do
+    Repo.delete_all(where(UserIp, user_id: ^user_id))
+    :ok
+  end
+
+  @doc """
+  Persists the batching server's coalesced IP usage.
+  """
+  @spec persist_usage_batch(%{{pos_integer(), Postgrex.INET.t()} => DateTime.t()}) :: :ok
+  def persist_usage_batch(user_ips) when is_map(user_ips) do
+    if map_size(user_ips) > 0 do
+      update_query =
+        update(UserIp, inc: [uses: 1], set: [updated_at: fragment("EXCLUDED.updated_at")])
+
+      usage_rows =
+        Enum.map(user_ips, fn {{user_id, ip_address}, updated_at} ->
+          %UserIp{user_id: user_id}
+          |> UserIp.changeset(%{ip: ip_address})
+          |> Ecto.Changeset.apply_changes()
+          |> Map.take(UserIp.insert_fields())
+          |> Map.merge(%{created_at: updated_at, updated_at: updated_at})
+        end)
+
+      Repo.insert_all(
+        UserIp,
+        usage_rows,
+        on_conflict: update_query,
+        conflict_target: [:user_id, :ip]
+      )
+    end
+
+    :ok
+  end
 end

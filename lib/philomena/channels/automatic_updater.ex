@@ -7,12 +7,12 @@ defmodule Philomena.Channels.AutomaticUpdater do
   """
 
   import Ecto.Query, warn: false
-  alias Philomena.Repo
 
   alias Philomena.Channels
   alias Philomena.Channels.Channel
   alias Philomena.Channels.PicartoChannel
   alias Philomena.Channels.PiczelChannel
+  alias Philomena.Repo
 
   @doc """
   Updates all the tracked channels for which an update scheme is known.
@@ -33,20 +33,12 @@ defmodule Philomena.Channels.AutomaticUpdater do
   defp update_provider({provider_name, live_channels}, now) do
     channel_names = Map.keys(live_channels)
 
-    provider_name
-    |> update_offline_query(channel_names, now)
-    |> Repo.update_all([])
+    Channels.mark_provider_channels_offline(provider_name, channel_names, now)
 
     provider_name
     |> online_query(channel_names)
     |> Repo.all()
     |> Enum.each(&update_online_channel(&1, live_channels, now))
-  end
-
-  defp update_offline_query(provider_name, channel_names, now) do
-    from c in Channel,
-      where: c.type == ^provider_name and c.short_name not in ^channel_names,
-      update: [set: [is_live: false, updated_at: ^now]]
   end
 
   defp online_query(provider_name, channel_names) do

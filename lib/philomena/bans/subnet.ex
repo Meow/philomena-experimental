@@ -30,7 +30,14 @@ defmodule Philomena.Bans.Subnet do
     |> mask_specification()
   end
 
+  @doc false
+  def paired_ban_changeset(subnet_ban, attrs \\ %{}) do
+    cast(subnet_ban, attrs, [:specification])
+  end
+
   defp mask_specification(changeset) do
+    # IPv6 privacy addresses rotate their lower 64 bits. A subnet ban
+    # therefore covers the stable /64 prefix. IPv4 addresses remain unchanged.
     specification =
       changeset
       |> get_field(:specification)

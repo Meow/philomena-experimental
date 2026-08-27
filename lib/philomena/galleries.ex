@@ -868,6 +868,65 @@ defmodule Philomena.Galleries do
     end
   end
 
+  @doc """
+  Removes all gallery memberships for an image within `multi`.
+
+  Image hiding composes this operation after taking the image lock. Gallery
+  counters and interaction rows therefore change atomically in the caller's
+  transaction.
+  """
+  @spec put_remove_image_interactions(Multi.t(), Image.t()) :: Multi.t()
+  def put_remove_image_interactions(%Multi{} = multi, %Image{} = image) do
+    galleries =
+      Gallery
+      |> join(:inner, [g], gi in assoc(g, :interactions), on: gi.image_id == ^image.id)
+      |> update(inc: [image_count: -1])
+      |> select([g], g.id)
+
+    multi
+    |> Multi.update_all(:galleries, galleries, [])
+    |> Multi.delete_all(:gallery_interactions, where(Interaction, image_id: ^image.id), [])
+  end
+
+  @doc """
+  Migrates an image's gallery memberships to another image within `multi`.
+
+  Existing target memberships win; leftover source memberships are deleted and
+  affected gallery counters are adjusted. Image merge workflows must hold both
+  image locks before composing this operation.
+  """
+  @spec put_migrate_image_interactions(Multi.t(), Image.t(), Image.t()) :: Multi.t()
+  def put_migrate_image_interactions(%Multi{} = multi, %Image{} = source, %Image{} = target) do
+    target_gallery_ids =
+      Interaction
+      |> where(image_id: ^target.id)
+      |> select([gi], gi.gallery_id)
+
+    migratable =
+      Interaction
+      |> where(image_id: ^source.id)
+      |> where([gi], gi.gallery_id not in subquery(target_gallery_ids))
+      |> update(set: [image_id: ^target.id])
+      |> select([gi], gi.gallery_id)
+
+    leftover =
+      Interaction
+      |> where(image_id: ^source.id)
+      |> select([gi], gi.gallery_id)
+
+    multi
+    |> Multi.update_all(:migrated_gallery_interactions, migratable, [])
+    |> Multi.delete_all(:gallery_interactions, leftover, [])
+    |> Multi.run(:galleries, fn repo, %{gallery_interactions: {_count, gallery_ids}} ->
+      {count, nil} =
+        Gallery
+        |> where([g], g.id in ^gallery_ids)
+        |> repo.update_all(inc: [image_count: -1])
+
+      {:ok, {count, gallery_ids}}
+    end)
+  end
+
   @doc false
   @spec clear_gallery_notification(Gallery.t(), User.t() | nil) :: :ok
   def clear_gallery_notification(%Gallery{} = gallery, user) do

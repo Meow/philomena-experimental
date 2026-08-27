@@ -13,6 +13,7 @@ defmodule Philomena.Channels do
   alias Philomena.Channels.QueryBuilder
   alias Philomena.Channels.QueryForm
   alias Philomena.Loader
+  alias Philomena.Multi
   alias Philomena.Notifications
   alias Philomena.Repo
   alias Philomena.Tags
@@ -368,5 +369,33 @@ defmodule Philomena.Channels do
       clear_notification_for(channel, actor.user)
       {:ok, channel}
     end
+  end
+
+  @doc """
+  Repoints artist associations from an aliased tag to its target inside `multi`.
+  """
+  @spec put_replace_artist_tag(Multi.t(), Multi.name(), integer(), integer()) :: Multi.t()
+  def put_replace_artist_tag(%Multi{} = multi, step, source_tag_id, target_tag_id) do
+    query =
+      Channel
+      |> where(associated_artist_tag_id: ^source_tag_id)
+      |> update(set: [associated_artist_tag_id: ^target_tag_id])
+
+    Multi.update_all(multi, step, query, [])
+  end
+
+  @doc """
+  Marks tracked channels for a provider offline when they are absent from the
+  provider's current live name set.
+  """
+  @spec mark_provider_channels_offline(String.t(), [String.t()], DateTime.t()) ::
+          {non_neg_integer(), nil}
+  def mark_provider_channels_offline(provider_name, channel_names, now) do
+    query =
+      from channel in Channel,
+        where: channel.type == ^provider_name and channel.short_name not in ^channel_names,
+        update: [set: [is_live: false, updated_at: ^now]]
+
+    Repo.update_all(query, [])
   end
 end

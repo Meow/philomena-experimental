@@ -2618,6 +2618,58 @@ defmodule Philomena.Users do
     end
   end
 
+  @doc group: "Cross-context helpers"
+  @doc """
+  Replaces a watched tag ID in users' watched-tag arrays within `multi`.
+  """
+  @spec put_replace_watched_tag(Multi.t(), Multi.name(), integer(), integer()) :: Multi.t()
+  def put_replace_watched_tag(%Multi{} = multi, step, old_id, new_id) do
+    query =
+      User
+      |> where([u], fragment("? @> ARRAY[?]::integer[]", u.watched_tag_ids, ^old_id))
+      |> update([u],
+        set: [
+          watched_tag_ids: fragment("array_replace(?, ?, ?)", u.watched_tag_ids, ^old_id, ^new_id)
+        ]
+      )
+
+    Multi.update_all(multi, step, query, [])
+  end
+
+  @doc group: "Cross-context helpers"
+  @doc """
+  Increments one lifetime counter on a user through the supplied repository.
+
+  The return value is the normal `update_all/3` row count.
+  """
+  @spec increment_counter(module(), integer(), atom(), integer()) :: {non_neg_integer(), nil}
+  def increment_counter(repo, user_id, field, amount)
+      when is_integer(user_id) and is_atom(field) and is_integer(amount) do
+    repo.update_all(where(User, id: ^user_id), inc: [{field, amount}])
+  end
+
+  @doc group: "Cross-context helpers"
+  @doc """
+  Increments one lifetime counter for each supplied user through the supplied
+  repository.
+
+  The return value is the normal `update_all/3` row count.
+  """
+  @spec increment_counters(module(), [integer()], atom(), integer()) :: {non_neg_integer(), nil}
+  def increment_counters(repo, user_ids, field, amount)
+      when is_list(user_ids) and is_atom(field) and is_integer(amount) do
+    repo.update_all(where(User, [user], user.id in ^user_ids), inc: [{field, amount}])
+  end
+
+  @doc group: "Cross-context helpers"
+  @doc """
+  Replaces a user's email with the supplied erased address.
+  """
+  @spec replace_email_for_wipe!(integer(), String.t()) :: {non_neg_integer(), nil}
+  def replace_email_for_wipe!(user_id, email) when is_integer(user_id) and is_binary(email) do
+    Repo.update_all(where(User, id: ^user_id), set: [email: email])
+  end
+
   @doc group: "Background jobs"
   @doc """
   Updates all search engine references to a user's old name with their new name.
@@ -2700,6 +2752,24 @@ defmodule Philomena.Users do
     Exq.enqueue(Exq, "indexing", IndexWorker, ["Users", "id", [user.id]])
 
     user
+  end
+
+  @doc group: "Background jobs"
+  @doc """
+  Queues a list of user IDs for search index updates.
+  Returns the list unchanged, for use in a pipeline.
+
+  ## Examples
+
+      iex> reindex_user_ids([1, 2, 3])
+      [1, 2, 3]
+
+  """
+  @spec reindex_user_ids(list(integer())) :: list(integer())
+  def reindex_user_ids(user_ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Users", "id", user_ids])
+
+    user_ids
   end
 
   @doc group: "Background jobs"

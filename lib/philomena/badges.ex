@@ -1,6 +1,8 @@
 defmodule Philomena.Badges do
   @moduledoc """
   Administration for badges and associated awards attached to user profiles.
+
+  Performs artist badge awarding for verified artist links.
   """
 
   import Ecto.Query, warn: false
@@ -10,7 +12,7 @@ defmodule Philomena.Badges do
   alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.Authorization
-  alias Philomena.Badges.{Badge, Uploader}
+  alias Philomena.Badges.{Award, Badge, Uploader}
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
@@ -289,8 +291,6 @@ defmodule Philomena.Badges do
     end
   end
 
-  alias Philomena.Badges.Award
-
   defp awardable_badges do
     Badge
     |> where(disable_award: false)
@@ -541,5 +541,30 @@ defmodule Philomena.Badges do
           {:error, changeset}
       end
     end
+  end
+
+  @doc """
+  Adds the automatic "Artist" badge award for a verified artist link to `multi`.
+
+  The underlying award operation returns `{:ok, award}`, `{:ok, nil}`, or
+  `{:error, changeset}` as the result of the `Multi.run/3` callback.
+  Existing awards and a missing Artist badge are intentional no-ops.
+  """
+  @spec put_award_artist_badge(
+          multi :: Multi.t(),
+          target_user :: User.t(),
+          verifying_user :: User.t()
+        ) :: Multi.t()
+  def put_award_artist_badge(%Multi{} = multi, %User{} = target_user, %User{} = verifying_user) do
+    Multi.run(multi, :award, fn repo, _changes ->
+      with %Badge{} = badge <- repo.get_by(Badge, title: "Artist"),
+           nil <- repo.get_by(Award, badge_id: badge.id, user_id: target_user.id) do
+        %Award{awarded_by_id: verifying_user.id, user_id: target_user.id}
+        |> Award.changeset(%{badge_id: badge.id})
+        |> repo.insert()
+      else
+        _ -> {:ok, nil}
+      end
+    end)
   end
 end

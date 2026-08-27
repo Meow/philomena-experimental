@@ -340,6 +340,22 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
+  Repoints DNP entries from one tag to another inside `multi`.
+
+  Tag aliasing uses this boundary so the DnpEntries context owns its table
+  update and the operation remains coupled to the alias transaction.
+  """
+  @spec put_replace_tag(Multi.t(), Multi.name(), integer(), integer()) :: Multi.t()
+  def put_replace_tag(%Multi{} = multi, step, source_tag_id, target_tag_id) do
+    query =
+      DnpEntry
+      |> where(tag_id: ^source_tag_id)
+      |> update(set: [tag_id: ^target_tag_id])
+
+    Multi.update_all(multi, step, query, [])
+  end
+
+  @doc """
   Returns the count of active DNP requests when `actor` may view the admin DNP
   index, otherwise `nil`.
 

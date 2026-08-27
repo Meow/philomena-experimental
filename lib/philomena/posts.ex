@@ -31,6 +31,7 @@ defmodule Philomena.Posts do
   alias Philomena.Versions
   alias Philomena.RateLimiter
   alias Philomena.Attribution.Actor
+  alias PhilomenaQuery.Batch
 
   @post_create_window 15
 
@@ -294,10 +295,10 @@ defmodule Philomena.Posts do
         |> Map.put(:topic, topic)
         |> Post.creation_changeset(params, actor)
       end)
-      |> put_post_topic_visibility_counters(visible?: true)
-      |> put_refresh_topic_last_post()
-      |> put_post_forum_visibility_counters(visible?: true)
-      |> put_refresh_forum_last_post()
+      |> Topics.put_post_visibility_counters(visible?: true)
+      |> Topics.put_refresh_last_post()
+      |> Forums.put_post_visibility_counters(visible?: true)
+      |> Forums.put_refresh_last_post()
       |> Topics.maybe_subscribe_on(:locked_topic, creator, :watch_on_reply)
       |> Multi.run(:notification, &notify_post/2)
       |> UserStatistics.put_increment(creator, :posts_count)
@@ -480,8 +481,8 @@ defmodule Philomena.Posts do
         Post.hide_changeset(post, params, user)
       end)
       |> Reports.put_close_reports(:reports, user, post_id: post_id)
-      |> put_refresh_topic_last_post()
-      |> put_refresh_forum_last_post()
+      |> Topics.put_refresh_last_post()
+      |> Forums.put_refresh_last_post()
       |> put_reindex_post()
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -546,8 +547,8 @@ defmodule Philomena.Posts do
         :unhide
       )
       |> Multi.update(:post, fn %{locked_post: post} -> Post.unhide_changeset(post) end)
-      |> put_refresh_topic_last_post()
-      |> put_refresh_forum_last_post()
+      |> Topics.put_refresh_last_post()
+      |> Forums.put_refresh_last_post()
       |> put_reindex_post()
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -618,8 +619,8 @@ defmodule Philomena.Posts do
         :delete
       )
       |> Multi.update(:post, fn %{locked_post: post} -> Post.destroy_changeset(post) end)
-      |> put_post_topic_visibility_counters(visible?: false)
-      |> put_post_forum_visibility_counters(visible?: false)
+      |> Topics.put_post_visibility_counters(visible?: false)
+      |> Forums.put_post_visibility_counters(visible?: false)
       |> UserStatistics.put_increment(
         fn %{post: post} ->
           if post.approved, do: post.user_id
@@ -685,10 +686,10 @@ defmodule Philomena.Posts do
       |> Post.destroy_changeset()
     end)
     |> Reports.put_close_reports(:reports, moderator, post_id: post.id)
-    |> put_post_topic_visibility_counters(visible?: false)
-    |> put_post_forum_visibility_counters(visible?: false)
-    |> put_refresh_topic_last_post()
-    |> put_refresh_forum_last_post()
+    |> Topics.put_post_visibility_counters(visible?: false)
+    |> Forums.put_post_visibility_counters(visible?: false)
+    |> Topics.put_refresh_last_post()
+    |> Forums.put_refresh_last_post()
     |> UserStatistics.put_increment(
       fn %{post: post} ->
         if post.approved, do: post.user_id
@@ -852,6 +853,19 @@ defmodule Philomena.Posts do
          {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show) do
       load_post_in_topic(actor, topic, post_id, :show)
     end
+  end
+
+  @doc """
+  Replaces attribution data on a user's posts in batches.
+  """
+  @spec wipe_user_attribution!(integer(), term(), String.t()) :: :ok
+  def wipe_user_attribution!(user_id, ip, fingerprint) do
+    Post
+    |> where(user_id: ^user_id)
+    |> Batch.query_batches()
+    |> Enum.each(&Repo.update_all(&1, set: [ip: ip, fingerprint: fingerprint]))
+
+    :ok
   end
 
   @doc """

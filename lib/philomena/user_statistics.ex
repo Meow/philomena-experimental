@@ -6,8 +6,6 @@ defmodule Philomena.UserStatistics do
   updates the user's lifetime counter and UTC daily row together.
   """
 
-  import Ecto.Query, warn: false
-
   alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Users
@@ -36,10 +34,9 @@ defmodule Philomena.UserStatistics do
 
   defp persist_increment(user_id, statistic, amount) do
     day = Date.utc_today()
-    user_query = where(User, id: ^user_id)
 
     Repo.transact(fn ->
-      case Repo.update_all(user_query, inc: [{statistic, amount}]) do
+      case Users.increment_counter(Repo, user_id, statistic, amount) do
         {1, nil} ->
           Repo.insert(
             Map.put(%UserStatistic{day: day, user_id: user_id}, statistic, amount),
@@ -61,9 +58,7 @@ defmodule Philomena.UserStatistics do
   defp reindex_result(error, _user_id), do: error
 
   defp persist_bulk_increment(repo, user_ids, statistic, amount) do
-    user_query = where(User, [user], user.id in ^user_ids)
-
-    case repo.update_all(user_query, inc: [{statistic, amount}]) do
+    case Users.increment_counters(repo, user_ids, statistic, amount) do
       {count, nil} when count == length(user_ids) ->
         entries =
           Enum.map(user_ids, fn user_id ->
@@ -172,9 +167,7 @@ defmodule Philomena.UserStatistics do
     |> Multi.run({:put_bulk_increment, make_ref()}, fn repo, _changes ->
       persist_bulk_increment(repo, user_ids, statistic, amount)
     end)
-    |> Multi.on_commit(fn _changes ->
-      Enum.each(user_ids, &Users.reindex_user(%User{id: &1}))
-    end)
+    |> Multi.on_commit(fn _changes -> Users.reindex_user_ids(user_ids) end)
   end
 
   @doc """

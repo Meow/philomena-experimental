@@ -10,10 +10,13 @@ defmodule Philomena.ImageVotes do
   import Ecto.Query, warn: false
 
   alias Philomena.Multi
+  alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.ImageVotes.ImageVote
   alias Philomena.UserStatistics
   alias Philomena.Users.User
+  alias Philomena.Repo
+  alias PhilomenaQuery.Batch
 
   defp delete_vote_steps(multi, image, user) do
     user_vote_query =
@@ -21,25 +24,26 @@ defmodule Philomena.ImageVotes do
       |> where(image_id: ^image.id)
       |> where(user_id: ^user.id)
 
-    image_query = where(Image, id: ^image.id)
-
     multi
     |> Multi.delete_all(:unupvote, where(user_vote_query, up: true))
     |> Multi.delete_all(:undownvote, where(user_vote_query, up: false))
-    |> Multi.run(
-      :dec_votes_count,
-      fn repo, %{unupvote: {upvotes, nil}, undownvote: {downvotes, nil}} ->
-        {count, nil} =
-          repo.update_all(image_query,
-            inc: [
-              upvotes_count: -upvotes,
-              downvotes_count: -downvotes,
-              score: downvotes - upvotes
-            ]
-          )
-
-        {:ok, count}
-      end
+    |> Images.put_image_counter_delta(
+      :dec_upvotes_count,
+      image,
+      :upvotes_count,
+      fn %{unupvote: {upvotes, nil}} -> -upvotes end
+    )
+    |> Images.put_image_counter_delta(
+      :dec_downvotes_count,
+      image,
+      :downvotes_count,
+      fn %{undownvote: {downvotes, nil}} -> -downvotes end
+    )
+    |> Images.put_image_counter_delta(
+      :dec_score,
+      image,
+      :score,
+      fn %{unupvote: {upvotes, nil}, undownvote: {downvotes, nil}} -> downvotes - upvotes end
     )
     |> Multi.merge(fn %{unupvote: {upvotes, nil}, undownvote: {downvotes, nil}} ->
       UserStatistics.put_increment(Multi.new(), user, :image_votes_count, -(upvotes + downvotes))
@@ -70,15 +74,29 @@ defmodule Philomena.ImageVotes do
       %ImageVote{image_id: image.id, user_id: user.id, up: up}
       |> ImageVote.changeset(%{})
 
-    image_query = where(Image, id: ^image.id)
     upvotes = if up, do: 1, else: 0
     downvotes = if up, do: 0, else: 1
 
     multi
     |> delete_vote_steps(image, user)
     |> Multi.insert(:vote, vote)
-    |> Multi.update_all(:inc_vote_count, image_query,
-      inc: [upvotes_count: upvotes, downvotes_count: downvotes, score: upvotes - downvotes]
+    |> Images.put_image_counter_delta(
+      :inc_upvotes_count,
+      image,
+      :upvotes_count,
+      fn _changes -> upvotes end
+    )
+    |> Images.put_image_counter_delta(
+      :inc_downvotes_count,
+      image,
+      :downvotes_count,
+      fn _changes -> downvotes end
+    )
+    |> Images.put_image_counter_delta(
+      :inc_score,
+      image,
+      :score,
+      fn _changes -> upvotes - downvotes end
     )
     |> UserStatistics.put_increment(user, :image_votes_count, 1)
   end
@@ -102,5 +120,58 @@ defmodule Philomena.ImageVotes do
   @spec delete_vote_for_loaded_image(Multi.t(), Image.t(), User.t()) :: Multi.t()
   def delete_vote_for_loaded_image(%Multi{} = multi, %Image{} = image, %User{} = user) do
     delete_vote_steps(multi, image, user)
+  end
+
+  @doc """
+  Deletes all of a user's votes in batches and returns `{count, image_ids}`.
+
+  Image counters and the user's lifetime counter are adjusted separately by
+  their owning contexts.
+  """
+  @spec delete_user_votes!(integer(), boolean()) :: {non_neg_integer(), [integer()]}
+  def delete_user_votes!(user_id, up) when is_integer(user_id) and is_boolean(up) do
+    query = where(ImageVote, user_id: ^user_id, up: ^up)
+
+    query
+    |> Batch.query_batches(id_field: :image_id)
+    |> Enum.reduce({0, []}, fn batch, {count, image_ids} ->
+      ids = Repo.all(select(batch, [vote], vote.image_id))
+      {deleted, _} = Repo.delete_all(batch)
+      {count + deleted, ids ++ image_ids}
+    end)
+    |> then(fn {count, image_ids} -> {count, Enum.uniq(image_ids)} end)
+  end
+
+  @doc """
+  Inserts image vote interactions for a merge target inside `multi`.
+
+  The source interaction snapshot is expected at `:interaction_source`.
+  """
+  @spec put_migrate_image_interactions(Multi.t(), Image.t(), Multi.name(), boolean()) :: Multi.t()
+  def put_migrate_image_interactions(%Multi{} = multi, %Image{} = target, step, up)
+      when is_boolean(up) do
+    multi
+    |> Multi.run(step, fn repo,
+                          %{interaction_source: %{source: source, created_at: created_at}} ->
+      voters = if up, do: source.upvoters, else: source.downvoters
+
+      rows =
+        Enum.map(voters, &%{image_id: target.id, user_id: &1.id, created_at: created_at, up: up})
+
+      {count, inserted} =
+        repo.insert_all(ImageVote, rows,
+          on_conflict: :nothing,
+          returning: [:user_id]
+        )
+
+      {:ok, {count, inserted}}
+    end)
+    |> Multi.merge(fn %{^step => {_count, rows}} ->
+      UserStatistics.put_bulk_increment(
+        Multi.new(),
+        Enum.map(rows, & &1.user_id),
+        :image_votes_count
+      )
+    end)
   end
 end

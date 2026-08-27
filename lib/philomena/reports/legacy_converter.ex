@@ -8,7 +8,7 @@ defmodule Philomena.Reports.LegacyConverter do
   alias PhilomenaQuery.Batch
   alias Philomena.Reports.Report
   alias Philomena.Rules
-  alias Philomena.Repo
+  alias Philomena.Reports
 
   @reason_regex ~r/^(Rule|Other|Takedown|Verification|Approval|Review|System)([^:]*): (.*)$/
 
@@ -17,9 +17,7 @@ defmodule Philomena.Reports.LegacyConverter do
       [_, prefix, suffix, reason] ->
         rule = Map.get(rules, "#{prefix}#{suffix}", %{id: 1})
 
-        report
-        |> Report.conversion_changeset(%{reason: String.trim(reason)}, rule)
-        |> Repo.update!()
+        Reports.convert_legacy_report!(report, reason, rule)
 
       _other ->
         {:error, report}

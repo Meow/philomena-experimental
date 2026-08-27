@@ -2,6 +2,11 @@ defmodule Philomena.Bans do
   @moduledoc """
   Ban enforcement and actor-scoped administration for user, subnet, and
   fingerprint bans.
+
+  Handles automatic creation of subnet bans for an input user ban.
+
+  This prevents trivial ban evasion with the creation of a new account from the same address.
+  The user must work around or wait out the subnet ban first.
   """
 
   import Ecto.Query, warn: false
@@ -16,7 +21,6 @@ defmodule Philomena.Bans do
   alias Philomena.Bans.Fingerprint
   alias Philomena.Bans.FingerprintQueryBuilder
   alias Philomena.Bans.FingerprintQueryForm
-  alias Philomena.Bans.SubnetCreator
   alias Philomena.Bans.Subnet
   alias Philomena.Bans.SubnetQueryBuilder
   alias Philomena.Bans.SubnetQueryForm
@@ -25,6 +29,7 @@ defmodule Philomena.Bans do
   alias Philomena.Bans.UserQueryForm
   alias Philomena.ModerationLogs
   alias Philomena.Multi
+  alias Philomena.UserIps
   alias Philomena.Users
 
   # For every ban type: authorize on schema module first, then on instance.
@@ -534,8 +539,19 @@ defmodule Philomena.Bans do
 
     Multi.new()
     |> Multi.insert(:user, user_changeset)
-    |> Multi.run(:subnet, fn _repo, _changes ->
-      SubnetCreator.create_for_user(creator, target.id, attrs)
+    |> Multi.run(:subnet, fn repo, _changes ->
+      # Create a subnet ban for the given user's last known IP address as part
+      # of the user-ban creation transaction. No ban is created if none is known.
+      case UserIps.latest_ip_for_user(target.id) do
+        nil ->
+          {:ok, nil}
+
+        ip ->
+          %Subnet{banning_user_id: creator.id}
+          |> Subnet.paired_ban_changeset(%{specification: ip})
+          |> Subnet.changeset(attrs)
+          |> repo.insert()
+      end
     end)
     |> Multi.on_commit(fn _changes ->
       Users.reindex_user(%Users.User{id: target.id})

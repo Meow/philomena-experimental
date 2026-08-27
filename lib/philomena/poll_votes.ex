@@ -102,18 +102,14 @@ defmodule Philomena.PollVotes do
 
         Enum.map(ballot.option_ids, &%{poll_option_id: &1, user_id: user.id, created_at: now})
       end)
-      |> Multi.run(:update_options, fn repo, %{ballot: ballot, poll: poll} ->
-        {count, nil} =
-          PollOption
-          |> where([option], option.id in ^ballot.option_ids and option.poll_id == ^poll.id)
-          |> repo.update_all(inc: [vote_count: 1])
-
-        {:ok, count}
-      end)
-      |> Multi.run(:update_poll, fn repo, %{poll_votes: {count, _}} ->
-        {count, nil} = repo.update_all(poll_query, inc: [total_votes: count])
-
-        {:ok, count}
+      |> PollOptions.put_vote_count_delta(
+        :update_options,
+        poll.id,
+        fn %{ballot: ballot} -> ballot.option_ids end,
+        1
+      )
+      |> Polls.put_total_votes_delta(:update_poll, poll.id, fn %{poll_votes: {count, _}} ->
+        count
       end)
       |> Multi.transact()
       |> case do
@@ -145,7 +141,6 @@ defmodule Philomena.PollVotes do
          {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :delete_poll_vote),
          {:ok, poll} <- Polls.load_topic_poll(topic),
          {:ok, poll_vote} <- load_poll_vote(poll, vote_id) do
-      poll_option_query = where(PollOption, id: ^poll_vote.poll_option_id)
       poll_query = where(Poll, id: ^poll.id)
 
       try do
@@ -153,8 +148,13 @@ defmodule Philomena.PollVotes do
           Multi.new()
           |> Multi.lock_one(:poll, poll_query)
           |> Multi.delete(:poll_vote, poll_vote)
-          |> Multi.update_all(:update_options, poll_option_query, inc: [vote_count: -1])
-          |> Multi.update_all(:update_poll, poll_query, inc: [total_votes: -1])
+          |> PollOptions.put_vote_count_delta(
+            :update_options,
+            poll.id,
+            fn _changes -> [poll_vote.poll_option_id] end,
+            -1
+          )
+          |> Polls.put_total_votes_delta(:update_poll, poll.id, fn _changes -> -1 end)
           |> Multi.transact()
 
         {:ok, poll}

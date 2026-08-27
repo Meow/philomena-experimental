@@ -44,6 +44,12 @@ defmodule Philomena.Adverts do
     Loader.fetch_and_authorize(Advert, actor, action, id)
   end
 
+  defp increment_counter({id, count}, field) do
+    Advert
+    |> where(id: ^id)
+    |> Repo.update_all(inc: [{field, count}])
+  end
+
   @doc """
   Gets an advert that is currently live.
 
@@ -193,13 +199,9 @@ defmodule Philomena.Adverts do
       Multi.new()
       |> Multi.insert(:advert, advert_changeset)
       |> Uploader.put_persist_upload_and_unpersist_old(:advert)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        fn %{advert: advert} ->
-          {"Admin.Advert:create", "/admin/adverts", "Created advert #{advert.id}"}
-        end
-      )
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{advert: advert} ->
+        {"Admin.Advert:create", "/admin/adverts", "Created advert #{advert.id}"}
+      end)
       |> Multi.transact()
       |> case do
         {:ok, %{advert: advert}} ->
@@ -284,13 +286,9 @@ defmodule Philomena.Adverts do
 
       Multi.new()
       |> Multi.update(:advert, advert_changeset)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        fn %{advert: advert} ->
-          {"Admin.Advert:update", "/admin/adverts", "Updated advert #{advert.id}"}
-        end
-      )
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{advert: advert} ->
+        {"Admin.Advert:update", "/admin/adverts", "Updated advert #{advert.id}"}
+      end)
       |> Multi.transact()
       |> case do
         {:ok, %{advert: advert}} ->
@@ -327,13 +325,9 @@ defmodule Philomena.Adverts do
       # TODO: this orphans the file.
       Multi.new()
       |> Multi.delete(:advert, advert)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        fn %{advert: advert} ->
-          {"Admin.Advert:delete", "/admin/adverts", "Deleted advert #{advert.id}"}
-        end
-      )
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{advert: advert} ->
+        {"Admin.Advert:delete", "/admin/adverts", "Deleted advert #{advert.id}"}
+      end)
       |> Multi.transact()
       |> case do
         {:ok, %{advert: advert}} ->
@@ -380,13 +374,9 @@ defmodule Philomena.Adverts do
       Multi.new()
       |> Multi.update(:advert, advert_changeset)
       |> Uploader.put_persist_upload_and_unpersist_old(:advert)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        fn %{advert: advert} ->
-          {"Admin.Advert.Image:update", "/admin/adverts", "Updated image for advert #{advert.id}"}
-        end
-      )
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{advert: advert} ->
+        {"Admin.Advert.Image:update", "/admin/adverts", "Updated image for advert #{advert.id}"}
+      end)
       |> Multi.transact()
       |> case do
         {:ok, %{advert: advert}} ->
@@ -396,5 +386,15 @@ defmodule Philomena.Adverts do
           {:error, changeset}
       end
     end
+  end
+
+  @doc """
+  Records batched advert impressions and clicks.
+  """
+  @spec record_counters(%{impressions: map(), clicks: map()}) :: :ok
+  def record_counters(%{impressions: impressions, clicks: clicks}) do
+    Enum.each(impressions, &increment_counter(&1, :impressions))
+    Enum.each(clicks, &increment_counter(&1, :clicks))
+    :ok
   end
 end

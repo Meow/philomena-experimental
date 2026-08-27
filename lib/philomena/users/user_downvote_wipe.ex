@@ -8,14 +8,12 @@ defmodule Philomena.Users.UserDownvoteWipe do
 
   import Ecto.Query
 
-  alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
   alias Philomena.Users
-  alias Philomena.Users.User
   alias Philomena.Images.Image
   alias Philomena.Images
-  alias Philomena.ImageVotes.ImageVote
-  alias Philomena.ImageFaves.ImageFave
+  alias Philomena.ImageVotes
+  alias Philomena.ImageFaves
   alias Philomena.Repo
 
   defp reindex(image_ids) do
@@ -47,52 +45,21 @@ defmodule Philomena.Users.UserDownvoteWipe do
   def perform(user_id, upvotes_and_faves_too \\ false) do
     user = Users.fetch_user_for_worker!(user_id)
 
-    ImageVote
-    |> where(user_id: ^user.id, up: false)
-    |> Batch.query_batches(id_field: :image_id)
-    |> Enum.each(fn queryable ->
-      {_, image_ids} = Repo.delete_all(select(queryable, [i_v], i_v.image_id))
-
-      {count, nil} =
-        Repo.update_all(where(Image, [i], i.id in ^image_ids),
-          inc: [downvotes_count: -1, score: 1]
-        )
-
-      Repo.update_all(where(User, id: ^user.id), inc: [image_votes_count: -count])
-
-      reindex(image_ids)
-    end)
+    {count, image_ids} = ImageVotes.delete_user_votes!(user.id, false)
+    Images.decrement_vote_counters!(image_ids, false)
+    Users.increment_counter(Repo, user.id, :image_votes_count, -count)
+    reindex(image_ids)
 
     if upvotes_and_faves_too do
-      ImageVote
-      |> where(user_id: ^user.id, up: true)
-      |> Batch.query_batches(id_field: :image_id)
-      |> Enum.each(fn queryable ->
-        {_, image_ids} = Repo.delete_all(select(queryable, [i_v], i_v.image_id))
+      {count, image_ids} = ImageVotes.delete_user_votes!(user.id, true)
+      Images.decrement_vote_counters!(image_ids, true)
+      Users.increment_counter(Repo, user.id, :image_votes_count, -count)
+      reindex(image_ids)
 
-        {count, nil} =
-          Repo.update_all(where(Image, [i], i.id in ^image_ids),
-            inc: [upvotes_count: -1, score: -1]
-          )
-
-        Repo.update_all(where(User, id: ^user.id), inc: [image_votes_count: -count])
-
-        reindex(image_ids)
-      end)
-
-      ImageFave
-      |> where(user_id: ^user.id)
-      |> Batch.query_batches(id_field: :image_id)
-      |> Enum.each(fn queryable ->
-        {_, image_ids} = Repo.delete_all(select(queryable, [i_f], i_f.image_id))
-
-        {count, nil} =
-          Repo.update_all(where(Image, [i], i.id in ^image_ids), inc: [faves_count: -1])
-
-        Repo.update_all(where(User, id: ^user.id), inc: [image_faves_count: -count])
-
-        reindex(image_ids)
-      end)
+      {count, image_ids} = ImageFaves.delete_user_faves!(user.id)
+      Images.decrement_fave_counters!(image_ids)
+      Users.increment_counter(Repo, user.id, :image_faves_count, -count)
+      reindex(image_ids)
     end
 
     :ok

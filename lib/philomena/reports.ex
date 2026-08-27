@@ -33,8 +33,11 @@ defmodule Philomena.Reports do
   alias Philomena.Reports.ReportForm
   alias Philomena.Reports.ReportPage
   alias Philomena.Rules
+  alias Philomena.Rules.Rule
   alias Philomena.Users
   alias Philomena.Users.User
+  alias PhilomenaQuery.Batch
+
   alias PhilomenaQuery.Search
 
   @max_open_reports 5
@@ -624,6 +627,29 @@ defmodule Philomena.Reports do
     multi
     |> Multi.insert(:report, report_changeset)
     |> put_reindex_report()
+  end
+
+  @doc """
+  Converts one legacy report reason and persists the structured fields.
+  """
+  @spec convert_legacy_report!(Report.t(), String.t(), Rule.t()) :: Report.t()
+  def convert_legacy_report!(%Report{} = report, reason, rule) do
+    report
+    |> Report.conversion_changeset(%{reason: String.trim(reason)}, rule)
+    |> Repo.update!()
+  end
+
+  @doc """
+  Replaces attribution data on a user's reports in batches.
+  """
+  @spec wipe_user_attribution!(integer(), term(), String.t()) :: :ok
+  def wipe_user_attribution!(user_id, ip, fingerprint) do
+    Report
+    |> where(user_id: ^user_id)
+    |> Batch.query_batches()
+    |> Enum.each(&Repo.update_all(&1, set: [ip: ip, fingerprint: fingerprint]))
+
+    :ok
   end
 
   @doc """

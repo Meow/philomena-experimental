@@ -11,9 +11,12 @@ defmodule Philomena.ImageFaves do
 
   alias Philomena.Multi
   alias Philomena.ImageFaves.ImageFave
+  alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.UserStatistics
   alias Philomena.Users.User
+  alias Philomena.Repo
+  alias PhilomenaQuery.Batch
 
   defp delete_fave_steps(multi, image, user) do
     fave_query =
@@ -21,14 +24,14 @@ defmodule Philomena.ImageFaves do
       |> where(image_id: ^image.id)
       |> where(user_id: ^user.id)
 
-    image_query = where(Image, id: ^image.id)
-
     multi
     |> Multi.delete_all(:unfave, fave_query)
-    |> Multi.run(:dec_faves_count, fn repo, %{unfave: {faves, nil}} ->
-      {count, nil} = repo.update_all(image_query, inc: [faves_count: -faves])
-      {:ok, count}
-    end)
+    |> Images.put_image_counter_delta(
+      :dec_faves_count,
+      image,
+      :faves_count,
+      fn %{unfave: {faves, nil}} -> -faves end
+    )
     |> Multi.merge(fn %{unfave: {faves, nil}} ->
       UserStatistics.put_increment(Multi.new(), user, :image_faves_count, -faves)
     end)
@@ -58,12 +61,15 @@ defmodule Philomena.ImageFaves do
       %ImageFave{image_id: image.id, user_id: user.id}
       |> ImageFave.changeset(%{})
 
-    image_query = where(Image, id: ^image.id)
-
     multi
     |> delete_fave_steps(image, user)
     |> Multi.insert(:fave, fave)
-    |> Multi.update_all(:inc_faves_count, image_query, inc: [faves_count: 1])
+    |> Images.put_image_counter_delta(
+      :inc_faves_count,
+      image,
+      :faves_count,
+      fn _changes -> 1 end
+    )
     |> UserStatistics.put_increment(user, :image_faves_count, 1)
   end
 
@@ -85,5 +91,55 @@ defmodule Philomena.ImageFaves do
   @spec delete_fave_for_loaded_image(Multi.t(), Image.t(), User.t()) :: Multi.t()
   def delete_fave_for_loaded_image(%Multi{} = multi, %Image{} = image, %User{} = user) do
     delete_fave_steps(multi, image, user)
+  end
+
+  @doc """
+  Deletes all of a user's favorites in batches and returns `{count, image_ids}`.
+
+  Image and user counters are adjusted by their owning contexts afterward.
+  """
+  @spec delete_user_faves!(integer()) :: {non_neg_integer(), [integer()]}
+  def delete_user_faves!(user_id) when is_integer(user_id) do
+    ImageFave
+    |> where(user_id: ^user_id)
+    |> Batch.query_batches(id_field: :image_id)
+    |> Enum.reduce({0, []}, fn batch, {count, image_ids} ->
+      ids = Repo.all(select(batch, [fave], fave.image_id))
+      {deleted, _} = Repo.delete_all(batch)
+      {count + deleted, ids ++ image_ids}
+    end)
+    |> then(fn {count, image_ids} -> {count, Enum.uniq(image_ids)} end)
+  end
+
+  @doc """
+  Inserts image favorite interactions for a merge target inside `multi`.
+
+  The source interaction snapshot is expected at `:interaction_source`.
+  """
+  @spec put_migrate_image_interactions(Multi.t(), Image.t()) :: Multi.t()
+  def put_migrate_image_interactions(%Multi{} = multi, %Image{} = target) do
+    multi
+    |> Multi.run(
+      :interaction_faves,
+      fn repo, %{interaction_source: %{source: source, created_at: created_at}} ->
+        rows =
+          Enum.map(source.favers, &%{image_id: target.id, user_id: &1.id, created_at: created_at})
+
+        {count, inserted} =
+          repo.insert_all(ImageFave, rows,
+            on_conflict: :nothing,
+            returning: [:user_id]
+          )
+
+        {:ok, {count, inserted}}
+      end
+    )
+    |> Multi.merge(fn %{interaction_faves: {_count, rows}} ->
+      UserStatistics.put_bulk_increment(
+        Multi.new(),
+        Enum.map(rows, & &1.user_id),
+        :image_faves_count
+      )
+    end)
   end
 end

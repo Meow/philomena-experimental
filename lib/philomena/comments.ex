@@ -32,6 +32,7 @@ defmodule Philomena.Comments do
   alias Philomena.UserStatistics
   alias Philomena.Users.User
   alias Philomena.Versions
+  alias PhilomenaQuery.Batch
   alias PhilomenaQuery.Search
 
   @comment_create_window 15
@@ -377,8 +378,6 @@ defmodule Philomena.Comments do
          {:ok, image} <- load_image(actor, image_id, :create_comment),
          :ok <- Images.verify_forced_filter_access(actor, image),
          :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
-      image_query = where(Image, id: ^image.id)
-
       comment_changeset =
         image
         |> Ecto.build_assoc(:comments)
@@ -387,7 +386,12 @@ defmodule Philomena.Comments do
       Multi.new()
       |> put_lock_image(actor, image.id, :create_comment)
       |> Multi.insert(:comment, comment_changeset)
-      |> Multi.update_all(:update_image, image_query, inc: [comments_count: 1])
+      |> Images.put_image_counter_delta(
+        :update_image,
+        image,
+        :comments_count,
+        fn _changes -> 1 end
+      )
       |> Multi.run(:notification, &notify_comment/2)
       |> Images.maybe_subscribe_on(:locked_image, creator, :watch_on_reply)
       |> Images.put_reindex_image(:locked_image)
@@ -693,7 +697,6 @@ defmodule Philomena.Comments do
          {:ok, image} <- load_image(actor, image_id, :show),
          {:ok, comment} <- load_image_comment(actor, image, comment_id, :delete, @preloads) do
       comment_query = from(c in Comment, where: c.id == ^comment.id)
-      image_query = from(i in Image, where: i.id == ^comment.image_id)
 
       Multi.new()
       |> put_lock_image(actor, image.id, :show)
@@ -701,7 +704,12 @@ defmodule Philomena.Comments do
       |> Multi.update(:comment, fn %{locked_comment: comment} ->
         Comment.destroy_changeset(comment)
       end)
-      |> Multi.update_all(:update_image, image_query, inc: [comments_count: -1])
+      |> Images.put_image_counter_delta(
+        :update_image,
+        image,
+        :comments_count,
+        fn _changes -> -1 end
+      )
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -810,7 +818,12 @@ defmodule Philomena.Comments do
       |> Comment.hide_changeset(%{deletion_reason: "Site abuse"}, moderator)
       |> Comment.destroy_changeset()
     end)
-    |> Multi.update_all(:update_image, image_query, inc: [comments_count: -1])
+    |> Images.put_image_counter_delta(
+      :update_image,
+      comment.image_id,
+      :comments_count,
+      fn _changes -> -1 end
+    )
     |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
     |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
     |> Images.put_reindex_image(:locked_image)
@@ -832,29 +845,29 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Moves all comments from a duplicate image to its target and reindexes them.
+  Moves comments from one image to another inside `multi`.
 
-  This internal function returns the target image for use in the owning Images
-  pipeline.
-
-  ## Examples
-
-      iex> migrate_comments(source_image, target_image)
-      %Image{}
-
+  Image merge workflows compose this operation and then adjust the target
+  image's denormalized count through `Images.put_image_counter_delta`. The
+  returned `:migrated_comments` step contains the number of moved rows.
   """
-  @spec migrate_comments(Image.t(), Image.t()) :: Image.t()
-  def migrate_comments(%Image{} = image, %Image{} = duplicate_of_image) do
-    {count, nil} =
-      Comment
-      |> where(image_id: ^image.id)
-      |> Repo.update_all(set: [image_id: duplicate_of_image.id])
+  @spec put_migrate_image_comments(Multi.t(), Image.t(), Image.t()) :: Multi.t()
+  def put_migrate_image_comments(%Multi{} = multi, %Image{} = source, %Image{} = target) do
+    query = where(Comment, image_id: ^source.id) |> update(set: [image_id: ^target.id])
+    Multi.update_all(multi, :migrated_comments, query, [])
+  end
 
-    Image
-    |> where(id: ^duplicate_of_image.id)
-    |> Repo.update_all(inc: [comments_count: count])
+  @doc """
+  Replaces attribution data on a user's comments in batches.
+  """
+  @spec wipe_user_attribution!(integer(), term(), String.t()) :: :ok
+  def wipe_user_attribution!(user_id, ip, fingerprint) do
+    Comment
+    |> where(user_id: ^user_id)
+    |> Batch.query_batches()
+    |> Enum.each(&Repo.update_all(&1, set: [ip: ip, fingerprint: fingerprint]))
 
-    reindex_comments_on_image(duplicate_of_image)
+    :ok
   end
 
   @doc """

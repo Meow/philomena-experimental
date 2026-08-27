@@ -5,7 +5,7 @@ defmodule Philomena.Adverts.Server do
   """
 
   use GenServer
-  alias Philomena.Adverts.Recorder
+  alias Philomena.Adverts
 
   @timeout 0
   @flush_interval to_timeout(second: 10)
@@ -67,7 +67,7 @@ defmodule Philomena.Adverts.Server do
   @doc false
   def handle_info(:timeout, state) do
     # Process all updates from state now
-    Recorder.run(state)
+    Adverts.record_counters(state)
 
     # Return to GenServer event loop and wait for the next flush interval.
     {:noreply, initial_state(), @flush_interval}

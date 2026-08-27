@@ -13,6 +13,7 @@ defmodule Philomena.Users.Eraser do
   alias Philomena.Topics
   alias Philomena.Images
   alias Philomena.SourceChanges.SourceChange
+  alias Philomena.SourceChanges
   alias Philomena.Reports
   alias Philomena.Users
   alias Philomena.Multi
@@ -72,9 +73,7 @@ defmodule Philomena.Users.Eraser do
     end)
 
     # Delete all source changes
-    SourceChange
-    |> where(user_id: ^user.id)
-    |> Repo.delete_all()
+    SourceChanges.delete_for_user!(user.id)
 
     # Ban the user
     {:ok, _ban} =

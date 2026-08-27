@@ -236,6 +236,41 @@ end)
 end
 ```
 
+## Schema-table write ownership
+
+Every insertion, update, or delete that affects a schema module's table must
+be visible as a function in the context that exposes that schema. A caller
+should be able to inspect that context's public write surface and find every
+operation that can create, change, or remove rows from the table; do not hide a
+table write in an unrelated aggregate, query helper, worker, or schema
+collaborator.
+
+- A context may keep its own one-step persistence inline when the operation is
+  already a complete public workflow. The changeset, authorization, locking,
+  write, and result contract should remain visible together.
+- Cross-context collaboration should normally be a documented `put_*`
+  function that accepts and returns `Philomena.Multi`. The owning context
+  constructs the query, changeset, or insert rows and adds named steps, locks,
+  counters, indexing, and other post-commit work there. The caller composes
+  that function instead of constructing an `insert`, `insert_all`,
+  `update_all`, or `delete_all` for the other context's schema.
+- A submodule collaborator should call a documented function on its owning
+  context that performs the complete operation. Do not let a recorder,
+  maintenance worker, uploader, or verifier update another context's schema
+  directly just because it lives below the same namespace.
+- This applies to bulk inserts, updates, and deletes as well as changeset
+  writes and row deletes. Reads and query construction may be shared, but
+  mutation ownership must remain discoverable at the context boundary.
+- A `put_*` function owns the post-commit side effects caused by its write.
+  If the write changes a search document, queues indexing, broadcasts an event,
+  purges an object, or triggers another external effect, attach that work with
+  `Multi.on_commit/2` in the owner function. Callers should not have to
+  remember a second indexing or notification step after composing the write.
+
+This rule is intentional: locking requirements, lock order, rollback coupling,
+and denormalized-counter maintenance cannot be evaluated reliably while writes
+to one table are scattered across otherwise unrelated contexts.
+
 - Put all related PostgreSQL changes in the same pipeline: the primary write,
   counters, reports, statistics, subscriptions, and moderation logs should
   commit or roll back together.

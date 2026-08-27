@@ -104,15 +104,11 @@ defmodule Philomena.TagChanges do
 
     tag_changes = Repo.all(tag_change_query)
 
-    tag_changes
-    |> Enum.flat_map(& &1.tag_change_tags)
-    |> revert_tag_change_tags(attributes)
-    |> case do
-      {:ok, _result} ->
-        {:ok, tag_changes}
-
-      error ->
-        error
+    with {:ok, _result} <-
+           tag_changes
+           |> Enum.flat_map(& &1.tag_change_tags)
+           |> revert_tag_change_tags(attributes) do
+      {:ok, tag_changes}
     end
   end
 
@@ -670,6 +666,125 @@ defmodule Philomena.TagChanges do
   end
 
   @doc """
+  Worker service that reverts every tag change selected by `queryable`, batching
+  only on image IDs so one image's history cannot straddle a batch boundary.
+
+  ## Examples
+
+      iex> revert_all_for_worker(query, %{batch_size: 100})
+      :ok
+
+  """
+  @spec revert_all_for_worker(Ecto.Queryable.t(), map()) :: :ok | {:error, term()}
+  def revert_all_for_worker(queryable, attributes) do
+    batch_size = attributes[:batch_size] || 100
+    attributes = Map.delete(attributes, :batch_size)
+
+    queryable
+    |> Batch.query_batches(batch_size: batch_size, id_field: :image_id)
+    |> Enum.reduce_while(:ok, fn queryable, :ok ->
+      queryable
+      |> select([tag_change], tag_change.id)
+      |> Repo.all()
+      |> revert_for_worker(attributes)
+      |> case do
+        {:ok, _tag_changes} ->
+          {:cont, :ok}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  @doc """
+  Replaces attribution data on a user's tag change history in batches.
+  """
+  @spec wipe_user_attribution!(integer(), term(), String.t()) :: :ok
+  def wipe_user_attribution!(user_id, ip, fingerprint) do
+    TagChange
+    |> where(user_id: ^user_id)
+    |> Batch.query_batches()
+    |> Enum.each(&Repo.update_all(&1, set: [ip: ip, fingerprint: fingerprint]))
+
+    :ok
+  end
+
+  @doc """
+  Adds deletion of tag change tag join table rows represented by `query` to
+  `multi` and queues the affected tag changes after commit.
+  """
+  @spec put_delete_tag_change_tags(Multi.t(), Multi.name(), Ecto.Query.t()) :: Multi.t()
+  def put_delete_tag_change_tags(%Multi{} = multi, step, %Ecto.Query{} = query) do
+    tag_change_ids_step = {:tag_change_ids, step}
+
+    multi
+    |> Multi.all(
+      tag_change_ids_step,
+      select(query, [tag_change_tag], tag_change_tag.tag_change_id)
+    )
+    |> Multi.delete_all(step, query)
+    |> Multi.on_commit(fn %{^tag_change_ids_step => tag_change_ids} ->
+      reindex_tag_changes(tag_change_ids)
+    end)
+  end
+
+  @doc """
+  Records tag changes from inserted and deleted image tagging rows in `multi`.
+
+  Images supplies the two prior Multi steps; TagChanges owns both the history
+  and join-row insertions and queues the affected history after commit.
+  """
+  @spec put_batch_tag_changes(Multi.t(), Multi.name(), Multi.name(), map()) :: Multi.t()
+  def put_batch_tag_changes(%Multi{} = multi, inserted_step, deleted_step, attributes) do
+    multi
+    |> Multi.run(:batch_tag_changes, fn repo, changes ->
+      inserted =
+        changes
+        |> Map.fetch!(inserted_step)
+        |> elem(1)
+        |> Enum.map(&[&1.image_id, &1.tag_id])
+
+      deleted = changes |> Map.fetch!(deleted_step) |> elem(1)
+      changed = inserted ++ deleted
+      now = DateTime.utc_now(:second)
+
+      # Create tag change batches for every image ID.
+      tag_changes =
+        changed
+        |> Enum.uniq_by(&hd/1)
+        |> Enum.map(fn [image_id, _tag_id] ->
+          {:ok, tag_change} =
+            %TagChange{
+              image_id: image_id,
+              user_id: attributes[:user_id],
+              ip: attributes[:ip],
+              fingerprint: attributes[:fingerprint],
+              created_at: now
+            }
+            |> repo.insert()
+
+          {image_id, tag_change}
+        end)
+        |> Map.new()
+
+      # Create tags belonging to tag changes.
+      # Generate data for TagChanges.TagChangeTag rows.
+      rows =
+        Enum.map(inserted, fn [image_id, tag_id] ->
+          %{tag_change_id: tag_changes[image_id].id, tag_id: tag_id, added: true}
+        end) ++
+          Enum.map(deleted, fn [image_id, tag_id] ->
+            %{tag_change_id: tag_changes[image_id].id, tag_id: tag_id, added: false}
+          end)
+
+      {_, _} = repo.insert_all(TagChangeTag, rows)
+      {:ok, Map.keys(tag_changes)}
+    end)
+    |> Multi.on_commit(fn %{batch_tag_changes: image_ids} -> reindex_for_images(image_ids) end)
+  end
+
+  @doc """
   Updates tag-change search documents after a user rename.
 
   ## Examples
@@ -758,37 +873,5 @@ defmodule Philomena.TagChanges do
     |> preload(^indexing_preloads())
     |> where([tag_change], field(tag_change, ^column) in ^condition)
     |> Search.reindex(TagChange)
-  end
-
-  @doc """
-  Worker service that reverts every tag change selected by `queryable`, batching
-  only on image IDs so one image's history cannot straddle a batch boundary.
-
-  ## Examples
-
-      iex> revert_all_for_worker(query, %{batch_size: 100})
-      :ok
-
-  """
-  @spec revert_all_for_worker(Ecto.Queryable.t(), map()) :: :ok | {:error, term()}
-  def revert_all_for_worker(queryable, attributes) do
-    batch_size = attributes[:batch_size] || 100
-    attributes = Map.delete(attributes, :batch_size)
-
-    queryable
-    |> Batch.query_batches(batch_size: batch_size, id_field: :image_id)
-    |> Enum.reduce_while(:ok, fn queryable, :ok ->
-      queryable
-      |> select([tag_change], tag_change.id)
-      |> Repo.all()
-      |> revert_for_worker(attributes)
-      |> case do
-        {:ok, _tag_changes} ->
-          {:cont, :ok}
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
   end
 end

@@ -107,6 +107,24 @@ defmodule Philomena.Polls do
   end
 
   @doc """
+  Adds a total  vote adjustment for `poll_id` to `multi`.
+
+  PollVotes uses this transaction step after inserting or deleting votes. The
+  poll row is expected to have been locked by the caller before this step is
+  composed.
+  """
+  @spec put_total_votes_delta(Multi.t(), Multi.name(), integer(), (Multi.changes() -> integer())) ::
+          Multi.t()
+  def put_total_votes_delta(%Multi{} = multi, step, poll_id, amount_callback)
+      when is_integer(poll_id) do
+    Multi.run(multi, step, fn repo, changes ->
+      amount = amount_callback.(changes)
+
+      {:ok, repo.update_all(where(Poll, id: ^poll_id), inc: [total_votes: amount])}
+    end)
+  end
+
+  @doc """
   Returns whether a loaded poll is accepting votes at `now`.
 
   The close instant itself is inactive.

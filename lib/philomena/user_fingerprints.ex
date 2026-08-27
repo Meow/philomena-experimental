@@ -147,6 +147,47 @@ defmodule Philomena.UserFingerprints do
   end
 
   @doc """
+  Deletes all stored fingerprint history for a user.
+  """
+  @spec delete_for_user!(integer()) :: :ok
+  def delete_for_user!(user_id) do
+    Repo.delete_all(where(UserFingerprint, user_id: ^user_id))
+    :ok
+  end
+
+  @doc """
+  Persists the batching server's coalesced fingerprint usage.
+  """
+  @spec persist_usage_batch(%{{pos_integer(), String.t()} => DateTime.t()}) :: :ok
+  def persist_usage_batch(user_fingerprints) when is_map(user_fingerprints) do
+    if map_size(user_fingerprints) > 0 do
+      update_query =
+        update(UserFingerprint,
+          inc: [uses: 1],
+          set: [updated_at: fragment("EXCLUDED.updated_at")]
+        )
+
+      usage_rows =
+        Enum.map(user_fingerprints, fn {{user_id, fingerprint}, updated_at} ->
+          %UserFingerprint{user_id: user_id}
+          |> UserFingerprint.changeset(%{fingerprint: fingerprint})
+          |> Ecto.Changeset.apply_changes()
+          |> Map.take(UserFingerprint.insert_fields())
+          |> Map.merge(%{created_at: updated_at, updated_at: updated_at})
+        end)
+
+      Repo.insert_all(
+        UserFingerprint,
+        usage_rows,
+        on_conflict: update_query,
+        conflict_target: [:user_id, :fingerprint]
+      )
+    end
+
+    :ok
+  end
+
+  @doc """
   Determine whether the fingerprint corresponds to a valid format.
 
   Valid formats start with `c` or `d` (for the version). The `c` format is a legacy format

@@ -15,12 +15,14 @@ defmodule Philomena.SourceChanges do
   alias Philomena.Attribution.Actor
   alias Philomena.Images
   alias Philomena.Images.Image
+  alias Philomena.Multi
   alias Philomena.SourceChanges.SourceChange
   alias Philomena.SourceChanges.QueryBuilder
   alias Philomena.SourceChanges.QueryForm
   alias Philomena.SourceChanges.SourceChangePage
   alias Philomena.UserFingerprints
   alias Philomena.Users
+  alias PhilomenaQuery.Batch
   alias PhilomenaQuery.IpMask
 
   @preloads [:user, image: [:user, :sources, tags: :aliases]]
@@ -263,5 +265,67 @@ defmodule Philomena.SourceChanges do
 
       {:ok, page, QueryForm.changeset(query_form)}
     end
+  end
+
+  @doc """
+  Replaces attribution data on a user's source change history in batches.
+  """
+  @spec wipe_user_attribution!(integer(), term(), String.t()) :: :ok
+  def wipe_user_attribution!(user_id, ip, fingerprint) do
+    SourceChange
+    |> where(user_id: ^user_id)
+    |> Batch.query_batches()
+    |> Enum.each(&Repo.update_all(&1, set: [ip: ip, fingerprint: fingerprint]))
+
+    :ok
+  end
+
+  @doc """
+  Deletes all source-change history belonging to a user.
+
+  Permanent user erasure delegates this table delete to SourceChanges.
+  """
+  @spec delete_for_user!(integer()) :: :ok
+  def delete_for_user!(user_id) do
+    Repo.delete_all(where(SourceChange, user_id: ^user_id))
+    :ok
+  end
+
+  @doc """
+  Records added and removed source URLs from an image mutation in `multi`.
+
+  The image owner can attach any image reindex needed by the surrounding
+  workflow after composing this operation.
+  """
+  @spec put_record_image_changes(Multi.t(), Actor.t(), Multi.name()) :: Multi.t()
+  def put_record_image_changes(%Multi{} = multi, %Actor{} = actor, image_step \\ :image) do
+    multi
+    |> Multi.run(:added_source_changes, fn repo,
+                                           %{^image_step => {image, added_sources, _removed}} ->
+      rows = Enum.map(added_sources, &source_change_attributes(actor, image, &1, true))
+      {count, nil} = repo.insert_all(SourceChange, rows)
+      {:ok, count}
+    end)
+    |> Multi.run(:removed_source_changes, fn repo,
+                                             %{^image_step => {image, _added, removed_sources}} ->
+      rows = Enum.map(removed_sources, &source_change_attributes(actor, image, &1, false))
+      {count, nil} = repo.insert_all(SourceChange, rows)
+      {:ok, count}
+    end)
+  end
+
+  defp source_change_attributes(%Actor{user: user} = actor, image, source, added) do
+    now = DateTime.utc_now(:second)
+
+    %{
+      image_id: image.id,
+      source_url: source,
+      user_id: if(user, do: user.id),
+      created_at: now,
+      updated_at: now,
+      ip: actor.ip,
+      fingerprint: actor.fingerprint,
+      added: added
+    }
   end
 end

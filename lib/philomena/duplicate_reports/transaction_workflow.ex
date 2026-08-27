@@ -192,21 +192,6 @@ defmodule Philomena.DuplicateReports.TransactionWorkflow do
     end
   end
 
-  def put_reject_open_reports(%Multi{} = multi) do
-    Multi.update_all(
-      multi,
-      :reject_open_reports,
-      fn %{locked_source_image: %{id: source_id}, locked_target_image: %{id: target_id}} ->
-        from report in DuplicateReport,
-          where:
-            (report.image_id == ^source_id and report.duplicate_of_image_id == ^target_id) or
-              (report.duplicate_of_image_id == ^source_id and report.image_id == ^target_id),
-          where: report.state in ~w(open claimed)
-      end,
-      set: [state: "rejected"]
-    )
-  end
-
   defp lock_image_pair(%Multi{} = multi, source_id, target_id) do
     # Image pair locking occurs in a consistent order to avoid deadlock.
     [source_id, target_id]

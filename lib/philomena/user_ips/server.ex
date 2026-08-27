@@ -5,10 +5,7 @@ defmodule Philomena.UserIps.Server do
 
   use GenServer
 
-  import Ecto.Query
-
-  alias Philomena.Repo
-  alias Philomena.UserIps.UserIp
+  alias Philomena.UserIps
 
   @timeout 0
   @flush_interval to_timeout(second: 60)
@@ -53,31 +50,8 @@ defmodule Philomena.UserIps.Server do
   @impl true
   @doc false
   def handle_info(:timeout, user_ips) do
-    flush(user_ips)
+    UserIps.persist_usage_batch(user_ips)
+
     {:noreply, %{}, @flush_interval}
-  end
-
-  defp flush(user_ips) do
-    if map_size(user_ips) > 0 do
-      update_query =
-        update(UserIp, inc: [uses: 1], set: [updated_at: fragment("EXCLUDED.updated_at")])
-
-      Repo.insert_all(
-        UserIp,
-        Enum.map(user_ips, &into_insert_all/1),
-        on_conflict: update_query,
-        conflict_target: [:user_id, :ip]
-      )
-    end
-  end
-
-  defp into_insert_all({{user_id, ip_address}, updated_at}) do
-    %{
-      user_id: user_id,
-      ip: ip_address,
-      uses: 1,
-      created_at: updated_at,
-      updated_at: updated_at
-    }
   end
 end

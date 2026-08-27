@@ -7,20 +7,16 @@ defmodule Philomena.Users.UserWipe do
   by `Philomena.UserWipeWorker` after an authorized Users service enqueues it.
   """
 
-  import Ecto.Query
-
-  alias Philomena.Comments.Comment
-  alias Philomena.Images.Image
-  alias Philomena.Posts.Post
-  alias Philomena.Reports.Report
-  alias Philomena.SourceChanges.SourceChange
-  alias Philomena.TagChanges.TagChange
-  alias Philomena.UserIps.UserIp
-  alias Philomena.UserFingerprints.UserFingerprint
+  alias Philomena.Comments
+  alias Philomena.Images
+  alias Philomena.Posts
+  alias Philomena.Reports
+  alias Philomena.SourceChanges
+  alias Philomena.TagChanges
+  alias Philomena.UserIps
+  alias Philomena.UserFingerprints
   alias Philomena.Users
   alias Philomena.Users.User
-  alias Philomena.Repo
-  alias PhilomenaQuery.Batch
 
   @wipe_ip %Postgrex.INET{address: {127, 0, 1, 1}, netmask: 32}
   @wipe_fp "ffff"
@@ -42,24 +38,15 @@ defmodule Philomena.Users.UserWipe do
 
     random_hex = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 
-    for schema <- [Comment, Image, Post, Report, SourceChange, TagChange] do
-      schema
-      |> where(user_id: ^user.id)
-      |> Batch.query_batches()
-      |> Enum.each(&Repo.update_all(&1, set: [ip: @wipe_ip, fingerprint: @wipe_fp]))
-    end
-
-    UserIp
-    |> where(user_id: ^user.id)
-    |> Repo.delete_all()
-
-    UserFingerprint
-    |> where(user_id: ^user.id)
-    |> Repo.delete_all()
-
-    User
-    |> where(id: ^user.id)
-    |> Repo.update_all(set: [email: "deactivated#{random_hex}@example.com"])
+    Comments.wipe_user_attribution!(user.id, @wipe_ip, @wipe_fp)
+    Images.wipe_user_attribution!(user.id, @wipe_ip, @wipe_fp)
+    Posts.wipe_user_attribution!(user.id, @wipe_ip, @wipe_fp)
+    Reports.wipe_user_attribution!(user.id, @wipe_ip, @wipe_fp)
+    SourceChanges.wipe_user_attribution!(user.id, @wipe_ip, @wipe_fp)
+    TagChanges.wipe_user_attribution!(user.id, @wipe_ip, @wipe_fp)
+    UserIps.delete_for_user!(user.id)
+    UserFingerprints.delete_for_user!(user.id)
+    Users.replace_email_for_wipe!(user.id, "deactivated#{random_hex}@example.com")
 
     Users.reindex_user(user)
   end

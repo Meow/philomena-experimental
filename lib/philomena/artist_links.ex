@@ -11,13 +11,13 @@ defmodule Philomena.ArtistLinks do
   alias Philomena.ArtistLinks.{
     ArtistLink,
     AutomaticVerifier,
-    BadgeAwarder,
     QueryBuilder,
     QueryForm
   }
 
   alias Philomena.Attribution.Actor
   alias Philomena.Authorization
+  alias Philomena.Badges
   alias Philomena.Loader
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
@@ -337,9 +337,7 @@ defmodule Philomena.ArtistLinks do
 
       Multi.new()
       |> Multi.update(:artist_link, verify_changeset)
-      |> Multi.run(:award, fn _repo, %{artist_link: artist_link} ->
-        BadgeAwarder.award_badge(artist_link, user)
-      end)
+      |> Badges.put_award_artist_badge(artist_link.user, user)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -460,6 +458,40 @@ defmodule Philomena.ArtistLinks do
           {:error, changeset}
       end
     end
+  end
+
+  @doc """
+  Repoints artist links from one tag to another inside `multi`.
+
+  Links that would duplicate an existing non-rejected target link are removed
+  first. Tag aliasing composes this operation instead of writing the
+  `artist_links` table directly.
+  """
+  @spec put_alias_tag(Multi.t(), integer(), integer()) :: Multi.t()
+  def put_alias_tag(%Multi{} = multi, source_tag_id, target_tag_id) do
+    conflicts =
+      from source in ArtistLink,
+        join: target in ArtistLink,
+        on:
+          target.tag_id == ^target_tag_id and
+            target.uri == source.uri and
+            target.user_id == source.user_id,
+        where:
+          source.tag_id == ^source_tag_id and
+            source.aasm_state != "rejected" and
+            target.aasm_state != "rejected",
+        select: source.id
+
+    multi
+    |> Multi.delete_all(
+      :delete_conflicting_artist_links,
+      from(link in ArtistLink, where: link.id in subquery(conflicts))
+    )
+    |> Multi.update_all(
+      :update_artist_links,
+      where(ArtistLink, tag_id: ^source_tag_id),
+      set: [tag_id: target_tag_id]
+    )
   end
 
   @doc """

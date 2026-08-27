@@ -20,6 +20,7 @@ defmodule Philomena.Notifications do
   alias Philomena.Galleries.Gallery
   alias Philomena.Images
   alias Philomena.Images.Image
+  alias Philomena.Multi
   alias Philomena.Notifications.ChannelLiveNotification
   alias Philomena.Notifications.ForumPostNotification
   alias Philomena.Notifications.ForumTopicNotification
@@ -522,5 +523,48 @@ defmodule Philomena.Notifications do
     ImageMergeNotification
     |> where(target_id: ^image.id)
     |> clear_for_user(user)
+  end
+
+  @doc """
+  Migrates image comment and image merge notifications to the target image.
+  """
+  @spec put_migrate_image_notifications(Multi.t(), Image.t(), Image.t()) :: Multi.t()
+  def put_migrate_image_notifications(%Multi{} = multi, %Image{} = source, %Image{} = target) do
+    Multi.run(multi, :migrate_image_notifications, fn repo, _changes ->
+      comment_notifications =
+        from notification in ImageCommentNotification,
+          where: notification.image_id == ^source.id,
+          select: %{
+            user_id: notification.user_id,
+            image_id: ^target.id,
+            comment_id: notification.comment_id,
+            read: notification.read,
+            created_at: notification.created_at,
+            updated_at: notification.updated_at
+          }
+
+      merge_notifications =
+        from notification in ImageMergeNotification,
+          where: notification.target_id == ^source.id,
+          select: %{
+            user_id: notification.user_id,
+            target_id: ^target.id,
+            source_id: notification.source_id,
+            read: notification.read,
+            created_at: notification.created_at,
+            updated_at: notification.updated_at
+          }
+
+      {comment_count, nil} =
+        repo.insert_all(ImageCommentNotification, comment_notifications, on_conflict: :nothing)
+
+      {merge_count, nil} =
+        repo.insert_all(ImageMergeNotification, merge_notifications, on_conflict: :nothing)
+
+      repo.delete_all(exclude(comment_notifications, :select))
+      repo.delete_all(exclude(merge_notifications, :select))
+
+      {:ok, {comment_count, merge_count}}
+    end)
   end
 end

@@ -8,11 +8,14 @@ defmodule Philomena.Interactions do
   alias Philomena.Multi
   alias Philomena.Attribution.Actor
   alias Philomena.ImageFaves.ImageFave
+  alias Philomena.ImageFaves
   alias Philomena.ImageHides.ImageHide
+  alias Philomena.ImageHides
+  alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.ImageVotes.ImageVote
+  alias Philomena.ImageVotes
   alias Philomena.Repo
-  alias Philomena.UserStatistics
 
   @type interaction :: %{
           image_id: pos_integer(),
@@ -90,20 +93,6 @@ defmodule Philomena.Interactions do
     {:ok, %{source: source, created_at: DateTime.utc_now(:second)}}
   end
 
-  defp hide_rows(%{source: source, created_at: created_at}, target) do
-    Enum.map(source.hiders, &%{image_id: target.id, user_id: &1.id, created_at: created_at})
-  end
-
-  defp fave_rows(%{source: source, created_at: created_at}, target) do
-    Enum.map(source.favers, &%{image_id: target.id, user_id: &1.id, created_at: created_at})
-  end
-
-  defp vote_rows(%{source: source, created_at: created_at}, target, up) do
-    voters = if up, do: source.upvoters, else: source.downvoters
-
-    Enum.map(voters, &%{image_id: target.id, user_id: &1.id, created_at: created_at, up: up})
-  end
-
   @doc """
   Lists `actor`'s interactions with all supplied images.
 
@@ -159,79 +148,27 @@ defmodule Philomena.Interactions do
   def migrate_loaded_images(%Multi{} = multi, %Image{} = source, %Image{} = target) do
     multi
     |> Multi.run(:interaction_source, fn repo, _changes -> source_interactions(repo, source) end)
-    |> Multi.run(:interaction_hides, fn repo, %{interaction_source: interactions} ->
-      {count, nil} =
-        repo.insert_all(ImageHide, hide_rows(interactions, target), on_conflict: :nothing)
-
-      {:ok, count}
-    end)
-    |> Multi.run(:interaction_faves, fn repo, %{interaction_source: interactions} ->
-      {count, rows} =
-        repo.insert_all(ImageFave, fave_rows(interactions, target),
-          on_conflict: :nothing,
-          returning: [:user_id]
-        )
-
-      {:ok, {count, rows}}
-    end)
-    |> Multi.merge(fn %{interaction_faves: {_count, rows}} ->
-      UserStatistics.put_bulk_increment(
-        Multi.new(),
-        Enum.map(rows, & &1.user_id),
-        :image_faves_count
-      )
-    end)
-    |> Multi.run(:interaction_upvotes, fn repo, %{interaction_source: interactions} ->
-      {count, rows} =
-        repo.insert_all(ImageVote, vote_rows(interactions, target, true),
-          on_conflict: :nothing,
-          returning: [:user_id]
-        )
-
-      {:ok, {count, rows}}
-    end)
-    |> Multi.merge(fn %{interaction_upvotes: {_count, rows}} ->
-      UserStatistics.put_bulk_increment(
-        Multi.new(),
-        Enum.map(rows, & &1.user_id),
-        :image_votes_count
-      )
-    end)
-    |> Multi.run(:interaction_downvotes, fn repo, %{interaction_source: interactions} ->
-      {count, rows} =
-        repo.insert_all(ImageVote, vote_rows(interactions, target, false),
-          on_conflict: :nothing,
-          returning: [:user_id]
-        )
-
-      {:ok, {count, rows}}
-    end)
-    |> Multi.merge(fn %{interaction_downvotes: {_count, rows}} ->
-      UserStatistics.put_bulk_increment(
-        Multi.new(),
-        Enum.map(rows, & &1.user_id),
-        :image_votes_count
-      )
-    end)
-    |> Multi.run(:interaction_image, fn repo,
-                                        %{
-                                          interaction_hides: hides,
-                                          interaction_faves: {faves, _},
-                                          interaction_upvotes: {upvotes, _},
-                                          interaction_downvotes: {downvotes, _}
-                                        } ->
-      {count, nil} =
-        repo.update_all(where(Image, id: ^target.id),
-          inc: [
-            hides_count: hides,
-            faves_count: faves,
-            upvotes_count: upvotes,
-            downvotes_count: downvotes,
-            score: upvotes - downvotes
-          ]
-        )
-
-      {:ok, count}
-    end)
+    |> ImageHides.put_migrate_image_interactions(target)
+    |> ImageFaves.put_migrate_image_interactions(target)
+    |> ImageVotes.put_migrate_image_interactions(target, :interaction_upvotes, true)
+    |> ImageVotes.put_migrate_image_interactions(target, :interaction_downvotes, false)
+    |> Images.put_image_counter_deltas(
+      :interaction_image,
+      target,
+      fn %{
+           interaction_hides: hides,
+           interaction_faves: {faves, _},
+           interaction_upvotes: {upvotes, _},
+           interaction_downvotes: {downvotes, _}
+         } ->
+        %{
+          hides_count: hides,
+          faves_count: faves,
+          upvotes_count: upvotes,
+          downvotes_count: downvotes,
+          score: upvotes - downvotes
+        }
+      end
+    )
   end
 end

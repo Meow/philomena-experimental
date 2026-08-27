@@ -102,8 +102,8 @@ defmodule Philomena.Topics do
       Topic.hide_changeset(topic, user, params)
     end)
     |> put_topic_visibility_counters(visible?: false)
-    |> put_refresh_topic_last_post()
-    |> put_refresh_forum_last_post()
+    |> put_refresh_last_post()
+    |> Forums.put_refresh_last_post()
     |> Posts.put_reindex_posts_in_topic()
   end
 
@@ -364,8 +364,8 @@ defmodule Philomena.Topics do
       end)
       |> put_topic_visibility_counters(visible?: true)
       |> UserStatistics.put_increment(creator, :posts_count)
-      |> put_refresh_topic_last_post(:topic)
-      |> put_refresh_forum_last_post()
+      |> put_refresh_last_post(:topic)
+      |> Forums.put_refresh_last_post()
       |> maybe_subscribe_on(:topic, creator, :watch_on_new_topic)
       |> Multi.run(:notification, &notify_topic/2)
       |> Posts.put_approval_report(fn %{topic: %{posts: [post]}} -> post end)
@@ -514,8 +514,8 @@ defmodule Philomena.Topics do
       |> put_forum_and_topic_locks(actor, forum_slug, :show, topic_slug, :unhide)
       |> Multi.update(:topic, fn %{locked_topic: topic} -> Topic.unhide_changeset(topic) end)
       |> put_topic_visibility_counters(visible?: true)
-      |> put_refresh_topic_last_post()
-      |> put_refresh_forum_last_post()
+      |> put_refresh_last_post()
+      |> Forums.put_refresh_last_post()
       |> Posts.put_reindex_posts_in_topic()
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -594,9 +594,9 @@ defmodule Philomena.Topics do
       |> Multi.update(:topic, fn %{locked_topic: topic, locked_target_forum: target_forum} ->
         Topic.move_changeset(topic, target_forum.id)
       end)
-      |> put_topic_transfer_counters()
-      |> put_refresh_forum_last_post(:locked_source_forum)
-      |> put_refresh_forum_last_post(:locked_target_forum)
+      |> Forums.put_topic_transfer_counters()
+      |> Forums.put_refresh_last_post(:locked_source_forum)
+      |> Forums.put_refresh_last_post(:locked_target_forum)
       |> Posts.put_reindex_posts_in_topic()
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -907,6 +907,115 @@ defmodule Philomena.Topics do
       error ->
         map_lock_errors(error)
     end
+  end
+
+  @doc """
+  Adds an update step that recalculates a topic's cached last visible post.
+
+  Maintains `Topic.last_post_id` and `Topic.last_replied_to_at` from the
+  newest post visible to users in that topic. The step reads the locked topic
+  from `topic_step`, which defaults to `:locked_topic`. Add it after inserting,
+  hiding, or restoring a post, and after hiding or restoring a topic. For topic
+  creation, pass `:topic` because the inserted topic is the row whose initial
+  post must be considered. A destruction-only operation does not need this
+  step because posts must already be hidden before they can be destroyed.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_forum_and_topic_locks(actor, "dis", :show, "topic", :create_post)
+      ...> |> Multi.insert(:post, post_changeset)
+      ...> |> Topics.put_refresh_topic_last_post())
+      %Multi{}
+
+  """
+  @spec put_refresh_last_post(Multi.t(), Multi.name()) :: Multi.t()
+  def put_refresh_last_post(%Multi{} = multi, topic_step \\ :locked_topic) do
+    Multi.update_all(
+      multi,
+      {:refresh_topic_last_post, topic_step},
+      fn %{^topic_step => topic} -> update_last_post_query(topic.id) end,
+      []
+    )
+  end
+
+  @doc """
+  Adds counter updates for a topic becoming visible or hidden.
+
+  Maintains `Forum.topic_count`, `Forum.post_count`, and the topic author's
+  `topics_count`. `visible?: true` adds one topic and that topic's complete
+  non-destroyed `post_count`; `false` removes the same contribution. The
+  transaction must contain `:locked_forum` and the updated `:topic`, and must
+  call this immediately after changing `Topic.hidden_from_users`.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_forum_and_topic_locks(actor, "dis", :show, "topic", :unhide)
+      ...> |> Multi.update(:topic, topic_changeset)
+      ...> |> Topics.put_topic_visibility_counters(visible?: true))
+      %Multi{}
+
+  """
+  @spec put_topic_visibility_counters(Multi.t(), [{:visible?, boolean()}]) :: Multi.t()
+  def put_topic_visibility_counters(%Multi{} = multi, [{:visible?, visible?}]) do
+    scale = if visible?, do: 1, else: -1
+
+    multi
+    |> UserStatistics.put_increment(fn %{topic: topic} -> topic.user_id end, :topics_count, scale)
+    |> Forums.put_topic_visibility_counters(visible?: visible?)
+  end
+
+  @doc """
+  Adds a topic post-counter update for a post becoming or ceasing to be
+  non-destroyed.
+
+  Maintains `Topic.post_count`, which includes every non-destroyed post,
+  whether or not it is hidden from users. `visible?: true` increments the
+  counter and `false` decrements it. The topic is read from `:locked_topic`;
+  call this after the post mutation and pair it with
+  `put_post_forum_visibility_counters/2` when the topic is visible.
+
+  ## Examples
+
+      iex> Multi.new()
+      ...> |> put_forum_and_topic_locks(actor, "dis", :show, "topic", :create_post)
+      ...> |> Multi.insert(:post, post_changeset)
+      ...> |> Topics.put_post_visibility_counters(visible?: true)
+      %Multi{}
+
+  """
+  @spec put_post_visibility_counters(Multi.t(), [{:visible?, boolean()}]) :: Multi.t()
+  def put_post_visibility_counters(%Multi{} = multi, [{:visible?, visible?}]) do
+    scale = if visible?, do: 1, else: -1
+
+    Multi.update_all(
+      multi,
+      :topic_post_count,
+      fn %{locked_topic: topic} ->
+        Topic |> where(id: ^topic.id) |> update(inc: [post_count: ^scale])
+      end,
+      []
+    )
+  end
+
+  defp update_last_post_query(topic_id) do
+    Topic
+    |> where(id: ^topic_id)
+    |> update(
+      set: [
+        last_post_id:
+          fragment(
+            "SELECT max(id) FROM posts WHERE topic_id = ? AND hidden_from_users IS FALSE",
+            ^topic_id
+          ),
+        last_replied_to_at:
+          fragment(
+            "SELECT max(created_at) FROM posts where topic_id = ? AND hidden_from_users IS FALSE",
+            ^topic_id
+          )
+      ]
+    )
   end
 
   @doc """

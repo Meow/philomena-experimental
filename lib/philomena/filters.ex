@@ -61,6 +61,13 @@ defmodule Philomena.Filters do
     Multi.on_commit(multi, fn %{^step => filter} -> reindex_filter(filter) end)
   end
 
+  defp reindex_filter_ids([]), do: []
+
+  defp reindex_filter_ids(filter_ids) do
+    Exq.enqueue(Exq, "indexing", IndexWorker, ["Filters", "id", filter_ids])
+    filter_ids
+  end
+
   @doc """
   Returns the default filter.
 
@@ -834,6 +841,47 @@ defmodule Philomena.Filters do
           {:error, changeset}
       end
     end
+  end
+
+  @doc """
+  Replaces a tag ID in hidden and spoilered filter arrays within `multi`.
+
+  Tag aliasing composes this function so failed updates roll back with
+  the alias transaction.
+  """
+  @spec put_replace_tag_references(Multi.t(), Multi.name(), Multi.name(), integer(), integer()) ::
+          Multi.t()
+  def put_replace_tag_references(%Multi{} = multi, hidden_step, spoilered_step, old_id, new_id) do
+    hidden_filters =
+      Filter
+      |> where([f], fragment("? @> ARRAY[?]::integer[]", f.hidden_tag_ids, ^old_id))
+      |> update([f],
+        set: [
+          hidden_tag_ids: fragment("array_replace(?, ?, ?)", f.hidden_tag_ids, ^old_id, ^new_id)
+        ]
+      )
+
+    spoilered_filters =
+      Filter
+      |> where([f], fragment("? @> ARRAY[?]::integer[]", f.spoilered_tag_ids, ^old_id))
+      |> update([f],
+        set: [
+          spoilered_tag_ids:
+            fragment("array_replace(?, ?, ?)", f.spoilered_tag_ids, ^old_id, ^new_id)
+        ]
+      )
+
+    hidden_ids_step = {:reindex_filter_ids, hidden_step}
+    spoilered_ids_step = {:reindex_filter_ids, spoilered_step}
+
+    multi
+    |> Multi.all(hidden_ids_step, select(exclude(hidden_filters, :update), [f], f.id))
+    |> Multi.all(spoilered_ids_step, select(exclude(spoilered_filters, :update), [f], f.id))
+    |> Multi.update_all(hidden_step, hidden_filters, [])
+    |> Multi.update_all(spoilered_step, spoilered_filters, [])
+    |> Multi.on_commit(fn %{^hidden_ids_step => hidden_ids, ^spoilered_ids_step => spoilered_ids} ->
+      reindex_filter_ids(Enum.uniq(hidden_ids ++ spoilered_ids))
+    end)
   end
 
   @doc """

@@ -10,6 +10,7 @@ defmodule Philomena.Forums do
   alias Philomena.Forums.{Forum, ForumIndex, ForumPage}
   alias Philomena.Forums.Visibility
   alias Philomena.Loader
+  alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Topics.Topic
 
@@ -252,5 +253,165 @@ defmodule Philomena.Forums do
       |> Forum.changeset(attrs)
       |> Repo.update()
     end
+  end
+
+  @doc """
+  Adds an update step that recalculates a forum's cached last visible post.
+
+  Maintains `Forum.last_post_id` as the highest-ID post that is visible and
+  belongs to a non-hidden topic in that forum. The step reads the locked forum
+  from `forum_step`, which defaults to `:locked_forum`. Add it after a reply,
+  post visibility change, topic visibility change, or topic move; a move must
+  refresh both locked forums.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_forum_and_topic_locks(actor, "dis", :show, "topic", :hide)
+      ...> |> Multi.update(:topic, topic_changeset)
+      ...> |> Forums.put_refresh_forum_last_post())
+      %Multi{}
+
+  """
+  @spec put_refresh_last_post(Multi.t(), Multi.name()) :: Multi.t()
+  def put_refresh_last_post(%Multi{} = multi, forum_step \\ :locked_forum) do
+    Multi.update_all(
+      multi,
+      {:refresh_forum_last_post, forum_step},
+      fn %{^forum_step => forum} -> update_last_post_query(forum.id) end,
+      []
+    )
+  end
+
+  @doc """
+  Adds forum counter updates for a topic transfer.
+
+  Maintains `Forum.topic_count` and `Forum.post_count` for both forums. The
+  updated topic is read from `:topic`. When it is visible, its one-topic and
+  complete `post_count` contribution is moved from `:locked_source_forum` to
+  `:locked_target_forum`. A hidden topic contributes to neither forum, so no
+  counters change. Call this immediately after moving the topic and before
+  refreshing the last-post pointers of both locked forums.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_source_and_target_forum_and_topic_locks(actor, "dis", :show, "gen", :show, "topic", :move)
+      ...> |> Multi.update(:topic, topic_changeset)
+      ...> |> Forums.put_topic_transfer_counters())
+      %Multi{}
+
+  """
+  @spec put_topic_transfer_counters(Multi.t()) :: Multi.t()
+  def put_topic_transfer_counters(%Multi{} = multi) do
+    Multi.merge(multi, fn
+      %{topic: %{hidden_from_users: true}} ->
+        # Hidden topics do not contribute to forum post count.
+        Multi.new()
+
+      %{locked_source_forum: source, locked_target_forum: target, topic: topic} ->
+        Multi.new()
+        |> Multi.update_all(
+          :source_forum_count,
+          Forum
+          |> where(id: ^source.id)
+          |> update(inc: [post_count: ^(-topic.post_count), topic_count: -1]),
+          []
+        )
+        |> Multi.update_all(
+          :target_forum_count,
+          Forum
+          |> where(id: ^target.id)
+          |> update(inc: [post_count: ^topic.post_count, topic_count: 1]),
+          []
+        )
+    end)
+  end
+
+  @doc """
+  Adds counter updates for a topic becoming visible or hidden.
+
+  Maintains `Forum.topic_count`, `Forum.post_count`, and the topic author's
+  `topics_count`. `visible?: true` adds one topic and that topic's complete
+  non-destroyed `post_count`; `false` removes the same contribution. The
+  transaction must contain `:locked_forum` and the updated `:topic`, and must
+  call this immediately after changing `Topic.hidden_from_users`.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_forum_and_topic_locks(actor, "dis", :show, "topic", :unhide)
+      ...> |> Multi.update(:topic, topic_changeset)
+      ...> |> Forums.put_topic_visibility_counters(visible?: true))
+      %Multi{}
+
+  """
+  @spec put_topic_visibility_counters(Multi.t(), [{:visible?, boolean()}]) :: Multi.t()
+  def put_topic_visibility_counters(%Multi{} = multi, [{:visible?, visible?}]) do
+    scale = if visible?, do: 1, else: -1
+
+    Multi.update_all(
+      multi,
+      :forum_topic_visibility_count,
+      fn %{locked_forum: forum, topic: topic} ->
+        Forum
+        |> where(id: ^forum.id)
+        |> update(inc: [post_count: ^(scale * topic.post_count), topic_count: ^scale])
+      end,
+      []
+    )
+  end
+
+  @doc """
+  Adds a forum post counter update for post creation or destruction.
+
+  Maintains `Forum.post_count`. `visible?: true` increments it and `false`
+  decrements it, but only when `:locked_topic` is visible. Hidden topics do not
+  contribute posts to their forum. The transaction must contain
+  `:locked_forum` and `:locked_topic`, and call this after the post mutation.
+  Pair it with `put_post_topic_visibility_counters/2` whenever a post is created
+  or destroyed.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_forum_and_topic_and_post_locks(actor, "dis", :show, "topic", :show, 1, :delete)
+      ...> |> Multi.update(:post, post_changeset)
+      ...> |> Topics.put_post_visibility_counters(visible?: false)
+      ...> |> Forums.put_post_visibility_counters(visible?: false))
+      %Multi{}
+
+  """
+  @spec put_post_visibility_counters(Multi.t(), [{:visible?, boolean()}]) :: Multi.t()
+  def put_post_visibility_counters(%Multi{} = multi, [{:visible?, visible?}]) do
+    Multi.merge(multi, fn
+      %{locked_topic: %{hidden_from_users: true}} ->
+        # Hidden topics do not contribute to forum post count.
+        Multi.new()
+
+      %{locked_forum: forum} ->
+        scale = if visible?, do: 1, else: -1
+
+        query =
+          Forum
+          |> where(id: ^forum.id)
+          |> update(inc: [post_count: ^scale])
+
+        Multi.update_all(Multi.new(), :forum_post_count, query, [])
+    end)
+  end
+
+  defp update_last_post_query(forum_id) do
+    Forum
+    |> where(id: ^forum_id)
+    |> update(
+      set: [
+        last_post_id:
+          fragment(
+            "SELECT max(posts.id) FROM posts JOIN topics ON posts.topic_id = topics.id WHERE topics.forum_id = ? AND topics.hidden_from_users IS FALSE AND posts.hidden_from_users IS FALSE",
+            ^forum_id
+          )
+      ]
+    )
   end
 end

@@ -20,7 +20,7 @@ defmodule Philomena.Images do
   alias PhilomenaQuery.Search
   alias Philomena.ThumbnailWorker
   alias Philomena.ImagePurgeWorker
-  alias Philomena.DuplicateReports.DuplicateReport
+  alias Philomena.DuplicateReports
   alias Philomena.Images.Image
   alias Philomena.Images.Filtering
   alias Philomena.Images.Uploader
@@ -40,11 +40,7 @@ defmodule Philomena.Images do
   alias Philomena.ImageHides
   alias Philomena.ImageFaves
   alias Philomena.SourceChanges
-  alias Philomena.SourceChanges.SourceChange
-  alias Philomena.Notifications.ImageCommentNotification
-  alias Philomena.Notifications.ImageMergeNotification
   alias Philomena.TagChanges
-  alias Philomena.TagChanges.TagChange
   alias Philomena.TagChanges.Limits
   alias Philomena.Tags
   alias Philomena.UserStatistics
@@ -54,8 +50,6 @@ defmodule Philomena.Images do
   alias Philomena.Reports
   alias Philomena.Comments
   alias Philomena.Galleries
-  alias Philomena.Galleries.Gallery
-  alias Philomena.Galleries.Interaction
   alias Philomena.Images.ImagePage
   alias Philomena.Images.Query, as: ImageQuery
   alias Philomena.Images.Search, as: ImageSearch
@@ -63,6 +57,7 @@ defmodule Philomena.Images do
   alias Philomena.Users.User
   alias PhilomenaWeb.Api.Json.ImageView
   alias PhilomenaWeb.Endpoint
+  alias PhilomenaQuery.Batch
 
   use Philomena.Subscriptions,
     on_delete: :clear_image_notification,
@@ -231,18 +226,23 @@ defmodule Philomena.Images do
 
     multi
     |> put_hide_image(source_changeset, image, user)
-    |> migrate_gallery_interactions_multi(image, duplicate_of_image)
+    |> Galleries.put_migrate_image_interactions(image, duplicate_of_image)
     |> Multi.update(:target_image, target_changeset)
     |> Tags.put_copy_tags(image, duplicate_of_image)
     |> Multi.run(:migrate_sources, fn _, %{} ->
       {:ok, migrate_sources(image, duplicate_of_image)}
     end)
-    |> Multi.run(:migrate_comments, fn _, %{} ->
-      {:ok, Comments.migrate_comments(image, duplicate_of_image)}
-    end)
+    |> Comments.put_migrate_image_comments(image, duplicate_of_image)
+    |> put_image_counter_delta(
+      :migrated_comment_count,
+      duplicate_of_image,
+      :comments_count,
+      fn %{migrated_comments: {count, nil}} -> count end
+    )
     |> Multi.run(:migrate_subscriptions, fn _, %{} ->
       {:ok, migrate_subscriptions(image, duplicate_of_image)}
     end)
+    |> Notifications.put_migrate_image_notifications(image, duplicate_of_image)
     |> Interactions.migrate_loaded_images(image, duplicate_of_image)
     |> Multi.run(:notification, &notify_merge(&1, &2, image, duplicate_of_image))
     |> put_process_after_hide()
@@ -260,68 +260,19 @@ defmodule Philomena.Images do
     multi
     |> Multi.update(:image, changeset)
     |> Reports.put_close_reports(:reports, user, image_id: image.id)
-    |> Multi.run(:tags, fn repo, %{image: image} ->
+    |> Multi.run(:tags, fn _repo, %{image: image} ->
       image = Repo.preload(image, :tags, force: true)
-
-      tag_ids = Enum.map(image.tags, & &1.id)
-
-      Tags.update_image_counts(repo, -1, tag_ids)
-
       {:ok, image.tags}
     end)
+    |> Tags.put_image_count_delta(
+      :tag_image_counts,
+      fn %{tags: tags} -> Enum.map(tags, & &1.id) end,
+      -1
+    )
   end
 
-  defp remove_gallery_interactions_multi(multi, image) do
-    # Image hides hold the image lock before reaching this step. Gallery
-    # membership mutations hold the same image lock first; deleting the
-    # interaction rows therefore composes safely with those workflows.
-    galleries =
-      Gallery
-      |> join(:inner, [g], gi in assoc(g, :interactions), on: gi.image_id == ^image.id)
-      |> update(inc: [image_count: -1])
-      |> select([g], g.id)
-
-    gallery_interactions = where(Interaction, image_id: ^image.id)
-
-    multi
-    |> Multi.update_all(:galleries, galleries, [])
-    |> Multi.delete_all(:gallery_interactions, gallery_interactions, [])
-  end
-
-  defp migrate_gallery_interactions_multi(multi, image, duplicate_of_image) do
-    # Image merges hold both image locks before reaching this step. The
-    # interaction updates and deletes stay in the image merge transaction; a
-    # concurrent gallery deletion may lose the lock race and abort, which
-    # rolls back the complete merge atomically.
-    target_gallery_ids =
-      Interaction
-      |> where(image_id: ^duplicate_of_image.id)
-      |> select([gi], gi.gallery_id)
-
-    # Galleries may contain at most one interaction per image, so the source
-    # image's interaction can only be repointed at the target image in
-    # galleries which do not already contain the target.
-    migratable =
-      Interaction
-      |> where(image_id: ^image.id)
-      |> where([gi], gi.gallery_id not in subquery(target_gallery_ids))
-      |> update(set: [image_id: ^duplicate_of_image.id])
-      |> select([gi], gi.gallery_id)
-
-    leftover = Interaction |> where(image_id: ^image.id) |> select([gi], gi.gallery_id)
-
-    multi
-    |> Multi.update_all(:migrated_gallery_interactions, migratable, [])
-    |> Multi.delete_all(:gallery_interactions, leftover, [])
-    |> Multi.run(:galleries, fn repo, %{gallery_interactions: {_count, gallery_ids}} ->
-      {count, nil} =
-        Gallery
-        |> where([g], g.id in ^gallery_ids)
-        |> repo.update_all(inc: [image_count: -1])
-
-      {:ok, {count, gallery_ids}}
-    end)
-  end
+  defp remove_gallery_interactions_multi(multi, image),
+    do: Galleries.put_remove_image_interactions(multi, image)
 
   defp put_process_after_hide(multi) do
     Multi.on_commit(multi, fn %{image: image, tags: tags, galleries: {_, gallery_ids}} ->
@@ -363,46 +314,18 @@ defmodule Philomena.Images do
           error
       end
     end)
-    |> Multi.run(:added_source_changes, fn repo, %{image: {image, added_sources, _removed}} ->
-      source_changes =
-        added_sources
-        |> Enum.map(&source_change_attributes(actor, image, &1, true))
-
-      {count, nil} = repo.insert_all(SourceChange, source_changes)
-
-      {:ok, count}
+    |> SourceChanges.put_record_image_changes(actor)
+    |> Multi.merge(fn %{image: {_image, added, removed}} ->
+      if Enum.any?(added) or Enum.any?(removed) do
+        UserStatistics.put_increment(Multi.new(), actor.user, :metadata_updates_count)
+      else
+        Multi.new()
+      end
     end)
-    |> Multi.run(:removed_source_changes, fn repo, %{image: {image, _added, removed_sources}} ->
-      source_changes =
-        removed_sources
-        |> Enum.map(&source_change_attributes(actor, image, &1, false))
-
-      {count, nil} = repo.insert_all(SourceChange, source_changes)
-
-      {:ok, count}
+    |> Multi.on_commit(fn %{image: {image, added, removed}} ->
+      if Enum.any?(added) or Enum.any?(removed), do: reindex_image(image)
     end)
     |> Multi.transact()
-  end
-
-  defp source_change_attributes(%Actor{user: user} = actor, image, source, added) do
-    now = DateTime.utc_now(:second)
-
-    user_id =
-      case user do
-        nil -> nil
-        user -> user.id
-      end
-
-    %{
-      image_id: image.id,
-      source_url: source,
-      user_id: user_id,
-      created_at: now,
-      updated_at: now,
-      ip: actor.ip,
-      fingerprint: actor.fingerprint,
-      added: added
-    }
   end
 
   defp update_loaded_tags(%Image{} = image, %Actor{} = actor, attrs) do
@@ -428,38 +351,36 @@ defmodule Philomena.Images do
       check_tag_change_limits_before_commit(image, actor)
     end)
     |> TagChanges.put_tag_change(actor)
-    |> Multi.run(:added_tag_count, fn
-      _repo, %{image: {%{hidden_from_users: true}, _added, _removed}} ->
-        {:ok, 0}
-
-      repo, %{image: {_image, added_tags, _removed}} ->
-        tag_ids = added_tags |> Enum.map(& &1.id)
-
-        count = Tags.update_image_counts(repo, 1, tag_ids)
-
-        {:ok, count}
+    |> Tags.put_image_count_delta(
+      :added_tag_count,
+      fn
+        %{image: {%{hidden_from_users: true}, _added, _removed}} -> []
+        %{image: {_image, added_tags, _removed}} -> Enum.map(added_tags, & &1.id)
+      end,
+      1
+    )
+    |> Tags.put_image_count_delta(
+      :removed_tag_count,
+      fn
+        %{image: {%{hidden_from_users: true}, _added, _removed}} -> []
+        %{image: {_image, _added, removed_tags}} -> Enum.map(removed_tags, & &1.id)
+      end,
+      -1
+    )
+    |> Multi.merge(fn %{image: {_image, added, removed}} ->
+      if Enum.any?(added ++ removed) do
+        UserStatistics.put_increment(Multi.new(), actor.user, :metadata_updates_count)
+      else
+        Multi.new()
+      end
     end)
-    |> Multi.run(:removed_tag_count, fn
-      _repo, %{image: {%{hidden_from_users: true}, _added, _removed}} ->
-        {:ok, 0}
-
-      repo, %{image: {_image, _added, removed_tags}} ->
-        tag_ids = removed_tags |> Enum.map(& &1.id)
-
-        count = Tags.update_image_counts(repo, -1, tag_ids)
-
-        {:ok, count}
+    |> Multi.on_commit(fn %{image: {image, added, removed}} ->
+      reindex_image(image)
+      Comments.reindex_comments_on_image(image)
+      update_tag_change_limits_after_commit(image, actor)
+      {added, removed}
     end)
     |> Multi.transact()
-    |> case do
-      {:ok, %{image: {image, _added, _removed}}} = res ->
-        update_tag_change_limits_after_commit(image, actor)
-
-        res
-
-      err ->
-        err
-    end
   end
 
   defp check_tag_change_limits_before_commit(image, %Actor{ip: ip, user: user}) do
@@ -905,12 +826,11 @@ defmodule Philomena.Images do
 
       Multi.new()
       |> Multi.insert(:image, image)
-      |> Multi.run(:added_tag_count, fn repo, %{image: image} ->
-        tag_ids = Enum.map(image.added_tags, & &1.id)
-        count = Tags.update_image_counts(repo, 1, tag_ids)
-
-        {:ok, count}
-      end)
+      |> Tags.put_image_count_delta(
+        :added_tag_count,
+        fn %{image: image} -> Enum.map(image.added_tags, & &1.id) end,
+        1
+      )
       |> maybe_subscribe_on(:image, user, :watch_on_upload)
       |> put_approval_steps()
       |> put_reindex_image(:image)
@@ -920,9 +840,6 @@ defmodule Philomena.Images do
           RateLimiter.record_action(actor, :image_create, @image_create_window)
 
           upload_pid = async_upload(image, params["image"])
-
-          # FIXME: put_reindex_tags
-          Tags.reindex_tags(image.added_tags)
 
           image = Repo.preload(image, tags: :aliases)
 
@@ -1978,11 +1895,6 @@ defmodule Philomena.Images do
            load_image_member(actor, :edit_metadata, image_id, [:user, :sources, tags: :aliases]),
          {:ok, %{image: {image, added, removed}}} <-
            update_loaded_sources(image, actor, attrs) do
-      if Enum.any?(added) or Enum.any?(removed) do
-        UserStatistics.increment(actor.user, :metadata_updates_count)
-      end
-
-      reindex_image(image)
       RateLimiter.record_action(actor, :source_update, @source_update_window)
 
       image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
@@ -2120,14 +2032,6 @@ defmodule Philomena.Images do
            ]),
          {:ok, %{image: {image, added, removed}}} <-
            update_loaded_tags(image, actor, attrs) do
-      Comments.reindex_comments_on_image(image)
-      reindex_image(image)
-      Tags.reindex_tags(added ++ removed)
-
-      if Enum.any?(added ++ removed) do
-        UserStatistics.increment(actor.user, :metadata_updates_count)
-      end
-
       RateLimiter.record_action(actor, :tag_update, @tag_update_window)
 
       {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
@@ -2352,19 +2256,13 @@ defmodule Philomena.Images do
   def hide_image(%Actor{user: user} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :hide, image_id) do
-      duplicate_reports_query =
-        DuplicateReport
-        |> where(state: "open")
-        |> where([d], d.image_id == ^image.id or d.duplicate_of_image_id == ^image.id)
-        |> update(set: [state: "rejected"])
-
       changeset_fun = fn %{locked_image: image} -> Image.hide_changeset(image, attrs, user) end
 
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> put_hide_image(changeset_fun, image, user)
       |> remove_gallery_interactions_multi(image)
-      |> Multi.update_all(:duplicate_reports, duplicate_reports_query, [])
+      |> DuplicateReports.put_reject_image_reports(:duplicate_reports, image.id)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: hidden} ->
         {
           "Image.Delete:create",
@@ -2422,27 +2320,29 @@ defmodule Philomena.Images do
       |> Multi.run(:tags, fn repo, %{locked_image: locked_image, image: image} ->
         if locked_image.hidden_from_users do
           image = repo.preload(image, :tags, force: true)
-          tag_ids = Enum.map(image.tags, & &1.id)
-          query = where(Tag, [t], t.id in ^tag_ids)
-
-          repo.update_all(query, inc: [images_count: 1])
-
           {:ok, image.tags}
         else
           {:ok, []}
         end
+      end)
+      |> Tags.put_image_count_delta(
+        :tag_image_counts,
+        fn %{tags: tags} -> Enum.map(tags, & &1.id) end,
+        1
+      )
+      |> put_reindex_image(:image)
+      |> Multi.on_commit(fn %{image: image, tags: tags} ->
+        Comments.reindex_comments_on_image(image)
+        {image, tags}
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {"Image.Delete:delete", Paths.image_path(image), "Restored image #{image.id}"}
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: image, tags: tags, restore_metadata: {true, key}}} ->
+        {:ok, %{image: image, tags: _tags, restore_metadata: {true, key}}} ->
           spawn(fn -> Thumbnailer.unhide_thumbnails(image, key) end)
-          reindex_image(image)
           purge_files(image, key)
-          Comments.reindex_comments_on_image(image)
-          Tags.reindex_tags(tags)
 
           {:ok, image}
 
@@ -2636,78 +2536,35 @@ defmodule Philomena.Images do
       |> where([t], t.image_id in ^image_ids and t.tag_id in ^to_delete_ids)
       |> select([t], [t.image_id, t.tag_id])
 
-    now = DateTime.utc_now(:second)
-    tag_attributes = %{name: "", slug: "", created_at: now, updated_at: now}
-
-    Repo.transaction(fn ->
-      {_count, inserted} =
-        Repo.insert_all(Tagging, to_insert,
-          on_conflict: :nothing,
-          returning: [:image_id, :tag_id]
-        )
-
-      {_count, deleted} = Repo.delete_all(to_delete)
-
-      inserted = Enum.map(inserted, &[&1.image_id, &1.tag_id])
-
-      # Create tag change batches for every image ID.
-      new_tag_changes =
-        (inserted ++ deleted)
-        |> Enum.uniq_by(fn [image_id, _] -> image_id end)
-        |> Enum.map(fn [image_id, _] ->
-          {:ok, tc} =
-            %TagChange{
-              image_id: image_id,
-              user_id: attributes[:user_id],
-              ip: attributes[:ip],
-              fingerprint: attributes[:fingerprint],
-              created_at: now
-            }
-            |> Repo.insert()
-
-          {image_id, tc}
-        end)
-        |> Map.new()
-
-      # Create tags belonging to tag changes.
-      added_changes = tag_change_data(inserted, new_tag_changes, true)
-      removed_changes = tag_change_data(deleted, new_tag_changes, false)
-
-      Repo.insert_all(Philomena.TagChanges.TagChangeTag, added_changes ++ removed_changes)
-
-      # In order to merge into the existing tables here in one go, insert_all
-      # is used with a query that is guaranteed to conflict on every row by
-      # using the primary key. This will update the image counts via the
-      # ON CONFLICT DO UPDATE clause.
-
-      added_upserts = tag_upsert_data(inserted, tag_attributes, true)
-      removed_upserts = tag_upsert_data(deleted, tag_attributes, false)
-
-      Repo.insert_all(Tag, added_upserts ++ removed_upserts,
-        on_conflict: update(Tag, inc: [images_count: fragment("EXCLUDED.images_count")]),
-        conflict_target: [:id]
-      )
-
+    Multi.new()
+    |> Multi.insert_all(
+      :inserted_taggings,
+      Tagging,
+      to_insert,
+      on_conflict: :nothing,
+      returning: [:image_id, :tag_id]
+    )
+    |> Multi.delete_all(:deleted_taggings, to_delete)
+    |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
+    |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings)
+    |> Multi.run(:after_changes, fn _repo, _changes ->
       case after_changes.(image_ids) do
-        :ok -> :ok
-        {:ok, _value} -> :ok
-        {:error, reason} -> Repo.rollback(reason)
+        :ok -> {:ok, nil}
+        {:ok, value} -> {:ok, value}
+        {:error, reason} -> {:error, reason}
       end
-
-      # Report the ids the batch actually matched back to the caller.
+    end)
+    # Report the ids the batch actually matched back to the caller.
+    |> Multi.put(:matched_image_ids, image_ids)
+    |> Multi.on_commit(fn %{matched_image_ids: image_ids} ->
+      reindex_images(image_ids)
+      Comments.reindex_comments_on_images(image_ids)
       image_ids
     end)
+    |> Multi.transact()
     |> case do
-      {:ok, _} = result ->
-        reindex_images(image_ids)
-        Comments.reindex_comments_on_images(image_ids)
-        Tags.reindex_tags(Enum.flat_map(changes, &(&1.added_tags ++ &1.removed_tags)))
-        TagChanges.reindex_for_images(image_ids)
-
-        result
-
-      result ->
-        result
+      {:ok, %{matched_image_ids: image_ids}} -> {:ok, image_ids}
+      error -> error
     end
   end
 
@@ -2740,31 +2597,6 @@ defmodule Philomena.Images do
       }
     end)
     |> Enum.reject(&(Enum.empty?(&1.added_tags) && Enum.empty?(&1.removed_tags)))
-  end
-
-  # Generate data for TagChanges.TagChangeTag rows.
-  defp tag_change_data(changes, tag_changes, added) do
-    Enum.map(changes, fn [image_id, tag_id] ->
-      %{id: id} = Map.get(tag_changes, image_id)
-
-      %{
-        tag_change_id: id,
-        tag_id: tag_id,
-        added: added
-      }
-    end)
-  end
-
-  # Generate data for inserts/updates (hence, upserts) of the Tags.Tag struct.
-  defp tag_upsert_data(changes, tag_attributes, added) do
-    changes
-    |> Enum.group_by(fn [_image_id, tag_id] -> tag_id end)
-    |> Enum.map(fn {tag_id, instances} ->
-      Map.merge(tag_attributes, %{
-        id: tag_id,
-        images_count: if(added, do: length(instances), else: -length(instances))
-      })
-    end)
   end
 
   @doc """
@@ -3010,42 +2842,7 @@ defmodule Philomena.Images do
       |> select([s], %{image_id: type(^target.id, :integer), user_id: s.user_id})
       |> Repo.all()
 
-    Repo.insert_all(Subscription, subscriptions, on_conflict: :nothing)
-
-    comment_notifications =
-      from cn in ImageCommentNotification,
-        where: cn.image_id == ^source.id,
-        select: %{
-          user_id: cn.user_id,
-          image_id: ^target.id,
-          comment_id: cn.comment_id,
-          read: cn.read,
-          created_at: cn.created_at,
-          updated_at: cn.updated_at
-        }
-
-    merge_notifications =
-      from mn in ImageMergeNotification,
-        where: mn.target_id == ^source.id,
-        select: %{
-          user_id: mn.user_id,
-          target_id: ^target.id,
-          source_id: mn.source_id,
-          read: mn.read,
-          created_at: mn.created_at,
-          updated_at: mn.updated_at
-        }
-
-    {comment_notification_count, nil} =
-      Repo.insert_all(ImageCommentNotification, comment_notifications, on_conflict: :nothing)
-
-    {merge_notification_count, nil} =
-      Repo.insert_all(ImageMergeNotification, merge_notifications, on_conflict: :nothing)
-
-    Repo.delete_all(exclude(comment_notifications, :select))
-    Repo.delete_all(exclude(merge_notifications, :select))
-
-    {:ok, {comment_notification_count, merge_notification_count}}
+    {:ok, Repo.insert_all(Subscription, subscriptions, on_conflict: :nothing)}
   end
 
   defp notify_merge(_repo, _changes, source, target) do
@@ -3383,6 +3180,194 @@ defmodule Philomena.Images do
       clear_image_notification(image, actor.user)
       {:ok, image}
     end
+  end
+
+  @doc """
+  Adds a denormalized image counter adjustment to `multi`.
+
+  Image interactions and other contexts use this function instead of updating
+  the `images` table themselves. `amount_callback` reads the exact delta from
+  prior Multi changes when it is known only after a delete.
+  """
+  @spec put_image_counter_delta(
+          Multi.t(),
+          Multi.name(),
+          Image.t() | integer(),
+          atom(),
+          (Multi.changes() -> integer())
+        ) :: Multi.t()
+  def put_image_counter_delta(
+        %Multi{} = multi,
+        step,
+        image_or_id,
+        field,
+        amount_callback
+      )
+      when is_atom(field) do
+    put_image_counter_deltas(multi, step, image_or_id, fn changes ->
+      %{field => amount_callback.(changes)}
+    end)
+  end
+
+  @doc """
+  Adds multiple denormalized image-counter adjustments to `multi`.
+
+  The owner attaches one image reindex after commit for the complete update.
+  """
+  @spec put_image_counter_deltas(
+          Multi.t(),
+          Multi.name(),
+          Image.t() | integer(),
+          (Multi.changes() -> %{atom() => integer()})
+        ) :: Multi.t()
+  def put_image_counter_deltas(%Multi{} = multi, step, image_or_id, increments_callback) do
+    multi
+    |> Multi.run(step, fn repo, changes ->
+      image_id = image_id_from(image_or_id)
+      increments = increments_callback.(changes)
+      {count, _} = repo.update_all(where(Image, id: ^image_id), inc: Map.to_list(increments))
+      {:ok, count}
+    end)
+    |> Multi.on_commit(fn _changes -> reindex_images([image_id_from(image_or_id)]) end)
+  end
+
+  defp image_id_from(image_or_id) do
+    if is_struct(image_or_id, Image), do: image_or_id.id, else: image_or_id
+  end
+
+  @doc """
+  Persists metadata calculated by the thumbnail worker.
+
+  The worker supplies derived attributes and a processing stage.
+  """
+  @spec update_thumbnail_metadata!(Image.t(), map(), :thumbnail | :process) :: Image.t()
+  def update_thumbnail_metadata!(%Image{} = image, attrs, :thumbnail) do
+    image
+    |> Image.thumbnail_changeset(attrs)
+    |> Repo.update!()
+  end
+
+  def update_thumbnail_metadata!(%Image{} = image, attrs, :process) do
+    image
+    |> Image.process_changeset(attrs)
+    |> Repo.update!()
+  end
+
+  @doc """
+  Replaces attribution data on a user's images in batches.
+  """
+  @spec wipe_user_attribution!(integer(), term(), String.t()) :: :ok
+  def wipe_user_attribution!(user_id, ip, fingerprint) do
+    Image
+    |> where(user_id: ^user_id)
+    |> Batch.query_batches()
+    |> Enum.each(&Repo.update_all(&1, set: [ip: ip, fingerprint: fingerprint]))
+
+    :ok
+  end
+
+  @doc """
+  Decrements vote counters for the supplied images after user vote cleanup.
+  """
+  @spec decrement_vote_counters!([integer()], boolean()) :: {non_neg_integer(), nil}
+  def decrement_vote_counters!(image_ids, true) when is_list(image_ids) do
+    Repo.update_all(where(Image, [image], image.id in ^image_ids),
+      inc: [upvotes_count: -1, score: -1]
+    )
+  end
+
+  def decrement_vote_counters!(image_ids, false) when is_list(image_ids) do
+    Repo.update_all(where(Image, [image], image.id in ^image_ids),
+      inc: [downvotes_count: -1, score: 1]
+    )
+  end
+
+  @doc """
+  Decrements favorite counters for the supplied images after user favorite
+  cleanup.
+  """
+  @spec decrement_fave_counters!([integer()]) :: {non_neg_integer(), nil}
+  def decrement_fave_counters!(image_ids) when is_list(image_ids) do
+    Repo.update_all(where(Image, [image], image.id in ^image_ids), inc: [faves_count: -1])
+  end
+
+  @doc """
+  Adds deletion of image taggings represented by `query` to `multi`.
+
+  Tag maintenance composes this function when removing or migrating a tag.
+  """
+  @spec put_delete_taggings(Multi.t(), Multi.name(), Ecto.Query.t()) :: Multi.t()
+  def put_delete_taggings(%Multi{} = multi, step, %Ecto.Query{} = query) do
+    image_ids_step = {:tagging_image_ids, step}
+    image_ids_query = query |> exclude(:select) |> select([tagging], tagging.image_id)
+
+    multi
+    |> Multi.all(image_ids_step, image_ids_query)
+    |> Multi.delete_all(step, query)
+    |> Multi.on_commit(fn %{^image_ids_step => image_ids} -> reindex_images(image_ids) end)
+  end
+
+  @doc """
+  Adds insertion of image taggings represented by `entries` to `multi`.
+
+  Tag maintenance composes this function when migrating a tag.
+  """
+  @spec put_insert_taggings(Multi.t(), Multi.name(), [map()] | Ecto.Query.t()) :: Multi.t()
+  def put_insert_taggings(%Multi{} = multi, step, entries) when is_list(entries) do
+    multi
+    |> Multi.insert_all(step, Tagging, entries,
+      on_conflict: :nothing,
+      returning: [:image_id, :tag_id]
+    )
+    |> Multi.on_commit(fn %{^step => {_count, taggings}} ->
+      taggings
+      |> Enum.map(& &1.image_id)
+      |> reindex_images()
+    end)
+  end
+
+  def put_insert_taggings(%Multi{} = multi, step, %Ecto.Query{} = query) do
+    image_ids_step = {:tagging_image_ids, step}
+    image_ids_query = query |> exclude(:select) |> select([tagging], tagging.image_id)
+
+    multi
+    |> Multi.all(image_ids_step, image_ids_query)
+    |> Multi.insert_all(step, Tagging, query,
+      on_conflict: :nothing,
+      returning: [:image_id, :tag_id]
+    )
+    |> Multi.on_commit(fn %{^image_ids_step => image_ids} -> reindex_images(image_ids) end)
+  end
+
+  @doc """
+  Copies an image's taggings to another image inside `multi`.
+
+  The inserted tag IDs are returned in `:copied_tag_ids` for Tags' counter
+  maintenance.
+  """
+  @spec put_copy_taggings(Multi.t(), Image.t(), Image.t()) :: Multi.t()
+  def put_copy_taggings(%Multi{} = multi, %Image{} = source, %Image{} = target) do
+    source_taggings_query =
+      Tagging
+      |> where(image_id: ^source.id)
+      |> select([tagging], %{
+        image_id: type(^target.id, :integer),
+        tag_id: tagging.tag_id
+      })
+
+    multi
+    |> Multi.all(:source_taggings, source_taggings_query)
+    |> Multi.insert_all(
+      :target_taggings,
+      Tagging,
+      fn %{source_taggings: source_taggings} -> source_taggings end,
+      on_conflict: :nothing,
+      returning: [:tag_id]
+    )
+    |> Multi.run(:copied_tag_ids, fn _repo, %{target_taggings: {_count, taggings}} ->
+      {:ok, Enum.map(taggings, & &1.tag_id)}
+    end)
+    |> Multi.on_commit(fn _changes -> reindex_images([target.id]) end)
   end
 
   # Invoked dynamically by the shared subscription implementation.
