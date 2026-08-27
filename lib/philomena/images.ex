@@ -319,45 +319,6 @@ defmodule Philomena.Images do
     :ok
   end
 
-  ## Image merge helpers
-
-  # Migrates source URLs from one image to another.
-  #
-  # This function is used during image merging to combine source URLs from both images.
-  # It will:
-  #
-  # 1. Combine sources from both images
-  # 2. Remove duplicates
-  # 3. Take up to 15 sources (the system limit)
-  # 4. Update the target image with the combined sources
-  #
-  # Returns the result of updating the target image with the combined sources.
-  defp migrate_sources(source, target) do
-    sources =
-      (source.sources ++ target.sources)
-      |> Enum.map(fn s -> %Source{image_id: target.id, source: s.source} end)
-      |> Enum.uniq()
-      |> Enum.take(15)
-
-    target
-    |> Image.sources_changeset(sources)
-    |> Repo.update()
-  end
-
-  defp migrate_subscriptions(source, target) do
-    subscriptions =
-      Subscription
-      |> where(image_id: ^source.id)
-      |> select([s], %{image_id: type(^target.id, :integer), user_id: s.user_id})
-      |> Repo.all()
-
-    {:ok, Repo.insert_all(Subscription, subscriptions, on_conflict: :nothing)}
-  end
-
-  defp notify_merge(_repo, _changes, source, target) do
-    Notifications.broadcast_image_merge(target, source)
-  end
-
   ## User interaction helpers
 
   defp image_interaction_allowed?(%Actor{user: nil}, _image), do: false
@@ -1204,19 +1165,28 @@ defmodule Philomena.Images do
     duplicate_of_image =
       Repo.preload(duplicate_of_image, [:user, :intensity, :sources, tags: :aliases])
 
+    subscriptions =
+      Subscription
+      |> where(image_id: ^image.id)
+      |> select([s], %{image_id: type(^duplicate_of_image.id, :integer), user_id: s.user_id})
+
     source_changeset =
       Image.merge_source_changeset(image, duplicate_of_image)
-
-    target_changeset =
-      Image.merge_target_changeset(image, duplicate_of_image)
 
     multi
     |> put_hide_image(source_changeset, image, user)
     |> Galleries.put_migrate_image_interactions(image, duplicate_of_image)
-    |> Multi.update(:target_image, target_changeset)
     |> Tags.put_copy_tags(image, duplicate_of_image)
-    |> Multi.run(:migrate_sources, fn _, %{} ->
-      {:ok, migrate_sources(image, duplicate_of_image)}
+    |> Multi.update(:target_image, fn _changes ->
+      sources =
+        (image.sources ++ duplicate_of_image.sources)
+        |> Enum.map(fn s -> %Source{image_id: duplicate_of_image.id, source: s.source} end)
+        |> Enum.uniq()
+        |> Enum.take(15)
+
+      image
+      |> Image.first_seen_at_changeset([image, duplicate_of_image])
+      |> Image.sources_changeset(sources)
     end)
     |> Comments.put_migrate_image_comments(image, duplicate_of_image)
     |> put_image_counter_delta(
@@ -1225,12 +1195,12 @@ defmodule Philomena.Images do
       :comments_count,
       fn %{migrated_comments: {count, nil}} -> count end
     )
-    |> Multi.run(:migrate_subscriptions, fn _, %{} ->
-      {:ok, migrate_subscriptions(image, duplicate_of_image)}
-    end)
+    |> Multi.insert_all(:subscriptions, Subscription, subscriptions, on_conflict: :nothing)
     |> Notifications.put_migrate_image_notifications(image, duplicate_of_image)
     |> Interactions.migrate_loaded_images(image, duplicate_of_image)
-    |> Multi.run(:notification, &notify_merge(&1, &2, image, duplicate_of_image))
+    |> Multi.run(:notification, fn _repo, _changes ->
+      Notifications.broadcast_image_merge(image, duplicate_of_image)
+    end)
     |> Multi.on_commit(fn result ->
       reindex_image(duplicate_of_image)
       Comments.reindex_comments_on_image(duplicate_of_image)

@@ -317,10 +317,11 @@ defmodule Philomena.Images.Image do
     |> put_change(:hidden_from_users, true)
   end
 
-  def merge_target_changeset(image, duplicate_of_image) do
-    [image.first_seen_at, duplicate_of_image.first_seen_at]
+  def first_seen_at_changeset(image, candidate_images) do
+    candidate_images
+    |> Enum.map(& &1.first_seen_at)
     |> Enum.min(DateTime)
-    |> then(&change(duplicate_of_image, first_seen_at: &1))
+    |> then(&change(image, first_seen_at: &1))
   end
 
   def unhide_changeset(image) do
