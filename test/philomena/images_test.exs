@@ -2910,16 +2910,6 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "non-map params for a moderator are invalid_params with no log" do
-      moderator = moderator_user_fixture()
-      image = image_fixture()
-
-      assert Images.update_uploader(actor(moderator), to_string(image.id), nil) ==
-               {:error, :invalid_params}
-
-      assert moderation_log_count() == 0
-    end
-
     test "a regular user is unauthorized on a real image and params" do
       # Authorization on :identity_metadata runs before the load, so a regular user is
       # denied without the image ever being touched.
@@ -3395,12 +3385,12 @@ defmodule Philomena.ImagesTest do
       assert hidden.id == image.id
     end
 
-    test "a blank reason is hide_failed with the image left visible and no log" do
+    test "a blank reason fails with the image left visible and no log" do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert Images.hide_image(actor(moderator), to_string(image.id), %{"deletion_reason" => ""}) ==
-               {:error, :hide_failed}
+      assert {:error, %Ecto.Changeset{}} =
+               Images.hide_image(actor(moderator), to_string(image.id), %{"deletion_reason" => ""})
 
       refute Repo.reload!(image).hidden_from_users
       assert moderation_log_count() == 0
@@ -3503,13 +3493,14 @@ defmodule Philomena.ImagesTest do
       assert updated.id == hidden.id
     end
 
-    test "a visible image is not_deleted with no log" do
+    test "a visible image is fails with no log" do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert Images.update_hide_reason(actor(moderator), to_string(image.id), %{
-               "deletion_reason" => "New"
-             }) == {:error, :not_deleted}
+      assert {:error, %Ecto.Changeset{}} =
+               Images.update_hide_reason(actor(moderator), to_string(image.id), %{
+                 "deletion_reason" => "New"
+               })
 
       assert moderation_log_count() == 0
     end

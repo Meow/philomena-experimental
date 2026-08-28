@@ -90,16 +90,13 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
       assert uploader_id(image) == original.id
     end
 
-    # NOTE: a request without the `image` param takes the fallback update/2
-    # clause, which also answers 300 with the failure flash.
-    test "a missing image param answers 300 with the failure flash", %{conn: conn} do
+    test "a missing image param raises", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
-      conn = put(conn, ~p"/images/#{image}/uploader", %{})
-
-      assert response(conn, 300) == ""
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Failed to update uploader!"
+      assert_raise Ecto.CastError, fn ->
+        put(conn, ~p"/images/#{image}/uploader", %{})
+      end
     end
 
     # NOTE: the context authorizes the loaded image on :update; an unknown

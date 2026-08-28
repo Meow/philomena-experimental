@@ -14,13 +14,10 @@ defmodule PhilomenaWeb.Image.UploaderController do
         |> put_view(PhilomenaWeb.ImageView)
         |> render("_uploader.html", layout: false, image: image, changeset: changeset)
 
-      {:error, :invalid_params} ->
-        update_failed(conn)
-
       {:error, %Ecto.Changeset{}} ->
         update_failed(conn)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

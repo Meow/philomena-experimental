@@ -15,12 +15,12 @@ defmodule PhilomenaWeb.Image.DeleteController do
         |> put_flash(:info, "Image successfully deleted.")
         |> redirect(to: ~p"/images/#{params["image_id"]}")
 
-      {:error, :hide_failed} ->
+      {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Failed to delete image.")
         |> redirect(to: ~p"/images/#{params["image_id"]}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -32,17 +32,12 @@ defmodule PhilomenaWeb.Image.DeleteController do
         |> put_flash(:info, "Deletion reason updated.")
         |> redirect(to: ~p"/images/#{params["image_id"]}")
 
-      {:error, :not_deleted} ->
-        conn
-        |> put_flash(:error, "Cannot change deletion reason on a non-deleted image!")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
-
       {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Couldn't update deletion reason.")
         |> redirect(to: ~p"/images/#{params["image_id"]}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

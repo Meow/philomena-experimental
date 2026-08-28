@@ -103,7 +103,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
     end
 
     # verify_deleted halts when the image is not currently hidden.
-    test "on a non-deleted image redirects with the not-deleted flash", %{conn: conn} do
+    test "on a non-deleted image redirects with the error flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
@@ -115,7 +115,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
       assert redirected_to(conn) == ~p"/images/#{image}"
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
-               "Cannot change deletion reason on a non-deleted image!"
+               "Couldn't update deletion reason."
     end
 
     # Failure path: a blank reason on a hidden image fails validation.

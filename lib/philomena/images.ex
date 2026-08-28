@@ -55,6 +55,7 @@ defmodule Philomena.Images do
   alias Philomena.Images.Query, as: ImageQuery
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
+  alias Philomena.Users
   alias Philomena.Users.User
   alias PhilomenaWeb.Api.Json.ImageView
   alias PhilomenaWeb.Endpoint
@@ -186,13 +187,6 @@ defmodule Philomena.Images do
 
   ## Moderation and lifecycle
 
-  defp moderation_image_result({:ok, %{image: image}}), do: {:ok, image}
-
-  defp moderation_image_result({:error, :image, %Ecto.Changeset{} = changeset, _changes}),
-    do: {:error, changeset}
-
-  defp moderation_image_result(error), do: error
-
   defp put_hide_image(multi, changeset, image, user) do
     multi
     |> Multi.update(:image, changeset)
@@ -319,7 +313,7 @@ defmodule Philomena.Images do
     :ok
   end
 
-  ## User interaction helpers
+  ## Forms and uploads
 
   defp image_interaction_allowed?(%Actor{user: nil}, _image), do: false
   defp image_interaction_allowed?(_actor, %Image{hidden_from_users: true}), do: false
@@ -334,8 +328,6 @@ defmodule Philomena.Images do
     end
   end
 
-  ## Comment composition
-
   defp comment_changeset_for(_actor, %Image{hidden_from_users: true}), do: nil
 
   defp comment_changeset_for(actor, image) do
@@ -347,8 +339,6 @@ defmodule Philomena.Images do
       _error -> nil
     end
   end
-
-  ## Forms and uploads
 
   defp image_changeset_for(actor, image, action) do
     with :ok <- verify_write_access(actor),
@@ -1899,7 +1889,7 @@ defmodule Philomena.Images do
   thumbnails purged, everything reindexed) and a moderation log is written attributing
   the deletion to `actor`.
 
-  Returns `{:ok, image}` with the hidden image, or `{:error, :hide_failed}` when
+  Returns `{:ok, image}` with the hidden image, or `{:error, changeset}` when
   the hide is rejected (e.g. a blank deletion reason), leaving the image visible.
 
   ## Examples
@@ -1912,7 +1902,7 @@ defmodule Philomena.Images do
 
   """
   @spec hide_image(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def hide_image(%Actor{user: user} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :hide, image_id) do
@@ -1932,8 +1922,11 @@ defmodule Philomena.Images do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: hidden}} -> {:ok, hidden}
-        {:error, _op, _changeset, _changes} -> {:error, :hide_failed}
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -2262,24 +2255,28 @@ defmodule Philomena.Images do
   def update_file(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :replace_file, image_id) do
-      result =
-        Multi.new()
-        |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-        |> Multi.update(:image, fn %{locked_image: image} ->
-          image |> Image.changeset(attrs) |> Uploader.analyze_upload(attrs)
-        end)
-        |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
-          {"Image.File:update", Paths.image_path(image), "Updated file of image #{image.id}"}
-        end)
-        |> put_reindex_image(:image)
-        |> Multi.transact()
-        |> moderation_image_result()
+      Multi.new()
+      |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
+      |> Multi.update(:image, fn %{locked_image: image} ->
+        image
+        |> Image.changeset(attrs)
+        |> Uploader.analyze_upload(attrs)
+      end)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
+        {"Image.File:update", Paths.image_path(image), "Updated file of image #{image.id}"}
+      end)
+      |> put_reindex_image(:image)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          Uploader.persist_upload(image)
+          repair_image(image)
+          purge_files(image, image.hidden_image_key)
 
-      with {:ok, image} <- result do
-        Uploader.persist_upload(image)
-        repair_image(image)
-        purge_files(image, image.hidden_image_key)
-        {:ok, image}
+          {:ok, image}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -2610,36 +2607,46 @@ defmodule Philomena.Images do
   """
   @spec update_uploader(Actor.t(), IntegerId.integer_id(), any()) ::
           {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | :invalid_params | Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_uploader(%Actor{} = actor, image_id, image_params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_uploader, image_id),
-         true <- is_map(image_params) do
-      result =
-        Multi.new()
-        |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-        |> Multi.update(:image, fn %{locked_image: image} ->
-          Image.uploader_changeset(image, image_params)
-        end)
-        |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
-          {
-            "Image.Uploader:update",
-            Paths.image_path(image),
-            "Changed uploader of image #{image.id}"
-          }
-        end)
-        |> put_reindex_image(:image)
-        |> Multi.transact()
-        |> moderation_image_result()
+         {:ok, image} <-
+           image
+           |> Image.username_changeset(image_params)
+           |> Ecto.Changeset.apply_action(:update) do
+      username = image.username
 
-      with {:ok, image} <- result do
-        {:ok, Repo.preload(image, user: [awards: :badge])}
+      uploader =
+        if username do
+          case Users.load_active_user_by_name(actor, username) do
+            {:ok, user} -> user
+            _error -> nil
+          end
+        end
+
+      Multi.new()
+      |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
+      |> Multi.update(:image, fn %{locked_image: image} ->
+        Image.uploader_changeset(image, username, uploader)
+      end)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
+        {
+          "Image.Uploader:update",
+          Paths.image_path(image),
+          "Changed uploader of image #{image.id}"
+        }
+      end)
+      |> put_reindex_image(:image)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, Repo.preload(image, user: [awards: :badge])}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
-    else
-      {:error, :unauthorized} -> {:error, :unauthorized}
-      false -> {:error, :invalid_params}
-      error -> error
     end
   end
 
@@ -2714,16 +2721,12 @@ defmodule Philomena.Images do
   """
   @spec update_hide_reason(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | :not_deleted | Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_hide_reason(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_hide_reason, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-      |> Multi.run(:state, fn
-        _repo, %{locked_image: %Image{hidden_from_users: true}} -> {:ok, :deleted}
-        _repo, %{locked_image: %Image{hidden_from_users: false}} -> {:error, :not_deleted}
-      end)
       |> Multi.update(:image, fn %{locked_image: image} ->
         Image.hide_reason_changeset(image, attrs)
       end)
@@ -2737,8 +2740,11 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:error, :state, :not_deleted, _changes} -> {:error, :not_deleted}
-        result -> moderation_image_result(result)
+        {:ok, %{image: %Image{} = image}} ->
+          {:ok, image}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end

@@ -104,6 +104,8 @@ defmodule Philomena.Images.Image do
     field :tag_change_tag_count, :integer, virtual: true
     field :source_change_count, :integer, virtual: true
 
+    field :username, :string, virtual: true
+
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
 
@@ -305,6 +307,7 @@ defmodule Philomena.Images.Image do
     image
     |> cast(attrs, [:deletion_reason])
     |> validate_required([:deletion_reason])
+    |> validate_hidden()
   end
 
   def merge_source_changeset(image, duplicate_of_image) do
@@ -360,22 +363,29 @@ defmodule Philomena.Images.Image do
     |> put_assoc(:source_changes, [])
   end
 
-  def uploader_changeset(image, attrs) do
-    change(image)
+  def username_changeset(image, attrs) do
+    cast(image, attrs, [:username])
+  end
+
+  def uploader_changeset(image, username, uploader) do
+    image
+    |> change()
     |> put_change(:ip, %Postgrex.INET{address: {127, 0, 0, 1}, netmask: 32})
     |> put_change(:fingerprint, "ffff")
-    |> put_uploader(attrs["username"])
+    |> put_uploader(username, uploader)
   end
 
   # A blank username anonymizes the image.
-  defp put_uploader(changeset, username) when username in [nil, ""],
-    do: put_change(changeset, :user_id, nil)
-
-  defp put_uploader(changeset, username) do
-    case Repo.get_by(User, name: username) do
-      nil -> add_error(changeset, :username, "does not name a known user")
-      user -> put_change(changeset, :user_id, user.id)
+  defp put_uploader(changeset, username, nil) do
+    if username do
+      add_error(changeset, :username, "does not name a known user")
+    else
+      put_change(changeset, :user_id, nil)
     end
+  end
+
+  defp put_uploader(changeset, _username, uploader) do
+    put_change(changeset, :user_id, uploader.id)
   end
 
   def anonymous_changeset(image, attrs) do
