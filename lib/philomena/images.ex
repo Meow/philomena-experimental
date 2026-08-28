@@ -508,6 +508,42 @@ defmodule Philomena.Images do
     {Enum.map(parsed, fn {_id, {:ok, int}} -> int end), Enum.map(unparsable, &elem(&1, 0))}
   end
 
+  defp prepare_change_batches(changes) do
+    # Merge any change batches belonging to the same image ID into
+    # one single batch, then deduplicate added_tags by filtering out
+    # any tags which are marked for removal in the same batch.
+    changes
+    |> Enum.group_by(& &1.image_id)
+    |> Enum.reduce({[], [], []}, fn {image_id, instances},
+                                    {image_ids, added_pairs, removed_pairs} ->
+      removed_ids =
+        instances
+        |> Enum.flat_map(& &1.removed_tags)
+        |> Enum.map(& &1.id)
+        |> Enum.uniq()
+
+      added_ids =
+        instances
+        |> Enum.flat_map(& &1.added_tags)
+        |> Enum.map(& &1.id)
+        |> Enum.uniq()
+        |> Enum.reject(&(&1 in removed_ids))
+
+      if Enum.empty?(added_ids) and Enum.empty?(removed_ids) do
+        {image_ids, added_pairs, removed_pairs}
+      else
+        added = Enum.map(added_ids, &%{image_id: image_id, tag_id: &1})
+        removed = Enum.map(removed_ids, &%{image_id: image_id, tag_id: &1})
+
+        {
+          Enum.concat([image_id], image_ids),
+          Enum.concat(added, added_pairs),
+          Enum.concat(removed, removed_pairs)
+        }
+      end
+    end)
+  end
+
   defp batch_update(image_ids, added_tags, removed_tags, attributes, after_changes) do
     batch_update(
       Enum.map(image_ids, fn id ->
@@ -523,24 +559,13 @@ defmodule Philomena.Images do
   end
 
   defp batch_update(changes, attributes, after_changes) do
-    changes = merge_change_batches(changes)
-
-    requested_image_ids = Enum.map(changes, & &1.image_id)
+    {requested_image_ids, added_pairs, removed_pairs} =
+      prepare_change_batches(changes)
 
     image_query =
       Image
       |> where([i], i.id in ^requested_image_ids)
       |> order_by([i], asc: i.id)
-
-    added_pairs =
-      Enum.flat_map(changes, fn %{image_id: image_id, added_tags: added_tags} ->
-        Enum.map(added_tags, &%{image_id: image_id, tag_id: &1.id})
-      end)
-
-    removed_pairs =
-      Enum.flat_map(changes, fn %{image_id: image_id, removed_tags: removed_tags} ->
-        Enum.map(removed_tags, &%{image_id: image_id, tag_id: &1.id})
-      end)
 
     Multi.new()
     |> Multi.lock_all(:locked_image_ids, select(image_query, [i], i.id))
@@ -597,37 +622,6 @@ defmodule Philomena.Images do
       error ->
         error
     end
-  end
-
-  # Merge any change batches belonging to the same image ID into
-  # one single batch, then deduplicate added_tags by removing any
-  # which are slated for removal, which is the behavior of the
-  # mass tagger anyway (it inserts anything that needs to be inserted
-  # into image_taggings, and then deletes anything that needs to be deleted,
-  # so by not inserting what would be deleted anyway, we're just mimicking
-  # this behavior here, and ensuring that there are no duplicate tag changes
-  # per batch)
-  defp merge_change_batches(changes) do
-    changes
-    |> Enum.group_by(& &1.image_id)
-    |> Enum.map(fn {image_id, instances} ->
-      added =
-        instances
-        |> Enum.flat_map(& &1.added_tags)
-        |> Enum.uniq_by(& &1.id)
-
-      removed =
-        instances
-        |> Enum.flat_map(& &1.removed_tags)
-        |> Enum.uniq_by(& &1.id)
-
-      %{
-        image_id: image_id,
-        added_tags: Enum.reject(added, fn a -> Enum.any?(removed, &(&1.id == a.id)) end),
-        removed_tags: removed
-      }
-    end)
-    |> Enum.reject(&(Enum.empty?(&1.added_tags) && Enum.empty?(&1.removed_tags)))
   end
 
   ## Voting and hiding
