@@ -235,10 +235,10 @@ defmodule Philomena.Images.Image do
     |> validate_length(:sources, max: 15)
   end
 
-  def tag_changeset(image, old_tags, new_tags, excluded_tags \\ []) do
+  def tag_changeset(image, added_tags, removed_tags, excluded_tags \\ []) do
     image
     |> change()
-    |> TagDiffer.diff_input(old_tags, new_tags, excluded_tags)
+    |> TagDiffer.apply(added_tags, removed_tags, excluded_tags)
     |> TagValidator.validate_tags()
   end
 

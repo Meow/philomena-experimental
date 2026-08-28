@@ -28,6 +28,7 @@ defmodule Philomena.Images do
   alias Philomena.Images.Thumbnailer
   alias Philomena.Images.Source
   alias Philomena.Images.SourceInputForm
+  alias Philomena.Images.TagDiffer
   alias Philomena.Images.TagInputForm
   alias Philomena.Images.VoteForm
   alias Philomena.Images.Subscription
@@ -249,14 +250,22 @@ defmodule Philomena.Images do
   end
 
   defp update_loaded_tags(%Image{} = image, %Actor{} = actor, %TagInputForm{} = form) do
-    old_tags = Tags.get_or_create_tags(form.old_tag_input)
-    new_tags = Tags.get_or_create_tags(form.tag_input)
+    %{added: added_tag_names, removed: removed_tag_names} =
+      TagDiffer.diff_inputs(
+        form.old_tag_input,
+        form.tag_input
+      )
 
     Multi.new()
-    |> Multi.run(:image, fn repo, _chg ->
+    |> Tags.put_canonicalize_tag_names(:removed_tags, removed_tag_names)
+    |> Tags.put_canonicalize_tag_names(:added_tags, added_tag_names,
+      allow_insert_new?: true,
+      expand_implications?: true
+    )
+    |> Multi.run(:image, fn repo, %{added_tags: added_tags, removed_tags: removed_tags} ->
       image = repo.preload(image, [:tags, :locked_tags])
 
-      changeset = Image.tag_changeset(image, old_tags, new_tags, image.locked_tags)
+      changeset = Image.tag_changeset(image, added_tags, removed_tags, image.locked_tags)
 
       if Image.meaningful_tag_update?(changeset) do
         repo.update(changeset)
@@ -1412,19 +1421,25 @@ defmodule Philomena.Images do
            %SourceInputForm{}
            |> SourceInputForm.changeset(params)
            |> SourceInputForm.apply(%Image{}) do
-      tags = Tags.get_or_create_tags(tag_input_form.tag_input)
+      %{added: added_tag_names} = TagDiffer.diff_inputs(nil, tag_input_form.tag_input)
 
       image_changeset =
         %Image{}
         |> Image.creation_changeset(params, actor)
-        |> Image.source_changeset([], source_input_form.sources)
-        |> Image.tag_changeset([], tags)
-        |> Image.dnp_changeset(user)
         |> Uploader.analyze_upload(upload)
         |> maybe_approve_image(user)
 
       Multi.new()
-      |> Multi.insert(:image, image_changeset)
+      |> Tags.put_canonicalize_tag_names(:added_tags, added_tag_names,
+        allow_insert_new?: true,
+        expand_implications?: true
+      )
+      |> Multi.insert(:image, fn %{added_tags: added_tags} ->
+        image_changeset
+        |> Image.source_changeset([], source_input_form.sources)
+        |> Image.tag_changeset(added_tags, [])
+        |> Image.dnp_changeset(user)
+      end)
       |> Tags.put_image_count_delta(
         :added_tag_count,
         fn %{image: image} -> Enum.map(image.added_tags, & &1.id) end,

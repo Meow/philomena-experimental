@@ -226,6 +226,14 @@ defmodule Philomena.Tags.Tag do
     |> Enum.uniq()
   end
 
+  def original_character_tag?(%__MODULE__{} = tag) do
+    tag.namespace == "oc"
+  end
+
+  def original_character_tag_name do
+    "oc"
+  end
+
   # Oversized names must never reach get_or_create_tags: its bulk insert
   # bypasses changeset validation and would trip tags_name_length_check,
   # failing the entire tag list.

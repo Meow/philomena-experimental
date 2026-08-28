@@ -198,6 +198,54 @@ defmodule Philomena.Tags do
     end)
   end
 
+  defp maybe_insert_new_tags(%Multi{} = multi, name, tag_names, true) do
+    insert_rows =
+      Enum.map(tag_names, fn tag_name ->
+        %Tag{}
+        |> Tag.creation_changeset(%{name: tag_name})
+        |> Ecto.Changeset.apply_changes()
+        |> Map.take(Tag.insert_fields())
+        |> Map.merge(%{
+          created_at: {:placeholder, :timestamp},
+          updated_at: {:placeholder, :timestamp}
+        })
+      end)
+
+    insert_options = [
+      placeholders: %{timestamp: DateTime.utc_now(:second)},
+      on_conflict: :nothing,
+      returning: [:id]
+    ]
+
+    multi
+    |> Multi.insert_all({name, :new_tags}, Tag, insert_rows, insert_options)
+    |> Multi.on_commit(fn %{{^name, :new_tags} => {_count, new_tags}} ->
+      if Enum.any?(new_tags) do
+        reindex_tags(new_tags)
+      end
+    end)
+  end
+
+  defp maybe_insert_new_tags(%Multi{} = multi, _name, _tag_names, _allow_insert_new),
+    do: multi
+
+  defp maybe_expand_implications(tag_list, repo, true) do
+    tag_list = Enum.flat_map(tag_list, &([&1] ++ &1.implied_tags))
+
+    with true <- Enum.any?(tag_list, &Tag.original_character_tag?/1),
+         %Tag{} = oc_tag <-
+           Tag
+           |> where(name: ^Tag.original_character_tag_name())
+           |> repo.one() do
+      Enum.concat([oc_tag], tag_list)
+    else
+      _ -> tag_list
+    end
+  end
+
+  defp maybe_expand_implications(tag_list, _repo, _expand_implications),
+    do: tag_list
+
   @doc """
   Gets existing tags or creates new ones from a tag list string.
 
@@ -248,6 +296,51 @@ defmodule Philomena.Tags do
       |> Enum.map(&(&1.aliased_tag || &1))
       |> Enum.uniq_by(& &1.id)
     end
+  end
+
+  @doc """
+  Gets existing tags or creates new ones from a list of tag names and places
+  them into the Multi step named by `name`.
+
+  `tag_names` is a list of strings. When option `:allow_insert_new?` is true,
+  new tags can be created. When option `:expand_implications?` is true, the
+  list of tags in `name` will also include all tags implied from the original
+  set.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_canonicalize_tag_names(:tags, ~w(safe cute pony))
+      ...> |> Multi.transact())
+      {:ok, %{tags: [%Tag{name: "safe"}, %Tag{name: "cute"}, %Tag{name: "pony"}]}}
+
+  """
+  @spec put_canonicalize_tag_names(Multi.t(), Multi.name(), [String.t()], Keyword.t()) ::
+          Multi.t()
+  def put_canonicalize_tag_names(multi, name, tag_names, options \\ [])
+
+  def put_canonicalize_tag_names(%Multi{} = multi, name, [], _options),
+    do: Multi.put(multi, name, [])
+
+  def put_canonicalize_tag_names(%Multi{} = multi, name, tag_names, options) do
+    allow_insert_new? = Keyword.get(options, :allow_insert_new?, false)
+    expand_implications? = Keyword.get(options, :expand_implications?, false)
+
+    tag_query =
+      Tag
+      |> where([tag], tag.name in ^tag_names)
+      |> preload([:implied_tags, aliased_tag: :implied_tags])
+
+    multi
+    |> maybe_insert_new_tags(name, tag_names, allow_insert_new?)
+    |> Multi.all({name, :all_tags}, tag_query)
+    |> Multi.run(name, fn repo, %{{^name, :all_tags} => all_tags} ->
+      {:ok,
+       all_tags
+       |> Enum.map(&(&1.aliased_tag || &1))
+       |> maybe_expand_implications(repo, expand_implications?)
+       |> Enum.uniq_by(& &1.id)}
+    end)
   end
 
   @doc """
