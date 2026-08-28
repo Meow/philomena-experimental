@@ -14,7 +14,9 @@ defmodule PhilomenaWeb.Search.ReverseController do
 
   def create(conn, %{"image" => image_params})
       when is_map(image_params) and image_params != %{} do
-    case DuplicateReports.search_duplicates(conn.assigns.actor, image_params) do
+    upload = PhilomenaMedia.Upload.cast(image_params, "image")
+
+    case DuplicateReports.search_duplicates(conn.assigns.actor, image_params, upload) do
       {:ok, %SearchResult{} = result} ->
         interactions = Interactions.user_interactions(conn.assigns.actor, result.images)
 

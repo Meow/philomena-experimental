@@ -7,6 +7,7 @@ defmodule Philomena.BadgesFixtures do
   alias Philomena.Badges.Award
   alias Philomena.Badges.Badge
   alias Philomena.Repo
+  alias PhilomenaMedia.Upload
 
   def unique_badge_title, do: "Test Badge #{System.unique_integer([:positive])}"
 
@@ -48,5 +49,9 @@ defmodule Philomena.BadgesFixtures do
     {:ok, path} = Plug.Upload.random_file("badge-upload-test")
     File.cp!(@svg_fixture, path)
     %Plug.Upload{path: path, filename: "badge.svg", content_type: "image/svg+xml"}
+  end
+
+  def media_svg_upload do
+    Upload.from_plug(svg_upload())
   end
 end

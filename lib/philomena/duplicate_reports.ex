@@ -320,21 +320,21 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> search_duplicates(actor, %{"image" => upload, "distance" => "0.25"})
+      iex> search_duplicates(actor, %{"distance" => "0.25"}, upload)
       {:ok, %SearchResult{images: %Scrivener.Page{}}}
 
-      iex> search_duplicates(actor, %{"image" => upload, "distance" => "bad"})
+      iex> search_duplicates(actor, %{"distance" => "bad"}, upload)
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec search_duplicates(Actor.t(), map()) ::
+  @spec search_duplicates(Actor.t(), map(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, SearchResult.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def search_duplicates(%Actor{} = actor, attrs) do
+  def search_duplicates(%Actor{} = actor, attrs, upload) do
     with :ok <- authorize(actor, :search, DuplicateReport),
          {:ok, search_query} <-
            %SearchQuery{}
            |> SearchQuery.changeset(attrs)
-           |> Uploader.analyze_upload(attrs)
+           |> Uploader.analyze_upload(upload)
            |> Ecto.Changeset.apply_action(:create) do
       analysis = SearchQuery.to_analysis(search_query)
       intensities = PhilomenaMedia.Processors.intensities(analysis, search_query.uploaded_image)

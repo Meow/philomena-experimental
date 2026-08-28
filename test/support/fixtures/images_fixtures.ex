@@ -15,6 +15,7 @@ defmodule Philomena.ImagesFixtures do
   alias Philomena.Images.Source
   alias Philomena.Repo
   alias Philomena.Tags
+  alias PhilomenaMedia.Upload
   alias PhilomenaMedia.Sha512
 
   @doc """
@@ -77,6 +78,10 @@ defmodule Philomena.ImagesFixtures do
     {:ok, path} = Plug.Upload.random_file("image-upload-test")
     File.cp!(@png_fixture, path)
     %Plug.Upload{path: path, content_type: "image/png", filename: "upload-test.png"}
+  end
+
+  def media_png_upload do
+    Upload.from_plug(png_upload())
   end
 
   @doc """

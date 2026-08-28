@@ -9,11 +9,13 @@ defmodule PhilomenaWeb.Api.Json.Search.ReverseController do
   plug PhilomenaWeb.ScraperPlug, params_key: "image", params_name: "image"
 
   def create(conn, %{"image" => image_params}) do
+    upload = PhilomenaMedia.Upload.cast(image_params, "image")
+
     {images, total} =
       image_params
       |> Map.put("distance", conn.params["distance"])
       |> Map.put("limit", conn.params["limit"])
-      |> then(&DuplicateReports.search_duplicates(conn.assigns.actor, &1))
+      |> then(&DuplicateReports.search_duplicates(conn.assigns.actor, &1, upload))
       |> case do
         {:ok, %SearchResult{images: images}} ->
           {images, images.total_entries}

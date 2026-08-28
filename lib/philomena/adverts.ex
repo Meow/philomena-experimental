@@ -179,22 +179,22 @@ defmodule Philomena.Adverts do
 
   ## Examples
 
-      iex> create_advert(admin, advert_params)
+      iex> create_advert(admin, advert_params, upload)
       {:ok, %Advert{}}
 
-      iex> create_advert(user, advert_params)
+      iex> create_advert(user, advert_params, upload)
       {:error, :unauthorized}
 
   """
-  @spec create_advert(Actor.t(), map()) ::
+  @spec create_advert(Actor.t(), map(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, Advert.t()} | Authorization.write_error() | {:error, Ecto.Changeset.t()}
-  def create_advert(%Actor{} = actor, attrs) do
+  def create_advert(%Actor{} = actor, attrs, upload) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Advert) do
       advert_changeset =
         %Advert{}
         |> Advert.changeset(attrs)
-        |> Uploader.analyze_upload(attrs)
+        |> Uploader.analyze_upload(upload)
 
       Multi.new()
       |> Multi.insert(:advert, advert_changeset)
@@ -347,29 +347,29 @@ defmodule Philomena.Adverts do
 
   ## Examples
 
-      iex> update_advert_image(admin, advert_id, advert_params)
+      iex> update_advert_image(admin, advert_id, upload)
       {:ok, %Advert{}}
 
-      iex> update_advert_image(admin, advert_id, invalid_params)
+      iex> update_advert_image(admin, advert_id, nil)
       {:error, %Ecto.Changeset{}}
 
-      iex> update_advert_image(admin, invalid_id, advert_params)
+      iex> update_advert_image(admin, invalid_id, upload)
       {:error, :not_found}
 
-      iex> update_advert_image(user, advert_id, advert_params)
+      iex> update_advert_image(user, advert_id, upload)
       {:error, :unauthorized}
 
   """
-  @spec update_advert_image(Actor.t(), Loader.integer_id(), map()) ::
+  @spec update_advert_image(Actor.t(), Loader.integer_id(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, Advert.t()}
           | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
-  def update_advert_image(%Actor{} = actor, id, attrs) do
+  def update_advert_image(%Actor{} = actor, id, upload) do
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :update_image, id) do
       advert_changeset =
         advert
-        |> Advert.changeset(attrs)
-        |> Uploader.analyze_upload(attrs)
+        |> Advert.changeset()
+        |> Uploader.analyze_upload(upload)
 
       Multi.new()
       |> Multi.update(:advert, advert_changeset)

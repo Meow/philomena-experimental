@@ -89,7 +89,9 @@ defmodule PhilomenaWeb.ImageController do
   end
 
   def create(conn, params) do
-    case Images.upload_image(conn.assigns.actor, params["image"]) do
+    upload = PhilomenaMedia.Upload.cast(params["image"], "image")
+
+    case Images.upload_image(conn.assigns.actor, params["image"], upload) do
       {:ok, %{image: image}} ->
         conn
         |> put_flash(:info, "Image created successfully.")

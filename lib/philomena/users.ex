@@ -1576,18 +1576,18 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> update_avatar(actor, %{"avatar" => upload})
+      iex> update_avatar(actor, upload)
       {:ok, %User{}}
 
-      iex> update_avatar(banned_actor, %{"avatar" => upload})
+      iex> update_avatar(banned_actor, upload)
       {:error, :ban}
 
   """
-  @spec update_avatar(Actor.t(), map()) ::
+  @spec update_avatar(Actor.t(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def update_avatar(%Actor{user: user} = actor, attrs) do
+  def update_avatar(%Actor{user: user} = actor, upload) do
     with :ok <- verify_write_access(actor) do
-      changeset = Uploader.analyze_upload(user, attrs)
+      changeset = Uploader.analyze_upload(user, upload)
 
       Multi.new()
       |> Multi.update(:user, changeset)

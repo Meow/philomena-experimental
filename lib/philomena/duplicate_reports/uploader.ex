@@ -5,13 +5,11 @@ defmodule Philomena.DuplicateReports.Uploader do
   alias PhilomenaMedia.Uploader
 
   @doc false
-  def analyze_upload(search_query, params) do
-    image = Map.get(params, "image") || Map.get(params, :image)
-
+  def analyze_upload(search_query, upload) do
     Uploader.analyze_upload(
       search_query,
       "image",
-      image,
+      upload,
       &SearchQuery.image_changeset/2
     )
   end

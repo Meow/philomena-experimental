@@ -18,7 +18,9 @@ defmodule PhilomenaWeb.Admin.BadgeController do
   end
 
   def create(conn, %{"badge" => badge_params}) do
-    case Badges.create_badge(conn.assigns.actor, badge_params) do
+    upload = PhilomenaMedia.Upload.cast(badge_params, "image")
+
+    case Badges.create_badge(conn.assigns.actor, badge_params, upload) do
       {:ok, _badge} ->
         conn
         |> put_flash(:info, "Badge created successfully.")

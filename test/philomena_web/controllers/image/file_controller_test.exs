@@ -1,7 +1,7 @@
 defmodule PhilomenaWeb.Image.FileControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
-  # `Images.update_file/2` drives the media pipeline synchronously
+  # `Images.update_file/3` drives the media pipeline synchronously
   # (analyze, persist to the stubbed S3, enqueue the dead
   # ThumbnailWorker/reindex jobs), with no spawned upload process, so this
   # file stays `async: true`.

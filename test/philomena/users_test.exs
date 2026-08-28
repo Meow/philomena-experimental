@@ -17,6 +17,7 @@ defmodule Philomena.UsersTest do
   alias PhilomenaQuery.SearchHelpers
   alias Philomena.Users.{AdminUserForm, AliasMatches, Settings, User, UserToken}
   alias Philomena.Repo
+  alias PhilomenaMedia.Upload
 
   @png_fixture Path.absname("test/support/fixtures/files/upload-test.png")
 
@@ -37,6 +38,11 @@ defmodule Philomena.UsersTest do
     {:ok, path} = Plug.Upload.random_file("avatar-test")
     File.cp!(@png_fixture, path)
     %Plug.Upload{path: path, content_type: "image/png", filename: "upload-test.png"}
+  end
+
+  defp media_png_upload do
+    png_upload()
+    |> Upload.from_plug()
   end
 
   defp valid_totp_code(user), do: :pot.totp(User.totp_secret(user))
@@ -1203,7 +1209,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, updated} =
-               Users.update_avatar(actor(user), %{"avatar" => png_upload()})
+               Users.update_avatar(actor(user), media_png_upload())
 
       assert updated.avatar =~ ~r/\.png$/
       assert Users.fetch_user_for_worker!(user.id).avatar =~ ~r/\.png$/
@@ -1212,30 +1218,31 @@ defmodule Philomena.UsersTest do
     test "a banned actor is rejected before analysis" do
       user = confirmed_user_fixture()
 
-      assert Users.update_avatar(actor(user, ban: @ban), %{"avatar" => png_upload()}) ==
+      assert Users.update_avatar(actor(user, ban: @ban), media_png_upload()) ==
                {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized before analysis" do
       user = confirmed_user_fixture()
 
-      assert Users.update_avatar(actor(user, fingerprint: nil), %{"avatar" => png_upload()}) ==
+      assert Users.update_avatar(actor(user, fingerprint: nil), media_png_upload()) ==
                {:error, :unauthorized}
     end
 
     test "the ban wins over a missing fingerprint" do
       user = confirmed_user_fixture()
 
-      assert Users.update_avatar(actor(user, ban: @ban, fingerprint: nil), %{
-               "avatar" => png_upload()
-             }) == {:error, :ban}
+      assert Users.update_avatar(
+               actor(user, ban: @ban, fingerprint: nil),
+               media_png_upload()
+             ) == {:error, :ban}
     end
 
     test "a missing avatar file is a rejected changeset" do
       user = confirmed_user_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Users.update_avatar(actor(user), %{})
+               Users.update_avatar(actor(user), nil)
     end
   end
 

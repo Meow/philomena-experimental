@@ -625,9 +625,11 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:ok, %Tag{} = updated} =
-               Tags.update_tag_image(actor(moderator_user_fixture()), tag.slug, %{
-                 "image" => png_upload()
-               })
+               Tags.update_tag_image(
+                 actor(moderator_user_fixture()),
+                 tag.slug,
+                 media_png_upload()
+               )
 
       assert updated.id == tag.id
       reloaded = Repo.reload!(tag)
@@ -644,7 +646,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Tags.update_tag_image(actor(moderator_user_fixture()), tag.slug, %{})
+               Tags.update_tag_image(actor(moderator_user_fixture()), tag.slug, nil)
 
       assert moderation_log_count() == 0
     end
@@ -652,23 +654,29 @@ defmodule Philomena.TagsTest do
     test "anonymous and regular users are unauthorized" do
       tag = tag_fixture()
 
-      assert Tags.update_tag_image(actor(), tag.slug, %{"image" => png_upload()}) ==
+      assert Tags.update_tag_image(actor(), tag.slug, media_png_upload()) ==
                {:error, :unauthorized}
 
-      assert Tags.update_tag_image(actor(confirmed_user_fixture()), tag.slug, %{
-               "image" => png_upload()
-             }) ==
+      assert Tags.update_tag_image(
+               actor(confirmed_user_fixture()),
+               tag.slug,
+               media_png_upload()
+             ) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.update_tag_image(actor(admin_user_fixture()), "nonexistent-tag", %{
-               "image" => png_upload()
-             }) == {:error, :not_found}
+      assert Tags.update_tag_image(
+               actor(admin_user_fixture()),
+               "nonexistent-tag",
+               media_png_upload()
+             ) == {:error, :not_found}
 
-      assert Tags.update_tag_image(actor(moderator_user_fixture()), "nonexistent-tag", %{
-               "image" => png_upload()
-             }) == {:error, :not_found}
+      assert Tags.update_tag_image(
+               actor(moderator_user_fixture()),
+               "nonexistent-tag",
+               media_png_upload()
+             ) == {:error, :not_found}
     end
   end
 
@@ -787,7 +795,7 @@ defmodule Philomena.TagsTest do
       assert Tags.load_tag_alias_for_edit(banned_actor, tag.slug) == {:error, :ban}
 
       assert Tags.update_tag(banned_actor, tag.slug, %{}) == {:error, :ban}
-      assert Tags.update_tag_image(banned_actor, tag.slug, %{}) == {:error, :ban}
+      assert Tags.update_tag_image(banned_actor, tag.slug, nil) == {:error, :ban}
       assert Tags.remove_tag_image(banned_actor, tag.slug) == {:error, :ban}
 
       assert Tags.alias_tag(banned_actor, tag.slug, %{"target_tag" => target.name}) ==

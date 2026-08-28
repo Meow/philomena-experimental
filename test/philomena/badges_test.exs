@@ -289,9 +289,9 @@ defmodule Philomena.BadgesTest do
       award = badge_award_fixture(admin, user, badge, %{label: "Unchanged"})
 
       operations = [
-        fn actor -> Badges.create_badge(actor, %{}) end,
+        fn actor -> Badges.create_badge(actor, %{}, nil) end,
         fn actor -> Badges.update_badge(actor, badge.id, %{"title" => "Changed"}) end,
-        fn actor -> Badges.update_badge_image(actor, badge.id, %{}) end,
+        fn actor -> Badges.update_badge_image(actor, badge.id, nil) end,
         fn actor -> Badges.award_badge(actor, user.slug, %{"badge_id" => badge.id}) end,
         fn actor ->
           Badges.update_badge_award(actor, user.slug, award.id, %{"label" => "Changed"})
@@ -355,15 +355,18 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "create_badge/2" do
+  describe "create_badge/3" do
     test "an admin creates a badge through the upload pipeline and writes a byte-exact log" do
       admin = admin_user_fixture()
 
       assert {:ok, %Badge{} = badge} =
-               Badges.create_badge(actor(admin), %{
-                 "title" => "Created Badge",
-                 "image" => svg_upload()
-               })
+               Badges.create_badge(
+                 actor(admin),
+                 %{
+                   "title" => "Created Badge"
+                 },
+                 media_svg_upload()
+               )
 
       assert badge.title == "Created Badge"
       assert Repo.get_by(Badge, title: "Created Badge")
@@ -377,17 +380,21 @@ defmodule Philomena.BadgesTest do
 
     test "a Badge-role moderator creates a badge" do
       assert {:ok, %Badge{}} =
-               Badges.create_badge(actor(role_moderator_fixture("Badge")), %{
-                 "title" => "Mod Created Badge",
-                 "image" => svg_upload()
-               })
+               Badges.create_badge(
+                 actor(role_moderator_fixture("Badge")),
+                 %{
+                   "title" => "Mod Created Badge"
+                 },
+                 media_svg_upload()
+               )
     end
 
     test "a plain moderator is unauthorized and writes no log" do
-      assert Badges.create_badge(actor(moderator_user_fixture()), %{
-               "title" => "nope",
-               "image" => svg_upload()
-             }) == {:error, :unauthorized}
+      assert Badges.create_badge(
+               actor(moderator_user_fixture()),
+               %{"title" => "nope"},
+               media_svg_upload()
+             ) == {:error, :unauthorized}
 
       refute Repo.get_by(Badge, title: "nope")
       no_moderation_logs!()
@@ -395,7 +402,11 @@ defmodule Philomena.BadgesTest do
 
     test "a missing image is a changeset error and writes no log" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Badges.create_badge(actor(admin_user_fixture()), %{"title" => "No Image Badge"})
+               Badges.create_badge(
+                 actor(admin_user_fixture()),
+                 %{"title" => "No Image Badge"},
+                 nil
+               )
 
       refute changeset.valid?
       refute Repo.get_by(Badge, title: "No Image Badge")
@@ -505,7 +516,7 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture(%{title: "Image Badge"})
 
       assert {:ok, %Badge{}} =
-               Badges.update_badge_image(actor(admin), "#{badge.id}", %{"image" => svg_upload()})
+               Badges.update_badge_image(actor(admin), "#{badge.id}", media_svg_upload())
 
       assert [log] = moderation_logs()
       assert log.user_id == admin.id
@@ -517,9 +528,11 @@ defmodule Philomena.BadgesTest do
     test "a plain moderator is unauthorized and writes no log" do
       badge = badge_fixture()
 
-      assert Badges.update_badge_image(actor(moderator_user_fixture()), "#{badge.id}", %{
-               "image" => svg_upload()
-             }) == {:error, :unauthorized}
+      assert Badges.update_badge_image(
+               actor(moderator_user_fixture()),
+               "#{badge.id}",
+               media_svg_upload()
+             ) == {:error, :unauthorized}
 
       no_moderation_logs!()
     end
@@ -528,7 +541,7 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture()
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Badges.update_badge_image(actor(admin_user_fixture()), badge.id, %{})
+               Badges.update_badge_image(actor(admin_user_fixture()), badge.id, nil)
 
       refute changeset.valid?
       assert Repo.get!(Badge, badge.id).image == "test.svg"
@@ -539,15 +552,19 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture()
 
       assert {:ok, %Badge{}} =
-               Badges.update_badge_image(actor(role_moderator_fixture("Badge")), badge.id, %{
-                 "image" => svg_upload()
-               })
+               Badges.update_badge_image(
+                 actor(role_moderator_fixture("Badge")),
+                 badge.id,
+                 media_svg_upload()
+               )
     end
 
     test "an unknown id is not-found" do
-      assert Badges.update_badge_image(actor(admin_user_fixture()), "2147483647", %{
-               "image" => svg_upload()
-             }) == {:error, :not_found}
+      assert Badges.update_badge_image(
+               actor(admin_user_fixture()),
+               "2147483647",
+               media_svg_upload()
+             ) == {:error, :not_found}
     end
   end
 

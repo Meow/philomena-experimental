@@ -37,8 +37,7 @@ defmodule Philomena.AdvertsTest do
       "link" => "https://example.com/created-#{System.unique_integer([:positive])}",
       "start_date" => "now",
       "finish_date" => "1 year from now",
-      "restrictions" => "none",
-      "image" => png_upload()
+      "restrictions" => "none"
     })
   end
 
@@ -86,14 +85,15 @@ defmodule Philomena.AdvertsTest do
     end
   end
 
-  describe "create_advert/2" do
+  describe "create_advert/3" do
     test "an admin creates an advert through the upload pipeline and writes a byte-exact log" do
       admin = admin_user_fixture()
 
       assert {:ok, %Advert{} = advert} =
                Adverts.create_advert(
                  actor(admin),
-                 advert_params(%{"title" => "Advert To Create"})
+                 advert_params(%{"title" => "Advert To Create"}),
+                 media_png_upload()
                )
 
       assert advert.title == "Advert To Create"
@@ -108,13 +108,18 @@ defmodule Philomena.AdvertsTest do
 
     test "an Advert-role moderator creates an advert" do
       assert {:ok, %Advert{}} =
-               Adverts.create_advert(actor(role_moderator_fixture("Advert")), advert_params())
+               Adverts.create_advert(
+                 actor(role_moderator_fixture("Advert")),
+                 advert_params(),
+                 media_png_upload()
+               )
     end
 
     test "a plain moderator is unauthorized and writes no log" do
       assert Adverts.create_advert(
                actor(moderator_user_fixture()),
-               advert_params(%{"title" => "nope"})
+               advert_params(%{"title" => "nope"}),
+               media_png_upload()
              ) ==
                {:error, :unauthorized}
 
@@ -124,7 +129,11 @@ defmodule Philomena.AdvertsTest do
 
     test "a blank title is a changeset error and writes no log" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Adverts.create_advert(actor(admin_user_fixture()), advert_params(%{"title" => ""}))
+               Adverts.create_advert(
+                 actor(admin_user_fixture()),
+                 advert_params(%{"title" => ""}),
+                 media_png_upload()
+               )
 
       refute changeset.valid?
       no_moderation_logs!()
@@ -239,9 +248,7 @@ defmodule Philomena.AdvertsTest do
       advert = advert_fixture()
 
       assert {:ok, %Advert{}} =
-               Adverts.update_advert_image(actor(admin), "#{advert.id}", %{
-                 "image" => png_upload()
-               })
+               Adverts.update_advert_image(actor(admin), "#{advert.id}", media_png_upload())
 
       assert [log] = moderation_logs()
       assert log.user_id == admin.id
@@ -254,9 +261,11 @@ defmodule Philomena.AdvertsTest do
       advert = advert_fixture()
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Adverts.update_advert_image(actor(admin_user_fixture()), "#{advert.id}", %{
-                 "image" => undersized_png_upload()
-               })
+               Adverts.update_advert_image(
+                 actor(admin_user_fixture()),
+                 "#{advert.id}",
+                 media_undersized_png_upload()
+               )
 
       refute changeset.valid?
       no_moderation_logs!()
@@ -265,9 +274,11 @@ defmodule Philomena.AdvertsTest do
     test "a plain moderator is rejected by the module gate" do
       advert = advert_fixture()
 
-      assert Adverts.update_advert_image(actor(moderator_user_fixture()), "#{advert.id}", %{
-               "image" => png_upload()
-             }) == {:error, :unauthorized}
+      assert Adverts.update_advert_image(
+               actor(moderator_user_fixture()),
+               "#{advert.id}",
+               media_png_upload()
+             ) == {:error, :unauthorized}
 
       no_moderation_logs!()
     end
@@ -279,18 +290,22 @@ defmodule Philomena.AdvertsTest do
                Adverts.update_advert_image(
                  actor(role_moderator_fixture("Advert")),
                  advert.id,
-                 %{"image" => png_upload()}
+                 media_png_upload()
                )
     end
 
     test "an unknown id is not-found for every actor" do
-      assert Adverts.update_advert_image(actor(admin_user_fixture()), "2147483647", %{
-               "image" => png_upload()
-             }) == {:error, :not_found}
+      assert Adverts.update_advert_image(
+               actor(admin_user_fixture()),
+               "2147483647",
+               media_png_upload()
+             ) == {:error, :not_found}
 
-      assert Adverts.update_advert_image(actor(role_moderator_fixture("Advert")), "2147483647", %{
-               "image" => png_upload()
-             }) == {:error, :not_found}
+      assert Adverts.update_advert_image(
+               actor(role_moderator_fixture("Advert")),
+               "2147483647",
+               media_png_upload()
+             ) == {:error, :not_found}
     end
   end
 
@@ -389,11 +404,11 @@ defmodule Philomena.AdvertsTest do
 
       operations = [
         fn actor -> Adverts.new_advert(actor) end,
-        fn actor -> Adverts.create_advert(actor, %{}) end,
+        fn actor -> Adverts.create_advert(actor, %{}, nil) end,
         fn actor -> Adverts.load_advert_for_edit(actor, advert.id) end,
         fn actor -> Adverts.load_advert_for_image_edit(actor, advert.id) end,
         fn actor -> Adverts.update_advert(actor, advert.id, %{"title" => "Changed"}) end,
-        fn actor -> Adverts.update_advert_image(actor, advert.id, %{}) end,
+        fn actor -> Adverts.update_advert_image(actor, advert.id, nil) end,
         fn actor -> Adverts.delete_advert(actor, advert.id) end
       ]
 

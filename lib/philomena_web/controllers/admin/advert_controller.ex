@@ -22,7 +22,9 @@ defmodule PhilomenaWeb.Admin.AdvertController do
   end
 
   def create(conn, %{"advert" => advert_params}) do
-    case Adverts.create_advert(conn.assigns.actor, advert_params) do
+    upload = PhilomenaMedia.Upload.cast(advert_params, "image")
+
+    case Adverts.create_advert(conn.assigns.actor, advert_params, upload) do
       {:ok, _advert} ->
         conn
         |> put_flash(:info, "Advert was successfully created.")

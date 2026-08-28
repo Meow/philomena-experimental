@@ -480,7 +480,7 @@ defmodule Philomena.DuplicateReportsTest do
       assert changeset.valid?
 
       assert {:error, invalid} =
-               DuplicateReports.search_duplicates(actor(), %{"distance" => "invalid"})
+               DuplicateReports.search_duplicates(actor(), %{"distance" => "invalid"}, nil)
 
       refute invalid.valid?
       assert invalid.errors[:distance]

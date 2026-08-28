@@ -13,7 +13,9 @@ defmodule PhilomenaWeb.Admin.Advert.ImageController do
   end
 
   def update(conn, %{"advert_id" => id, "advert" => advert_params}) do
-    case Adverts.update_advert_image(conn.assigns.actor, id, advert_params) do
+    upload = PhilomenaMedia.Upload.cast(advert_params, "image")
+
+    case Adverts.update_advert_image(conn.assigns.actor, id, upload) do
       {:ok, _advert} ->
         conn
         |> put_flash(:info, "Advert was successfully updated.")

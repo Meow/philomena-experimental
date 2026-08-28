@@ -701,17 +701,17 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> update_tag_image(moderator, "safe", %{"image" => upload})
+      iex> update_tag_image(moderator, "safe", upload)
       {:ok, %Tag{}}
 
   """
-  @spec update_tag_image(Actor.t(), String.t(), map()) ::
+  @spec update_tag_image(Actor.t(), String.t(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, Tag.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def update_tag_image(%Actor{} = actor, slug, attrs) do
+  def update_tag_image(%Actor{} = actor, slug, upload) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :update_image, slug, @image_preloads) do
-      tag_image_changeset = Uploader.analyze_upload(tag, attrs)
+      tag_image_changeset = Uploader.analyze_upload(tag, upload)
 
       Multi.new()
       |> Multi.update(:tag, tag_image_changeset)

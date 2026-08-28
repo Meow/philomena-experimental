@@ -245,10 +245,11 @@ defmodule Philomena.ImagesTest do
       existing = image_fixture(image_orig_sha512_hash: png_upload_sha512())
       user = user_fixture()
 
-      attrs = %{"image" => png_upload(), "tag_input" => "safe, solo, mare"}
+      attrs = %{"tag_input" => "safe, solo, mare"}
+      upload = media_png_upload()
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Images.upload_image(actor(user), attrs)
+               Images.upload_image(actor(user), attrs, upload)
 
       assert "has already been uploaded: it's image #{existing.id}" in errors_on(changeset).image
     end
@@ -330,7 +331,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_file/2 duplicate detection" do
+  describe "update_file/3 duplicate detection" do
     # Root cause of the fixed bug: replacing an image's file with a
     # byte-identical copy. The image's own row still holds that file's
     # orig_sha512_hash, so the dedup lookup matches the image against itself;
@@ -344,7 +345,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), image.id, %{"image" => png_upload()})
+               Images.update_file(actor(moderator), image.id, media_png_upload())
 
       # The dedup fingerprint is still set - it is overwritten with the (same)
       # new file's hash, never nulled.
@@ -362,7 +363,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
 
       assert {:error, changeset} =
-               Images.update_file(actor(moderator), image.id, %{"image" => png_upload()})
+               Images.update_file(actor(moderator), image.id, media_png_upload())
 
       assert "has already been uploaded: it's image #{other.id}" in errors_on(changeset).image
       # The target image keeps its own fingerprint.
@@ -2067,9 +2068,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), to_string(image.id), %{
-                 "image" => png_upload()
-               })
+               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
 
       assert updated.id == image.id
       assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
@@ -2080,7 +2079,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_file(actor(admin), to_string(image.id), %{"image" => png_upload()})
+               Images.update_file(actor(admin), to_string(image.id), media_png_upload())
 
       assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
     end
@@ -2090,9 +2089,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_file(actor(moderator), to_string(image.id), %{
-                 "image" => png_upload()
-               })
+               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -2106,7 +2103,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), image.id, %{"image" => png_upload()})
+               Images.update_file(actor(moderator), image.id, media_png_upload())
 
       assert updated.id == image.id
     end
@@ -2118,9 +2115,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_file(actor(moderator), to_string(image.id), %{
-                 "image" => png_upload()
-               })
+               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
 
       assert moderation_log_count() == 0
     end
@@ -2133,7 +2128,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_file(actor(moderator), to_string(image.id), %{})
+               Images.update_file(actor(moderator), to_string(image.id), nil)
 
       assert moderation_log_count() == 0
     end
@@ -2143,9 +2138,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(hidden_from_users: true, hidden_image_key: "hidden-key")
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), to_string(image.id), %{
-                 "image" => png_upload()
-               })
+               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
 
       assert updated.id == image.id
       assert updated.hidden_from_users
@@ -2159,7 +2152,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.update_file(actor(user), to_string(image.id), %{"image" => png_upload()}) ==
+      assert Images.update_file(actor(user), to_string(image.id), media_png_upload()) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2169,7 +2162,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.update_file(actor(user), to_string(image.id), %{"image" => png_upload()}) ==
+      assert Images.update_file(actor(user), to_string(image.id), media_png_upload()) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2178,7 +2171,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot replace the file" do
       image = image_fixture()
 
-      assert Images.update_file(actor(), to_string(image.id), %{"image" => png_upload()}) ==
+      assert Images.update_file(actor(), to_string(image.id), media_png_upload()) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2188,7 +2181,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.update_file(actor(moderator), "2147483647", %{"image" => png_upload()}) ==
+      assert Images.update_file(actor(moderator), "2147483647", media_png_upload()) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -2198,7 +2191,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.update_file(actor(admin), "2147483647", %{"image" => png_upload()}) ==
+      assert Images.update_file(actor(admin), "2147483647", media_png_upload()) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -2207,16 +2200,14 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_file(actor(moderator), "not-a-number", %{"image" => png_upload()}) ==
+      assert Images.update_file(actor(moderator), "not-a-number", media_png_upload()) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_file(actor(moderator), "99999999999999999999", %{
-               "image" => png_upload()
-             }) ==
+      assert Images.update_file(actor(moderator), "99999999999999999999", media_png_upload()) ==
                {:error, :not_found}
     end
   end
@@ -4497,16 +4488,17 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "upload_image/2" do
+  describe "upload_image/3" do
     test "a normal actor uploads an image and the row exists" do
       actor = actor(confirmed_user_fixture())
       :ok = Endpoint.subscribe("firehose")
 
       assert {:ok, %{image: %Image{} = image, upload_pid: pid}} =
-               Images.upload_image(actor, %{
-                 "image" => png_upload(),
-                 "tag_input" => "safe, solo, pony"
-               })
+               Images.upload_image(
+                 actor,
+                 %{"tag_input" => "safe, solo, pony"},
+                 media_png_upload()
+               )
 
       # The background upload process finishes the persist/repair work against
       # the Repo; in an async case it owns no sandbox connection, so grant it the
@@ -4530,16 +4522,19 @@ defmodule Philomena.ImagesTest do
       sources = ["https://example.com/first", "https://example.com/second"]
 
       assert {:ok, %{image: image, upload_pid: pid}} =
-               Images.upload_image(actor, %{
-                 "image" => png_upload(),
-                 "tag_input" => "safe, solo, pony",
-                 "sources" =>
-                   sources
-                   |> Enum.with_index()
-                   |> Map.new(fn {source, index} ->
-                     {to_string(index), %{"source" => source}}
-                   end)
-               })
+               Images.upload_image(
+                 actor,
+                 %{
+                   "tag_input" => "safe, solo, pony",
+                   "sources" =>
+                     sources
+                     |> Enum.with_index()
+                     |> Map.new(fn {source, index} ->
+                       {to_string(index), %{"source" => source}}
+                     end)
+                 },
+                 media_png_upload()
+               )
 
       Sandbox.allow(Repo, self(), pid)
       assert source_urls(image) == Enum.sort(sources)
@@ -4550,15 +4545,18 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
 
       assert {:ok, %{image: image, upload_pid: pid}} =
-               Images.upload_image(actor, %{
-                 "image" => png_upload(),
-                 "tag_input" => "safe, solo, pony",
-                 "sources" => %{
-                   "0" => %{"source" => ""},
-                   "1" => %{"source" => "https://example.com/source"},
-                   "2" => %{"source" => ""}
-                 }
-               })
+               Images.upload_image(
+                 actor,
+                 %{
+                   "tag_input" => "safe, solo, pony",
+                   "sources" => %{
+                     "0" => %{"source" => ""},
+                     "1" => %{"source" => "https://example.com/source"},
+                     "2" => %{"source" => ""}
+                   }
+                 },
+                 media_png_upload()
+               )
 
       Sandbox.allow(Repo, self(), pid)
       assert source_urls(image) == ["https://example.com/source"]
@@ -4569,11 +4567,14 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
 
       assert {:error, %Ecto.Changeset{data: %Image{} = image} = changeset} =
-               Images.upload_image(actor, %{
-                 "image" => png_upload(),
-                 "tag_input" => "safe, solo, pony",
-                 "sources" => %{"0" => %{"source" => "not-a-url"}}
-               })
+               Images.upload_image(
+                 actor,
+                 %{
+                   "tag_input" => "safe, solo, pony",
+                   "sources" => %{"0" => %{"source" => "not-a-url"}}
+                 },
+                 media_png_upload()
+               )
 
       assert image.id == nil
       assert [%Ecto.Changeset{} = source_changeset] = get_change(changeset, :sources)
@@ -4589,10 +4590,11 @@ defmodule Philomena.ImagesTest do
       |> Repo.update!()
 
       assert {:ok, %{image: image, upload_pid: pid}} =
-               Images.upload_image(actor(user), %{
-                 "image" => png_upload(),
-                 "tag_input" => "safe, solo, pony"
-               })
+               Images.upload_image(
+                 actor(user),
+                 %{"tag_input" => "safe, solo, pony"},
+                 media_png_upload()
+               )
 
       assert image.approved
       assert Repo.reload!(user).images_count == 5
@@ -4609,21 +4611,21 @@ defmodule Philomena.ImagesTest do
     test "a banned actor may not upload" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
+      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :ban}
     end
 
     test "an actor with no fingerprint may not upload" do
       actor = actor(confirmed_user_fixture(), fingerprint: nil)
 
-      assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
+      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :unauthorized}
     end
 
     test "a ban outranks a missing fingerprint" do
       actor = actor(confirmed_user_fixture(), ban: @ban, fingerprint: nil)
 
-      assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
+      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :ban}
     end
 
@@ -4634,7 +4636,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :image_create)
 
-      assert Images.upload_image(actor, %{"image" => png_upload(), "tag_input" => "safe"}) ==
+      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :rate_limited}
 
       assert Repo.aggregate(Image, :count) == 0
@@ -4645,10 +4647,11 @@ defmodule Philomena.ImagesTest do
       track_rate_limit(actor, :image_create)
 
       assert {:ok, %{image: %Image{}, upload_pid: pid}} =
-               Images.upload_image(actor, %{
-                 "image" => png_upload(),
-                 "tag_input" => "safe, solo, pony"
-               })
+               Images.upload_image(
+                 actor,
+                 %{"tag_input" => "safe, solo, pony"},
+                 media_png_upload()
+               )
 
       # Recording happens synchronously once create_image succeeds.
       assert rate_limit_count(actor, :image_create) == "1"
@@ -4665,7 +4668,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :image_create)
 
-      assert Images.upload_image(actor, %{}) == {:error, :rate_limited}
+      assert Images.upload_image(actor, %{}, nil) == {:error, :rate_limited}
     end
   end
 

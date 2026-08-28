@@ -17,7 +17,9 @@ defmodule PhilomenaWeb.Tag.ImageController do
   end
 
   def update(conn, %{"tag_id" => slug, "tag" => tag_params}) do
-    case Tags.update_tag_image(conn.assigns.actor, slug, tag_params) do
+    upload = PhilomenaMedia.Upload.cast(tag_params, "image")
+
+    case Tags.update_tag_image(conn.assigns.actor, slug, upload) do
       {:ok, tag} ->
         conn
         |> put_flash(:info, "Tag image successfully updated.")

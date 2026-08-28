@@ -7,8 +7,8 @@ defmodule Philomena.Users.Uploader do
   alias Philomena.Users.User
   alias PhilomenaMedia.Uploader
 
-  def analyze_upload(user, params) do
-    Uploader.analyze_upload(user, "avatar", params["avatar"], &User.avatar_changeset/2)
+  def analyze_upload(user, upload) do
+    Uploader.analyze_upload(user, "avatar", upload, &User.avatar_changeset/2)
   end
 
   def put_persist_upload_and_unpersist_old(multi, step) do

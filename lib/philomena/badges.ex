@@ -74,26 +74,26 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> create_badge(admin, badge_params)
+      iex> create_badge(admin, badge_params, upload)
       {:ok, %Badge{}}
 
-      iex> create_badge(admin, invalid_params)
+      iex> create_badge(admin, invalid_params, upload)
       {:error, %Ecto.Changeset{}}
 
-      iex> create_badge(user, badge_params)
+      iex> create_badge(user, badge_params, upload)
       {:error, :unauthorized}
 
   """
-  @spec create_badge(Actor.t(), map()) ::
+  @spec create_badge(Actor.t(), map(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, Badge.t()}
           | {:error, Authorization.write_error_reason() | Ecto.Changeset.t()}
-  def create_badge(%Actor{} = actor, attrs) do
+  def create_badge(%Actor{} = actor, attrs, upload) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Badge) do
       badge_changeset =
         %Badge{}
         |> Badge.changeset(attrs)
-        |> Uploader.analyze_upload(attrs)
+        |> Uploader.analyze_upload(upload)
 
       Multi.new()
       |> Multi.insert(:badge, badge_changeset)
@@ -215,29 +215,29 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> update_badge_image(admin, badge_id, badge_params)
+      iex> update_badge_image(admin, badge_id, upload)
       {:ok, %Badge{}}
 
-      iex> update_badge_image(admin, badge_id, invalid_params)
+      iex> update_badge_image(admin, badge_id, nil)
       {:error, %Ecto.Changeset{}}
 
-      iex> update_badge_image(admin, invalid_id, badge_params)
+      iex> update_badge_image(admin, invalid_id, upload)
       {:error, :not_found}
 
-      iex> update_badge_image(user, badge_id, badge_params)
+      iex> update_badge_image(user, badge_id, upload)
       {:error, :unauthorized}
 
   """
-  @spec update_badge_image(Actor.t(), Loader.integer_id(), map()) ::
+  @spec update_badge_image(Actor.t(), Loader.integer_id(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, Badge.t()}
           | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
-  def update_badge_image(%Actor{} = actor, id, attrs) do
+  def update_badge_image(%Actor{} = actor, id, upload) do
     with :ok <- verify_write_access(actor),
          {:ok, badge} <- load_badge(actor, :update_image, id) do
       badge_changeset =
         badge
-        |> Badge.changeset(attrs)
-        |> Uploader.analyze_upload(attrs)
+        |> Badge.changeset()
+        |> Uploader.analyze_upload(upload)
 
       Multi.new()
       |> Multi.update(:badge, badge_changeset)

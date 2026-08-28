@@ -12,7 +12,9 @@ defmodule PhilomenaWeb.Admin.Badge.ImageController do
   end
 
   def update(conn, %{"badge_id" => id, "badge" => badge_params}) do
-    case Badges.update_badge_image(conn.assigns.actor, id, badge_params) do
+    upload = PhilomenaMedia.Upload.cast(badge_params, "image")
+
+    case Badges.update_badge_image(conn.assigns.actor, id, upload) do
       {:ok, _badge} ->
         conn
         |> put_flash(:info, "Badge updated successfully.")

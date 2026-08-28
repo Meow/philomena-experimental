@@ -24,7 +24,9 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
   end
 
   def create(conn, %{"image" => image_params}) do
-    case Images.upload_image(conn.assigns.actor, image_params) do
+    upload = PhilomenaMedia.Upload.cast(image_params, "image")
+
+    case Images.upload_image(conn.assigns.actor, image_params, upload) do
       {:ok, %{image: image}} ->
         render(conn, "show.json", image: image, interactions: [])
 

@@ -366,7 +366,7 @@ defmodule Philomena.Images do
   defp sources_for_edit([]), do: [%Source{}]
   defp sources_for_edit(sources), do: sources
 
-  defp async_upload(image, plug_upload) do
+  defp async_upload(image, upload) do
     linked_pid =
       spawn(fn ->
         # Make sure task will finish before VM exit
@@ -382,7 +382,7 @@ defmodule Philomena.Images do
       end)
 
     # Give the upload to the linked process
-    Plug.Upload.give_away(plug_upload, linked_pid, self())
+    Plug.Upload.give_away(upload.path, linked_pid, self())
 
     # Free up the linked process
     send(linked_pid, :ready)
@@ -1390,17 +1390,17 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> upload_image(actor, %{"image" => upload, "tag_input" => "safe"})
+      iex> upload_image(actor, %{"tag_input" => "safe"}, upload)
       {:ok, %{image: %Image{}, upload_pid: pid}}
 
-      iex> upload_image(banned_actor, params)
+      iex> upload_image(banned_actor, params, upload)
       {:error, :ban}
 
   """
-  @spec upload_image(Actor.t(), map() | nil) ::
+  @spec upload_image(Actor.t(), map() | nil, PhilomenaMedia.Upload.t() | nil) ::
           {:ok, image_upload()}
           | {:error, :ban | :unauthorized | :rate_limited | Ecto.Changeset.t()}
-  def upload_image(%Actor{user: user} = actor, params) do
+  def upload_image(%Actor{user: user} = actor, params, upload) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Image),
          :ok <- RateLimiter.check_rate_limit(actor, :image_create),
@@ -1420,7 +1420,7 @@ defmodule Philomena.Images do
         |> Image.source_changeset([], source_input_form.sources)
         |> Image.tag_changeset([], tags)
         |> Image.dnp_changeset(user)
-        |> Uploader.analyze_upload(params)
+        |> Uploader.analyze_upload(upload)
         |> maybe_approve_image(user)
 
       Multi.new()
@@ -1438,7 +1438,7 @@ defmodule Philomena.Images do
         {:ok, %{image: %Image{} = image}} ->
           RateLimiter.record_action(actor, :image_create, @image_create_window)
 
-          upload_pid = async_upload(image, params["image"])
+          upload_pid = async_upload(image, upload)
 
           image = Repo.preload(image, tags: :aliases)
 
@@ -1457,7 +1457,7 @@ defmodule Philomena.Images do
   end
 
   @typedoc """
-  Result of the `upload_image/2` function. The image was created in the DB but an
+  Result of the `upload_image/3` function. The image was created in the DB but an
   upload process could still be running in the background with its PID given in the
   `upload_pid` field.
   """
@@ -2253,25 +2253,25 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_file(moderator, "42", %{"image" => upload})
+      iex> update_file(moderator, "42", upload)
       {:ok, %Image{}}
 
-      iex> update_file(user, "42", %{"image" => upload})
+      iex> update_file(user, "42", upload)
       {:error, :unauthorized}
 
   """
-  @spec update_file(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec update_file(Actor.t(), IntegerId.integer_id(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_file(%Actor{} = actor, image_id, attrs) do
+  def update_file(%Actor{} = actor, image_id, upload) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :replace_file, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
         image
-        |> Image.changeset(attrs)
-        |> Uploader.analyze_upload(attrs)
+        |> Image.changeset(%{})
+        |> Uploader.analyze_upload(upload)
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {"Image.File:update", Paths.image_path(image), "Updated file of image #{image.id}"}

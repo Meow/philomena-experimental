@@ -7,8 +7,8 @@ defmodule Philomena.Adverts.Uploader do
   alias Philomena.Adverts.Advert
   alias PhilomenaMedia.Uploader
 
-  def analyze_upload(advert, params) do
-    Uploader.analyze_upload(advert, "image", params["image"], &Advert.image_changeset/2)
+  def analyze_upload(advert, upload) do
+    Uploader.analyze_upload(advert, "image", upload, &Advert.image_changeset/2)
   end
 
   def put_persist_upload_and_unpersist_old(multi, step) do

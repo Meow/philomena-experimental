@@ -16,7 +16,9 @@ defmodule PhilomenaWeb.AvatarController do
   end
 
   def update(conn, %{"user" => user_params}) do
-    case Users.update_avatar(conn.assigns.actor, user_params) do
+    upload = PhilomenaMedia.Upload.cast(user_params, "avatar")
+
+    case Users.update_avatar(conn.assigns.actor, upload) do
       {:ok, _user} ->
         conn
         |> put_flash(:info, "Successfully updated avatar.")
