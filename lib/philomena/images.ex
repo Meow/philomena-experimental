@@ -28,6 +28,7 @@ defmodule Philomena.Images do
   alias Philomena.Images.Thumbnailer
   alias Philomena.Images.Source
   alias Philomena.Images.SourceInputForm
+  alias Philomena.Images.SourceDiffer
   alias Philomena.Images.TagDiffer
   alias Philomena.Images.TagInputForm
   alias Philomena.Images.VoteForm
@@ -218,14 +219,14 @@ defmodule Philomena.Images do
   ## Metadata editing
 
   defp update_loaded_sources(%Image{} = image, %Actor{} = actor, %SourceInputForm{} = form) do
-    old_sources = form.old_sources
-    new_sources = form.sources
+    %{added: added_sources, removed: removed_sources} =
+      SourceDiffer.diff_inputs(form.old_sources, form.sources)
 
     Multi.new()
     |> Multi.run(:image, fn repo, _changes ->
       image = repo.preload(image, [:sources])
 
-      changeset = Image.source_changeset(image, old_sources, new_sources)
+      changeset = Image.source_changeset(image, added_sources, removed_sources)
 
       if Image.meaningful_source_update?(changeset) do
         repo.update(changeset)
@@ -1422,6 +1423,7 @@ defmodule Philomena.Images do
            |> SourceInputForm.changeset(params)
            |> SourceInputForm.apply(%Image{}) do
       %{added: added_tag_names} = TagDiffer.diff_inputs(nil, tag_input_form.tag_input)
+      %{added: added_sources} = SourceDiffer.diff_inputs(nil, source_input_form.sources)
 
       image_changeset =
         %Image{}
@@ -1436,7 +1438,7 @@ defmodule Philomena.Images do
       )
       |> Multi.insert(:image, fn %{added_tags: added_tags} ->
         image_changeset
-        |> Image.source_changeset([], source_input_form.sources)
+        |> Image.source_changeset(added_sources, [])
         |> Image.tag_changeset(added_tags, [])
         |> Image.dnp_changeset(user)
       end)

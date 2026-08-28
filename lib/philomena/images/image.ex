@@ -215,10 +215,10 @@ defmodule Philomena.Images.Image do
     |> change(destroyed_content: true, removed_image: image.image, image: nil)
   end
 
-  def source_changeset(image, old_sources, new_sources) do
+  def source_changeset(image, added_sources, removed_sources) do
     image
     |> change()
-    |> SourceDiffer.diff_input(old_sources, new_sources)
+    |> SourceDiffer.apply(added_sources, removed_sources)
     |> validate_length(:sources, max: 15)
   end
 
