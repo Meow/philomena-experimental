@@ -24,7 +24,6 @@ defmodule Philomena.ImagesTest do
   alias Philomena.TagChanges.Limits
   alias Philomena.TagChanges.TagChange
   alias Philomena.Images.Image
-  alias Philomena.Images.Tagging
   alias Philomena.Images.ImagePage
   alias Philomena.Images.Search.Scope
   alias Philomena.Tags.Tag
@@ -4727,9 +4726,33 @@ defmodule Philomena.ImagesTest do
       log = only_moderation_log!()
       assert log.body == "Batch tagged 'batchadd' on 1 images"
     end
+
+    test "an admin updates hidden images without including them in tag image counts" do
+      actor = actor(admin_user_fixture())
+      visible = image_fixture()
+      hidden = image_fixture(hidden_from_users: true)
+      tag_fixture(%{name: "batchhiddentag"})
+
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, "batchhiddentag", [hidden.id, visible.id])
+
+      assert result.succeeded == Enum.sort([hidden.id, visible.id])
+      assert result.failed == []
+      assert result.added == ["batchhiddentag"]
+      assert "batchhiddentag" in image_tag_names(hidden)
+      assert "batchhiddentag" in image_tag_names(visible)
+      assert Repo.get_by!(Tag, name: "batchhiddentag").images_count == 1
+
+      assert {:ok, result} = Images.batch_update_tags(actor, "-batchhiddentag", [hidden.id])
+      assert result.succeeded == [hidden.id]
+      assert result.removed == ["batchhiddentag"]
+      refute "batchhiddentag" in image_tag_names(hidden)
+      assert "batchhiddentag" in image_tag_names(visible)
+      assert Repo.get_by!(Tag, name: "batchhiddentag").images_count == 1
+    end
   end
 
-  describe "batch_update/4" do
+  describe "batch_update/2" do
     test "removes only the tags paired with each image" do
       user = confirmed_user_fixture()
       attribution = actor(user)
@@ -4753,37 +4776,6 @@ defmodule Philomena.ImagesTest do
       assert matched_ids == Enum.sort([first.id, second.id])
       assert tag_names(first) == ["remove second", "safe"]
       assert tag_names(second) == ["remove first", "safe"]
-    end
-
-    test "updates hidden images without including them in tag image counts" do
-      admin = admin_user_fixture()
-      attribution = actor(admin)
-      visible = image_fixture()
-      hidden = image_fixture(hidden_from_users: true)
-      tag = tag_fixture(%{name: "batch hidden tag"})
-      attributes = %{user_id: admin.id, ip: attribution.ip, fingerprint: attribution.fingerprint}
-
-      assert {:ok, matched_ids} =
-               Images.batch_update([hidden.id, visible.id], [tag], [], attributes)
-
-      assert Enum.sort(matched_ids) == Enum.sort([hidden.id, visible.id])
-      assert Repo.reload!(tag).images_count == 1
-
-      assert Repo.exists?(
-               from t in Tagging, where: t.image_id == ^hidden.id and t.tag_id == ^tag.id
-             )
-
-      assert Repo.exists?(
-               from t in Tagging, where: t.image_id == ^visible.id and t.tag_id == ^tag.id
-             )
-
-      assert {:ok, matched_ids} = Images.batch_update([hidden.id], [], [tag], attributes)
-      assert matched_ids == [hidden.id]
-      assert Repo.reload!(tag).images_count == 1
-
-      refute Repo.exists?(
-               from t in Tagging, where: t.image_id == ^hidden.id and t.tag_id == ^tag.id
-             )
     end
   end
 

@@ -34,11 +34,14 @@ defmodule Philomena.TagChangeRevertWorkerTest do
     attribution = actor(user)
 
     assert {:ok, [image_id]} =
-             Images.batch_update([image.id], added, removed, %{
-               user_id: user.id,
-               ip: attribution.ip,
-               fingerprint: attribution.fingerprint
-             })
+             Images.batch_update(
+               [%{image_id: image.id, added_tags: added, removed_tags: removed}],
+               %{
+                 user_id: user.id,
+                 ip: attribution.ip,
+                 fingerprint: attribution.fingerprint
+               }
+             )
 
     assert image_id == image.id
   end

@@ -54,11 +54,14 @@ defmodule Philomena.TagChangesTest do
     added_tags = Tags.get_or_create_tags("added test tag, other added tag")
 
     {:ok, [image_id]} =
-      Images.batch_update([image.id], added_tags, [], %{
-        user_id: user && user.id,
-        ip: attribution.ip,
-        fingerprint: attribution.fingerprint
-      })
+      Images.batch_update(
+        [%{image_id: image.id, added_tags: added_tags, removed_tags: []}],
+        %{
+          user_id: user && user.id,
+          ip: attribution.ip,
+          fingerprint: attribution.fingerprint
+        }
+      )
 
     assert image_id == image.id
     {image, Repo.one!(from tc in TagChange, where: tc.image_id == ^image.id)}

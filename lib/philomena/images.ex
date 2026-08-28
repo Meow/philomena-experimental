@@ -544,21 +544,7 @@ defmodule Philomena.Images do
     end)
   end
 
-  defp batch_update(image_ids, added_tags, removed_tags, attributes, after_changes) do
-    batch_update(
-      Enum.map(image_ids, fn id ->
-        %{
-          image_id: id,
-          added_tags: added_tags,
-          removed_tags: removed_tags
-        }
-      end),
-      attributes,
-      after_changes
-    )
-  end
-
-  defp batch_update(changes, attributes, after_changes) do
+  defp non_uniform_batch_multi(changes, attributes) do
     {requested_image_ids, added_pairs, removed_pairs} =
       prepare_change_batches(changes)
 
@@ -603,25 +589,16 @@ defmodule Philomena.Images do
     )
     |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
     |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings, :visible_images)
-    |> Multi.run(:after_changes, fn _repo, %{locked_image_ids: image_ids} ->
-      case after_changes.(image_ids) do
-        :ok -> {:ok, nil}
-        {:ok, value} -> {:ok, value}
-        {:error, reason} -> {:error, reason}
-      end
-    end)
     |> Multi.on_commit(fn %{locked_image_ids: image_ids} ->
       reindex_images(image_ids)
       Comments.reindex_comments_on_images(image_ids)
     end)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{locked_image_ids: image_ids}} ->
-        {:ok, image_ids}
+  end
 
-      error ->
-        error
-    end
+  defp uniform_batch_multi(image_ids, added_tags, removed_tags, attributes) do
+    image_ids
+    |> Enum.map(&%{image_id: &1, added_tags: added_tags, removed_tags: removed_tags})
+    |> non_uniform_batch_multi(attributes)
   end
 
   ## Voting and hiding
@@ -2791,7 +2768,7 @@ defmodule Philomena.Images do
   Authorizes `:batch_update` against the tag model, parses the tag list into the
   added and removed tags (resolving aliases and implications for additions),
   splits the raw ids into castable integers and unparsable leftovers, and runs
-  the batch through `batch_update/4`. Batch tagging is a staff feature and is
+  the batch update transaction. Batch tagging is a staff feature and is
   not rate-limited. Writes an `"Admin.Batch.Tag:update"` moderation log, whose
   subject is the acting user's own profile, on success.
 
@@ -2839,33 +2816,34 @@ defmodule Philomena.Images do
         user_id: actor.user.id
       }
 
-      {image_ids, unparsable_ids} = partition_image_ids(image_ids)
+      {requested_ids, unparsable_ids} = partition_image_ids(image_ids)
 
-      log_batch = fn matched_ids ->
-        ModerationLogs.create_moderation_log(
-          actor.user,
+      requested_ids
+      |> uniform_batch_multi(added_tags, removed_tags, attributes)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{locked_image_ids: image_ids} ->
+        {
           "Admin.Batch.Tag:update",
           Paths.profile_path(actor.user),
-          "Batch tagged '#{tag_list}' on #{Enum.count(matched_ids)} images"
-        )
-      end
-
-      case batch_update(image_ids, added_tags, removed_tags, attributes, log_batch) do
-        {:ok, matched_ids} ->
-          # Ids which parsed but matched no existing image were
+          "Batch tagged '#{tag_list}' on #{Enum.count(image_ids)} images"
+        }
+      end)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{locked_image_ids: image_ids}} ->
+          # IDs which parsed but matched no existing image were
           # never touched by the batch, so they are reported as failed.
-          unmatched_ids = image_ids -- matched_ids
+          unmatched_ids = requested_ids -- image_ids
 
           {:ok,
            %{
-             succeeded: matched_ids,
+             succeeded: image_ids,
              failed: unmatched_ids ++ unparsable_ids,
              added: Enum.map(added_tags, & &1.name),
              removed: Enum.map(removed_tags, & &1.name)
            }}
 
         _error ->
-          {:error, {:batch_failed, image_ids ++ unparsable_ids}}
+          {:error, {:batch_failed, requested_ids ++ unparsable_ids}}
       end
     end
   end
@@ -2874,42 +2852,49 @@ defmodule Philomena.Images do
   @doc """
   Performs a batch update on multiple images, adding and removing tags.
 
-  This function efficiently updates tags for multiple images at once,
-  handling tag changes, tag counts, and reindexing in a single transaction.
+  Each change may contain a different set of added and removed tags. This
+  function handles tag changes, tag counts, and reindexing in a single
+  transaction.
 
   ## Parameters
-  - image_ids: List of image IDs to update
-  - added_tags: List of tags to add to all images
-  - removed_tags: List of tags to remove from all images
+
+  - changes: List of maps containing `:image_id`, `:added_tags`, and
+    `:removed_tags`
   - attributes: Attributes tag changes are created with
 
   ## Note
 
   All the tags provided to this function must exist in the database.
-  If you're not sure if the tags exist or not, use Tags.get_or_create_tags first.
+  If you're not sure if the tags exist or not, use `Tags.get_or_create_tags/1`
+  first.
 
   ## Return value
 
-  On success, returns `{:ok, image_ids}` where `image_ids` are the ids of
-  the images the batch actually matched (existing images);
-  requested ids that matched no such image are absent from the list.
+  On success, returns `{:ok, image_ids}` where `image_ids` are the IDs of
+  existing images with at least one requested tag addition or removal. Unknown
+  image IDs and changes with no tags are absent from the list.
 
   ## Examples
 
-      iex> batch_update([1, 2], [tag1], [tag2], %{user_id: user.id, ip: ip, fingerprint: "ffff"})
+      iex> batch_update([
+      ...>   %{image_id: 1, added_tags: [tag1], removed_tags: [tag2]},
+      ...>   %{image_id: 2, added_tags: [tag3], removed_tags: []}
+      ...> ], %{user_id: user.id, ip: ip, fingerprint: "ffff"})
       {:ok, [1, 2]}
 
   """
-  @spec batch_update([integer()], [Tag.t()], [Tag.t()], map()) ::
-          {:ok, [integer()]} | {:error, term()}
-  def batch_update(image_ids, added_tags, removed_tags, attributes) do
-    batch_update(image_ids, added_tags, removed_tags, attributes, fn _image_ids -> :ok end)
-  end
-
-  @doc group: "Bulk operations"
-  @spec batch_update([map()], map()) :: {:ok, [integer()]} | {:error, term()}
+  @spec batch_update([map()], map()) :: {:ok, [integer()]} | :error
   def batch_update(changes, attributes) do
-    batch_update(changes, attributes, fn _image_ids -> :ok end)
+    changes
+    |> non_uniform_batch_multi(attributes)
+    |> Multi.transact()
+    |> case do
+      {:ok, %{locked_image_ids: image_ids}} ->
+        {:ok, image_ids}
+
+      _error ->
+        :error
+    end
   end
 
   @doc group: "Background jobs"
