@@ -2131,14 +2131,19 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
-    test "a hidden image is deleted with no log" do
+    test "a moderator replaces a hidden image" do
       moderator = moderator_user_fixture()
-      image = image_fixture(hidden_from_users: true)
+      image = image_fixture(hidden_from_users: true, hidden_image_key: "hidden-key")
 
-      assert Images.update_file(actor(moderator), to_string(image.id), %{"image" => png_upload()}) ==
-               {:error, :deleted}
+      assert {:ok, updated} =
+               Images.update_file(actor(moderator), to_string(image.id), %{
+                 "image" => png_upload()
+               })
 
-      assert moderation_log_count() == 0
+      assert updated.id == image.id
+      assert updated.hidden_from_users
+      assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
+      assert moderation_log_count() == 1
     end
 
     test "a regular user on a hidden image is unauthorized, not deleted" do

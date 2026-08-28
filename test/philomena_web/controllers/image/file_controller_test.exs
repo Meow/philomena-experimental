@@ -109,17 +109,26 @@ defmodule PhilomenaWeb.Image.FileControllerTest do
       assert reloaded.processed == true
     end
 
-    # verify_not_deleted halts before replacing a hidden image.
-    test "on a deleted image redirects with the deleted-image flash", %{conn: conn} do
+    test "as a moderator replaces a hidden image", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
-      image = image_fixture(hidden_from_users: true, deletion_reason: "Spam")
+
+      image =
+        image_fixture(
+          hidden_from_users: true,
+          hidden_image_key: "hidden-key",
+          deletion_reason: "Spam"
+        )
 
       conn = put(conn, ~p"/images/#{image}/file", %{"image" => %{"image" => png_upload()}})
 
       assert redirected_to(conn) == ~p"/images/#{image}"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Cannot replace a deleted image."
-      # The hash is untouched because the action never runs.
-      assert Repo.reload!(image).image_orig_sha512_hash != nil
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully updated file."
+
+      reloaded = Repo.reload!(image)
+      assert reloaded.hidden_from_users
+      assert reloaded.processed == false
+      assert reloaded.thumbnails_generated == false
+      assert reloaded.image_orig_sha512_hash == png_upload_sha512()
     end
 
     # update_file re-renders the "Failed to update file!" error branch on a

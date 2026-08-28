@@ -2238,11 +2238,10 @@ defmodule Philomena.Images do
   Replaces the file content of the image named by `image_id`, on behalf of
   `actor`, from `attrs` (a map with an `"image"` upload).
 
-  The image is loaded by id and authorized for `:replace_file`. A deleted image (hidden
-  from users) cannot be replaced and is `{:error, :deleted}`, left untouched.
-  On success the file is replaced, thumbnails are regenerated, old files are
-  purged, the image is reindexed, and a moderation log is written attributing
-  the change to `actor`.
+  The image is loaded by id and authorized for `:replace_file`. On success the
+  file is replaced, thumbnails are regenerated in the image's current storage
+  path, old files are purged, the image is reindexed, and a moderation log is
+  written attributing the change to `actor`.
 
   Returns `{:ok, image}` with the updated image, or
   `{:error, %Ecto.Changeset{}}` when the replacement is rejected (e.g. no file,
@@ -2259,17 +2258,13 @@ defmodule Philomena.Images do
   """
   @spec update_file(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | :deleted | Ecto.Changeset.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_file(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :replace_file, image_id) do
       result =
         Multi.new()
         |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-        |> Multi.run(:state, fn
-          _repo, %{locked_image: %Image{hidden_from_users: false}} -> {:ok, :visible}
-          _repo, %{locked_image: %Image{hidden_from_users: true}} -> {:error, :deleted}
-        end)
         |> Multi.update(:image, fn %{locked_image: image} ->
           image |> Image.changeset(attrs) |> Uploader.analyze_upload(attrs)
         end)
@@ -2278,10 +2273,7 @@ defmodule Philomena.Images do
         end)
         |> put_reindex_image(:image)
         |> Multi.transact()
-        |> case do
-          {:error, :state, :deleted, _changes} -> {:error, :deleted}
-          result -> moderation_image_result(result)
-        end
+        |> moderation_image_result()
 
       with {:ok, image} <- result do
         Uploader.persist_upload(image)

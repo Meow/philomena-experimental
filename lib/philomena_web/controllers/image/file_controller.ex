@@ -14,11 +14,6 @@ defmodule PhilomenaWeb.Image.FileController do
         |> put_flash(:info, "Successfully updated file.")
         |> redirect(to: ~p"/images/#{image}")
 
-      {:error, :deleted} ->
-        conn
-        |> put_flash(:error, "Cannot replace a deleted image.")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
-
       {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Failed to update file!")
