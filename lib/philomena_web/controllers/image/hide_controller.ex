@@ -7,32 +7,14 @@ defmodule PhilomenaWeb.Image.HideController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Images.create_image_hide(conn.assigns.actor, params["image_id"]) do
-      {:ok, image} ->
-        json(conn, Image.interaction_data(image))
-
-      {:error, :hide_failed} ->
-        conn
-        |> put_status(409)
-        |> json(%{})
-
-      {:error, _} = error ->
-        error
+    with {:ok, image} <- Images.create_image_hide(conn.assigns.actor, params["image_id"]) do
+      json(conn, Image.interaction_data(image))
     end
   end
 
   def delete(conn, params) do
-    case Images.delete_image_hide(conn.assigns.actor, params["image_id"]) do
-      {:ok, image} ->
-        json(conn, Image.interaction_data(image))
-
-      {:error, :hide_failed} ->
-        conn
-        |> put_status(409)
-        |> json(%{})
-
-      {:error, _} = error ->
-        error
+    with {:ok, image} <- Images.delete_image_hide(conn.assigns.actor, params["image_id"]) do
+      json(conn, Image.interaction_data(image))
     end
   end
 end

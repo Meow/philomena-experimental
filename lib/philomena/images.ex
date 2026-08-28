@@ -611,16 +611,6 @@ defmodule Philomena.Images do
   defp parse_vote(up) when up in [false, "false"], do: {:ok, false}
   defp parse_vote(_up), do: {:error, :invalid_vote}
 
-  defp hide_result({:ok, _changes}, image),
-    do: {:ok, Repo.get!(preload(Image, :tags), image.id) |> reindex_image()}
-
-  defp hide_result(_error, _image), do: {:error, :hide_failed}
-
-  defp interaction_result({:ok, _changes}, image),
-    do: {:ok, Repo.get!(preload(Image, :tags), image.id) |> reindex_image()}
-
-  defp interaction_result(_error, _image), do: {:error, :interaction_failed}
-
   @doc group: "Browsing and discovery"
   @doc """
   Loads the most recent featured image visible to `actor`.
@@ -3071,8 +3061,7 @@ defmodule Philomena.Images do
   image is then loaded by id and authorized for `:vote`. Hiding is
   idempotent.
 
-  Returns `{:ok, image}` with the image reloaded and reindexed (so its hide count
-  is current), or `{:error, :hide_failed}` if the hide transaction is rolled back.
+  Returns `{:ok, image}` with the image reloaded.
 
   ## Examples
 
@@ -3081,14 +3070,17 @@ defmodule Philomena.Images do
 
   """
   @spec create_image_hide(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def create_image_hide(actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :vote, image_id) do
       Multi.new()
       |> ImageHides.put_hide_for_loaded_image(image, actor.user)
       |> Multi.transact()
-      |> hide_result(image)
+      |> case do
+        {:ok, _changes} ->
+          {:ok, Repo.reload!(image)}
+      end
     end
   end
 
@@ -3100,8 +3092,7 @@ defmodule Philomena.Images do
   Loading, authorization, and ban semantics mirror `create_image_hide/2`.
   Removing a hide is idempotent.
 
-  Returns `{:ok, image}` with the image reloaded and reindexed, or
-  `{:error, :hide_failed}` if the transaction is rolled back.
+  Returns `{:ok, image}` with the image reloaded.
 
   ## Examples
 
@@ -3110,14 +3101,17 @@ defmodule Philomena.Images do
 
   """
   @spec delete_image_hide(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | :hide_failed}
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
   def delete_image_hide(actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :vote, image_id) do
       Multi.new()
       |> ImageHides.delete_hide_for_loaded_image(image, actor.user)
       |> Multi.transact()
-      |> hide_result(image)
+      |> case do
+        {:ok, _changes} ->
+          {:ok, Repo.reload!(image)}
+      end
     end
   end
 
@@ -3137,7 +3131,7 @@ defmodule Philomena.Images do
   """
   @spec create_fave(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
+          | {:error, :ban | :unauthorized | :not_found | :forced_filter}
   def create_fave(%Actor{user: user} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
@@ -3147,7 +3141,10 @@ defmodule Philomena.Images do
       |> ImageFaves.put_fave_for_loaded_image(image, user)
       |> ImageVotes.put_vote_for_loaded_image(image, user, true)
       |> Multi.transact()
-      |> interaction_result(image)
+      |> case do
+        {:ok, _changes} ->
+          {:ok, Repo.reload!(image)}
+      end
     end
   end
 
@@ -3156,8 +3153,7 @@ defmodule Philomena.Images do
   Removes `actor`'s fave of `image_id`, leaving any upvote in place. Unfaving is
   idempotent and enforces the same prerequisites as `create_fave/2`.
 
-  Returns `{:ok, image}` with the image reloaded and reindexed, or
-  `{:error, :interaction_failed}` if the transaction is rolled back.
+  Returns `{:ok, image}` with the image reloaded.
 
   ## Examples
 
@@ -3167,7 +3163,7 @@ defmodule Philomena.Images do
   """
   @spec delete_fave(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
+          | {:error, :ban | :unauthorized | :not_found | :forced_filter}
   def delete_fave(%Actor{user: user} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
@@ -3176,14 +3172,17 @@ defmodule Philomena.Images do
       Multi.new()
       |> ImageFaves.delete_fave_for_loaded_image(image, user)
       |> Multi.transact()
-      |> interaction_result(image)
+      |> case do
+        {:ok, _changes} ->
+          {:ok, Repo.reload!(image)}
+      end
     end
   end
 
   @doc group: "User interactions"
   @doc """
   Records `actor`'s vote on `image_id`—an upvote when `up` is `true` or
-  `"true"`, and a downvote when it is `false` or `"false"`—replacing any
+  `"true"`, and a downvote when it is `false` or `"false"`, replacing any
   existing vote. Other values return `{:error, :invalid_vote}`. Voting is
   idempotent.
 
@@ -3203,8 +3202,7 @@ defmodule Philomena.Images do
              | :unauthorized
              | :not_found
              | :forced_filter
-             | :invalid_vote
-             | :interaction_failed}
+             | :invalid_vote}
   def create_vote(%Actor{user: user} = actor, image_id, up) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
@@ -3214,7 +3212,10 @@ defmodule Philomena.Images do
       Multi.new()
       |> ImageVotes.put_vote_for_loaded_image(image, user, up)
       |> Multi.transact()
-      |> interaction_result(image)
+      |> case do
+        {:ok, _changes} ->
+          {:ok, Repo.reload!(image)}
+      end
     end
   end
 
@@ -3223,8 +3224,7 @@ defmodule Philomena.Images do
   Removes `actor`'s vote on `image_id`. Unvoting is idempotent and enforces the
   same prerequisites as `create_vote/3`.
 
-  Returns `{:ok, image}` with the image reloaded and reindexed, or
-  `{:error, :interaction_failed}` if the transaction is rolled back.
+  Returns `{:ok, image}` with the image reloaded.
 
   ## Examples
 
@@ -3234,7 +3234,7 @@ defmodule Philomena.Images do
   """
   @spec delete_vote(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | :forced_filter | :interaction_failed}
+          | {:error, :ban | :unauthorized | :not_found | :forced_filter}
   def delete_vote(%Actor{user: user} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
@@ -3243,7 +3243,10 @@ defmodule Philomena.Images do
       Multi.new()
       |> ImageVotes.delete_vote_for_loaded_image(image, user)
       |> Multi.transact()
-      |> interaction_result(image)
+      |> case do
+        {:ok, _changes} ->
+          {:ok, Repo.reload!(image)}
+      end
     end
   end
 
