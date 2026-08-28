@@ -163,6 +163,13 @@ defmodule Philomena.ImagesTest do
     Repo.aggregate(from(s in SourceChange, where: s.image_id == ^image.id), :count)
   end
 
+  defp source_urls(image) do
+    image
+    |> Repo.preload(:sources, force: true)
+    |> Map.fetch!(:sources)
+    |> Enum.map(& &1.source)
+  end
+
   # Controller-shaped attrs adding a single source with no prior sources.
   defp add_source_attrs(url) do
     %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => url}}}
@@ -3164,7 +3171,7 @@ defmodule Philomena.ImagesTest do
 
       assert Images.create_fave(actor, image.id) == {:error, :forced_filter}
       assert Images.delete_fave(actor, image.id) == {:error, :forced_filter}
-      assert Images.create_vote(actor, image.id, false) == {:error, :forced_filter}
+      assert Images.create_vote(actor, image.id, %{up: false}) == {:error, :forced_filter}
       assert Images.delete_vote(actor, image.id) == {:error, :forced_filter}
 
       assert fave_count(image, user) == 1
@@ -3254,7 +3261,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_upvotes = Repo.reload!(image).upvotes_count
 
-      assert {:ok, voted} = Images.create_vote(actor(user), image.id, true)
+      assert {:ok, voted} = Images.create_vote(actor(user), image.id, %{up: true})
       assert voted.id == image.id
       assert voted.score == base_score + 1
       assert voted.upvotes_count == base_upvotes + 1
@@ -3267,7 +3274,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_downvotes = Repo.reload!(image).downvotes_count
 
-      assert {:ok, voted} = Images.create_vote(actor(user), image.id, false)
+      assert {:ok, voted} = Images.create_vote(actor(user), image.id, %{up: false})
       assert voted.score == base_score - 1
       assert voted.downvotes_count == base_downvotes + 1
       assert %ImageVote{up: false} = vote_row(image, user)
@@ -3284,7 +3291,7 @@ defmodule Philomena.ImagesTest do
       assert %ImageVote{up: false} = vote_row(image, user)
       assert Repo.reload!(image).score == base_score - 1
 
-      assert {:ok, voted} = Images.create_vote(actor(user), image.id, true)
+      assert {:ok, voted} = Images.create_vote(actor(user), image.id, %{up: true})
       # get_by raises on more than one row, so a returned struct confirms a
       # single vote row survived the flip.
       assert %ImageVote{up: true} = vote_row(image, user)
@@ -3297,7 +3304,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
       base_score = Repo.reload!(image).score
-      {:ok, _} = Images.create_vote(actor(user), image.id, true)
+      {:ok, _} = Images.create_vote(actor(user), image.id, %{up: true})
 
       assert {:ok, unvoted} = Images.delete_vote(actor(user), image.id)
       assert unvoted.id == image.id
@@ -3781,6 +3788,28 @@ defmodule Philomena.ImagesTest do
       assert {:error, %Ecto.Changeset{}} =
                Images.update_sources(actor(user), to_string(image.id), many_source_attrs(16))
 
+      assert source_change_row_count(image) == 0
+    end
+
+    test "an invalid source URL returns an image-backed changeset" do
+      user = confirmed_user_fixture()
+      image = image_fixture(sources: ["https://example.com/existing"])
+
+      assert {:error, %Ecto.Changeset{data: %Image{} = changeset_image} = changeset} =
+               Images.update_sources(
+                 actor(user),
+                 image.id,
+                 %{
+                   "old_sources" => %{},
+                   "sources" => %{"0" => %{"source" => "not-a-url"}}
+                 }
+               )
+
+      assert changeset_image.id == image.id
+      source_changeset = Enum.find(get_change(changeset, :sources), &(not &1.valid?))
+      assert %Ecto.Changeset{} = source_changeset
+      assert "has invalid format" in errors_on(source_changeset).source
+      assert source_urls(image) == ["https://example.com/existing"]
       assert source_change_row_count(image) == 0
     end
 
@@ -4485,6 +4514,7 @@ defmodule Philomena.ImagesTest do
       Sandbox.allow(Repo, self(), pid)
 
       assert Repo.get(Image, image.id)
+      assert source_urls(image) == []
 
       assert_receive %Broadcast{
         event: "image:create",
@@ -4493,6 +4523,61 @@ defmodule Philomena.ImagesTest do
 
       assert image_id == image.id
       await_async_upload()
+    end
+
+    test "uploads valid nested source params and persists the source rows" do
+      actor = actor(confirmed_user_fixture())
+      sources = ["https://example.com/first", "https://example.com/second"]
+
+      assert {:ok, %{image: image, upload_pid: pid}} =
+               Images.upload_image(actor, %{
+                 "image" => png_upload(),
+                 "tag_input" => "safe, solo, pony",
+                 "sources" =>
+                   sources
+                   |> Enum.with_index()
+                   |> Map.new(fn {source, index} ->
+                     {to_string(index), %{"source" => source}}
+                   end)
+               })
+
+      Sandbox.allow(Repo, self(), pid)
+      assert source_urls(image) == Enum.sort(sources)
+      await_async_upload()
+    end
+
+    test "ignores blank source rows during upload" do
+      actor = actor(confirmed_user_fixture())
+
+      assert {:ok, %{image: image, upload_pid: pid}} =
+               Images.upload_image(actor, %{
+                 "image" => png_upload(),
+                 "tag_input" => "safe, solo, pony",
+                 "sources" => %{
+                   "0" => %{"source" => ""},
+                   "1" => %{"source" => "https://example.com/source"},
+                   "2" => %{"source" => ""}
+                 }
+               })
+
+      Sandbox.allow(Repo, self(), pid)
+      assert source_urls(image) == ["https://example.com/source"]
+      await_async_upload()
+    end
+
+    test "invalid upload source URLs return an image-backed changeset" do
+      actor = actor(confirmed_user_fixture())
+
+      assert {:error, %Ecto.Changeset{data: %Image{} = image} = changeset} =
+               Images.upload_image(actor, %{
+                 "image" => png_upload(),
+                 "tag_input" => "safe, solo, pony",
+                 "sources" => %{"0" => %{"source" => "not-a-url"}}
+               })
+
+      assert image.id == nil
+      assert [%Ecto.Changeset{} = source_changeset] = get_change(changeset, :sources)
+      assert "has invalid format" in errors_on(source_changeset).source
     end
 
     test "a trusted actor's approved upload increments the count and suggests verification" do

@@ -27,6 +27,9 @@ defmodule Philomena.Images do
   alias Philomena.Images.Tagging
   alias Philomena.Images.Thumbnailer
   alias Philomena.Images.Source
+  alias Philomena.Images.SourceInputForm
+  alias Philomena.Images.TagInputForm
+  alias Philomena.Images.VoteForm
   alias Philomena.Images.Subscription
   alias Philomena.Images
   alias Philomena.IntegerId
@@ -213,9 +216,9 @@ defmodule Philomena.Images do
 
   ## Metadata editing
 
-  defp update_loaded_sources(%Image{} = image, %Actor{} = actor, attrs) do
-    old_sources = attrs["old_sources"]
-    new_sources = attrs["sources"]
+  defp update_loaded_sources(%Image{} = image, %Actor{} = actor, %SourceInputForm{} = form) do
+    old_sources = form.old_sources
+    new_sources = form.sources
 
     Multi.new()
     |> Multi.run(:image, fn repo, _changes ->
@@ -245,9 +248,9 @@ defmodule Philomena.Images do
     end
   end
 
-  defp update_loaded_tags(%Image{} = image, %Actor{} = actor, attrs) do
-    old_tags = Tags.get_or_create_tags(attrs["old_tag_input"])
-    new_tags = Tags.get_or_create_tags(attrs["tag_input"])
+  defp update_loaded_tags(%Image{} = image, %Actor{} = actor, %TagInputForm{} = form) do
+    old_tags = Tags.get_or_create_tags(form.old_tag_input)
+    new_tags = Tags.get_or_create_tags(form.tag_input)
 
     Multi.new()
     |> Multi.run(:image, fn repo, _chg ->
@@ -596,10 +599,6 @@ defmodule Philomena.Images do
   defp deleted_vote_type(%{undownvote: {1, _}}), do: "downvote"
   defp deleted_vote_type(%{unupvote: {1, _}}), do: "upvote"
   defp deleted_vote_type(_changes), do: "vote"
-
-  defp parse_vote(up) when up in [true, "true"], do: {:ok, true}
-  defp parse_vote(up) when up in [false, "false"], do: {:ok, false}
-  defp parse_vote(_up), do: {:error, :invalid_vote}
 
   @doc group: "Browsing and discovery"
   @doc """
@@ -1173,14 +1172,19 @@ defmodule Philomena.Images do
 
   """
   @spec revert_source_change_for_erasure(Image.t(), Actor.t(), map()) ::
-          {:ok, map()} | Multi.failure()
+          {:ok, Image.t()} | {:error, Ecto.Changeset.t()}
   def revert_source_change_for_erasure(%Image{} = image, %Actor{} = actor, attrs) do
-    case update_loaded_sources(image, actor, attrs) do
-      {:ok, image} ->
-        {:ok, image}
+    with {:ok, source_input_form} <-
+           %SourceInputForm{}
+           |> SourceInputForm.changeset(attrs)
+           |> SourceInputForm.apply(image) do
+      case update_loaded_sources(image, actor, source_input_form) do
+        {:ok, image} ->
+          {:ok, image}
 
-      {:error, :no_change} ->
-        {:ok, image}
+        {:error, :no_change} ->
+          {:ok, image}
+      end
     end
   end
 
@@ -1399,21 +1403,28 @@ defmodule Philomena.Images do
   def upload_image(%Actor{user: user} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Image),
-         :ok <- RateLimiter.check_rate_limit(actor, :image_create) do
-      tags = Tags.get_or_create_tags(params["tag_input"])
-      sources = params["sources"]
+         :ok <- RateLimiter.check_rate_limit(actor, :image_create),
+         {:ok, tag_input_form} <-
+           %TagInputForm{}
+           |> TagInputForm.changeset(params)
+           |> TagInputForm.apply(%Image{}),
+         {:ok, source_input_form} <-
+           %SourceInputForm{}
+           |> SourceInputForm.changeset(params)
+           |> SourceInputForm.apply(%Image{}) do
+      tags = Tags.get_or_create_tags(tag_input_form.tag_input)
 
-      image =
+      image_changeset =
         %Image{}
         |> Image.creation_changeset(params, actor)
-        |> Image.source_changeset([], sources)
+        |> Image.source_changeset([], source_input_form.sources)
         |> Image.tag_changeset([], tags)
         |> Image.dnp_changeset(user)
         |> Uploader.analyze_upload(params)
         |> maybe_approve_image(user)
 
       Multi.new()
-      |> Multi.insert(:image, image)
+      |> Multi.insert(:image, image_changeset)
       |> Tags.put_image_count_delta(
         :added_tag_count,
         fn %{image: image} -> Enum.map(image.added_tags, & &1.id) end,
@@ -2378,9 +2389,13 @@ defmodule Philomena.Images do
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :source_update),
          {:ok, image} <-
-           load_image_member(actor, :edit_metadata, image_id, [:user, :sources, tags: :aliases]) do
+           load_image_member(actor, :edit_metadata, image_id, [:user, :sources, tags: :aliases]),
+         {:ok, source_input_form} <-
+           %SourceInputForm{}
+           |> SourceInputForm.changeset(attrs)
+           |> SourceInputForm.apply(image) do
       image
-      |> update_loaded_sources(actor, attrs)
+      |> update_loaded_sources(actor, source_input_form)
       |> case do
         {:ok, %Image{} = image} ->
           RateLimiter.record_action(actor, :source_update, @source_update_window)
@@ -2532,9 +2547,13 @@ defmodule Philomena.Images do
              :locked_tags,
              :sources,
              tags: :aliases
-           ]) do
+           ]),
+         {:ok, tag_input_form} <-
+           %TagInputForm{}
+           |> TagInputForm.changeset(attrs)
+           |> TagInputForm.apply(image) do
       image
-      |> update_loaded_tags(actor, attrs)
+      |> update_loaded_tags(actor, tag_input_form)
       |> case do
         {:ok, %Image{} = image} ->
           RateLimiter.record_action(actor, :tag_update, @tag_update_window)
@@ -3179,9 +3198,9 @@ defmodule Philomena.Images do
 
   @doc group: "User interactions"
   @doc """
-  Records `actor`'s vote on `image_id`—an upvote when `up` is `true` or
-  `"true"`, and a downvote when it is `false` or `"false"`, replacing any
-  existing vote. Other values return `{:error, :invalid_vote}`. Voting is
+  Records `actor`'s vote on `image_id` from `attrs`, replacing any existing
+  vote. The `up` parameter accepts booleans and their form-encoded string
+  values. Invalid attributes return their vote form changeset. Voting is
   idempotent.
 
   Write access, image authorization, and forced-filter enforcement happen before
@@ -3189,24 +3208,27 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> create_vote(actor, "42", true)
+      iex> create_vote(actor, "42", %{"up" => "1"})
       {:ok, %Image{}}
 
   """
-  @spec create_vote(Actor.t(), IntegerId.integer_id(), term()) ::
+  @spec create_vote(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()}
           | {:error,
              :ban
              | :unauthorized
              | :not_found
              | :forced_filter
-             | :invalid_vote}
-  def create_vote(%Actor{user: user} = actor, image_id, up) do
+             | Ecto.Changeset.t()}
+  def create_vote(%Actor{user: user} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
            load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
          :ok <- Filtering.verify_not_forced(actor, image),
-         {:ok, up} <- parse_vote(up) do
+         {:ok, %{up: up}} <-
+           %VoteForm{}
+           |> VoteForm.changeset(attrs)
+           |> VoteForm.apply(image) do
       Multi.new()
       |> ImageVotes.put_vote_for_loaded_image(image, user, up)
       |> Multi.transact()

@@ -108,7 +108,7 @@ defmodule PhilomenaWeb.Image.VoteControllerTest do
 
       conn = post(conn, ~p"/images/#{image}/vote", %{})
 
-      assert json_response(conn, 400) == %{}
+      assert json_response(conn, 400) == %{"errors" => %{"up" => ["can't be blank"]}}
       refute vote(image, user)
     end
 
@@ -118,7 +118,7 @@ defmodule PhilomenaWeb.Image.VoteControllerTest do
 
       conn = post(conn, ~p"/images/#{image}/vote", %{"up" => "banana"})
 
-      assert json_response(conn, 400) == %{}
+      assert json_response(conn, 400) == %{"errors" => %{"up" => ["is invalid"]}}
       refute vote(image, user)
     end
 

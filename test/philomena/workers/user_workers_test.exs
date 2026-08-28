@@ -28,7 +28,7 @@ defmodule Philomena.UserWorkersTest do
     downvoted = image_fixture()
     faved = image_fixture()
 
-    assert {:ok, _image} = Images.create_vote(actor(user), downvoted.id, false)
+    assert {:ok, _image} = Images.create_vote(actor(user), downvoted.id, %{up: false})
     assert {:ok, _image} = Images.create_fave(actor(user), faved.id)
 
     assert :ok = UserUnvoteWorker.perform(user.id, true)
