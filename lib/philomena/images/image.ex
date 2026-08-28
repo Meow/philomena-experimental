@@ -24,7 +24,6 @@ defmodule Philomena.Images.Image do
   alias Philomena.Images.SourceDiffer
   alias Philomena.Images.TagValidator
   alias Philomena.Images.DnpValidator
-  alias Philomena.Repo
 
   @type t :: %__MODULE__{}
 
@@ -178,7 +177,7 @@ defmodule Philomena.Images.Image do
     |> check_dimensions()
     |> prepare_changes(fn changeset ->
       sha512 = fetch_field!(changeset, :image_orig_sha512_hash)
-      other_image = Repo.get_by(Image, image_orig_sha512_hash: sha512)
+      other_image = changeset.repo.get_by(Image, image_orig_sha512_hash: sha512)
 
       if is_nil(other_image) or other_image.id == changeset.data.id do
         changeset
