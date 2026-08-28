@@ -547,50 +547,23 @@ defmodule Philomena.Multi do
     update_in(multi.multi, &Ecto.Multi.update_all(&1, name, queryable_or_fun, updates, opts))
   end
 
-  @doc """
-  Locks a query result for update, or aborts the transaction if it was not found.
+  @doc ~S"""
+  Acquires a transaction-scoped advisory lock for the application-defined key.
 
-  The locked result is available under `name` to later Multi steps. This is
-  useful before making a change that depends on the row's current state. The
-  query may be a function of earlier Multi changes and is evaluated inside the
-  transaction.
+  This is useful when there would otherwise be nothing to lock.
 
   ## Example
 
       Multi.new()
-      |> Multi.lock_one(:user, from(u in User, where: u.id == ^user_id))
-      |> Multi.transact()
-
-      Multi.new()
-      |> Multi.lock_one(:topic, topic_query)
-      |> Multi.lock_one(:forum, fn %{topic: topic} ->
-        from(forum in Forum, where: forum.id == ^topic.forum_id)
-      end)
+      |> Multi.lock_advisory(:lock_user_ip, "ip:#{ip}")
       |> Multi.transact()
 
   """
-  @spec lock_one(
-          t(),
-          Ecto.Multi.name(),
-          Ecto.Queryable.t() | (Ecto.Multi.changes() -> Ecto.Queryable.t())
-        ) :: t()
-  def lock_one(%__MODULE__{} = multi, name, queryable_or_fun) do
+  @spec lock_advisory(t(), Ecto.Multi.name(), binary()) :: t()
+  def lock_advisory(%__MODULE__{} = multi, name, key) do
     lock_fn =
-      fn repo, changes ->
-        queryable =
-          if is_function(queryable_or_fun, 1) do
-            queryable_or_fun.(changes)
-          else
-            queryable_or_fun
-          end
-
-        queryable
-        |> lock("FOR UPDATE")
-        |> repo.one()
-        |> case do
-          nil -> {:error, :not_found}
-          result -> {:ok, result}
-        end
+      fn repo, _changes ->
+        repo.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))", [key])
       end
 
     update_in(multi.multi, &Ecto.Multi.run(&1, name, lock_fn))
@@ -639,6 +612,55 @@ defmodule Philomena.Multi do
          queryable
          |> lock("FOR UPDATE")
          |> repo.all()}
+      end
+
+    update_in(multi.multi, &Ecto.Multi.run(&1, name, lock_fn))
+  end
+
+  @doc """
+  Locks a query result for update, or aborts the transaction if it was not found.
+
+  The locked result is available under `name` to later Multi steps. This is
+  useful before making a change that depends on the row's current state. The
+  query may be a function of earlier Multi changes and is evaluated inside the
+  transaction.
+
+  ## Example
+
+      Multi.new()
+      |> Multi.lock_one(:user, from(u in User, where: u.id == ^user_id))
+      |> Multi.transact()
+
+      Multi.new()
+      |> Multi.lock_one(:topic, topic_query)
+      |> Multi.lock_one(:forum, fn %{topic: topic} ->
+        from(forum in Forum, where: forum.id == ^topic.forum_id)
+      end)
+      |> Multi.transact()
+
+  """
+  @spec lock_one(
+          t(),
+          Ecto.Multi.name(),
+          Ecto.Queryable.t() | (Ecto.Multi.changes() -> Ecto.Queryable.t())
+        ) :: t()
+  def lock_one(%__MODULE__{} = multi, name, queryable_or_fun) do
+    lock_fn =
+      fn repo, changes ->
+        queryable =
+          if is_function(queryable_or_fun, 1) do
+            queryable_or_fun.(changes)
+          else
+            queryable_or_fun
+          end
+
+        queryable
+        |> lock("FOR UPDATE")
+        |> repo.one()
+        |> case do
+          nil -> {:error, :not_found}
+          result -> {:ok, result}
+        end
       end
 
     update_in(multi.multi, &Ecto.Multi.run(&1, name, lock_fn))

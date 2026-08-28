@@ -84,22 +84,22 @@ defmodule Philomena.Reports do
     end
   end
 
-  defp open_report_count(query) do
+  defp open_report_count(repo, query) do
     query
     |> where([report], report.state in ["open", "in_progress"])
-    |> Repo.aggregate(:count)
+    |> repo.aggregate(:count)
   end
 
-  defp ensure_report_limit(%Actor{user: user, ip: ip} = actor) do
+  defp ensure_report_limit(repo, %Actor{user: user, ip: ip} = actor) do
     cond do
       authorize(actor, :bypass_submission_limit, Report) == :ok ->
         :ok
 
       not is_nil(user) and
-          open_report_count(where(Report, user_id: ^user.id)) >= @max_open_reports ->
+          open_report_count(repo, where(Report, user_id: ^user.id)) >= @max_open_reports ->
         {:error, :too_many_reports}
 
-      open_report_count(where(Report, ip: ^ip)) >= @max_open_reports ->
+      open_report_count(repo, where(Report, ip: ^ip)) >= @max_open_reports ->
         {:error, :too_many_reports}
 
       true ->
@@ -389,18 +389,31 @@ defmodule Philomena.Reports do
           {:ok, Report.t()}
           | {:error, :too_many_reports | :ban | :unauthorized | :not_found}
           | {:error, ReportForm.t()}
-  def create_report(%Actor{} = actor, locator, params) do
+  def create_report(%Actor{user: user} = actor, locator, params) do
     with :ok <- verify_write_access(actor),
          {:ok, target} <- load_report_target(actor, locator),
          {:ok, rule_id} <- Report.fetch_rule_id(params),
-         {:ok, rule} <- Rules.fetch_rule(rule_id),
-         :ok <- ensure_report_limit(actor) do
+         {:ok, rule} <- Rules.fetch_rule(rule_id) do
       report_changeset =
         target
         |> Ecto.build_assoc(:reports)
         |> Report.user_creation_changeset(params, actor, rule)
 
       Multi.new()
+      |> Multi.lock_advisory(:report_limit_ip, "reports:ip:#{actor.ip}")
+      |> then(fn multi ->
+        if user do
+          Multi.lock_one(multi, :report_limit_user, where(User, id: ^user.id))
+        else
+          multi
+        end
+      end)
+      |> Multi.run(:report_limit, fn repo, _changes ->
+        case ensure_report_limit(repo, actor) do
+          :ok -> {:ok, nil}
+          error -> error
+        end
+      end)
       |> Multi.insert(:report, report_changeset)
       |> put_reindex_report()
       |> Multi.transact()
@@ -415,6 +428,9 @@ defmodule Philomena.Reports do
              changeset: changeset,
              rules: Rules.list_reportable_rules()
            }}
+
+        {:error, :report_limit, :too_many_reports, _changes} ->
+          {:error, :too_many_reports}
       end
     end
   end
