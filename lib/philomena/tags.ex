@@ -1248,7 +1248,7 @@ defmodule Philomena.Tags do
 
     Tagging
     |> where(tag_id: ^tag.id)
-    |> Batch.query_batches(batch_size: 1_000, id_field: :image_id)
+    |> Batch.query_batches_until_empty(batch_size: 1_000, id_field: :image_id)
     |> Enum.each(fn batch_query ->
       # Lock all images in the batch first to prevent image operations from racing tag updates.
       image_query =
@@ -1286,7 +1286,7 @@ defmodule Philomena.Tags do
 
     TagChangeTag
     |> where(tag_id: ^tag.id)
-    |> Batch.query_batches(batch_size: 10_000, id_field: :tag_change_id)
+    |> Batch.query_batches_until_empty(batch_size: 10_000, id_field: :tag_change_id)
     |> Enum.each(fn batch_query ->
       tag_change_query =
         from tag_change in TagChange,
@@ -1323,14 +1323,14 @@ defmodule Philomena.Tags do
       :ok
 
   """
-  @spec perform_alias(integer(), integer()) :: :ok | {:error, :invalid_target}
+  @spec perform_alias(integer(), integer()) :: :ok | {:error, :stale_target}
   def perform_alias(tag_id, target_tag_id) do
     tag = Repo.get!(Tag, tag_id)
     target_tag = Repo.get!(Tag, target_tag_id)
 
     Tagging
     |> where(tag_id: ^tag.id)
-    |> Batch.query_batches(batch_size: 1_000, id_field: :image_id)
+    |> Batch.query_batches_until_empty(batch_size: 1_000, id_field: :image_id)
     |> Enum.find(:ok, fn batch_query ->
       # Lock all images in the batch to prevent image operations from racing tag updates.
       image_query =
@@ -1361,7 +1361,7 @@ defmodule Philomena.Tags do
         if tag.aliased_tag_id == target_tag.id do
           {:ok, nil}
         else
-          {:error, :invalid_target}
+          {:error, :stale_target}
         end
       end)
       |> Images.put_insert_taggings(:new_visible, visible_insert_all)
@@ -1396,7 +1396,7 @@ defmodule Philomena.Tags do
           nil
 
         {:error, :check_source_tag, _reason, _changes} ->
-          {:error, :invalid_target}
+          {:error, :stale_target}
       end
     end)
   end
