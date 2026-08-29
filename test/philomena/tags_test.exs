@@ -853,7 +853,7 @@ defmodule Philomena.TagsTest do
         |> Ecto.Changeset.change(description: "Still useful")
         |> Repo.update!()
 
-      assert {1, [empty_id]} = Tags.cleanup!()
+      assert [empty_id] = Tags.cleanup!()
       assert empty_id == empty.id
       refute Repo.get(Tag, empty.id)
       assert Repo.get(Tag, kept.id)
@@ -898,13 +898,13 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "put_canonicalize_tag_names/4" do
+  describe "put_canonicalize_tag_name_sets/2" do
     test "does not create tags by default" do
       name = unique_tag_name()
 
-      assert {:ok, %{tags: []}} =
+      assert {:ok, %{canonical_tags: %{tags: []}}} =
                Multi.new()
-               |> Tags.put_canonicalize_tag_names(:tags, [name])
+               |> Tags.put_canonicalize_tag_name_sets([{:tags, [name], []}])
                |> Multi.transact()
 
       assert Tags.find_canonical_tag_by_name(name) == nil
@@ -914,9 +914,11 @@ defmodule Philomena.TagsTest do
       oversized = String.duplicate("a", @limit + 1)
       tag_names = Tag.parse_tag_list("safe, #{oversized}")
 
-      assert {:ok, %{tags: [%Tag{name: "safe"}]}} =
+      assert {:ok, %{canonical_tags: %{tags: [%Tag{name: "safe"}]}}} =
                Multi.new()
-               |> Tags.put_canonicalize_tag_names(:tags, tag_names, allow_insert_new?: true)
+               |> Tags.put_canonicalize_tag_name_sets([
+                 {:tags, tag_names, allow_insert_new?: true}
+               ])
                |> Multi.transact()
 
       assert Tags.find_canonical_tag_by_name(oversized) == nil

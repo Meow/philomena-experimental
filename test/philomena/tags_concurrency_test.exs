@@ -49,13 +49,15 @@ defmodule Philomena.TagsConcurrencyTest do
         for _ <- 1..8 do
           fn ->
             Multi.new()
-            |> Tags.put_canonicalize_tag_names(:tags, [name], allow_insert_new?: true)
+            |> Tags.put_canonicalize_tag_name_sets([
+              {:tags, [name], allow_insert_new?: true}
+            ])
             |> Multi.transact()
           end
         end
       )
 
-    assert Enum.all?(results, &match?({:ok, %{tags: [%Tag{name: ^name}]}}, &1))
+    assert Enum.all?(results, &match?({:ok, %{canonical_tags: %{tags: [%Tag{name: ^name}]}}}, &1))
     assert Repo.aggregate(from(tag in Tag, where: tag.name == ^name), :count) == 1
   end
 

@@ -152,6 +152,10 @@ defmodule Philomena.Tags.Tag do
     |> put_change(:image, nil)
   end
 
+  def implication_form_changeset(tag, attrs \\ %{}) do
+    cast(tag, attrs, [:implied_tag_list])
+  end
+
   def alias_form_changeset(tag, attrs \\ %{}) do
     tag
     |> cast(attrs, [:target_tag])

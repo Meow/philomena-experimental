@@ -12,11 +12,11 @@ defmodule Philomena.TagsFixtures do
   def unique_tag_name, do: "test tag #{System.unique_integer([:positive])}"
 
   def tag_list_fixture(tag_input) do
-    {:ok, %{tags: tags}} =
+    {:ok, %{canonical_tags: %{tags: tags}}} =
       Multi.new()
-      |> Tags.put_canonicalize_tag_names(:tags, Tag.parse_tag_list(tag_input),
-        allow_insert_new?: true
-      )
+      |> Tags.put_canonicalize_tag_name_sets([
+        {:tags, Tag.parse_tag_list(tag_input), allow_insert_new?: true}
+      ])
       |> Multi.transact()
 
     tags

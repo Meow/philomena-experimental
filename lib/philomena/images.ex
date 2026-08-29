@@ -285,14 +285,17 @@ defmodule Philomena.Images do
       )
 
     Multi.new()
-    |> Tags.put_canonicalize_tag_names(:removed_tags, removed_tag_names)
-    |> Tags.put_canonicalize_tag_names(:added_tags, added_tag_names,
-      allow_insert_new?: true,
-      expand_implications?: true
-    )
     |> put_lock_image(actor, image.id, :edit_metadata, [:tags, :locked_tags])
+    |> Tags.put_canonicalize_tag_name_sets([
+      {:removed_tags, removed_tag_names, []},
+      {:added_tags, added_tag_names, allow_insert_new?: true, expand_implications?: true}
+    ])
     |> Multi.run(:image, fn
-      repo, %{locked_image: image, added_tags: added_tags, removed_tags: removed_tags} ->
+      repo,
+      %{
+        locked_image: image,
+        canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}
+      } ->
         changeset = Image.tag_changeset(image, added_tags, removed_tags, image.locked_tags)
 
         if Image.meaningful_tag_update?(changeset) do
@@ -312,7 +315,7 @@ defmodule Philomena.Images do
       Comments.reindex_comments_on_image(image)
       update_tag_change_limits_after_commit(image, actor)
     end)
-    |> Multi.transact()
+    |> Multi.transact_with_automatic_retry()
     |> case do
       {:ok, %{image: %Image{} = image}} ->
         {:ok, image}
@@ -1462,11 +1465,10 @@ defmodule Philomena.Images do
         |> maybe_approve_image(user)
 
       Multi.new()
-      |> Tags.put_canonicalize_tag_names(:added_tags, added_tag_names,
-        allow_insert_new?: true,
-        expand_implications?: true
-      )
-      |> Multi.insert(:image, fn %{added_tags: added_tags} ->
+      |> Tags.put_canonicalize_tag_name_sets([
+        {:added_tags, added_tag_names, allow_insert_new?: true, expand_implications?: true}
+      ])
+      |> Multi.insert(:image, fn %{canonical_tags: %{added_tags: added_tags}} ->
         image_changeset
         |> Image.source_changeset(added_sources, [])
         |> Image.tag_changeset(added_tags, [])
@@ -1480,7 +1482,7 @@ defmodule Philomena.Images do
       |> maybe_subscribe_on(:image, user, :watch_on_upload)
       |> put_approval_steps()
       |> put_reindex_image(:image)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
           RateLimiter.record_action(actor, :image_create, @image_create_window)
@@ -2508,15 +2510,15 @@ defmodule Philomena.Images do
            |> TagInputForm.apply(image) do
       tag_names = Tag.parse_tag_list(tag_input_form.tag_input)
 
-      query =
+      image_query =
         Image
         |> where(id: ^image.id)
         |> preload(:locked_tags)
 
       Multi.new()
-      |> Tags.put_canonicalize_tag_names(:tags, tag_names)
-      |> Multi.lock_one(:locked_image, query)
-      |> Multi.update(:image, fn %{locked_image: image, tags: tags} ->
+      |> Tags.put_canonicalize_tag_name_sets([{:tags, tag_names, []}])
+      |> Multi.lock_one(:locked_image, image_query)
+      |> Multi.update(:image, fn %{locked_image: image, canonical_tags: %{tags: tags}} ->
         Image.locked_tags_changeset(image, attrs, tags)
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
@@ -2527,7 +2529,7 @@ defmodule Philomena.Images do
         }
       end)
       |> put_reindex_image(:image)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
           {:ok, image}
@@ -2922,7 +2924,7 @@ defmodule Philomena.Images do
   ## Note
 
   All the tags provided to this function must exist in the database.
-  Resolve tag names with `Tags.put_canonicalize_tag_names/4` in a preceding
+  Resolve tag names with `Tags.put_canonicalize_tag_name_sets/2` in a preceding
   `Multi` step when needed.
 
   ## Return value

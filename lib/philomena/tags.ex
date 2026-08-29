@@ -198,7 +198,10 @@ defmodule Philomena.Tags do
     end)
   end
 
-  defp maybe_insert_new_tags(%Multi{} = multi, name, tag_names, true) do
+  defp maybe_insert_new_tags(%Multi{} = multi, []),
+    do: multi
+
+  defp maybe_insert_new_tags(%Multi{} = multi, tag_names) do
     insert_rows =
       Enum.map(tag_names, fn tag_name ->
         %Tag{}
@@ -218,16 +221,13 @@ defmodule Philomena.Tags do
     ]
 
     multi
-    |> Multi.insert_all({name, :new_tags}, Tag, insert_rows, insert_options)
-    |> Multi.on_commit(fn %{{^name, :new_tags} => {_count, new_tags}} ->
+    |> Multi.insert_all(:new_tags, Tag, insert_rows, insert_options)
+    |> Multi.on_commit(fn %{new_tags: {_count, new_tags}} ->
       if Enum.any?(new_tags) do
         reindex_tags(new_tags)
       end
     end)
   end
-
-  defp maybe_insert_new_tags(%Multi{} = multi, _name, _tag_names, _allow_insert_new),
-    do: multi
 
   defp maybe_expand_implications(tag_list, repo, true) do
     tag_list = Enum.flat_map(tag_list, &([&1] ++ &1.implied_tags))
@@ -253,32 +253,45 @@ defmodule Philomena.Tags do
   end
 
   @doc """
-  Gets existing tags or creates new ones from a list of tag names and places
-  them into the Multi step named by `name`.
+  Gets existing tags or creates new ones from multiple lists of tag names,
+  canonicalizes each list, and places the results in the `:canonical_tags`
+  Multi step.
 
-  `tag_names` is a list of strings. When option `:allow_insert_new?` is true,
-  new tags can be created. When option `:expand_implications?` is true, the
-  list of tags in `name` will also include all tags implied from the original
-  set.
+  `name_sets` is a list of `{name, tag_names, options}` tuples. `tag_names`
+  is a list of strings. When `:allow_insert_new?` is true in a set's options,
+  missing tags from that set can be created. When `:expand_implications?` is
+  true, that set also includes all tags implied from its original tags.
+
+  The `:canonical_tags` result is a map from each set name to its list of
+  canonical tags. Tags shared by multiple sets are fetched and locked only
+  once.
 
   ## Examples
 
       iex> (Multi.new()
-      ...> |> put_canonicalize_tag_names(:tags, ~w(safe cute pony))
+      ...> |> put_canonicalize_tag_name_sets([
+      ...>   {:tags, ~w(safe cute pony), allow_insert_new?: true}
+      ...> ])
       ...> |> Multi.transact())
-      {:ok, %{tags: [%Tag{name: "safe"}, %Tag{name: "cute"}, %Tag{name: "pony"}]}}
+      {:ok, %{canonical_tags: %{tags: [%Tag{name: "safe"}, %Tag{name: "cute"}, %Tag{name: "pony"}]}}}
 
   """
-  @spec put_canonicalize_tag_names(Multi.t(), Multi.name(), [String.t()], Keyword.t()) ::
+  @spec put_canonicalize_tag_name_sets(
+          multi :: Multi.t(),
+          name_sets :: [{Multi.name(), [String.t()], Keyword.t()}]
+        ) ::
           Multi.t()
-  def put_canonicalize_tag_names(multi, name, tag_names, options \\ [])
+  def put_canonicalize_tag_name_sets(%Multi{} = multi, name_sets) do
+    tag_names =
+      name_sets
+      |> Enum.flat_map(fn {_set, names, _options} -> names end)
+      |> Enum.uniq()
 
-  def put_canonicalize_tag_names(%Multi{} = multi, name, [], _options),
-    do: Multi.put(multi, name, [])
-
-  def put_canonicalize_tag_names(%Multi{} = multi, name, tag_names, options) do
-    allow_insert_new? = Keyword.get(options, :allow_insert_new?, false)
-    expand_implications? = Keyword.get(options, :expand_implications?, false)
+    insertable_tag_names =
+      name_sets
+      |> Enum.filter(fn {_set, _names, options} -> Keyword.get(options, :allow_insert_new?) end)
+      |> Enum.flat_map(fn {_set, names, _options} -> names end)
+      |> Enum.uniq()
 
     tag_query =
       Tag
@@ -286,14 +299,62 @@ defmodule Philomena.Tags do
       |> preload([:implied_tags, aliased_tag: :implied_tags])
 
     multi
-    |> maybe_insert_new_tags(name, tag_names, allow_insert_new?)
-    |> Multi.all({name, :all_tags}, tag_query)
-    |> Multi.run(name, fn repo, %{{^name, :all_tags} => all_tags} ->
-      {:ok,
-       all_tags
-       |> Enum.map(&(&1.aliased_tag || &1))
-       |> maybe_expand_implications(repo, expand_implications?)
-       |> Enum.uniq_by(& &1.id)}
+    |> maybe_insert_new_tags(insertable_tag_names)
+    |> Multi.all(:unlocked_tags, tag_query)
+    |> Multi.run(:canonical_tags, fn repo, %{unlocked_tags: tags} ->
+      tags_by_name = Map.new(tags, &{&1.name, &1})
+
+      buckets =
+        Map.new(name_sets, fn {set, names, options} ->
+          expand_implications? = Keyword.get(options, :expand_implications?)
+
+          {set,
+           names
+           |> Enum.filter(&Map.has_key?(tags_by_name, &1))
+           |> Enum.map(&tags_by_name[&1])
+           |> Enum.map(&(&1.aliased_tag || &1))
+           |> maybe_expand_implications(repo, expand_implications?)
+           |> Enum.uniq_by(& &1.id)}
+        end)
+
+      {:ok, buckets}
+    end)
+    |> Multi.lock_all(:locked_tags, fn %{canonical_tags: buckets} ->
+      tag_ids =
+        buckets
+        |> Enum.flat_map(fn {_set, tags} -> Enum.map(tags, & &1.id) end)
+        |> Enum.uniq()
+
+      Tag
+      |> where([tag], tag.id in ^tag_ids)
+      |> order_by(asc: :id)
+    end)
+    |> Multi.run(:detect_conflict, fn _repo, %{canonical_tags: buckets, locked_tags: tags} ->
+      tags_by_id =
+        buckets
+        |> Enum.flat_map(fn {_set, tags} -> tags end)
+        |> Map.new(&{&1.id, &1})
+
+      # Implication list addition is a permitted race.
+      #
+      # However, deletion and alias canonicalization absolutely must be
+      # quiescent because incorrect state during a transaction can corrupt tag
+      # image counters.
+      #
+      # This code checks that the tag's alias is the same as it was before the
+      # lock to handle legacy databases that might have aliases resident in
+      # implied tag lists. Eventually this should be migrated out.
+      conflict_fn =
+        fn tag ->
+          not Map.has_key?(tags_by_id, tag.id) or
+            Map.fetch!(tags_by_id, tag.id).aliased_tag_id != tag.aliased_tag_id
+        end
+
+      if Enum.any?(tags, conflict_fn) do
+        {:error, :conflict}
+      else
+        {:ok, nil}
+      end
     end)
   end
 
@@ -700,23 +761,30 @@ defmodule Philomena.Tags do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_tag(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, tag} <- load_tag_for_action(actor, :update, slug, [:implied_tags]) do
+         {:ok, tag} <- load_tag_for_action(actor, :update, slug, []) do
       implied_tag_names =
-        tag
-        |> Tag.changeset(attrs)
+        %Tag{}
+        |> Tag.implication_form_changeset(attrs)
         |> Ecto.Changeset.get_field(:implied_tag_list)
         |> Tag.parse_tag_list()
 
-      tag_query =
+      locked_tags_query =
+        Tag
+        |> where([t], t.name in ^[tag.name | implied_tag_names])
+        |> order_by(asc: :id)
+
+      locked_tag_query =
         Tag
         |> where(id: ^tag.id)
-        |> preload(^@show_preloads)
+        |> preload(:implied_tags)
 
       Multi.new()
-      |> put_canonicalize_tag_names(:implied_tags, implied_tag_names)
-      |> Multi.lock_one(:locked_tag, tag_query)
-      |> Multi.update(:tag, fn %{locked_tag: tag, implied_tags: implied_tags} ->
-        Tag.changeset(tag, attrs, implied_tags)
+      |> Multi.lock_all(:locked_tags, locked_tags_query)
+      |> Multi.lock_one(:locked_tag, locked_tag_query)
+      |> Multi.update(:tag, fn %{locked_tags: locked_tags, locked_tag: tag} ->
+        locked_tags
+        |> Enum.filter(&(&1.name in implied_tag_names))
+        |> then(&Tag.changeset(tag, attrs, &1))
       end)
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -888,26 +956,22 @@ defmodule Philomena.Tags do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def alias_tag(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, %{id: source_tag_id}} <- load_tag_for_action(actor, :alias, slug, []),
+         {:ok, %{name: source_tag_name}} <- load_tag_for_action(actor, :alias, slug, []),
          {:ok, %{target_tag: target_tag_name}} =
            %Tag{}
            |> Tag.alias_form_changeset(attrs)
-           |> Ecto.Changeset.apply_action(:update),
-         {:ok, %{id: target_tag_id}} <-
-           target_tag_name
-           |> canonical_tag_query
-           |> Loader.one() do
+           |> Ecto.Changeset.apply_action(:update) do
       tag_query =
         Tag
-        |> where([t], t.id in ^[source_tag_id, target_tag_id])
+        |> where([t], t.name in ^[source_tag_name, target_tag_name])
         |> preload(^@alias_preloads)
         |> order_by(asc: :id)
 
       Multi.new()
       |> Multi.lock_all(:locked_tags, tag_query)
       |> Multi.run(:tags, fn _repo, %{locked_tags: locked_tags} ->
-        source_tag = Enum.find(locked_tags, &(&1.id == source_tag_id))
-        target_tag = Enum.find(locked_tags, &(&1.id == target_tag_id))
+        source_tag = Enum.find(locked_tags, &(&1.name == source_tag_name))
+        target_tag = Enum.find(locked_tags, &(&1.name == target_tag_name))
 
         if is_nil(source_tag) or is_nil(target_tag) do
           {:error, :not_found}
@@ -915,7 +979,9 @@ defmodule Philomena.Tags do
           {:ok, {source_tag, target_tag}}
         end
       end)
-      |> Multi.exists?(:incoming_aliases, where(Tag, aliased_tag_id: ^source_tag_id))
+      |> Multi.exists?(:incoming_aliases, fn %{tags: {source_tag, _target_tag}} ->
+        where(Tag, aliased_tag_id: ^source_tag.id)
+      end)
       |> Multi.update(:tag, fn
         %{tags: {source_tag, target_tag}, incoming_aliases: incoming_aliases} ->
           Tag.alias_changeset(source_tag, target_tag, incoming_aliases)
@@ -1470,12 +1536,12 @@ defmodule Philomena.Tags do
   ## Examples
 
       iex> cleanup!()
-      {3, [1, 2, 3]}
+      [1, 2, 3]
 
   """
   def cleanup! do
     cleanup_query =
-      from(tag in Tag,
+      from tag in Tag,
         as: :tag,
         where: tag.description == "",
         where: is_nil(tag.short_description) or tag.short_description == "",
@@ -1489,16 +1555,23 @@ defmodule Philomena.Tags do
         where: not exists(where(Implication, implied_tag_id: parent_as(:tag).id)),
         where: not exists(where(ArtistLink, tag_id: parent_as(:tag).id)),
         where: not exists(where(DnpEntry, tag_id: parent_as(:tag).id)),
+        order_by: [asc: tag.id],
         select: tag.id
-      )
 
-    {count, tag_ids} = Repo.delete_all(cleanup_query)
+    Multi.new()
+    |> Multi.lock_all(:locked_tags, cleanup_query)
+    |> Multi.delete_all(:tags, fn %{locked_tags: tag_ids} ->
+      where(Tag, [tag], tag.id in ^tag_ids)
+    end)
+    |> Multi.transact()
+    |> case do
+      {:ok, %{locked_tags: tag_ids}} ->
+        if Enum.any?(tag_ids) do
+          PhilomenaQuery.Search.delete_documents(tag_ids, Tag)
+        end
 
-    if count > 0 do
-      PhilomenaQuery.Search.delete_documents(tag_ids, Tag)
+        tag_ids
     end
-
-    {count, tag_ids}
   end
 
   @doc """

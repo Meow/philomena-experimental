@@ -695,6 +695,29 @@ defmodule Philomena.Multi do
   end
 
   @doc """
+  Run the Multi steps inside a transaction, restarting the transaction while
+  any step returns `{:error, :conflict}`.
+
+  See `c:Ecto.Repo.transact/2` for more information.
+  """
+  @spec transact_with_automatic_retry(t(), Keyword.t()) ::
+          {:ok, Ecto.Multi.changes()} | Ecto.Multi.failure()
+  def transact_with_automatic_retry(%__MODULE__{} = multi, opts \\ []) do
+    multi
+    |> transact(opts)
+    |> case do
+      {:ok, changes} ->
+        {:ok, changes}
+
+      {:error, _step, :conflict, _changes} ->
+        transact_with_automatic_retry(multi, opts)
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
   Registers a callback to occur after the Multi commits.
 
   The callback receives the transaction changes and runs only after a
