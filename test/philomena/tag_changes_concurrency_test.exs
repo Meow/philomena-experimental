@@ -33,21 +33,33 @@ defmodule Philomena.TagChangesConcurrencyTest do
   end
 
   defp create_tag_change!(image, tag, user, added) do
-    attributes = tag_change_attributes(user)
+    image_tag_names =
+      image
+      |> Repo.preload(:tags, force: true)
+      |> Map.fetch!(:tags)
+      |> Enum.map(& &1.name)
 
-    assert {:ok, [image_id]} =
-             Images.batch_update(
-               [
-                 %{
-                   image_id: image.id,
-                   added_tags: if(added, do: [tag], else: []),
-                   removed_tags: if(added, do: [], else: [tag])
-                 }
-               ],
-               attributes
+    old_tag_input = Enum.join(image_tag_names, ", ")
+
+    new_tag_input =
+      if added do
+        Enum.join([tag.name | image_tag_names], ", ")
+      else
+        image_tag_names
+        |> List.delete(tag.name)
+        |> Enum.join(", ")
+      end
+
+    arrangement_actor = actor(%{user | bypass_rate_limits: true})
+
+    assert {:ok, result} =
+             Images.update_tags(
+               arrangement_actor,
+               image.id,
+               %{"old_tag_input" => old_tag_input, "tag_input" => new_tag_input}
              )
 
-    assert image_id == image.id
+    assert result.image.id == image.id
 
     Repo.one!(
       from tag_change in TagChange,

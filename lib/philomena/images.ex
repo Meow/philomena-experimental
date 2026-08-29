@@ -3005,55 +3005,6 @@ defmodule Philomena.Images do
 
   @doc group: "Bulk operations"
   @doc """
-  Performs a batch update on multiple images, adding and removing tags.
-
-  Each change may contain a different set of added and removed tags. This
-  function handles tag changes, tag counts, and reindexing in a single
-  transaction.
-
-  ## Parameters
-
-  - changes: List of maps containing `:image_id`, `:added_tags`, and
-    `:removed_tags`
-  - attributes: Attributes tag changes are created with
-
-  ## Note
-
-  All the tags provided to this function must be existing `%Tag{}` records.
-  This function applies their IDs directly; use `batch_revert/2` for the
-  alias-aware tag-change reversion workflow.
-
-  ## Return value
-
-  On success, returns `{:ok, image_ids}` where `image_ids` are the IDs of
-  existing images with at least one requested tag addition or removal. Unknown
-  image IDs and changes with no tags are absent from the list.
-
-  ## Examples
-
-      iex> batch_update([
-      ...>   %{image_id: 1, added_tags: [tag1], removed_tags: [tag2]},
-      ...>   %{image_id: 2, added_tags: [tag3], removed_tags: []}
-      ...> ], %{user_id: user.id, ip: ip, fingerprint: "ffff"})
-      {:ok, [1, 2]}
-
-  """
-  @spec batch_update([map()], map()) :: {:ok, [integer()]} | :error
-  def batch_update(changes, attributes) do
-    changes
-    |> non_uniform_batch_multi(attributes)
-    |> Multi.transact()
-    |> case do
-      {:ok, %{locked_image_ids: image_ids}} ->
-        {:ok, image_ids}
-
-      _error ->
-        :error
-    end
-  end
-
-  @doc group: "Bulk operations"
-  @doc """
   Applies the net inverse of selected tag-change entries to multiple images.
 
   `changes` contains one or more ordered `:tag_changes` entries for each image.

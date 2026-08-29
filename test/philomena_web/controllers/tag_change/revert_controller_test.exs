@@ -1,10 +1,6 @@
 defmodule PhilomenaWeb.TagChange.RevertControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
-  # mass_revert reads the tag changes from Postgres and re-tags through
-  # Images.batch_update; every reindex is a dead Exq enqueue, so this stays
-  # Postgres-only.
-
   import Philomena.AttributionFixtures
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures

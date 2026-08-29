@@ -49,20 +49,28 @@ defmodule Philomena.TagChangesTest do
   # image plus the single TagChange row that recorded the two adds.
   defp tag_change!(user) do
     image = image_fixture()
-    attribution = actor(user)
-    added_tags = tag_list_fixture("added test tag, other added tag")
 
-    {:ok, [image_id]} =
-      Images.batch_update(
-        [%{image_id: image.id, added_tags: added_tags, removed_tags: []}],
+    # These tests arrange history rather than exercise the write rate limits.
+    arrangement_actor =
+      case user do
+        nil ->
+          actor()
+
+        user ->
+          actor(%{user | bypass_rate_limits: true})
+      end
+
+    {:ok, result} =
+      Images.update_tags(
+        arrangement_actor,
+        image.id,
         %{
-          user_id: user && user.id,
-          ip: attribution.ip,
-          fingerprint: attribution.fingerprint
+          "old_tag_input" => "safe",
+          "tag_input" => "safe, added test tag, other added tag"
         }
       )
 
-    assert image_id == image.id
+    assert result.image.id == image.id
     {image, Repo.one!(from tc in TagChange, where: tc.image_id == ^image.id)}
   end
 

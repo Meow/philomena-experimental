@@ -6,7 +6,6 @@ defmodule Philomena.TagChangeRevertWorkerTest do
 
   import Philomena.AttributionFixtures
   import Philomena.ImagesFixtures
-  import Philomena.TagsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Images
@@ -25,26 +24,17 @@ defmodule Philomena.TagChangeRevertWorkerTest do
   end
 
   defp change_tags!(image, user, old_input, new_input) do
-    old_tags = tag_list_fixture(old_input)
-    new_tags = tag_list_fixture(new_input)
-    old_ids = MapSet.new(old_tags, & &1.id)
-    new_ids = MapSet.new(new_tags, & &1.id)
+    # These tests arrange history rather than exercise the write rate limits.
+    arrangement_actor = actor(%{user | bypass_rate_limits: true})
 
-    added = Enum.reject(new_tags, &MapSet.member?(old_ids, &1.id))
-    removed = Enum.reject(old_tags, &MapSet.member?(new_ids, &1.id))
-    attribution = actor(user)
-
-    assert {:ok, [image_id]} =
-             Images.batch_update(
-               [%{image_id: image.id, added_tags: added, removed_tags: removed}],
-               %{
-                 user_id: user.id,
-                 ip: attribution.ip,
-                 fingerprint: attribution.fingerprint
-               }
+    assert {:ok, result} =
+             Images.update_tags(
+               arrangement_actor,
+               image.id,
+               %{"old_tag_input" => old_input, "tag_input" => new_input}
              )
 
-    assert image_id == image.id
+    assert result.image.id == image.id
   end
 
   defp full_revert!(user, batch_size) do
