@@ -694,20 +694,24 @@ defmodule Philomena.Tags do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_tag(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, tag} <- load_tag_for_action(actor, :update, slug, @show_preloads) do
-      tag_input =
+         {:ok, tag} <- load_tag_for_action(actor, :update, slug, [:implied_tags]) do
+      implied_tag_names =
         tag
         |> Tag.changeset(attrs)
         |> Ecto.Changeset.get_field(:implied_tag_list)
         |> Tag.parse_tag_list()
 
-      implied_tags =
+      tag_query =
         Tag
-        |> where([t], t.name in ^tag_input)
-        |> Repo.all()
+        |> where(id: ^tag.id)
+        |> preload(^@show_preloads)
 
       Multi.new()
-      |> Multi.update(:tag, Tag.changeset(tag, attrs, implied_tags))
+      |> put_canonicalize_tag_names(:implied_tags, implied_tag_names)
+      |> Multi.lock_one(:locked_tag, tag_query)
+      |> Multi.update(:tag, fn %{locked_tag: tag, implied_tags: implied_tags} ->
+        Tag.changeset(tag, attrs, implied_tags)
+      end)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -755,6 +759,7 @@ defmodule Philomena.Tags do
       tag_image_changeset = Uploader.analyze_upload(tag, upload)
 
       Multi.new()
+      |> Multi.lock_one(:locked_tag, where(Tag, id: ^tag.id))
       |> Multi.update(:tag, tag_image_changeset)
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -797,6 +802,7 @@ defmodule Philomena.Tags do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :delete_image, slug, @image_preloads) do
       Multi.new()
+      |> Multi.lock_one(:locked_tag, where(Tag, id: ^tag.id))
       |> Multi.update(:tag, Tag.remove_image_changeset(tag))
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -877,39 +883,54 @@ defmodule Philomena.Tags do
   def alias_tag(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :alias, slug, @alias_preloads),
-         {:ok, tag} =
+         {:ok, %{target_tag: target_tag_name}} =
            tag
            |> Tag.alias_form_changeset(attrs)
-           |> Ecto.Changeset.apply_action(:update),
-         target_tag = find_canonical_tag_by_name(tag.target_tag),
-         alias_changeset = Tag.alias_changeset(tag, target_tag),
-         {:ok, _tag} <- Ecto.Changeset.apply_action(alias_changeset, :update) do
+           |> Ecto.Changeset.apply_action(:update) do
+      tag_query =
+        Tag
+        |> where(id: ^tag.id)
+        |> preload(^@alias_preloads)
+
       Multi.new()
-      |> Multi.update(:tag, alias_changeset)
-      |> Filters.put_replace_tag_references(
-        :update_hidden_filters,
-        :update_spoilered_filters,
-        tag.id,
-        target_tag.id
-      )
-      |> Users.put_replace_watched_tag(:update_users_watching, tag.id, target_tag.id)
-      |> ArtistLinks.put_alias_tag(tag.id, target_tag.id)
-      |> DnpEntries.put_replace_tag(:update_dnp_entries, tag.id, target_tag.id)
-      |> Channels.put_replace_artist_tag(:update_channels, tag.id, target_tag.id)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        "Tag.Alias:update",
-        Paths.tag_path(tag),
-        "Aliased tag '#{tag.name}' into '#{target_tag.name}'"
-      )
-      |> Multi.on_commit(fn _changes ->
+      |> Multi.lock_one(:locked_tag, tag_query)
+      |> Multi.run(:target_tag, fn _repo, _changes ->
+        # TODO: both tags need to be locked
+        {:ok, find_canonical_tag_by_name(target_tag_name)}
+      end)
+      |> Multi.update(:tag, fn %{locked_tag: tag, target_tag: target_tag} ->
+        Tag.alias_changeset(tag, target_tag)
+      end)
+      |> Multi.merge(fn %{tag: tag, target_tag: target_tag} ->
+        Multi.new()
+        |> Filters.put_replace_tag_references(
+          :update_hidden_filters,
+          :update_spoilered_filters,
+          tag.id,
+          target_tag.id
+        )
+        |> Users.put_replace_watched_tag(:update_users_watching, tag.id, target_tag.id)
+        |> ArtistLinks.put_alias_tag(tag.id, target_tag.id)
+        |> DnpEntries.put_replace_tag(:update_dnp_entries, tag.id, target_tag.id)
+        |> Channels.put_replace_artist_tag(:update_channels, tag.id, target_tag.id)
+      end)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag: tag, target_tag: target_tag} ->
+        {
+          "Tag.Alias:update",
+          Paths.tag_path(tag),
+          "Aliased tag '#{tag.name}' into '#{target_tag.name}'"
+        }
+      end)
+      |> Multi.on_commit(fn %{tag: tag, target_tag: target_tag} ->
         Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
       end)
       |> Multi.transact()
       |> case do
         {:ok, %{tag: %Tag{} = tag}} ->
           {:ok, tag}
+
+        {:error, :target_tag, :not_found, _changes} ->
+          {:error, :not_found}
 
         {:error, :tag, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
@@ -960,11 +981,16 @@ defmodule Philomena.Tags do
   def unalias_tag(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :unalias, slug, @alias_preloads) do
-      unalias_changeset = Tag.unalias_changeset(tag)
-      former_alias = tag.aliased_tag
+      tag_query =
+        Tag
+        |> where(id: ^tag.id)
+        |> preload(:aliased_tag)
 
       Multi.new()
-      |> Multi.update(:tag, unalias_changeset)
+      |> Multi.lock_one(:locked_tag, tag_query)
+      |> Multi.update(:tag, fn %{locked_tag: tag} ->
+        Tag.unalias_changeset(tag)
+      end)
       |> ModerationLogs.put_log(
         :moderation_log,
         actor,
@@ -972,7 +998,7 @@ defmodule Philomena.Tags do
         Paths.tag_path(tag),
         "Dealiased tag '#{tag.name}'"
       )
-      |> Multi.on_commit(fn %{tag: tag} ->
+      |> Multi.on_commit(fn %{locked_tag: %{aliased_tag: former_alias}, tag: tag} ->
         reindex_tag_images(former_alias)
         reindex_tags([tag, former_alias])
       end)
@@ -1279,7 +1305,7 @@ defmodule Philomena.Tags do
       :ok
 
   """
-  @spec perform_alias(integer(), integer()) :: :ok
+  @spec perform_alias(integer(), integer()) :: :ok | {:error, :invalid_target}
   def perform_alias(tag_id, target_tag_id) do
     tag = Repo.get!(Tag, tag_id)
     target_tag = Repo.get!(Tag, target_tag_id)
@@ -1287,8 +1313,8 @@ defmodule Philomena.Tags do
     Tagging
     |> where(tag_id: ^tag.id)
     |> Batch.query_batches(batch_size: 1_000, id_field: :image_id)
-    |> Enum.each(fn batch_query ->
-      # Lock all images in the batch first to prevent image operations from racing tag updates.
+    |> Enum.find(:ok, fn batch_query ->
+      # Lock all images in the batch to prevent image operations from racing tag updates.
       image_query =
         from image in Image,
           where: image.id in subquery(select(batch_query, [tagging], tagging.image_id)),
@@ -1307,7 +1333,19 @@ defmodule Philomena.Tags do
       hidden_insert_all = insert_all_for_alias(hidden_taggings, target_tag)
 
       Multi.new()
-      |> Multi.lock_all(:images, image_query)
+      |> Multi.lock_all(:locked_images, image_query)
+      |> Multi.lock_one(:locked_source_tag, where(Tag, id: ^tag_id))
+      |> Multi.run(:check_source_tag, fn _repo, %{locked_source_tag: tag} ->
+        # Abort processing if the target is changed during batch scanning.
+        #
+        # This check can be ABA, but ABA will not have any deleterious effect
+        # on the migration.
+        if tag.aliased_tag_id == target_tag.id do
+          {:ok, nil}
+        else
+          {:error, :invalid_target}
+        end
+      end)
       |> Images.put_insert_taggings(:new_visible, visible_insert_all)
       |> Images.put_insert_taggings(:new_hidden, hidden_insert_all)
       |> Images.put_delete_taggings(:old_visible, visible_taggings)
@@ -1335,9 +1373,14 @@ defmodule Philomena.Tags do
         reindex_tags([tag, target_tag])
       end)
       |> Multi.transact()
-    end)
+      |> case do
+        {:ok, _changes} ->
+          nil
 
-    :ok
+        {:error, :check_source_tag, _reason, _changes} ->
+          {:error, :invalid_target}
+      end
+    end)
   end
 
   @doc """

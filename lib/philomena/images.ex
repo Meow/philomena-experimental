@@ -218,14 +218,38 @@ defmodule Philomena.Images do
 
   ## Metadata editing
 
+  defp put_lock_image(%Multi{} = multi, %Actor{} = actor, image_id, action, preloads) do
+    image_query =
+      Image
+      |> where(id: ^image_id)
+      |> preload(^preloads)
+
+    multi
+    |> Multi.lock_one(:locked_image, image_query)
+    |> Multi.run(:authorize, fn _repo, %{locked_image: image} ->
+      with :ok <- authorize(actor, action, image) do
+        {:ok, nil}
+      end
+    end)
+  end
+
+  defp map_lock_errors(result) do
+    case result do
+      {:error, :locked_image, :not_found, _changes} ->
+        {:error, :not_found}
+
+      {:error, :authorize, :unauthorized, _changes} ->
+        {:error, :unauthorized}
+    end
+  end
+
   defp update_loaded_sources(%Image{} = image, %Actor{} = actor, %SourceInputForm{} = form) do
     %{added: added_sources, removed: removed_sources} =
       SourceDiffer.diff_inputs(form.old_sources, form.sources)
 
     Multi.new()
-    |> Multi.run(:image, fn repo, _changes ->
-      image = repo.preload(image, [:sources])
-
+    |> put_lock_image(actor, image.id, :edit_metadata, [:sources])
+    |> Multi.run(:image, fn repo, %{locked_image: image} ->
       changeset = Image.source_changeset(image, added_sources, removed_sources)
 
       if Image.meaningful_source_update?(changeset) do
@@ -247,6 +271,9 @@ defmodule Philomena.Images do
 
       {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
+
+      error ->
+        map_lock_errors(error)
     end
   end
 
@@ -263,16 +290,16 @@ defmodule Philomena.Images do
       allow_insert_new?: true,
       expand_implications?: true
     )
-    |> Multi.run(:image, fn repo, %{added_tags: added_tags, removed_tags: removed_tags} ->
-      image = repo.preload(image, [:tags, :locked_tags])
+    |> put_lock_image(actor, image.id, :edit_metadata, [:tags, :locked_tags])
+    |> Multi.run(:image, fn
+      repo, %{locked_image: image, added_tags: added_tags, removed_tags: removed_tags} ->
+        changeset = Image.tag_changeset(image, added_tags, removed_tags, image.locked_tags)
 
-      changeset = Image.tag_changeset(image, added_tags, removed_tags, image.locked_tags)
-
-      if Image.meaningful_tag_update?(changeset) do
-        repo.update(changeset)
-      else
-        {:error, :no_change}
-      end
+        if Image.meaningful_tag_update?(changeset) do
+          repo.update(changeset)
+        else
+          {:error, :no_change}
+        end
     end)
     |> Multi.run(:check_limits, fn _repo, %{image: image} ->
       check_tag_change_limits_before_commit(image, actor)
@@ -298,6 +325,9 @@ defmodule Philomena.Images do
 
       {:error, :check_limits, _reason, _changes} ->
         {:error, :rate_limited}
+
+      error ->
+        map_lock_errors(error)
     end
   end
 
@@ -2405,8 +2435,7 @@ defmodule Philomena.Images do
   def update_sources(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :source_update),
-         {:ok, image} <-
-           load_image_member(actor, :edit_metadata, image_id, [:user, :sources, tags: :aliases]),
+         {:ok, image} <- load_image_member(actor, :edit_metadata, image_id, [:sources]),
          {:ok, source_input_form} <-
            %SourceInputForm{}
            |> SourceInputForm.changeset(attrs)
@@ -2568,13 +2597,7 @@ defmodule Philomena.Images do
   def update_tags(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          :ok <- RateLimiter.check_rate_limit(actor, :tag_update),
-         {:ok, image} <-
-           load_image_member(actor, :edit_metadata, image_id, [
-             :user,
-             :locked_tags,
-             :sources,
-             tags: :aliases
-           ]),
+         {:ok, image} <- load_image_member(actor, :edit_metadata, image_id),
          {:ok, tag_input_form} <-
            %TagInputForm{}
            |> TagInputForm.changeset(attrs)
@@ -2586,7 +2609,7 @@ defmodule Philomena.Images do
           RateLimiter.record_action(actor, :tag_update, @tag_update_window)
 
           # TODO: broadcast should move to update_loaded_tags
-          image = Repo.preload(image, [:sources, tags: :aliases], force: true)
+          image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
           added = image.added_tags
           removed = image.removed_tags
           broadcast_tag_update(image, added, removed)
