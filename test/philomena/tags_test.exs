@@ -436,15 +436,14 @@ defmodule Philomena.TagsTest do
       assert log.body == "Aliased tag '#{tag.name}' into '#{target.name}'"
     end
 
-    test "aliasing into an unknown target is a rejected changeset and writes no log" do
+    test "aliasing into an unknown target is not found and writes no log" do
       tag = tag_fixture()
 
-      assert {:error, %Ecto.Changeset{} = changeset} =
+      assert {:error, :not_found} =
                Tags.alias_tag(actor(admin_user_fixture()), tag.slug, %{
                  "target_tag" => "no such tag"
                })
 
-      refute changeset.valid?
       assert Repo.reload!(tag).aliased_tag_id == nil
       assert moderation_log_count() == 0
     end

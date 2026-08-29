@@ -1,14 +1,12 @@
 defmodule Philomena.Tags.Tag do
   use Ecto.Schema
   import Ecto.Changeset
-  import Ecto.Query
 
   alias Philomena.Channels.Channel
   alias Philomena.DnpEntries.DnpEntry
   alias Philomena.ArtistLinks.ArtistLink
   alias Philomena.Tags.Tag
   alias Philomena.Slug
-  alias Philomena.Repo
 
   @namespaces [
     "artist",
@@ -160,14 +158,15 @@ defmodule Philomena.Tags.Tag do
     |> validate_required(:target_tag)
   end
 
-  def alias_changeset(tag, target_tag) do
+  def alias_changeset(tag, target_tag, incoming_aliases?) do
     tag
     |> change()
+    |> validate_not_aliased()
     |> put_assoc(:aliased_tag, target_tag)
     |> validate_required(:aliased_tag)
     |> validate_not_aliased_to_self()
     |> validate_alias_not_transitive()
-    |> validate_incoming_aliases()
+    |> validate_incoming_aliases(incoming_aliases?)
   end
 
   def unalias_changeset(tag) do
@@ -175,6 +174,14 @@ defmodule Philomena.Tags.Tag do
     |> change()
     |> validate_aliased()
     |> put_change(:aliased_tag_id, nil)
+  end
+
+  defp validate_not_aliased(changeset) do
+    if get_field(changeset, :aliased_tag_id) do
+      add_error(changeset, :aliased_tag, "is already aliased")
+    else
+      changeset
+    end
   end
 
   defp validate_aliased(changeset) do
@@ -384,15 +391,8 @@ defmodule Philomena.Tags.Tag do
     end
   end
 
-  defp validate_incoming_aliases(changeset) do
-    id = get_field(changeset, :id)
-
-    count =
-      Tag
-      |> where(aliased_tag_id: ^id)
-      |> Repo.aggregate(:count, :id)
-
-    if count > 0 do
+  defp validate_incoming_aliases(changeset, incoming_aliases?) do
+    if incoming_aliases? do
       add_error(changeset, :tag, "has incoming aliases and cannot be aliased")
     else
       changeset

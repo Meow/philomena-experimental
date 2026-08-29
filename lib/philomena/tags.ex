@@ -246,6 +246,12 @@ defmodule Philomena.Tags do
   defp maybe_expand_implications(tag_list, _repo, _expand_implications),
     do: tag_list
 
+  defp canonical_tag_query(name) do
+    Tag
+    |> where(name: ^Tag.clean_tag_name(name))
+    |> preload(:aliased_tag)
+  end
+
   @doc """
   Gets existing tags or creates new ones from a list of tag names and places
   them into the Multi step named by `name`.
@@ -882,54 +888,67 @@ defmodule Philomena.Tags do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def alias_tag(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, tag} <- load_tag_for_action(actor, :alias, slug, @alias_preloads),
+         {:ok, %{id: source_tag_id}} <- load_tag_for_action(actor, :alias, slug, []),
          {:ok, %{target_tag: target_tag_name}} =
-           tag
+           %Tag{}
            |> Tag.alias_form_changeset(attrs)
-           |> Ecto.Changeset.apply_action(:update) do
+           |> Ecto.Changeset.apply_action(:update),
+         {:ok, %{id: target_tag_id}} <-
+           target_tag_name
+           |> canonical_tag_query
+           |> Loader.one() do
       tag_query =
         Tag
-        |> where(id: ^tag.id)
+        |> where([t], t.id in ^[source_tag_id, target_tag_id])
         |> preload(^@alias_preloads)
+        |> order_by(asc: :id)
 
       Multi.new()
-      |> Multi.lock_one(:locked_tag, tag_query)
-      |> Multi.run(:target_tag, fn _repo, _changes ->
-        # TODO: both tags need to be locked
-        {:ok, find_canonical_tag_by_name(target_tag_name)}
+      |> Multi.lock_all(:locked_tags, tag_query)
+      |> Multi.run(:tags, fn _repo, %{locked_tags: locked_tags} ->
+        source_tag = Enum.find(locked_tags, &(&1.id == source_tag_id))
+        target_tag = Enum.find(locked_tags, &(&1.id == target_tag_id))
+
+        if is_nil(source_tag) or is_nil(target_tag) do
+          {:error, :not_found}
+        else
+          {:ok, {source_tag, target_tag}}
+        end
       end)
-      |> Multi.update(:tag, fn %{locked_tag: tag, target_tag: target_tag} ->
-        Tag.alias_changeset(tag, target_tag)
+      |> Multi.exists?(:incoming_aliases, where(Tag, aliased_tag_id: ^source_tag_id))
+      |> Multi.update(:tag, fn
+        %{tags: {source_tag, target_tag}, incoming_aliases: incoming_aliases} ->
+          Tag.alias_changeset(source_tag, target_tag, incoming_aliases)
       end)
-      |> Multi.merge(fn %{tag: tag, target_tag: target_tag} ->
+      |> Multi.merge(fn %{tags: {source_tag, target_tag}} ->
         Multi.new()
         |> Filters.put_replace_tag_references(
           :update_hidden_filters,
           :update_spoilered_filters,
-          tag.id,
+          source_tag.id,
           target_tag.id
         )
-        |> Users.put_replace_watched_tag(:update_users_watching, tag.id, target_tag.id)
-        |> ArtistLinks.put_alias_tag(tag.id, target_tag.id)
-        |> DnpEntries.put_replace_tag(:update_dnp_entries, tag.id, target_tag.id)
-        |> Channels.put_replace_artist_tag(:update_channels, tag.id, target_tag.id)
+        |> Users.put_replace_watched_tag(:update_users_watching, source_tag.id, target_tag.id)
+        |> ArtistLinks.put_alias_tag(source_tag.id, target_tag.id)
+        |> DnpEntries.put_replace_tag(:update_dnp_entries, source_tag.id, target_tag.id)
+        |> Channels.put_replace_artist_tag(:update_channels, source_tag.id, target_tag.id)
       end)
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tag: tag, target_tag: target_tag} ->
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{tags: {source_tag, target_tag}} ->
         {
           "Tag.Alias:update",
-          Paths.tag_path(tag),
-          "Aliased tag '#{tag.name}' into '#{target_tag.name}'"
+          Paths.tag_path(source_tag),
+          "Aliased tag '#{source_tag.name}' into '#{target_tag.name}'"
         }
       end)
-      |> Multi.on_commit(fn %{tag: tag, target_tag: target_tag} ->
-        Exq.enqueue(Exq, "indexing", TagAliasWorker, [tag.id, target_tag.id])
+      |> Multi.on_commit(fn %{tags: {source_tag, target_tag}} ->
+        Exq.enqueue(Exq, "indexing", TagAliasWorker, [source_tag.id, target_tag.id])
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{tag: %Tag{} = tag}} ->
-          {:ok, tag}
+        {:ok, %{tag: %Tag{} = source_tag}} ->
+          {:ok, source_tag}
 
-        {:error, :target_tag, :not_found, _changes} ->
+        {:error, :tags, :not_found, _changes} ->
           {:error, :not_found}
 
         {:error, :tag, %Ecto.Changeset{} = changeset, _changes} ->
@@ -1030,9 +1049,8 @@ defmodule Philomena.Tags do
   """
   @spec find_canonical_tag_by_name(String.t() | nil) :: Tag.t() | nil
   def find_canonical_tag_by_name(name) when is_binary(name) do
-    Tag
-    |> where(name: ^Tag.clean_tag_name(name))
-    |> preload(:aliased_tag)
+    name
+    |> canonical_tag_query()
     |> Repo.one()
     |> case do
       nil -> nil
