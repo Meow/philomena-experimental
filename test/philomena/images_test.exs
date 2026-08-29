@@ -1811,6 +1811,8 @@ defmodule Philomena.ImagesTest do
     test "a moderator replaces the locked-tags list" do
       moderator = moderator_user_fixture()
       image = image_fixture()
+      tag_fixture(name: "old lock")
+      tag_fixture(name: "cute")
 
       # Seed a starting locked tag, then replace it wholesale.
       {:ok, _} =
@@ -1830,6 +1832,7 @@ defmodule Philomena.ImagesTest do
     test "an empty tag_input clears the locked-tags list" do
       moderator = moderator_user_fixture()
       image = image_fixture()
+      tag_fixture(name: "cute")
 
       {:ok, _} =
         Images.update_locked_tags(actor(moderator), image.id, %{"tag_input" => "safe, cute"})
@@ -1854,6 +1857,30 @@ defmodule Philomena.ImagesTest do
                })
 
       assert locked_tag_names(image) == ["safe"]
+    end
+
+    test "only locks existing tags without expanding implications" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+      implied = tag_fixture(name: "locked implied")
+      selected = tag_fixture(name: "locked selected")
+
+      selected =
+        selected
+        |> Repo.preload(:implied_tags)
+        |> change()
+        |> put_assoc(:implied_tags, [implied])
+        |> Repo.update!()
+
+      missing = unique_tag_name()
+
+      assert {:ok, _} =
+               Images.update_locked_tags(actor(moderator), image.id, %{
+                 "tag_input" => "#{selected.name}, #{missing}"
+               })
+
+      assert locked_tag_names(image) == [selected.name]
+      assert Repo.get_by(Tag, name: missing) == nil
     end
 
     test "a successful update writes an exact moderation log" do

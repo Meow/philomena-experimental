@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
   import Philomena.ImagesFixtures
+  import Philomena.TagsFixtures
 
   alias Philomena.Repo
 
@@ -176,6 +177,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     test "as a moderator updates the locked tag list", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
+      tag_fixture(name: "solo")
 
       conn =
         put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "safe, solo"}})
@@ -191,6 +193,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     test "as an admin updates the locked tag list", %{conn: conn} do
       %{conn: conn} = register_and_log_in_admin(%{conn: conn})
       image = image_fixture()
+      tag_fixture(name: "solo")
 
       conn = put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "solo"}})
 
@@ -200,11 +203,12 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       assert locked_tag_names(image) == ["solo"]
     end
 
-    # NOTE: an empty tag_input clears the locked tag list (get_or_create_tags
-    # returns []); this is a success, not a validation error.
+    # NOTE: an empty tag_input clears the locked tag list; this is a success,
+    # not a validation error.
     test "an empty tag_input clears the locked tag list", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
+      tag_fixture(name: "solo")
 
       # Lock some tags first.
       put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "safe, solo"}})

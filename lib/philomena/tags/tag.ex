@@ -234,9 +234,8 @@ defmodule Philomena.Tags.Tag do
     "oc"
   end
 
-  # Oversized names must never reach get_or_create_tags: its bulk insert
-  # bypasses changeset validation and would trip tags_name_length_check,
-  # failing the entire tag list.
+  # Oversized names are filtered before bulk tag insertion so they cannot
+  # bypass changeset validation and trip tags_name_length_check.
   defp oversized_name?(name), do: byte_size(name) > @name_length_limit
 
   def display_order(tags) do

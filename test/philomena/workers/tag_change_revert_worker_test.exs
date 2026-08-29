@@ -6,11 +6,11 @@ defmodule Philomena.TagChangeRevertWorkerTest do
 
   import Philomena.AttributionFixtures
   import Philomena.ImagesFixtures
+  import Philomena.TagsFixtures
   import Philomena.UsersFixtures
 
   alias Philomena.Images
   alias Philomena.TagChangeRevertWorker
-  alias Philomena.Tags
 
   # Images validate a 3-tag minimum, so every input keeps these on top of
   # whatever tag the test adds or removes.
@@ -24,8 +24,8 @@ defmodule Philomena.TagChangeRevertWorkerTest do
   end
 
   defp change_tags!(image, user, old_input, new_input) do
-    old_tags = Tags.get_or_create_tags(old_input)
-    new_tags = Tags.get_or_create_tags(new_input)
+    old_tags = tag_list_fixture(old_input)
+    new_tags = tag_list_fixture(new_input)
     old_ids = MapSet.new(old_tags, & &1.id)
     new_ids = MapSet.new(new_tags, & &1.id)
 

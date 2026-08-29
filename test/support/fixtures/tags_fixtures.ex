@@ -5,9 +5,22 @@ defmodule Philomena.TagsFixtures do
   """
 
   alias Philomena.Repo
+  alias Philomena.Multi
   alias Philomena.Tags
+  alias Philomena.Tags.Tag
 
   def unique_tag_name, do: "test tag #{System.unique_integer([:positive])}"
+
+  def tag_list_fixture(tag_input) do
+    {:ok, %{tags: tags}} =
+      Multi.new()
+      |> Tags.put_canonicalize_tag_names(:tags, Tag.parse_tag_list(tag_input),
+        allow_insert_new?: true
+      )
+      |> Multi.transact()
+
+    tags
+  end
 
   @doc """
   Creates a tag.

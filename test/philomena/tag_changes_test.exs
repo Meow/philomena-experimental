@@ -31,7 +31,6 @@ defmodule Philomena.TagChangesTest do
   alias Philomena.TagChanges.QueryForm
   alias Philomena.TagChanges.TagChange
   alias Philomena.TagChanges.TagChangePage
-  alias Philomena.Tags
   alias Philomena.Tags.Tag
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
@@ -51,7 +50,7 @@ defmodule Philomena.TagChangesTest do
   defp tag_change!(user) do
     image = image_fixture()
     attribution = actor(user)
-    added_tags = Tags.get_or_create_tags("added test tag, other added tag")
+    added_tags = tag_list_fixture("added test tag, other added tag")
 
     {:ok, [image_id]} =
       Images.batch_update(

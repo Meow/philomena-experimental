@@ -2453,7 +2453,9 @@ defmodule Philomena.Images do
 
   The image is loaded by id and authorized for `:lock_tags`. A blank `tag_input` clears
   the list. On success the locked tags are replaced, the image is reindexed, and a
-  moderation log is written attributing the change to `actor`.
+  moderation log is written attributing the change to `actor`. Only existing tags
+  are considered; aliases resolve to their canonical tags and implications are not
+  expanded.
 
   Returns `{:ok, image}` with the updated image.
 
@@ -2470,15 +2472,23 @@ defmodule Philomena.Images do
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_locked_tags(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]) do
-      new_tags = Tags.get_or_create_tags(attrs["tag_input"])
+         {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]),
+         {:ok, tag_input_form} <-
+           %TagInputForm{}
+           |> TagInputForm.changeset(attrs)
+           |> TagInputForm.apply(image) do
+      tag_names = Tag.parse_tag_list(tag_input_form.tag_input)
 
-      query = Image |> where(id: ^image.id) |> preload(:locked_tags)
+      query =
+        Image
+        |> where(id: ^image.id)
+        |> preload(:locked_tags)
 
       Multi.new()
+      |> Tags.put_canonicalize_tag_names(:tags, tag_names)
       |> Multi.lock_one(:locked_image, query)
-      |> Multi.update(:image, fn %{locked_image: image} ->
-        Image.locked_tags_changeset(image, attrs, new_tags)
+      |> Multi.update(:image, fn %{locked_image: image, tags: tags} ->
+        Image.locked_tags_changeset(image, attrs, tags)
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {
@@ -2889,8 +2899,8 @@ defmodule Philomena.Images do
   ## Note
 
   All the tags provided to this function must exist in the database.
-  If you're not sure if the tags exist or not, use `Tags.get_or_create_tags/1`
-  first.
+  Resolve tag names with `Tags.put_canonicalize_tag_names/4` in a preceding
+  `Multi` step when needed.
 
   ## Return value
 

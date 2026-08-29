@@ -899,21 +899,28 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "get_or_create_tags/1" do
-    test "does not create tags with oversized names" do
-      oversized = String.duplicate("a", @limit + 1)
+  describe "put_canonicalize_tag_names/4" do
+    test "does not create tags by default" do
+      name = unique_tag_name()
 
-      tags = Tags.get_or_create_tags("safe, #{oversized}")
+      assert {:ok, %{tags: []}} =
+               Multi.new()
+               |> Tags.put_canonicalize_tag_names(:tags, [name])
+               |> Multi.transact()
 
-      assert [%Tag{name: "safe"}] = tags
-      assert Tags.find_canonical_tag_by_name(oversized) == nil
+      assert Tags.find_canonical_tag_by_name(name) == nil
     end
 
-    test "creates new tags" do
-      tags = Tags.get_or_create_tags("new tag")
+    test "creates tags when requested and filters oversized names" do
+      oversized = String.duplicate("a", @limit + 1)
+      tag_names = Tag.parse_tag_list("safe, #{oversized}")
 
-      assert [%Tag{name: "new tag"}] = tags
-      refute is_nil(Tags.find_canonical_tag_by_name("new tag"))
+      assert {:ok, %{tags: [%Tag{name: "safe"}]}} =
+               Multi.new()
+               |> Tags.put_canonicalize_tag_names(:tags, tag_names, allow_insert_new?: true)
+               |> Multi.transact()
+
+      assert Tags.find_canonical_tag_by_name(oversized) == nil
     end
   end
 end

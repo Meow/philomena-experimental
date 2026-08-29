@@ -247,58 +247,6 @@ defmodule Philomena.Tags do
     do: tag_list
 
   @doc """
-  Gets existing tags or creates new ones from a tag list string.
-
-  Takes a string of comma-separated tag names, parses it into individual tags,
-  and either retrieves existing tags or creates new ones for tags that don't exist.
-  Resolves tag aliases to the target tag.
-
-  ## Examples
-
-      iex> get_or_create_tags("safe, cute, pony")
-      [%Tag{name: "safe"}, %Tag{name: "cute"}, %Tag{name: "pony"}]
-
-  """
-  @spec get_or_create_tags(String.t()) :: [Tag.t()]
-  def get_or_create_tags(tag_list) do
-    with tag_names when tag_names != [] <- Tag.parse_tag_list(tag_list) do
-      tag_query =
-        Tag
-        |> where([tag], tag.name in ^tag_names)
-        |> preload([:implied_tags, aliased_tag: :implied_tags])
-
-      insert_rows =
-        Enum.map(tag_names, fn tag_name ->
-          %Tag{}
-          |> Tag.creation_changeset(%{name: tag_name})
-          |> Ecto.Changeset.apply_changes()
-          |> Map.take(Tag.insert_fields())
-          |> Map.merge(%{
-            created_at: {:placeholder, :timestamp},
-            updated_at: {:placeholder, :timestamp}
-          })
-        end)
-
-      insert_options = [
-        placeholders: %{timestamp: DateTime.utc_now(:second)},
-        on_conflict: :nothing,
-        returning: [:id]
-      ]
-
-      {:ok, %{all_tags: all_tags}} =
-        Multi.new()
-        |> Multi.insert_all(:new_tags, Tag, insert_rows, insert_options)
-        |> Multi.all(:all_tags, tag_query)
-        |> Multi.on_commit(fn %{new_tags: {_count, new_tags}} -> reindex_tags(new_tags) end)
-        |> Multi.transact()
-
-      all_tags
-      |> Enum.map(&(&1.aliased_tag || &1))
-      |> Enum.uniq_by(& &1.id)
-    end
-  end
-
-  @doc """
   Gets existing tags or creates new ones from a list of tag names and places
   them into the Multi step named by `name`.
 
