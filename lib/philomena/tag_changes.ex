@@ -119,17 +119,16 @@ defmodule Philomena.TagChanges do
       changed_tags =
         instances
         |> Enum.sort_by(&{DateTime.to_unix(&1.tag_change.created_at), &1.tag_change_id})
-        |> Enum.uniq_by(& &1.tag_id)
-
-      {added_tags, removed_tags} = Enum.split_with(changed_tags, & &1.added)
+        |> Enum.map(fn %{tag_id: tag_id, added: added} ->
+          %{tag_id: tag_id, added: added}
+        end)
 
       %{
         image_id: image_id,
-        added_tags: Enum.map(removed_tags, & &1.tag),
-        removed_tags: Enum.map(added_tags, & &1.tag)
+        tag_changes: changed_tags
       }
     end)
-    |> Images.batch_update(attributes)
+    |> Images.batch_revert(attributes)
   end
 
   defp put_enqueue_full_revert(%Multi{} = multi, actor, target) do
@@ -467,7 +466,9 @@ defmodule Philomena.TagChanges do
 
   Malformed ID lists return `{:error, changeset}`. Missing IDs and changes on
   hidden images are skipped, making stale or repeated batch submissions safe.
-  The successful moderation log records the number of loaded changes reverted.
+  The selected edits are inverted as one net edit per affected image, so a
+  successful reversion creates at most one new tag-change row per image. The
+  successful moderation log records the number of loaded changes reverted.
 
   ## Examples
 
@@ -503,8 +504,10 @@ defmodule Philomena.TagChanges do
   @doc """
   Reverts a validated worker batch without request authorization or logging.
 
-  The worker owns batching by image ID. Missing IDs and hidden-image changes are
-  skipped; database failures are returned to the worker.
+  The worker owns batching by image ID. All selected edits for an image are
+  inverted as one net edit; self-canceling edits produce no new tag-change row.
+  Missing IDs and hidden-image changes are skipped; database failures are
+  returned to the worker.
 
   ## Examples
 

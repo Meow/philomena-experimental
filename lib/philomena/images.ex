@@ -544,6 +544,102 @@ defmodule Philomena.Images do
     {Enum.map(parsed, fn {_id, {:ok, int}} -> int end), Enum.map(unparsable, &elem(&1, 0))}
   end
 
+  defp reversion_pairs(changes, locked_image_ids, families) do
+    changes
+    |> Enum.group_by(& &1.image_id)
+    |> Enum.filter(fn {image_id, _image_changes} -> image_id in locked_image_ids end)
+    |> Enum.reduce({[], []}, fn {image_id, image_changes}, {added_pairs, removed_pairs} ->
+      # Map each tag change to the relevant reversion operation.
+      # Added tags should be removed; removed tags should be added.
+      # Only one operation may occur per alias family.
+      operations =
+        image_changes
+        |> Enum.flat_map(& &1.tag_changes)
+        |> Enum.map(fn %{tag_id: tag_id, added: added} ->
+          families
+          |> Map.fetch!(tag_id)
+          |> Map.put(:added, added)
+        end)
+        |> Enum.uniq_by(& &1.canonical_id)
+
+      removed =
+        operations
+        |> Enum.filter(& &1.added)
+        |> Enum.flat_map(fn op -> Enum.map(op.tag_ids, &%{image_id: image_id, tag_id: &1}) end)
+
+      added =
+        operations
+        |> Enum.reject(& &1.added)
+        |> Enum.map(&%{image_id: image_id, tag_id: &1.canonical_id})
+
+      {
+        Enum.concat(added, added_pairs),
+        Enum.concat(removed, removed_pairs)
+      }
+    end)
+  end
+
+  defp non_uniform_reversion_batch_multi(changes, attributes) do
+    image_ids =
+      changes
+      |> Enum.map(& &1.image_id)
+      |> Enum.uniq()
+
+    tag_ids =
+      changes
+      |> Enum.flat_map(fn %{tag_changes: tag_changes} -> tag_changes end)
+      |> Enum.map(& &1.tag_id)
+      |> Enum.uniq()
+
+    image_query =
+      Image
+      |> where([i], i.id in ^image_ids)
+      |> order_by([i], asc: i.id)
+
+    Multi.new()
+    |> Multi.lock_all(:locked_image_ids, select(image_query, [i], i.id))
+    |> Multi.all(:visible_images, where(image_query, [i], i.hidden_from_users == false))
+    |> Tags.put_lock_tag_alias_families(tag_ids)
+    |> Multi.run(:reversion_pairs, fn
+      _repo, %{locked_image_ids: image_ids, tag_alias_families: families} ->
+        {:ok, reversion_pairs(changes, image_ids, families)}
+    end)
+    |> Multi.insert_all(
+      :inserted_taggings,
+      Tagging,
+      fn %{reversion_pairs: {added, _removed}} ->
+        # Scope insertions to existing, requested images.
+        Enum.filter(added, &(&1.image_id in image_ids))
+      end,
+      on_conflict: :nothing,
+      returning: [:image_id, :tag_id]
+    )
+    |> Multi.delete_all(:deleted_taggings, fn %{reversion_pairs: {_added, removed}} ->
+      # Scope deletions to existing, requested images.
+      removed
+      |> Enum.filter(&(&1.image_id in image_ids))
+      |> case do
+        [] ->
+          # The values API rejects an empty list.
+          from t in Tagging,
+            where: false,
+            select: [t.image_id, t.tag_id]
+
+        pairs ->
+          from t in Tagging,
+            join: pair in values(pairs, %{image_id: :integer, tag_id: :integer}),
+            on: t.image_id == pair.image_id and t.tag_id == pair.tag_id,
+            select: [t.image_id, t.tag_id]
+      end
+    end)
+    |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
+    |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings, :visible_images)
+    |> Multi.on_commit(fn %{locked_image_ids: image_ids} ->
+      reindex_images(image_ids)
+      Comments.reindex_comments_on_images(image_ids)
+    end)
+  end
+
   defp prepare_change_batches(changes) do
     # Merge any change batches belonging to the same image ID into
     # one single batch, then deduplicate added_tags by filtering out
@@ -2923,9 +3019,9 @@ defmodule Philomena.Images do
 
   ## Note
 
-  All the tags provided to this function must exist in the database.
-  Resolve tag names with `Tags.put_canonicalize_tag_name_sets/2` in a preceding
-  `Multi` step when needed.
+  All the tags provided to this function must be existing `%Tag{}` records.
+  This function applies their IDs directly; use `batch_revert/2` for the
+  alias-aware tag-change reversion workflow.
 
   ## Return value
 
@@ -2947,6 +3043,36 @@ defmodule Philomena.Images do
     changes
     |> non_uniform_batch_multi(attributes)
     |> Multi.transact()
+    |> case do
+      {:ok, %{locked_image_ids: image_ids}} ->
+        {:ok, image_ids}
+
+      _error ->
+        :error
+    end
+  end
+
+  @doc group: "Bulk operations"
+  @doc """
+  Applies the net inverse of selected tag-change entries to multiple images.
+
+  `changes` contains one or more ordered `:tag_changes` entries for each image.
+  Each entry is resolved through its locked alias family and the entries are
+  reduced to one physical tag edit per image. An entry that adds a tag is
+  inverted by removing its alias family; an entry that removes a tag is
+  inverted by adding the current canonical tag when the family is absent. At
+  most one new tag-change row is created for each affected image.
+
+  Images are locked before tag aliases and current taggings are read, matching
+  the lock order used by batched alias migration. This allows a reversion to
+  observe either the source or canonical physical tagging without creating a
+  duplicate or losing an inverse removal.
+  """
+  @spec batch_revert([map()], map()) :: {:ok, [integer()]} | :error
+  def batch_revert(changes, attributes) do
+    changes
+    |> non_uniform_reversion_batch_multi(attributes)
+    |> Multi.transact_with_automatic_retry()
     |> case do
       {:ok, %{locked_image_ids: image_ids}} ->
         {:ok, image_ids}

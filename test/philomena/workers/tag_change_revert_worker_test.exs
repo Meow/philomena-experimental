@@ -11,6 +11,7 @@ defmodule Philomena.TagChangeRevertWorkerTest do
 
   alias Philomena.Images
   alias Philomena.TagChangeRevertWorker
+  alias Philomena.TagChanges.TagChange
 
   # Images validate a 3-tag minimum, so every input keeps these on top of
   # whatever tag the test adds or removes.
@@ -65,17 +66,26 @@ defmodule Philomena.TagChangeRevertWorkerTest do
     |> Enum.map(& &1.name)
   end
 
+  defp tag_change_count(image) do
+    Repo.aggregate(from(tag_change in TagChange, where: tag_change.image_id == ^image.id), :count)
+  end
+
   test "a full revert removes tags the user added", %{user: user} do
     image_a = image_fixture(tags: @base_tags)
     image_b = image_fixture(tags: @base_tags)
     change_tags!(image_a, user, @base_tags, "#{@base_tags}, vandal tag")
     change_tags!(image_b, user, @base_tags, "#{@base_tags}, vandal tag")
 
+    assert tag_change_count(image_a) == 1
+    assert tag_change_count(image_b) == 1
+
     # batch_size 1 forces the two images into separate batches.
     full_revert!(user, 1)
 
     refute "vandal tag" in image_tag_names(image_a)
     refute "vandal tag" in image_tag_names(image_b)
+    assert tag_change_count(image_a) == 2
+    assert tag_change_count(image_b) == 2
   end
 
   test "a full revert restores tags the user removed", %{user: user} do
@@ -140,6 +150,8 @@ defmodule Philomena.TagChangeRevertWorkerTest do
     refute "vandal one" in names_b
     refute "vandal two" in names_b
     assert "safe" in names_b
+    assert tag_change_count(image_a) == 2
+    assert tag_change_count(image_b) == 4
   end
 
   test "a self-canceled remove/add pair does not strip the tag", %{user: user} do

@@ -246,10 +246,15 @@ defmodule Philomena.Tags do
   defp maybe_expand_implications(tag_list, _repo, _expand_implications),
     do: tag_list
 
-  defp canonical_tag_query(name) do
-    Tag
-    |> where(name: ^Tag.clean_tag_name(name))
-    |> preload(:aliased_tag)
+  defp tag_alias_family(tag) do
+    canonical_tag = tag.aliased_tag || tag
+    alias_ids = Enum.map(canonical_tag.aliases, & &1.id)
+    family_ids = Enum.uniq([tag.id, canonical_tag.id] ++ alias_ids)
+
+    %{
+      canonical_id: canonical_tag.id,
+      tag_ids: family_ids
+    }
   end
 
   @doc """
@@ -355,6 +360,67 @@ defmodule Philomena.Tags do
       else
         {:ok, nil}
       end
+    end)
+  end
+
+  @doc """
+  Adds transaction steps to load and optimistically lock alias families
+  for the given `tag_ids`.
+
+  An "alias family" refers to the set of all tag IDs which have the same
+  canonical tag ID.
+
+  The initial query is expanded through each tag's current aliases. All
+  rows in those are then locked in ascending ID order. If an alias pointer
+  changes while the families are being locked, the Multi is rolled back
+  with `{:error, :conflict}` to allow automatic retry.
+
+  The loaded tags are stored in `:tags` for conflict detection. The
+  `:tag_alias_families` result is keyed by each requested tag ID and contains
+  its canonical ID and the IDs in that canonical tag's family.
+
+  ## Examples
+
+      iex> (Multi.new()
+      ...> |> put_lock_tag_alias_families([12, 13])
+      ...> |> Multi.transact_with_automatic_retry())
+      {:ok,
+       %{tags: [%Tag{id: 12}, %Tag{id: 13}],
+         tag_alias_families: %{
+           12 => %{canonical_id: 12, tag_ids: [12]},
+           13 => %{canonical_id: 13, tag_ids: [13]}
+         }}}
+
+  """
+  @spec put_lock_tag_alias_families(Multi.t(), [integer()]) :: Multi.t()
+  def put_lock_tag_alias_families(%Multi{} = multi, tag_ids) do
+    tag_query =
+      Tag
+      |> where([tag], tag.id in ^tag_ids)
+      |> preload([:aliases, aliased_tag: :aliases])
+      |> order_by(asc: :id)
+
+    multi
+    |> Multi.all(:tags, tag_query)
+    |> Multi.lock_all(:locked_tags, fn %{tags: tags} ->
+      tag_ids = Enum.flat_map(tags, &tag_alias_family(&1).tag_ids)
+
+      Tag
+      |> where([tag], tag.id in ^tag_ids)
+      |> order_by(asc: :id)
+    end)
+    |> Multi.run(:detect_conflict, fn
+      _repo, %{tags: unlocked_tags, locked_tags: locked_tags} ->
+        locked_aliases = Map.new(locked_tags, &{&1.id, &1.aliased_tag_id})
+
+        if Enum.any?(unlocked_tags, &(locked_aliases[&1.id] != &1.aliased_tag_id)) do
+          {:error, :conflict}
+        else
+          {:ok, nil}
+        end
+    end)
+    |> Multi.run(:tag_alias_families, fn _repo, %{tags: tags} ->
+      {:ok, Map.new(tags, fn tag -> {tag.id, tag_alias_family(tag)} end)}
     end)
   end
 
@@ -1115,8 +1181,9 @@ defmodule Philomena.Tags do
   """
   @spec find_canonical_tag_by_name(String.t() | nil) :: Tag.t() | nil
   def find_canonical_tag_by_name(name) when is_binary(name) do
-    name
-    |> canonical_tag_query()
+    Tag
+    |> where(name: ^Tag.clean_tag_name(name))
+    |> preload(:aliased_tag)
     |> Repo.one()
     |> case do
       nil -> nil

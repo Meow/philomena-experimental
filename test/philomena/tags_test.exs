@@ -924,4 +924,30 @@ defmodule Philomena.TagsTest do
       assert Tags.find_canonical_tag_by_name(oversized) == nil
     end
   end
+
+  describe "put_lock_tag_alias_families/2" do
+    test "returns the requested tags and their complete alias families" do
+      canonical = tag_fixture(name: unique_tag_name())
+      alias_tag = tag_fixture(name: unique_tag_name())
+
+      alias_tag =
+        alias_tag
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      assert {:ok, %{tags: tags, tag_alias_families: families}} =
+               Multi.new()
+               |> Tags.put_lock_tag_alias_families([alias_tag.id, canonical.id])
+               |> Multi.transact()
+
+      assert MapSet.new(Enum.map(tags, & &1.id)) == MapSet.new([alias_tag.id, canonical.id])
+
+      for tag_id <- [alias_tag.id, canonical.id] do
+        assert families[tag_id].canonical_id == canonical.id
+
+        assert MapSet.new(families[tag_id].tag_ids) ==
+                 MapSet.new([alias_tag.id, canonical.id])
+      end
+    end
+  end
 end
