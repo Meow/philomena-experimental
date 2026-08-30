@@ -51,7 +51,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         end)
       )
 
-    assert Enum.all?(results, &match?({:ok, %{added: [_]}}, &1))
+    assert Enum.all?(results, &match?({:ok, %{}}, &1))
     assert source_urls(image) == Enum.sort(sources)
 
     assert Repo.aggregate(
@@ -74,7 +74,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         fn -> Images.update_sources(Enum.at(actors, 1), image.id, source_attrs([base], [])) end
       ])
 
-    assert Enum.all?(results, &match?({:ok, %{added: _, removed: _}}, &1))
+    assert Enum.all?(results, &match?({:ok, %{}}, &1))
     assert source_urls(image) == [added]
 
     assert Repo.aggregate(
@@ -100,7 +100,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         end
       )
 
-    assert Enum.count(results, &match?({:ok, %{added: [_]}}, &1)) == 2
+    assert Enum.count(results, &match?({:ok, %{}}, &1)) == 2
     assert Enum.count(results, &(&1 == {:error, :rate_limited})) == 1
   end
 
@@ -127,7 +127,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         end)
       )
 
-    assert Enum.all?(results, &match?({:ok, %{added: [_]}}, &1))
+    assert Enum.all?(results, &match?({:ok, %{}}, &1))
     assert tag_names(image) == Enum.sort(["safe", "initial one", "initial two" | added_names])
 
     added_tags = Repo.all(from(tag in Tag, where: tag.name in ^added_names))
@@ -170,7 +170,7 @@ defmodule Philomena.ImagesConcurrencyTest do
 
     results = concurrently([add, remove])
 
-    assert Enum.all?(results, &match?({:ok, %{added: _, removed: _}}, &1))
+    assert Enum.all?(results, &match?({:ok, %{}}, &1))
     assert tag_names(image) == ["keep", "other", "safe", added_name]
 
     assert Repo.get_by!(Tag, name: removed_name).images_count == 0
@@ -207,7 +207,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         end
       )
 
-    assert Enum.count(results, &match?({:ok, %{added: [_]}}, &1)) == 2
+    assert Enum.count(results, &match?({:ok, %{}}, &1)) == 2
     assert Enum.count(results, &(&1 == {:error, :rate_limited})) == 1
   end
 
@@ -248,8 +248,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         end
       )
 
-    assert Enum.count(results, &match?({:ok, %{added: [_ | _]}}, &1)) == 1
-    assert Enum.count(results, &match?({:ok, %{added: [], removed: []}}, &1)) == 1
+    assert Enum.count(results, &match?({:ok, %{}}, &1)) == 2
 
     assert tag_names(image) ==
              Enum.sort([

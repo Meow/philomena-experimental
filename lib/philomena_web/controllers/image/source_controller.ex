@@ -12,7 +12,7 @@ defmodule PhilomenaWeb.Image.SourceController do
 
   def update(conn, %{"image" => image_params} = params) do
     case Images.update_sources(conn.assigns.actor, params["image_id"], image_params) do
-      {:ok, %{image: image, added: _added, removed: _removed, source_change_count: count}} ->
+      {:ok, %{image: image, source_change_count: count}} ->
         changeset =
           %{image | sources: sources_for_edit(image.sources)}
           |> Images.change_image()

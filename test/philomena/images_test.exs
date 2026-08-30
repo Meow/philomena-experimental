@@ -3722,11 +3722,10 @@ defmodule Philomena.ImagesTest do
                )
 
       assert result.image.id == image.id
-      assert result.added == ["https://example.com/art"]
-      assert result.removed == []
       assert result.source_change_count == 1
 
       change = Repo.one(from s in SourceChange, where: s.image_id == ^image.id)
+      assert change.source_url == "https://example.com/art"
       assert change.user_id == user.id
       assert change.added == true
 
@@ -3736,16 +3735,15 @@ defmodule Philomena.ImagesTest do
     test "an anonymous fingerprinted actor records a change with no user" do
       image = image_fixture()
 
-      assert {:ok, result} =
+      assert {:ok, _result} =
                Images.update_sources(
                  actor(),
                  to_string(image.id),
                  add_source_attrs("https://example.com/anon")
                )
 
-      assert result.added == ["https://example.com/anon"]
-
       change = Repo.one(from s in SourceChange, where: s.image_id == ^image.id)
+      assert change.source_url == "https://example.com/anon"
       assert change.user_id == nil
     end
 
@@ -3943,8 +3941,6 @@ defmodule Philomena.ImagesTest do
                )
 
       assert result.image.id == image.id
-      assert Enum.sort(Enum.map(result.added, & &1.name)) == ["added test tag", "other added tag"]
-      assert result.removed == []
       assert result.tag_change_count >= 1
       assert result.tag_change_tag_count >= 1
 

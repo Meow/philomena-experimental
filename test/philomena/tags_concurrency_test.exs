@@ -199,7 +199,7 @@ defmodule Philomena.TagsConcurrencyTest do
       ])
 
     assert Enum.count(results, &(&1 == :ok)) == 1
-    assert Enum.count(results, &match?({:ok, %{added: [%Tag{}]}}, &1)) == 1
+    assert Enum.count(results, &match?({:ok, %{}}, &1)) == 1
 
     tag_ids =
       image
@@ -286,7 +286,7 @@ defmodule Philomena.TagsConcurrencyTest do
           ])
 
         assert Enum.any?(results, &(&1 == :ok))
-        assert Enum.any?(results, &match?({:ok, %{added: [%Tag{}]}}, &1))
+        assert Enum.any?(results, &match?({:ok, %{}}, &1))
         assert Repo.reload!(tag).images_count == 2
       after
         Repo.delete!(image)

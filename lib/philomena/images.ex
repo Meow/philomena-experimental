@@ -284,6 +284,10 @@ defmodule Philomena.Images do
     |> SourceChanges.put_record_image_changes(actor)
     |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
     |> put_reindex_image(:image)
+    |> Multi.on_commit(fn %{image: %{added_sources: added, removed_sources: removed} = image} ->
+      image = Repo.preload(image, [:user, :sources, tags: :aliases])
+      broadcast_source_update(image, added, removed)
+    end)
     |> Multi.transact()
     |> case do
       {:error, :action_reservation, :rate_limited, _changes} ->
@@ -349,8 +353,10 @@ defmodule Philomena.Images do
     |> Tags.put_image_tag_count_changes()
     |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
     |> put_reindex_image(:image)
-    |> Multi.on_commit(fn %{image: image} ->
+    |> Multi.on_commit(fn %{image: %{added_tags: added, removed_tags: removed} = image} ->
+      image = Repo.preload(image, [:user, :sources, tags: :aliases])
       Comments.reindex_comments_on_image(image)
+      broadcast_tag_update(image, added, removed)
     end)
     |> Multi.transact_with_automatic_retry()
     |> case do
@@ -2522,17 +2528,9 @@ defmodule Philomena.Images do
            |> SourceInputForm.apply(image) do
       case update_loaded_sources(image, actor, source_input_form) do
         {:ok, %Image{} = image} ->
-          # TODO: broadcast should move to update_loaded_sources
-          image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
-          added = image.added_sources
-          removed = image.removed_sources
-          broadcast_source_update(image, added, removed)
-
           {:ok,
            %{
              image: image,
-             added: added,
-             removed: removed,
              source_change_count: SourceChanges.count_for_image(image)
            }}
 
@@ -2540,8 +2538,6 @@ defmodule Philomena.Images do
           {:ok,
            %{
              image: image,
-             added: [],
-             removed: [],
              source_change_count: SourceChanges.count_for_image(image)
            }}
 
@@ -2681,19 +2677,11 @@ defmodule Philomena.Images do
            |> TagInputForm.apply(image) do
       case update_loaded_tags(image, actor, tag_input_form) do
         {:ok, %Image{} = image} ->
-          # TODO: broadcast should move to update_loaded_tags
-          image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
-          added = image.added_tags
-          removed = image.removed_tags
-          broadcast_tag_update(image, added, removed)
-
           {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
 
           {:ok,
            %{
              image: image,
-             added: added,
-             removed: removed,
              tag_change_count: tag_change_count,
              tag_change_tag_count: tag_change_tag_count
            }}
@@ -2704,8 +2692,6 @@ defmodule Philomena.Images do
           {:ok,
            %{
              image: image,
-             added: [],
-             removed: [],
              tag_change_count: tag_change_count,
              tag_change_tag_count: tag_change_tag_count
            }}

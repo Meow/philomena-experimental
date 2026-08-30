@@ -14,8 +14,6 @@ defmodule PhilomenaWeb.Image.TagController do
       {:ok,
        %{
          image: image,
-         added: _added_tags,
-         removed: _removed_tags,
          tag_change_count: tag_change_count,
          tag_change_tag_count: tag_change_tag_count
        }} ->
