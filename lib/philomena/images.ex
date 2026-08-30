@@ -2445,27 +2445,25 @@ defmodule Philomena.Images do
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_description(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <-
-           load_image_member(actor, :edit_description, image_id, [
-             :user,
-             :sources,
-             tags: :aliases
-           ]) do
-      old_description = image.description
-      changeset = Image.description_changeset(image, attrs)
-
+         {:ok, image_id} <- Loader.parse_id(image_id) do
       Multi.new()
-      |> Multi.update(:image, changeset)
+      |> put_lock_image(actor, image_id, :edit_description, [:user, :sources, tags: :aliases])
+      |> Multi.update(:image, fn %{locked_image: image} ->
+        Image.description_changeset(image, attrs)
+      end)
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          broadcast_description_update(image, old_description)
+        {:ok, %{locked_image: old_image, image: %Image{} = image}} ->
+          broadcast_description_update(image, old_image.description)
 
-          {:ok, {image, old_description}}
+          {:ok, {image, old_image.description}}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          map_lock_errors(error)
       end
     end
   end
@@ -2587,8 +2585,8 @@ defmodule Philomena.Images do
         |> preload(:locked_tags)
 
       Multi.new()
-      |> Tags.put_canonicalize_tag_name_sets([{:tags, tag_names, []}])
       |> Multi.lock_one(:locked_image, image_query)
+      |> Tags.put_canonicalize_tag_name_sets([{:tags, tag_names, []}])
       |> Multi.update(:image, fn %{locked_image: image, canonical_tags: %{tags: tags}} ->
         Image.locked_tags_changeset(image, attrs, tags)
       end)

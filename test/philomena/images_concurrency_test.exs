@@ -60,6 +60,29 @@ defmodule Philomena.ImagesConcurrencyTest do
            ) == 2
   end
 
+  test "concurrent source addition and removal merge against the locked image" do
+    base = "https://example.com/concurrent-base"
+    added = "https://example.com/concurrent-added"
+    image = image_fixture(tags: "safe", sources: [base])
+    actors = for _ <- 1..2, do: actor(admin_user_fixture())
+
+    results =
+      concurrently([
+        fn ->
+          Images.update_sources(Enum.at(actors, 0), image.id, source_attrs([base], [base, added]))
+        end,
+        fn -> Images.update_sources(Enum.at(actors, 1), image.id, source_attrs([base], [])) end
+      ])
+
+    assert Enum.all?(results, &match?({:ok, %{added: _, removed: _}}, &1))
+    assert source_urls(image) == [added]
+
+    assert Repo.aggregate(
+             from(change in SourceChange, where: change.image_id == ^image.id),
+             :count
+           ) == 2
+  end
+
   test "concurrent source updates are limited per actor" do
     user = confirmed_user_fixture()
     images = for _ <- 1..3, do: image_fixture(tags: "safe")
@@ -110,6 +133,48 @@ defmodule Philomena.ImagesConcurrencyTest do
     added_tags = Repo.all(from(tag in Tag, where: tag.name in ^added_names))
 
     assert Enum.map(added_tags, & &1.images_count) |> Enum.sort() == [1, 1]
+
+    assert Repo.aggregate(
+             from(change in TagChange, where: change.image_id == ^image.id),
+             :count
+           ) == 2
+  end
+
+  test "concurrent tag addition and removal merge against the locked image" do
+    removed_name = unique_tag_name()
+    added_name = unique_tag_name()
+    old_input = "safe, keep, other, #{removed_name}"
+    image = image_fixture(tags: old_input)
+
+    Repo.get_by!(Tag, name: removed_name)
+    |> change(images_count: 1)
+    |> Repo.update!()
+
+    actors = for _ <- 1..2, do: actor(admin_user_fixture())
+
+    add = fn ->
+      Images.update_tags(
+        Enum.at(actors, 0),
+        image.id,
+        %{"old_tag_input" => old_input, "tag_input" => "#{old_input}, #{added_name}"}
+      )
+    end
+
+    remove = fn ->
+      Images.update_tags(
+        Enum.at(actors, 1),
+        image.id,
+        %{"old_tag_input" => old_input, "tag_input" => "safe, keep, other"}
+      )
+    end
+
+    results = concurrently([add, remove])
+
+    assert Enum.all?(results, &match?({:ok, %{added: _, removed: _}}, &1))
+    assert tag_names(image) == ["keep", "other", "safe", added_name]
+
+    assert Repo.get_by!(Tag, name: removed_name).images_count == 0
+    assert Repo.get_by!(Tag, name: added_name).images_count == 1
 
     assert Repo.aggregate(
              from(change in TagChange, where: change.image_id == ^image.id),
@@ -199,8 +264,19 @@ defmodule Philomena.ImagesConcurrencyTest do
              1
   end
 
-  defp source_attrs(source) do
-    %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => source}}}
+  defp source_attrs(source), do: source_attrs([], [source])
+
+  defp source_attrs(old_sources, sources) do
+    %{
+      "old_sources" => source_params(old_sources),
+      "sources" => source_params(sources)
+    }
+  end
+
+  defp source_params(sources) do
+    sources
+    |> Enum.with_index()
+    |> Map.new(fn {source, index} -> {to_string(index), %{"source" => source}} end)
   end
 
   defp source_urls(image) do

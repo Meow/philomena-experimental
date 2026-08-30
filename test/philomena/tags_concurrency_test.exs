@@ -5,6 +5,7 @@ defmodule Philomena.TagsConcurrencyTest do
   import Philomena.TagsFixtures
 
   alias Philomena.Images
+  alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Tags
@@ -61,6 +62,25 @@ defmodule Philomena.TagsConcurrencyTest do
 
     assert Enum.all?(results, &match?({:ok, %{canonical_tags: %{tags: [%Tag{name: ^name}]}}}, &1))
     assert Repo.aggregate(from(tag in Tag, where: tag.name == ^name), :count) == 1
+  end
+
+  test "concurrent alias requests for one source commit only one target" do
+    source = tag_fixture(name: unique_tag_name())
+    targets = for _ <- 1..2, do: tag_fixture(name: unique_tag_name())
+    actors = for _ <- 1..2, do: actor(admin_user_fixture())
+
+    results =
+      concurrently(
+        Enum.zip(actors, targets)
+        |> Enum.map(fn {actor, target} ->
+          fn -> Tags.alias_tag(actor, source.slug, %{"target_tag" => target.name}) end
+        end)
+      )
+
+    assert Enum.count(results, &match?({:ok, %Tag{}}, &1)) == 1
+    assert Enum.count(results, &match?({:error, %Ecto.Changeset{}}, &1)) == 1
+    assert Repo.reload!(source).aliased_tag_id in Enum.map(targets, & &1.id)
+    assert Repo.aggregate(ModerationLog, :count) == 1
   end
 
   test "concurrent alias workers migrate each image tagging once" do

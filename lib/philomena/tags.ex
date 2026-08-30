@@ -146,7 +146,7 @@ defmodule Philomena.Tags do
     end
   end
 
-  defp filtered_taggings_for_batch(batch_query, [{:hidden_from_users, hidden_from_users}]) do
+  defp filtered_taggings_for_query(batch_query, [{:hidden_from_users, hidden_from_users}]) do
     from tagging in batch_query,
       as: :tagging,
       where:
@@ -257,6 +257,51 @@ defmodule Philomena.Tags do
     }
   end
 
+  defp put_delete_taggings_in_query(%Multi{} = multi, tag, query) do
+    # Lock all images in the batch first to prevent image operations from racing tag updates.
+    image_query =
+      from image in Image,
+        where: image.id in subquery(select(query, [tagging], tagging.image_id)),
+        order_by: [asc: :id],
+        select: image.id
+
+    # The image counter represents only the count of visible images.
+    # To preserve this meaning, the operation must be split into deleting
+    # taggings of visible and non-visible images.
+    #
+    # The image counter is updated so the partial deletion state is resumable.
+
+    visible_taggings = filtered_taggings_for_query(query, hidden_from_users: false)
+    hidden_taggings = filtered_taggings_for_query(query, hidden_from_users: true)
+
+    multi
+    |> Multi.lock_all(:locked_image_ids, image_query)
+    |> Multi.lock_one(:locked_tag, where(Tag, id: ^tag.id))
+    |> Images.put_delete_taggings(:old_visible, visible_taggings)
+    |> Images.put_delete_taggings(:old_hidden, hidden_taggings)
+    |> Multi.update_all(
+      :source_tag,
+      fn %{old_visible: {count, _}} ->
+        Tag
+        |> where(id: ^tag.id)
+        |> update(inc: [images_count: ^(-count)])
+      end,
+      []
+    )
+  end
+
+  defp put_delete_tag_change_tags_in_query(%Multi{} = multi, batch_query) do
+    tag_change_query =
+      from tag_change in TagChange,
+        where: tag_change.id in subquery(select(batch_query, [t], t.tag_change_id)),
+        order_by: [asc: :id],
+        select: tag_change.id
+
+    multi
+    |> Multi.lock_all(:tag_change_ids, tag_change_query)
+    |> TagChanges.put_delete_tag_change_tags(:tag_change_tags, batch_query)
+  end
+
   @doc """
   Gets existing tags or creates new ones from multiple lists of tag names,
   canonicalizes each list, and places the results in the `:canonical_tags`
@@ -324,42 +369,46 @@ defmodule Philomena.Tags do
 
       {:ok, buckets}
     end)
-    |> Multi.lock_all(:locked_tags, fn %{canonical_tags: buckets} ->
+    |> Multi.lock_all(:locked_tags, fn %{unlocked_tags: tags, canonical_tags: buckets} ->
       tag_ids =
         buckets
         |> Enum.flat_map(fn {_set, tags} -> Enum.map(tags, & &1.id) end)
+        |> Enum.concat(Enum.map(tags, & &1.id))
         |> Enum.uniq()
 
       Tag
       |> where([tag], tag.id in ^tag_ids)
       |> order_by(asc: :id)
     end)
-    |> Multi.run(:detect_conflict, fn _repo, %{canonical_tags: buckets, locked_tags: tags} ->
-      tags_by_id =
+    |> Multi.run(:detect_conflict, fn
+      _repo, %{canonical_tags: buckets, unlocked_tags: unlocked_tags, locked_tags: locked_tags} ->
+        locked_tags_by_id = Map.new(locked_tags, &{&1.id, &1})
+
+        # Implication list addition is a permitted race.
+        #
+        # However, deletion and alias canonicalization absolutely must be
+        # quiescent because incorrect state during a transaction can corrupt tag
+        # image counters.
+        #
+        # This code checks that the tag's alias is the same as it was before the
+        # lock to handle legacy databases that might have aliases resident in
+        # implied tag lists. Eventually this should be migrated out.
+        conflict_fn =
+          fn tag ->
+            not Map.has_key?(locked_tags_by_id, tag.id) or
+              Map.fetch!(locked_tags_by_id, tag.id).aliased_tag_id != tag.aliased_tag_id
+          end
+
         buckets
         |> Enum.flat_map(fn {_set, tags} -> tags end)
-        |> Map.new(&{&1.id, &1})
-
-      # Implication list addition is a permitted race.
-      #
-      # However, deletion and alias canonicalization absolutely must be
-      # quiescent because incorrect state during a transaction can corrupt tag
-      # image counters.
-      #
-      # This code checks that the tag's alias is the same as it was before the
-      # lock to handle legacy databases that might have aliases resident in
-      # implied tag lists. Eventually this should be migrated out.
-      conflict_fn =
-        fn tag ->
-          not Map.has_key?(tags_by_id, tag.id) or
-            Map.fetch!(tags_by_id, tag.id).aliased_tag_id != tag.aliased_tag_id
+        |> Enum.concat(unlocked_tags)
+        |> Enum.uniq_by(& &1.id)
+        |> Enum.any?(conflict_fn)
+        |> if do
+          {:error, :conflict}
+        else
+          {:ok, nil}
         end
-
-      if Enum.any?(tags, conflict_fn) do
-        {:error, :conflict}
-      else
-        {:ok, nil}
-      end
     end)
   end
 
@@ -1377,65 +1426,34 @@ defmodule Philomena.Tags do
   def perform_delete(tag_id) do
     tag = Repo.get!(Tag, tag_id)
 
+    tagging_query = where(Tagging, tag_id: ^tag.id)
+    tag_change_tag_query = where(TagChangeTag, tag_id: ^tag.id)
+
     # Clean up image taggings
 
-    Tagging
-    |> where(tag_id: ^tag.id)
+    tagging_query
     |> Batch.query_batches_until_empty(batch_size: 1_000, id_field: :image_id)
     |> Enum.each(fn batch_query ->
-      # Lock all images in the batch first to prevent image operations from racing tag updates.
-      image_query =
-        from image in Image,
-          where: image.id in subquery(select(batch_query, [tagging], tagging.image_id)),
-          order_by: [asc: :id],
-          select: image.id
-
-      # The image counter represents only the count of visible images.
-      # To preserve this meaning, the operation must be split into deleting
-      # taggings of visible and non-visible images.
-      #
-      # The image counter is updated so the partial deletion state is resumable.
-
-      visible_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: false)
-      hidden_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: true)
-
       Multi.new()
-      |> Multi.lock_all(:image_ids, image_query)
-      |> Images.put_delete_taggings(:old_visible, visible_taggings)
-      |> Images.put_delete_taggings(:old_hidden, hidden_taggings)
-      |> Multi.update_all(
-        :source_tag,
-        fn %{old_visible: {count, _}} ->
-          Tag
-          |> where(id: ^tag.id)
-          |> update(inc: [images_count: ^(-count)])
-        end,
-        []
-      )
+      |> put_delete_taggings_in_query(tag, batch_query)
       |> Multi.transact()
     end)
 
     # Clean up tag changes
 
-    TagChangeTag
-    |> where(tag_id: ^tag.id)
+    tag_change_tag_query
     |> Batch.query_batches_until_empty(batch_size: 10_000, id_field: :tag_change_id)
     |> Enum.each(fn batch_query ->
-      tag_change_query =
-        from tag_change in TagChange,
-          where: tag_change.id in subquery(select(batch_query, [t], t.tag_change_id)),
-          order_by: [asc: :id],
-          select: tag_change.id
-
       Multi.new()
-      |> Multi.lock_all(:tag_change_ids, tag_change_query)
-      |> TagChanges.put_delete_tag_change_tags(:tag_change_tags, batch_query)
+      |> put_delete_tag_change_tags_in_query(batch_query)
       |> Multi.transact()
     end)
 
     # Deletion now proceeds
 
     Multi.new()
+    |> put_delete_taggings_in_query(tag, tagging_query)
+    |> put_delete_tag_change_tags_in_query(tag_change_tag_query)
     |> Multi.delete(:tag, tag)
     |> Multi.on_commit(fn _changes -> Search.delete_document(tag.id, Tag) end)
     |> Multi.transact()
@@ -1471,21 +1489,28 @@ defmodule Philomena.Tags do
           where: image.id in subquery(select(batch_query, [tagging], tagging.image_id)),
           order_by: [asc: :id]
 
+      # Lock alias source and target to prevent alias migration from racing aliasing.
+      tag_query =
+        from tag in Tag,
+          where: tag.id in ^[tag_id, target_tag_id],
+          order_by: [asc: :id]
+
       # The image counter represents only the count of visible images.
       # To preserve this meaning, the operation must be split into migrating
       # taggings of visible and non-visible images.
       #
       # The image counter is updated so the partial migration state is resumable.
 
-      visible_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: false)
+      visible_taggings = filtered_taggings_for_query(batch_query, hidden_from_users: false)
       visible_insert_all = insert_all_for_alias(visible_taggings, target_tag)
 
-      hidden_taggings = filtered_taggings_for_batch(batch_query, hidden_from_users: true)
+      hidden_taggings = filtered_taggings_for_query(batch_query, hidden_from_users: true)
       hidden_insert_all = insert_all_for_alias(hidden_taggings, target_tag)
 
       Multi.new()
       |> Multi.lock_all(:locked_images, image_query)
-      |> Multi.lock_one(:locked_source_tag, where(Tag, id: ^tag_id))
+      |> Multi.lock_all(:locked_tags, tag_query)
+      |> Multi.lock_one(:locked_source_tag, where(Tag, id: ^tag.id))
       |> Multi.run(:check_source_tag, fn _repo, %{locked_source_tag: tag} ->
         # Abort processing if the target is changed during batch scanning.
         #
@@ -1548,7 +1573,8 @@ defmodule Philomena.Tags do
   def perform_reindex_images(tag_id) do
     tag = Repo.get!(Tag, tag_id)
 
-    # First recount the tag
+    # First, recount the tag.
+    # Recount failure is permitted and ignored.
     Multi.new()
     |> Multi.run(:image_count, fn repo, _changes ->
       {:ok,
@@ -1569,7 +1595,7 @@ defmodule Philomena.Tags do
     |> Multi.on_commit(fn _changes -> reindex_tags([tag]) end)
     |> Multi.transact_with_automatic_retry(isolation: :serializable)
 
-    # Then reindex
+    # Then, reindex.
     Image
     |> join(:inner, [i], _ in assoc(i, :tags))
     |> where([_i, t], t.id == ^tag.id)
