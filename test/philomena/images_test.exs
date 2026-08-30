@@ -331,6 +331,39 @@ defmodule Philomena.ImagesTest do
     end
   end
 
+  describe "merge_image/4 target updates" do
+    test "combines the source image's sources into the target image" do
+      moderator = user_fixture()
+      source = image_fixture(sources: ["https://example.com/source"])
+      target = image_fixture(sources: ["https://example.com/target"])
+
+      assert {:ok, _result} =
+               Multi.new()
+               |> Images.put_merge_image(source, target, moderator)
+               |> Multi.transact()
+
+      assert Enum.sort(source_urls(target)) == [
+               "https://example.com/source",
+               "https://example.com/target"
+             ]
+    end
+
+    test "migrates the earliest first_seen_at to the target image" do
+      moderator = user_fixture()
+      source_first_seen_at = ~U[2020-01-01 00:00:00Z]
+      target_first_seen_at = ~U[2021-01-01 00:00:00Z]
+      source = image_fixture(first_seen_at: source_first_seen_at)
+      target = image_fixture(first_seen_at: target_first_seen_at)
+
+      assert {:ok, _result} =
+               Multi.new()
+               |> Images.put_merge_image(source, target, moderator)
+               |> Multi.transact()
+
+      assert Repo.reload!(target).first_seen_at == source_first_seen_at
+    end
+  end
+
   describe "update_file/3 duplicate detection" do
     # Root cause of the fixed bug: replacing an image's file with a
     # byte-identical copy. The image's own row still holds that file's

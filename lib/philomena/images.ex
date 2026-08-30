@@ -1212,14 +1212,10 @@ defmodule Philomena.Images do
   @doc """
   Adds a loaded-image merge to `multi` without transacting it.
 
-  The caller owns authorization and must lock the two images before **merging**
+  The caller owns authorization and must lock the two images before merging
   this service when their current state controls the operation. PostgreSQL
   mutations join the caller's transaction; thumbnail work, indexing, and the
   firehose broadcast run only after that transaction commits.
-
-  TODO: read the locked images out of the multi changes map, instead of relying
-  on the user to read the documentation which requires the multi to be merged
-  instead of simply composed
 
   ## Examples
 
@@ -1259,7 +1255,7 @@ defmodule Philomena.Images do
         |> Enum.uniq()
         |> Enum.take(15)
 
-      image
+      duplicate_of_image
       |> Image.first_seen_at_changeset([image, duplicate_of_image])
       |> Image.sources_changeset(sources)
     end)
