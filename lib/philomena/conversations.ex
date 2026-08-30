@@ -226,7 +226,6 @@ defmodule Philomena.Conversations do
   def create_conversation(%Actor{user: user} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Conversation),
-         :ok <- RateLimiter.check_rate_limit(actor, :conversation_create),
          {:ok, recipient_name} <- Conversation.recipient_name(params) do
       recipient =
         case Users.load_active_user_by_name(actor, recipient_name) do
@@ -238,14 +237,21 @@ defmodule Philomena.Conversations do
         Conversation.creation_changeset(%Conversation{}, user, recipient, params)
 
       Multi.new()
+      |> Multi.reserve_action(
+        fn ->
+          RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
+        end,
+        fn -> RateLimiter.rollback_action(actor, :conversation_create) end
+      )
       |> Multi.insert(:conversation, conversation_changeset)
       |> put_approval_report(fn %{conversation: %{messages: [message]}} -> message end)
       |> Multi.transact()
       |> case do
         {:ok, %{conversation: conversation}} ->
-          RateLimiter.record_action(actor, :conversation_create, @conversation_create_window)
-
           {:ok, conversation}
+
+        {:error, :action_reservation, :rate_limited, _changes} ->
+          {:error, :rate_limited}
 
         {:error, :conversation, changeset, _changes} ->
           {:error, changeset}

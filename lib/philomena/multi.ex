@@ -689,6 +689,18 @@ defmodule Philomena.Multi do
 
         {:ok, changes}
 
+      {:error, _step, _reason, changes} = error ->
+        changes
+        |> Enum.each(fn
+          {{:on_rollback, _ref}, callback} ->
+            callback.(changes)
+
+          _ ->
+            :ok
+        end)
+
+        error
+
       error ->
         error
     end
@@ -736,5 +748,42 @@ defmodule Philomena.Multi do
   @spec on_commit(t(), (Ecto.Multi.changes() -> any())) :: t()
   def on_commit(%__MODULE__{} = multi, callback) when is_function(callback, 1) do
     update_in(multi.multi, &Ecto.Multi.put(&1, {:on_commit, make_ref()}, callback))
+  end
+
+  @doc """
+  Registers a callback to occur when the Multi transaction rolls back.
+
+  The callback receives the changes from the failed transaction. This is useful
+  for compensating external reservations made by a `Multi.run/3` step.
+  """
+  @spec on_rollback(t(), (Ecto.Multi.changes() -> any())) :: t()
+  def on_rollback(%__MODULE__{} = multi, callback) when is_function(callback, 1) do
+    update_in(multi.multi, &Ecto.Multi.put(&1, {:on_rollback, make_ref()}, callback))
+  end
+
+  @doc """
+  Reserves an external action for the transaction and releases it if the
+  transaction rolls back.
+
+  `record_action` must return `:ok` or an error tuple. The reservation is
+  stored as `:action_reservation` in the Multi changes.
+  """
+  @spec reserve_action(t(), (-> :ok | {:error, term()}), (-> :ok)) :: t()
+  def reserve_action(%__MODULE__{} = multi, record_action, rollback_action)
+      when is_function(record_action, 0) and is_function(rollback_action, 0) do
+    multi
+    |> run(:action_reservation, fn _repo, _changes ->
+      case record_action.() do
+        :ok -> {:ok, nil}
+        error -> error
+      end
+    end)
+    |> on_rollback(fn changes ->
+      if Map.has_key?(changes, :action_reservation) do
+        rollback_action.()
+      end
+
+      :ok
+    end)
   end
 end

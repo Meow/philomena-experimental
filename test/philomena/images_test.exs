@@ -3897,14 +3897,12 @@ defmodule Philomena.ImagesTest do
       assert rate_limit_count(actor, :source_update) == "1"
     end
 
-    test "the rate check precedes the id parse: over-limit with a non-castable id is still rate limited" do
-      # IntegerId.parse runs after the rate check, so an over-limit actor gets
-      # :rate_limited rather than the :not_found a non-castable id yields.
+    test "a non-castable id does not consume the rate limit" do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :source_update)
 
       assert Images.update_sources(actor, "not-a-number", add_source_attrs("https://x.test")) ==
-               {:error, :rate_limited}
+               {:error, :not_found}
     end
   end
 
@@ -4043,7 +4041,7 @@ defmodule Philomena.ImagesTest do
       # Fill the user's tag bucket to the 50-change limit so the next multi-tag
       # update trips check_limits. The counter carries a 10-minute TTL that the
       # SQL sandbox does not roll back, so clear it afterward.
-      :ok = Limits.update_tag_count_after_update(user, ip, 50)
+      :ok = Limits.record_action(user, ip, 50, 0)
       on_exit(fn -> reset_tag_change_limits(user: user, ip: ip) end)
 
       assert Images.update_tags(
@@ -4125,15 +4123,12 @@ defmodule Philomena.ImagesTest do
       assert rate_limit_count(actor, :tag_update) == "1"
     end
 
-    test "the rate check precedes the id parse: over-limit with a non-castable id is still rate limited" do
-      # IntegerId.parse runs after the once-per-window rate check, so an over-limit
-      # actor gets :rate_limited rather than the :not_found a non-castable id
-      # yields.
+    test "a non-castable id does not consume the rate limit" do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :tag_update)
 
       assert Images.update_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
-               {:error, :rate_limited}
+               {:error, :not_found}
     end
   end
 

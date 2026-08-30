@@ -376,14 +376,17 @@ defmodule Philomena.Comments do
   def create_comment(%Actor{user: creator} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image(actor, image_id, :create_comment),
-         :ok <- Images.verify_forced_filter_access(actor, image),
-         :ok <- RateLimiter.check_rate_limit(actor, :comment_create) do
+         :ok <- Images.verify_forced_filter_access(actor, image) do
       comment_changeset =
         image
         |> Ecto.build_assoc(:comments)
         |> Comment.creation_changeset(attrs, actor)
 
       Multi.new()
+      |> Multi.reserve_action(
+        fn -> RateLimiter.record_action(actor, :comment_create, @comment_create_window) end,
+        fn -> RateLimiter.rollback_action(actor, :comment_create) end
+      )
       |> put_lock_image(actor, image.id, :create_comment)
       |> Multi.insert(:comment, comment_changeset)
       |> Images.put_image_counter_delta(:update_image, image.id, :comments_count, 1)
@@ -396,9 +399,11 @@ defmodule Philomena.Comments do
       |> Multi.transact()
       |> case do
         {:ok, %{comment: %Comment{} = comment}} ->
-          RateLimiter.record_action(actor, :comment_create, @comment_create_window)
           broadcast_comment("comment:create", comment)
           {:ok, comment}
+
+        {:error, :action_reservation, :rate_limited, _changes} ->
+          {:error, :rate_limited}
 
         {:error, :comment, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, {image, changeset}}

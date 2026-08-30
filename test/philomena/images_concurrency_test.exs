@@ -60,6 +60,27 @@ defmodule Philomena.ImagesConcurrencyTest do
            ) == 2
   end
 
+  test "concurrent source updates are limited per actor" do
+    user = confirmed_user_fixture()
+    images = for _ <- 1..3, do: image_fixture(tags: "safe")
+    actor = actor(user)
+
+    results =
+      concurrently(
+        for {image, source} <-
+              Enum.zip(images, [
+                "https://example.com/limited-one",
+                "https://example.com/limited-two",
+                "https://example.com/limited-three"
+              ]) do
+          fn -> Images.update_sources(actor, image.id, source_attrs(source)) end
+        end
+      )
+
+    assert Enum.count(results, &match?({:ok, %{added: [_]}}, &1)) == 2
+    assert Enum.count(results, &(&1 == {:error, :rate_limited})) == 1
+  end
+
   test "concurrent tag additions merge against the locked image and update counts" do
     image = image_fixture(tags: "safe, initial one, initial two")
     actors = for _ <- 1..2, do: actor(admin_user_fixture())
@@ -94,6 +115,35 @@ defmodule Philomena.ImagesConcurrencyTest do
              from(change in TagChange, where: change.image_id == ^image.id),
              :count
            ) == 2
+  end
+
+  test "concurrent tag updates are limited per actor" do
+    user = confirmed_user_fixture()
+
+    images = for _ <- 1..3, do: image_fixture(tags: "safe, initial one, initial two")
+
+    actor = actor(user)
+    tag_names = for _ <- 1..3, do: unique_tag_name()
+    old_input = "safe, initial one, initial two"
+
+    results =
+      concurrently(
+        for {image, tag_name} <- Enum.zip(images, tag_names) do
+          fn ->
+            Images.update_tags(
+              actor,
+              image.id,
+              %{
+                "old_tag_input" => old_input,
+                "tag_input" => "#{old_input}, #{tag_name}"
+              }
+            )
+          end
+        end
+      )
+
+    assert Enum.count(results, &match?({:ok, %{added: [_]}}, &1)) == 2
+    assert Enum.count(results, &(&1 == {:error, :rate_limited})) == 1
   end
 
   test "concurrent tag additions resolve an alias and its implications once" do

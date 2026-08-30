@@ -41,7 +41,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
   # (they carry a 10-minute TTL and the SQL sandbox does not roll them back).
   defp fill_tag_bucket!(user) do
     ip = %Postgrex.INET{address: {127, 0, 0, 1}, netmask: 32}
-    :ok = Limits.update_tag_count_after_update(user, ip, 50)
+    :ok = Limits.record_action(user, ip, 50, 0)
     on_exit(fn -> reset_tag_change_limits(user: user, ip: ip) end)
   end
 

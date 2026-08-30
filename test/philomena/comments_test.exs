@@ -1063,14 +1063,14 @@ defmodule Philomena.CommentsTest do
       assert rate_limit_count(actor, :comment_create) == "1"
     end
 
-    test "the rate check precedes the insert: over-limit with a blank body is still rate limited",
-         %{image: image} do
-      # A blank body would fail the insert with :creation_failed, but the rate
-      # check runs before persistence, so the actor gets :rate_limited.
+    test "an invalid comment does not consume the rate limit", %{image: image} do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :comment_create)
 
-      assert Comments.create_comment(actor, image.id, %{"body" => ""}) == {:error, :rate_limited}
+      assert {:error, {%Image{}, %Ecto.Changeset{}}} =
+               Comments.create_comment(actor, image.id, %{"body" => ""})
+
+      assert rate_limit_count(actor, :comment_create) == "2"
     end
   end
 

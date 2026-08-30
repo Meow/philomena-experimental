@@ -2,15 +2,17 @@ defmodule Philomena.RateLimiter do
   @moduledoc """
   Per-identity rate limiting for controller-facing write operations.
 
-  Contexts guard a rate-limited write by calling `check_rate_limit/2` before
-  performing it and `record_action/3` after it succeeds. Counters live in
-  Valkey under a per-operation key scoped to the acting identity - the actor's
-  user when signed in, otherwise its IP - and expire `window` seconds after
-  the last recorded action.
+  Contexts reserve a rate-limited write by calling `record_action/3` before
+  its transaction and call `rollback_action/2` if that transaction rolls back.
+  Counters live in Valkey under a per-operation key scoped to the acting
+  identity - the actor's user when signed in, otherwise its IP - and expire
+  `window` seconds after each successful reservation.
 
-  The check boundary is inclusive: an operation is refused only once its
-  counter exceeds the limit of 1, so with recording done once per successful
-  write, two writes may land inside a single window and the third is refused.
+  `record_action/3` uses Valkey's atomic increment reply to reserve a slot. A
+  reservation over the inclusive limit is refused, so concurrent requests
+  cannot all pass a separate check before any of them are recorded. With the
+  inclusive limit of 1, two writes are allowed in a window and the third is
+  refused. A reservation is decremented only when its transaction rolls back.
   Staff (admins, moderators, assistants) and users with `bypass_rate_limits`
   set are never limited and record no counters; see `considered_for_limit?/1`.
   """
@@ -22,41 +24,11 @@ defmodule Philomena.RateLimiter do
   @limit 1
 
   @doc """
-  Determine whether `actor` may perform `operation` right now.
+  Reserve a rate-limited `operation` for `actor`.
 
-  Returns `:ok` when the actor's counter for `operation` does not exceed the
-  limit (or the actor is exempt), otherwise `{:error, :rate_limited}`.
-  Should be used in tandem with `record_action/3`.
-
-  ## Examples
-
-      iex> check_rate_limit(actor, :post_create)
-      :ok
-
-      iex> check_rate_limit(actor_over_limit, :post_create)
-      {:error, :rate_limited}
-
-  """
-  @spec check_rate_limit(Actor.t(), atom()) :: :ok | {:error, :rate_limited}
-  def check_rate_limit(%Actor{} = actor, operation) do
-    if considered_for_limit?(actor.user) do
-      amt =
-        String.to_integer(
-          Redix.command!(redix_connection(), ["GET", key(actor, operation)]) || "0"
-        )
-
-      if amt <= @limit, do: :ok, else: {:error, :rate_limited}
-    else
-      :ok
-    end
-  end
-
-  @doc """
-  Record a successful, rate-limited `operation` by `actor`.
-
-  Increments the actor's counter for `operation` and (re)starts its expiry
-  `window`, in seconds. Exempt actors record nothing. Always returns `:ok`.
-  Should be used in tandem with `check_rate_limit/2`.
+  Increments the actor's counter for `operation` and starts its expiry
+  `window`, in seconds. Exempt actors reserve nothing. A reservation over the
+  limit returns `{:error, :rate_limited}` immediately.
 
   ## Examples
 
@@ -64,13 +36,40 @@ defmodule Philomena.RateLimiter do
       :ok
 
   """
-  @spec record_action(Actor.t(), atom(), pos_integer()) :: :ok
+  @spec record_action(Actor.t(), atom(), pos_integer()) ::
+          :ok | {:error, :rate_limited}
   def record_action(%Actor{} = actor, operation, window) do
     if considered_for_limit?(actor.user) do
-      Redix.pipeline!(redix_connection(), [
-        ["INCR", key(actor, operation)],
-        ["EXPIRE", key(actor, operation), window]
-      ])
+      key = key(actor, operation)
+      count = Redix.command!(redix_connection(), ["INCR", key])
+
+      if count <= @limit + 1 do
+        Redix.command!(redix_connection(), ["EXPIRE", key, window])
+        :ok
+      else
+        {:error, :rate_limited}
+      end
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  Roll back a reservation made by `record_action/3`.
+
+  This is intended to be called only when the transaction which owns the
+  reservation rolls back. Exempt actors have no counter to decrement.
+
+  ## Examples
+
+      iex> rollback_action(actor, :post_create)
+      :ok
+
+  """
+  @spec rollback_action(Actor.t(), atom()) :: :ok
+  def rollback_action(%Actor{} = actor, operation) do
+    if considered_for_limit?(actor.user) do
+      rollback_counter(key(actor, operation), 1)
     end
 
     :ok
@@ -105,6 +104,11 @@ defmodule Philomena.RateLimiter do
 
   defp scope(%Actor{user: nil, ip: ip}), do: "i:#{ip}"
   defp scope(%Actor{user: user}), do: "u:#{user.id}"
+
+  defp rollback_counter(key, amount) do
+    Redix.command!(redix_connection(), ["DECRBY", key, amount])
+    :ok
+  end
 
   defp redix_connection, do: :redix
 end

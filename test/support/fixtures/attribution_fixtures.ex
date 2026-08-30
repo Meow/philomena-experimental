@@ -119,7 +119,7 @@ defmodule Philomena.AttributionFixtures do
 
   @doc """
   Primes `actor`'s `Philomena.RateLimiter` counter for `operation` past the
-  limit so the next `check_rate_limit/2` refuses it, and registers `on_exit`
+  limit so the next `record_action/3` refuses it, and registers `on_exit`
   cleanup of the key.
 
   The check boundary is inclusive at a limit of 1, so a counter of 2 is over the

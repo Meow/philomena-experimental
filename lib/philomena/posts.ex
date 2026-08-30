@@ -284,9 +284,12 @@ defmodule Philomena.Posts do
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited}
   def create_post(%Actor{user: creator} = actor, forum_slug, topic_slug, params) do
-    with :ok <- verify_write_access(actor),
-         :ok <- RateLimiter.check_rate_limit(actor, :post_create) do
+    with :ok <- verify_write_access(actor) do
       Multi.new()
+      |> Multi.reserve_action(
+        fn -> RateLimiter.record_action(actor, :post_create, @post_create_window) end,
+        fn -> RateLimiter.rollback_action(actor, :post_create) end
+      )
       |> put_forum_and_topic_locks(actor, forum_slug, :show, topic_slug, :create_post)
       |> put_max_topic_position()
       |> Multi.insert(:post, fn %{max_topic_position: max_topic_position, locked_topic: topic} ->
@@ -307,8 +310,6 @@ defmodule Philomena.Posts do
       |> Multi.transact()
       |> case do
         {:ok, %{locked_forum: forum, post: %Post{} = post}} ->
-          RateLimiter.record_action(actor, :post_create, @post_create_window)
-
           # The firehose representation includes the topic author.
           broadcast_post_creation(%{
             post: post,
@@ -317,6 +318,9 @@ defmodule Philomena.Posts do
           })
 
           {:ok, post}
+
+        {:error, :action_reservation, :rate_limited, _changes} ->
+          {:error, :rate_limited}
 
         {:error, :post, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}

@@ -355,9 +355,12 @@ defmodule Philomena.Topics do
   @spec create_topic(Forum.t(), keyword(), map()) ::
           {:ok, %{topic: Topic.t()}} | {:error, atom(), Ecto.Changeset.t(), map()}
   def create_topic(%Actor{user: creator} = actor, forum_slug, params) do
-    with :ok <- verify_write_access(actor),
-         :ok <- RateLimiter.check_rate_limit(actor, :topic_create) do
+    with :ok <- verify_write_access(actor) do
       Multi.new()
+      |> Multi.reserve_action(
+        fn -> RateLimiter.record_action(actor, :topic_create, @topic_create_window) end,
+        fn -> RateLimiter.rollback_action(actor, :topic_create) end
+      )
       |> put_forum_lock(actor, forum_slug, :create_topic)
       |> Multi.insert(:topic, fn %{locked_forum: forum} ->
         Topic.creation_changeset(%Topic{}, params, forum, actor)
@@ -373,11 +376,12 @@ defmodule Philomena.Topics do
       |> Multi.transact()
       |> case do
         {:ok, %{locked_forum: forum, topic: %Topic{} = topic}} ->
-          RateLimiter.record_action(actor, :topic_create, @topic_create_window)
-
           result = %{topic: topic, forum: forum, post: hd(topic.posts)}
 
           {:ok, broadcast_topic_creation(result)}
+
+        {:error, :action_reservation, :rate_limited, _changes} ->
+          {:error, :rate_limited}
 
         {:error, :topic, %Ecto.Changeset{} = changeset, %{locked_forum: %Forum{} = forum}} ->
           {:error, forum, changeset}

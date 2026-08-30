@@ -66,6 +66,9 @@ defmodule Philomena.Images do
   alias PhilomenaWeb.Endpoint
   alias PhilomenaQuery.Batch
 
+  @source_update_window 5
+  @tag_update_window 5
+
   use Philomena.Subscriptions,
     on_delete: :clear_image_notification,
     id_name: :image_id
@@ -248,6 +251,10 @@ defmodule Philomena.Images do
       SourceDiffer.diff_inputs(form.old_sources, form.sources)
 
     Multi.new()
+    |> Multi.reserve_action(
+      fn -> RateLimiter.record_action(actor, :source_update, @source_update_window) end,
+      fn -> RateLimiter.rollback_action(actor, :source_update) end
+    )
     |> put_lock_image(actor, image.id, :edit_metadata, [:sources])
     |> Multi.run(:image, fn repo, %{locked_image: image} ->
       changeset = Image.source_changeset(image, added_sources, removed_sources)
@@ -263,6 +270,9 @@ defmodule Philomena.Images do
     |> put_reindex_image(:image)
     |> Multi.transact()
     |> case do
+      {:error, :action_reservation, :rate_limited, _changes} ->
+        {:error, :rate_limited}
+
       {:ok, %{image: %Image{} = image}} ->
         {:ok, image}
 
@@ -285,6 +295,10 @@ defmodule Philomena.Images do
       )
 
     Multi.new()
+    |> Multi.reserve_action(
+      fn -> RateLimiter.record_action(actor, :tag_update, @tag_update_window) end,
+      fn -> RateLimiter.rollback_action(actor, :tag_update) end
+    )
     |> put_lock_image(actor, image.id, :edit_metadata, [:tags, :locked_tags])
     |> Tags.put_canonicalize_tag_name_sets([
       {:removed_tags, removed_tag_names, []},
@@ -305,7 +319,17 @@ defmodule Philomena.Images do
         end
     end)
     |> Multi.run(:check_limits, fn _repo, %{image: image} ->
-      check_tag_change_limits_before_commit(image, actor)
+      record_tag_change_limits(image, actor)
+    end)
+    |> Multi.on_rollback(fn changes ->
+      case changes[:check_limits] do
+        {tag_changed_count, rating_changed_count} ->
+          %Actor{ip: ip, user: user} = actor
+          Limits.rollback_action(user, ip, tag_changed_count, rating_changed_count)
+
+        _ ->
+          :ok
+      end
     end)
     |> TagChanges.put_tag_change(actor)
     |> Tags.put_image_tag_count_changes()
@@ -313,10 +337,12 @@ defmodule Philomena.Images do
     |> put_reindex_image(:image)
     |> Multi.on_commit(fn %{image: image} ->
       Comments.reindex_comments_on_image(image)
-      update_tag_change_limits_after_commit(image, actor)
     end)
     |> Multi.transact_with_automatic_retry()
     |> case do
+      {:error, :action_reservation, :rate_limited, _changes} ->
+        {:error, :rate_limited}
+
       {:ok, %{image: %Image{} = image}} ->
         {:ok, image}
 
@@ -334,29 +360,14 @@ defmodule Philomena.Images do
     end
   end
 
-  defp check_tag_change_limits_before_commit(image, %Actor{ip: ip, user: user}) do
+  defp record_tag_change_limits(image, %Actor{ip: ip, user: user}) do
     tag_changed_count = length(image.added_tags) + length(image.removed_tags)
-    rating_changed = image.ratings_changed
-
-    cond do
-      Limits.limited_for_tag_count?(user, ip, tag_changed_count) ->
-        {:error, :limit_exceeded}
-
-      rating_changed and Limits.limited_for_rating_count?(user, ip) ->
-        {:error, :limit_exceeded}
-
-      true ->
-        {:ok, 0}
-    end
-  end
-
-  defp update_tag_change_limits_after_commit(image, %Actor{ip: ip, user: user}) do
     rating_changed_count = if(image.ratings_changed, do: 1, else: 0)
-    tag_changed_count = length(image.added_tags) + length(image.removed_tags)
 
-    :ok = Limits.update_tag_count_after_update(user, ip, tag_changed_count)
-    :ok = Limits.update_rating_count_after_update(user, ip, rating_changed_count)
-    :ok
+    case Limits.record_action(user, ip, tag_changed_count, rating_changed_count) do
+      :ok -> {:ok, {tag_changed_count, rating_changed_count}}
+      error -> error
+    end
   end
 
   ## Forms and uploads
@@ -1502,7 +1513,6 @@ defmodule Philomena.Images do
   def upload_image(%Actor{user: user} = actor, params, upload) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Image),
-         :ok <- RateLimiter.check_rate_limit(actor, :image_create),
          {:ok, tag_input_form} <-
            %TagInputForm{}
            |> TagInputForm.changeset(params)
@@ -1521,6 +1531,10 @@ defmodule Philomena.Images do
         |> maybe_approve_image(user)
 
       Multi.new()
+      |> Multi.reserve_action(
+        fn -> RateLimiter.record_action(actor, :image_create, @image_create_window) end,
+        fn -> RateLimiter.rollback_action(actor, :image_create) end
+      )
       |> Tags.put_canonicalize_tag_name_sets([
         {:added_tags, added_tag_names, allow_insert_new?: true, expand_implications?: true}
       ])
@@ -1541,8 +1555,6 @@ defmodule Philomena.Images do
       |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          RateLimiter.record_action(actor, :image_create, @image_create_window)
-
           upload_pid = async_upload(image, upload)
 
           image = Repo.preload(image, tags: :aliases)
@@ -1555,8 +1567,14 @@ defmodule Philomena.Images do
           # used for uploading.
           {:ok, %{image: image, upload_pid: upload_pid}}
 
+        {:error, :action_reservation, :rate_limited, _changes} ->
+          {:error, :rate_limited}
+
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
+
+        error ->
+          error
       end
     end
   end
@@ -2452,8 +2470,6 @@ defmodule Philomena.Images do
     end
   end
 
-  @source_update_window 5
-
   @doc group: "Metadata editing"
   @doc """
   Updates the sources of the image named by `image_id`, on behalf of `actor`,
@@ -2463,11 +2479,12 @@ defmodule Philomena.Images do
   Banned actors are rejected first with `{:error, :ban}` (a write with no
   fingerprint is `{:error, :unauthorized}`), before the image is loaded. A
   non-exempt actor who has updated metadata within the last 5 seconds gets
-  `{:error, :rate_limited}`. The image is then loaded by id (with its author,
-  sources, and tags preloaded) and authorized for `:edit_metadata`. Sources are
-  editable on a non-hidden image by anyone (anonymous included). On success the
-  sources are updated and attributed, the actor's metadata-update stat is
-  incremented when sources actually changed, and the image is reindexed.
+  `{:error, :rate_limited}` during the transaction reservation. The image is
+  loaded by id (with its author, sources, and tags preloaded) and authorized
+  for `:edit_metadata` before that reservation. Sources are editable on a
+  non-hidden image by anyone (anonymous included). On success the sources are
+  updated and attributed, the actor's metadata-update stat is incremented when
+  sources actually changed, and the image is reindexed.
 
   Returns `{:ok, %{image: image, added: added_sources, removed: removed_sources,
   source_change_count: count}}`. The context broadcasts the source and image
@@ -2492,18 +2509,13 @@ defmodule Philomena.Images do
           | {:error, :ban | :unauthorized | :not_found | :rate_limited | Ecto.Changeset.t()}
   def update_sources(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
-         :ok <- RateLimiter.check_rate_limit(actor, :source_update),
          {:ok, image} <- load_image_member(actor, :edit_metadata, image_id, [:sources]),
          {:ok, source_input_form} <-
            %SourceInputForm{}
            |> SourceInputForm.changeset(attrs)
            |> SourceInputForm.apply(image) do
-      image
-      |> update_loaded_sources(actor, source_input_form)
-      |> case do
+      case update_loaded_sources(image, actor, source_input_form) do
         {:ok, %Image{} = image} ->
-          RateLimiter.record_action(actor, :source_update, @source_update_window)
-
           # TODO: broadcast should move to update_loaded_sources
           image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
           added = image.added_sources
@@ -2529,6 +2541,9 @@ defmodule Philomena.Images do
 
         {:error, %Ecto.Changeset{} = changeset} ->
           {:error, changeset}
+
+        error ->
+          error
       end
     end
   end
@@ -2596,8 +2611,6 @@ defmodule Philomena.Images do
     end
   end
 
-  @tag_update_window 5
-
   @doc group: "Metadata editing"
   @doc """
   Updates the tags of the image named by `image_id`, on behalf of `actor`, from
@@ -2607,13 +2620,14 @@ defmodule Philomena.Images do
   Banned actors are rejected first with `{:error, :ban}` (a write with no
   fingerprint is `{:error, :unauthorized}`), before the image is loaded. A
   non-exempt actor who has updated metadata within the last 5 seconds gets
-  `{:error, :rate_limited}` from the once-per-window check. The image is then
+  `{:error, :rate_limited}` from the transaction reservation. The image is
   loaded by id (with its author, locked tags, sources, and tags preloaded) and
-  authorized for `:edit_metadata` - editable on a non-hidden image whose tag
-  editing is allowed by anyone (anonymous included), so an image with tag editing
-  disabled is `{:error, :unauthorized}`. On success the tags are updated and
-  attributed, the image, its comments, and the affected tags are reindexed, and
-  the actor's metadata-update stat is incremented when tags actually changed.
+  authorized for `:edit_metadata` before that reservation - editable on a
+  non-hidden image whose tag editing is allowed by anyone (anonymous
+  included), so an image with tag editing disabled is
+  `{:error, :unauthorized}`. On success the tags are updated and attributed,
+  the image, its comments, and the affected tags are reindexed, and the
+  actor's metadata-update stat is incremented when tags actually changed.
 
   On success, returns `{:ok, %{image: image, added: added_tags, removed: removed_tags,
   tag_change_count: count, tag_change_tag_count: tag_count}}`. The context
@@ -2654,18 +2668,13 @@ defmodule Philomena.Images do
              | Ecto.Changeset.t()}
   def update_tags(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
-         :ok <- RateLimiter.check_rate_limit(actor, :tag_update),
          {:ok, image} <- load_image_member(actor, :edit_metadata, image_id),
          {:ok, tag_input_form} <-
            %TagInputForm{}
            |> TagInputForm.changeset(attrs)
            |> TagInputForm.apply(image) do
-      image
-      |> update_loaded_tags(actor, tag_input_form)
-      |> case do
+      case update_loaded_tags(image, actor, tag_input_form) do
         {:ok, %Image{} = image} ->
-          RateLimiter.record_action(actor, :tag_update, @tag_update_window)
-
           # TODO: broadcast should move to update_loaded_tags
           image = Repo.preload(image, [:user, :sources, tags: :aliases], force: true)
           added = image.added_tags
@@ -2700,6 +2709,9 @@ defmodule Philomena.Images do
 
         {:error, %Ecto.Changeset{} = changeset} ->
           {:error, changeset}
+
+        error ->
+          error
       end
     end
   end

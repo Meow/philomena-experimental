@@ -339,15 +339,12 @@ defmodule Philomena.ConversationsTest do
       assert rate_limit_count(actor, :conversation_create) == "1"
     end
 
-    test "the rate check precedes validation: over-limit with an unknown recipient is still rate limited" do
-      # An unknown recipient would fail the required-recipient validation, but the
-      # The rate check runs before changeset construction, so the actor gets
-      # :rate_limited rather than a changeset error.
+    test "invalid recipient input does not consume the rate limit" do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :conversation_create)
 
-      assert Conversations.create_conversation(actor, %{"recipient" => "nobody by this name"}) ==
-               {:error, :rate_limited}
+      assert {:error, %Ecto.Changeset{}} =
+               Conversations.create_conversation(actor, %{"recipient" => "nobody by this name"})
     end
   end
 
