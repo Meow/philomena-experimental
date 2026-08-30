@@ -135,6 +135,7 @@ defmodule Philomena.Tags.Tag do
     tag
     |> cast(attrs, [:category, :description, :short_description, :mod_notes, :implied_tag_list])
     |> put_assoc(:implied_tags, implied_tags)
+    |> validate_no_aliased_implied_tags(implied_tags)
     |> validate_required([])
     |> validate_inclusion(:category, categories())
   end
@@ -162,7 +163,7 @@ defmodule Philomena.Tags.Tag do
     |> validate_required(:target_tag)
   end
 
-  def alias_changeset(tag, target_tag, incoming_aliases?) do
+  def alias_changeset(tag, target_tag, incoming_aliases?, implied_by_tags?) do
     tag
     |> change()
     |> validate_not_aliased()
@@ -171,6 +172,7 @@ defmodule Philomena.Tags.Tag do
     |> validate_not_aliased_to_self()
     |> validate_alias_not_transitive()
     |> validate_incoming_aliases(incoming_aliases?)
+    |> validate_implied_by_tags(implied_by_tags?)
   end
 
   def unalias_changeset(tag) do
@@ -398,6 +400,22 @@ defmodule Philomena.Tags.Tag do
   defp validate_incoming_aliases(changeset, incoming_aliases?) do
     if incoming_aliases? do
       add_error(changeset, :tag, "has incoming aliases and cannot be aliased")
+    else
+      changeset
+    end
+  end
+
+  defp validate_no_aliased_implied_tags(changeset, implied_tags) do
+    if Enum.any?(implied_tags, &(not is_nil(&1.aliased_tag_id))) do
+      add_error(changeset, :implied_tag_list, "contains aliased tags")
+    else
+      changeset
+    end
+  end
+
+  defp validate_implied_by_tags(changeset, implied_by_tags?) do
+    if implied_by_tags? do
+      add_error(changeset, :tag, "is implied by other tags and cannot be aliased")
     else
       changeset
     end

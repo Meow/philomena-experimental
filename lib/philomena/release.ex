@@ -74,6 +74,11 @@ defmodule Philomena.Release do
     Philomena.Tags.cleanup!()
   end
 
+  def replace_aliases_in_implied_tags do
+    start_app()
+    Philomena.Tags.replace_aliases_in_implied_tags!()
+  end
+
   def convert_reports do
     start_app()
     Philomena.Reports.LegacyConverter.convert_reports!()

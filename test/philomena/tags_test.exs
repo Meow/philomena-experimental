@@ -20,6 +20,7 @@ defmodule Philomena.TagsTest do
 
   alias Philomena.Tags
   alias Philomena.Tags.QueryForm
+  alias Philomena.Tags.Implication
   alias Philomena.Tags.Tag
   alias Philomena.Tags.TagDetail
   alias Philomena.Tags.TagPage
@@ -326,6 +327,25 @@ defmodule Philomena.TagsTest do
       assert only_moderation_log!().type == "Tag:update"
     end
 
+    test "rejects aliased tags in the implied-tag list" do
+      tag = tag_fixture(name: "implied list source")
+      implied_tag = tag_fixture(name: "implied list alias")
+      canonical_tag = tag_fixture(name: "implied list canonical")
+
+      implied_tag
+      |> Ecto.Changeset.change(aliased_tag_id: canonical_tag.id)
+      |> Repo.update!()
+
+      assert {:error, changeset} =
+               Tags.update_tag(actor(moderator_user_fixture()), tag.slug, %{
+                 "implied_tag_list" => implied_tag.name
+               })
+
+      assert %{implied_tag_list: ["contains aliased tags"]} = errors_on(changeset)
+      refute Repo.exists?(from implication in Implication, where: implication.tag_id == ^tag.id)
+      assert moderation_log_count() == 0
+    end
+
     test "anonymous and regular users are unauthorized and change nothing" do
       tag = tag_fixture()
 
@@ -478,6 +498,24 @@ defmodule Philomena.TagsTest do
                Tags.alias_tag(admin, tag.slug, %{"target_tag" => target.name})
 
       assert %{tag: [_message]} = errors_on(incoming_changeset)
+    end
+
+    test "rejects aliasing a tag that is implied by another tag" do
+      admin = actor(admin_user_fixture())
+      parent = tag_fixture(name: "implied parent")
+      source = tag_fixture(name: "implied source")
+      target = tag_fixture(name: "implied target")
+
+      parent
+      |> Repo.preload(:implied_tags)
+      |> Tag.changeset(%{"implied_tag_list" => source.name}, [source])
+      |> Repo.update!()
+
+      assert {:error, changeset} =
+               Tags.alias_tag(admin, source.slug, %{"target_tag" => target.name})
+
+      assert %{tag: ["is implied by other tags and cannot be aliased"]} = errors_on(changeset)
+      assert Repo.reload!(source).aliased_tag_id == nil
     end
 
     test "a plain moderator lacks :alias and is unauthorized" do
@@ -857,6 +895,52 @@ defmodule Philomena.TagsTest do
       assert empty_id == empty.id
       refute Repo.get(Tag, empty.id)
       assert Repo.get(Tag, kept.id)
+    end
+  end
+
+  describe "replace_aliases_in_implied_tags!/0" do
+    test "replaces aliased implied tags and avoids duplicate canonical relationships" do
+      parent = tag_fixture(name: "repair parent")
+      alias_tag = tag_fixture(name: "repair alias")
+      canonical = tag_fixture(name: "repair canonical")
+      other = tag_fixture(name: "repair other")
+
+      alias_tag
+      |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+      |> Repo.update!()
+
+      Repo.insert_all(Implication, [
+        %{tag_id: parent.id, implied_tag_id: alias_tag.id},
+        %{tag_id: parent.id, implied_tag_id: canonical.id},
+        %{tag_id: parent.id, implied_tag_id: other.id}
+      ])
+
+      assert :ok = Tags.replace_aliases_in_implied_tags!()
+
+      implication_ids =
+        parent
+        |> Repo.preload(:implied_tags, force: true)
+        |> Map.fetch!(:implied_tags)
+        |> Enum.map(& &1.id)
+        |> Enum.sort()
+
+      assert implication_ids == Enum.sort([canonical.id, other.id])
+    end
+
+    test "does nothing when no implied tag is aliased" do
+      parent = tag_fixture(name: "repair untouched parent")
+      implied = tag_fixture(name: "repair untouched implied")
+
+      Repo.insert_all(Implication, [%{tag_id: parent.id, implied_tag_id: implied.id}])
+
+      assert :ok = Tags.replace_aliases_in_implied_tags!()
+
+      assert [loaded] =
+               parent
+               |> Repo.preload(:implied_tags, force: true)
+               |> Map.fetch!(:implied_tags)
+
+      assert loaded.id == implied.id
     end
   end
 

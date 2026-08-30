@@ -1097,9 +1097,16 @@ defmodule Philomena.Tags do
       |> Multi.exists?(:incoming_aliases, fn %{tags: {source_tag, _target_tag}} ->
         where(Tag, aliased_tag_id: ^source_tag.id)
       end)
+      |> Multi.exists?(:implied_by_tags, fn %{tags: {source_tag, _target_tag}} ->
+        where(Implication, implied_tag_id: ^source_tag.id)
+      end)
       |> Multi.update(:tag, fn
-        %{tags: {source_tag, target_tag}, incoming_aliases: incoming_aliases} ->
-          Tag.alias_changeset(source_tag, target_tag, incoming_aliases)
+        %{
+          tags: {source_tag, target_tag},
+          incoming_aliases: incoming_aliases,
+          implied_by_tags: implied_by_tags
+        } ->
+          Tag.alias_changeset(source_tag, target_tag, incoming_aliases, implied_by_tags)
       end)
       |> Multi.merge(fn %{tags: {source_tag, target_tag}} ->
         Multi.new()
@@ -1716,5 +1723,56 @@ defmodule Philomena.Tags do
     |> preload(^indexing_preloads())
     |> where([t], field(t, ^column) in ^condition)
     |> Search.reindex(Tag)
+  end
+
+  @doc """
+  Replaces aliased tags in existing implied-tag relationships with their
+  canonical targets.
+
+  This is a one-time repair for relationships created before aliased tags were
+  rejected in implied-tag lists. Existing canonical relationships are kept.
+
+  ## Examples
+
+      iex> replace_aliases_in_implied_tags!()
+      :ok
+
+  """
+  @spec replace_aliases_in_implied_tags!() :: :ok
+  def replace_aliases_in_implied_tags! do
+    aliased_implications_query =
+      from implication in Implication,
+        join: implied_tag in Tag,
+        on: implied_tag.id == implication.implied_tag_id,
+        where: not is_nil(implied_tag.aliased_tag_id),
+        select: %{
+          tag_id: implication.tag_id,
+          implied_tag_id: implication.implied_tag_id,
+          canonical_implied_tag_id: implied_tag.aliased_tag_id
+        }
+
+    Multi.new()
+    |> Multi.all(:aliased_implications, aliased_implications_query)
+    |> Multi.delete_all(:alias_sources, fn %{aliased_implications: implications} ->
+      alias_source_ids = Enum.map(implications, & &1.implied_tag_id)
+      where(Implication, [implication], implication.implied_tag_id in ^alias_source_ids)
+    end)
+    |> Multi.insert_all(
+      :canonical_implications,
+      Implication,
+      fn %{aliased_implications: implications} ->
+        Enum.map(implications, fn implication ->
+          %{
+            tag_id: implication.tag_id,
+            implied_tag_id: implication.canonical_implied_tag_id
+          }
+        end)
+      end,
+      on_conflict: :nothing
+    )
+    |> Multi.transact()
+    |> case do
+      {:ok, _changes} -> :ok
+    end
   end
 end
