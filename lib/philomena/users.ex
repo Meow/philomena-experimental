@@ -574,7 +574,7 @@ defmodule Philomena.Users do
   """
   @spec register_user(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def register_user(params) do
-    changeset = User.registration_changeset(%User{}, params)
+    changeset = User.registration_changeset(%User{}, &password_compromised?/1, params)
 
     Multi.new()
     |> Multi.insert(:user, changeset)
@@ -601,7 +601,7 @@ defmodule Philomena.Users do
   """
   @spec change_user_registration(User.t(), map()) :: Ecto.Changeset.t()
   def change_user_registration(%User{} = user, attrs \\ %{}) do
-    User.registration_changeset(user, attrs)
+    User.registration_changeset(user, &password_compromised?/1, attrs)
   end
 
   ## Settings
@@ -765,7 +765,7 @@ defmodule Philomena.Users do
   """
   @spec change_user_password(User.t(), map()) :: Ecto.Changeset.t()
   def change_user_password(user, attrs \\ %{}) do
-    User.password_changeset(user, attrs)
+    User.password_changeset(user, &password_compromised?/1, attrs)
   end
 
   @doc group: "Account settings"
@@ -786,7 +786,7 @@ defmodule Philomena.Users do
   def update_user_password(user, password, attrs) do
     changeset =
       user
-      |> User.password_changeset(attrs)
+      |> User.password_changeset(&password_compromised?/1, attrs)
       |> User.validate_current_password(password)
 
     Multi.new()
@@ -1130,7 +1130,7 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def reset_user_password(user, attrs) do
     Multi.new()
-    |> Multi.update(:user, User.password_changeset(user, attrs))
+    |> Multi.update(:user, User.password_changeset(user, &password_compromised?/1, attrs))
     |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
     |> put_reindex_user()
     |> Multi.transact()

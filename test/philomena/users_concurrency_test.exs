@@ -1,6 +1,7 @@
 defmodule Philomena.UsersConcurrencyTest do
   use Philomena.ConcurrentDataCase
 
+  import Ecto.Query
   import Philomena.UsersFixtures
   import Philomena.AttributionFixtures
   import Philomena.FiltersFixtures
@@ -10,6 +11,32 @@ defmodule Philomena.UsersConcurrencyTest do
   alias Philomena.Tags
   alias Philomena.Users
   alias Philomena.Users.User
+
+  test "concurrent registrations with the same email persist only one user" do
+    email = unique_user_email()
+
+    results =
+      concurrently([
+        fn ->
+          Users.register_user(%{
+            name: "concurrent-registration-one",
+            email: email,
+            password: valid_user_password()
+          })
+        end,
+        fn ->
+          Users.register_user(%{
+            name: "concurrent-registration-two",
+            email: email,
+            password: valid_user_password()
+          })
+        end
+      ])
+
+    assert Enum.count(results, &match?({:ok, %User{}}, &1)) == 1
+    assert Enum.count(results, &match?({:error, %Ecto.Changeset{}}, &1)) == 1
+    assert Repo.aggregate(from(user in User, where: user.email == ^email), :count) == 1
+  end
 
   test "concurrent watched-tag updates preserve every tag" do
     user = confirmed_user_fixture()

@@ -124,12 +124,13 @@ defmodule Philomena.Users.User do
   could lead to unpredictable or insecure behaviour. Long passwords may
   also be very expensive to hash for certain algorithms.
   """
-  def registration_changeset(user, attrs) do
+  def registration_changeset(user, password_compromised_fn, attrs)
+      when is_function(password_compromised_fn, 1) do
     user
     |> cast(attrs, [:name, :email, :password])
     |> validate_name()
     |> validate_email()
-    |> validate_password()
+    |> validate_password(password_compromised_fn)
     |> put_api_key()
     |> put_slug()
     |> unique_constraints()
@@ -149,6 +150,11 @@ defmodule Philomena.Users.User do
   defp trim_name(name), do: String.trim(name)
 
   defp validate_email(changeset) do
+    # The unsafe_validate_unique is used to generate form errors
+    # when users generate an update token with an email that has
+    # already been taken. It is not used to prevent duplicate
+    # registrations - that is done with a real unique constraint.
+
     changeset
     |> validate_required([:email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+\.[^\s]+$/,
@@ -158,17 +164,20 @@ defmodule Philomena.Users.User do
     |> unsafe_validate_unique(:email, Philomena.Repo)
   end
 
-  defp validate_password(changeset) do
+  defp validate_password(changeset, password_compromised_fn) do
     changeset
     |> validate_required([:password])
     |> validate_length(:password, min: 12, max: 80)
-    |> validate_compromised_password()
+    |> validate_compromised_password(password_compromised_fn)
     |> prepare_changes(&hash_password/1)
   end
 
-  defp validate_compromised_password(%Ecto.Changeset{valid?: true} = changeset) do
+  defp validate_compromised_password(
+         %Ecto.Changeset{valid?: true} = changeset,
+         password_compromised_fn
+       ) do
     validate_change(changeset, :password, fn :password, password ->
-      if Philomena.Users.password_compromised?(password) do
+      if password_compromised_fn.(password) do
         [password: "has been compromised in a data breach"]
       else
         []
@@ -176,7 +185,7 @@ defmodule Philomena.Users.User do
     end)
   end
 
-  defp validate_compromised_password(changeset), do: changeset
+  defp validate_compromised_password(changeset, _password_compromised_fn), do: changeset
 
   defp hash_password(changeset) do
     password = get_change(changeset, :password)
@@ -204,11 +213,12 @@ defmodule Philomena.Users.User do
   @doc """
   A user changeset for changing the password.
   """
-  def password_changeset(user, attrs) do
+  def password_changeset(user, password_compromised_fn, attrs)
+      when is_function(password_compromised_fn, 1) do
     user
     |> cast(attrs, [:password])
     |> validate_confirmation(:password, message: "does not match password")
-    |> validate_password()
+    |> validate_password(password_compromised_fn)
   end
 
   @doc """

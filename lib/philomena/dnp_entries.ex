@@ -386,6 +386,26 @@ defmodule Philomena.DnpEntries do
   end
 
   @doc """
+  Loads the DNP entries needed to validate an image's canonical tags inside
+  the caller's transaction.
+
+  The canonical tag step must contain an `:added_tags` list. The resulting
+  preloaded tags are stored under `dnp_step` for the image changeset to use.
+  """
+  @spec put_dnp_tags(Multi.t(), Multi.name(), Multi.name()) :: Multi.t()
+  def put_dnp_tags(%Multi{} = multi, dnp_step, canonical_tags_step) do
+    Multi.all(multi, dnp_step, fn %{^canonical_tags_step => %{added_tags: tags}} ->
+      tag_names = Enum.map(tags, & &1.name)
+
+      Tag
+      |> from(as: :tag)
+      |> where([t], t.name in ^tag_names)
+      |> where(exists(where(DnpEntry, [d], d.tag_id == parent_as(:tag).id)))
+      |> preload(dnp_entries: [tag: :verified_links])
+    end)
+  end
+
+  @doc """
   Returns the count of active DNP requests when `actor` may view the admin DNP
   index, otherwise `nil`.
 

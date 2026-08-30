@@ -21,6 +21,7 @@ defmodule Philomena.Images do
   alias Philomena.ThumbnailWorker
   alias Philomena.ImagePurgeWorker
   alias Philomena.DuplicateReports
+  alias Philomena.DnpEntries
   alias Philomena.Images.Image
   alias Philomena.Images.Filtering
   alias Philomena.Images.Uploader
@@ -1553,11 +1554,16 @@ defmodule Philomena.Images do
       |> Tags.put_canonicalize_tag_name_sets([
         {:added_tags, added_tag_names, allow_insert_new?: true, expand_implications?: true}
       ])
-      |> Multi.insert(:image, fn %{canonical_tags: %{added_tags: added_tags}} ->
-        image_changeset
-        |> Image.source_changeset(added_sources, [])
-        |> Image.tag_changeset(added_tags, [])
-        |> Image.dnp_changeset(user)
+      |> DnpEntries.put_dnp_tags(:dnp_tags, :canonical_tags)
+      |> Multi.insert(:image, fn
+        %{
+          canonical_tags: %{added_tags: added_tags},
+          dnp_tags: tags_with_dnp
+        } ->
+          image_changeset
+          |> Image.source_changeset(added_sources, [])
+          |> Image.tag_changeset(added_tags, [])
+          |> Image.dnp_changeset(user, tags_with_dnp)
       end)
       |> Tags.put_image_count_delta(
         :added_tag_count,

@@ -50,12 +50,7 @@ defmodule Philomena.Filters.Filter do
   end
 
   @doc false
-  def changeset(filter, attrs \\ %{}) do
-    user =
-      change(filter).data
-      |> Repo.preload(user: :settings)
-      |> Map.get(:user)
-
+  def changeset(filter, user, attrs \\ %{}) do
     filter
     |> cast(attrs, [
       :spoilered_tag_list,
@@ -88,15 +83,15 @@ defmodule Philomena.Filters.Filter do
     |> put_change(:hidden_tag_ids, hidden_tag_ids)
   end
 
-  def creation_changeset(filter, attrs) do
+  def creation_changeset(filter, user, attrs) do
     filter
     |> cast(attrs, [:public])
-    |> changeset(attrs)
+    |> changeset(user, attrs)
   end
 
-  def update_changeset(filter, attrs) do
+  def update_changeset(filter, user, attrs) do
     filter
-    |> changeset(attrs)
+    |> changeset(user, attrs)
     |> validate_default_filter_name()
   end
 

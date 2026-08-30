@@ -176,6 +176,8 @@ defmodule Philomena.Images.Image do
     )
     |> check_dimensions()
     |> prepare_changes(fn changeset ->
+      # This is just to give a nicer validation failure error message within Ecto.
+      # The image sha512 field has a real unique constraint.
       sha512 = fetch_field!(changeset, :image_orig_sha512_hash)
       other_image = changeset.repo.get_by(Image, image_orig_sha512_hash: sha512)
 
@@ -255,10 +257,10 @@ defmodule Philomena.Images.Image do
     |> put_assoc(:locked_tags, locked_tags)
   end
 
-  def dnp_changeset(image, user) do
+  def dnp_changeset(image, user, tags_with_dnp) do
     image
     |> change()
-    |> DnpValidator.validate_dnp(user)
+    |> DnpValidator.validate_dnp(user, tags_with_dnp)
   end
 
   def thumbnail_changeset(image, attrs) do

@@ -357,7 +357,7 @@ defmodule Philomena.Filters do
       {:ok,
        base_filter
        |> Filter.based_on()
-       |> Filter.changeset()}
+       |> Filter.changeset(Repo.preload(actor.user, :settings))}
     end
   end
 
@@ -384,13 +384,13 @@ defmodule Philomena.Filters do
           | {:error, :ban | :not_found | :unauthorized}
   def load_filter_for_edit(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
-         {:ok, filter} <- load_and_authorize_filter(actor, id, :edit) do
+         {:ok, filter} <- load_and_authorize_filter(actor, id, :edit, user: :settings) do
       filter =
         filter
         |> TagList.assign_tag_list(:spoilered_tag_ids, :spoilered_tag_list)
         |> TagList.assign_tag_list(:hidden_tag_ids, :hidden_tag_list)
 
-      {:ok, {filter, Filter.changeset(filter)}}
+      {:ok, {filter, Filter.changeset(filter, filter.user)}}
     end
   end
 
@@ -458,9 +458,11 @@ defmodule Philomena.Filters do
   def create_filter(%Actor{user: user} = actor, attrs \\ %{}) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Filter) do
+      user = Repo.preload(user, :settings)
+
       filter_changeset =
         %Filter{user_id: user.id}
-        |> Filter.creation_changeset(attrs)
+        |> Filter.creation_changeset(user, attrs)
 
       Multi.new()
       |> Tags.put_canonicalize_tag_name_sets([
@@ -519,8 +521,8 @@ defmodule Philomena.Filters do
           | {:error, :ban | :not_found | :unauthorized}
   def update_filter(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, filter} <- load_and_authorize_filter(actor, id, :update) do
-      filter_changeset = Filter.update_changeset(filter, attrs)
+         {:ok, filter} <- load_and_authorize_filter(actor, id, :update, user: :settings) do
+      filter_changeset = Filter.update_changeset(filter, filter.user, attrs)
 
       Multi.new()
       |> Tags.put_canonicalize_tag_name_sets([
