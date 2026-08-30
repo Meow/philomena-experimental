@@ -7,7 +7,8 @@ defmodule PhilomenaWeb.Page.HistoryController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"page_id" => slug}) do
-    with {:ok, {page, versions}} <- StaticPages.load_page_history(slug) do
+    with {:ok, {page, versions}} <-
+           StaticPages.load_page_history(conn.assigns.actor, slug) do
       render(conn, "index.html",
         title: "Revision History for Page `#{page.title}'",
         layout_class: "layout--wide",

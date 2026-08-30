@@ -958,17 +958,19 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "create_tag/1 name length limit" do
+  describe "Tag.creation_changeset/2 name length limit" do
     test "accepts a name of exactly the limit" do
       name = String.duplicate("a", @limit)
 
-      assert {:ok, %Tag{name: ^name}} = Tags.create_tag(%{name: name})
+      assert {:ok, %Tag{name: ^name}} =
+               %Tag{} |> Tag.creation_changeset(%{name: name}) |> Repo.insert()
     end
 
     test "rejects a name over the limit" do
       name = String.duplicate("a", @limit + 1)
 
-      assert {:error, changeset} = Tags.create_tag(%{name: name})
+      assert {:error, changeset} =
+               %Tag{} |> Tag.creation_changeset(%{name: name}) |> Repo.insert()
 
       assert %{name: ["should be at most #{@limit} byte(s)"]} == errors_on(changeset)
     end
@@ -977,7 +979,9 @@ defmodule Philomena.TagsTest do
       # 130 characters of "é" (2 bytes each in UTF-8) = 260 bytes
       name = String.duplicate("é", 130)
 
-      assert {:error, changeset} = Tags.create_tag(%{name: name})
+      assert {:error, changeset} =
+               %Tag{} |> Tag.creation_changeset(%{name: name}) |> Repo.insert()
+
       assert %{name: [_message]} = errors_on(changeset)
     end
   end

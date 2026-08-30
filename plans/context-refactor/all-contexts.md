@@ -308,6 +308,18 @@ Wave 4 is complete.
   state matters, and indexing, media, CDN, and firehose work runs only after a
   successful commit.
 
+Wave 5 is complete.
+
+- StaticPages, the final legacy boundary found by the enforcement audit, now
+  uses Actor-first history, missing-first slug loading, form/write prerequisite
+  parity, normalized changeset failures, and private persistence mechanics.
+- The final direct context Canada call and unused/test-only public helpers are
+  gone. The retained non-controller surface and its concrete callers are
+  recorded in [the Wave 5 public API inventory](wave-5-public-api.md).
+- `mix philomena.context_boundaries` enforces the four architectural rules from
+  this wave and runs in the repository test script. Focused tests cover its AST
+  handling and the gate passes over the complete repository.
+
 ### Wave 0: characterize and establish the contract
 
 - Follow `test/CONVENTIONS.md`: land any missing controller characterization in
@@ -363,7 +375,11 @@ serially where they touch shared indexes.
 - Re-run the public API inventory and ensure every retained non-controller
   function has an identified caller and documented reason to remain public.
 
-## Context audit and priority
+Implementation complete. See [the Wave 5 public API inventory](wave-5-public-api.md)
+for retained dynamic/service boundaries and the helpers removed by the final
+audit.
+
+## Initial context audit and priority (historical)
 
 | Context group                          | Highest-risk remaining issue                                                         | Priority |
 | -------------------------------------- | ------------------------------------------------------------------------------------ | -------- |

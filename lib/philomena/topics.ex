@@ -209,6 +209,8 @@ defmodule Philomena.Topics do
       {:ok, %Topic{}}
 
   """
+  @spec load_forum_topic(Actor.t(), Forum.t(), String.t(), atom()) ::
+          {:ok, Topic.t()} | {:error, :unauthorized | :not_found}
   def load_forum_topic(%Actor{} = actor, %Forum{} = forum, topic_slug, action) do
     Topic
     |> where(forum_id: ^forum.id, slug: ^topic_slug)

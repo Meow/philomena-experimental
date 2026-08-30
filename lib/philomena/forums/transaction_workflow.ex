@@ -301,7 +301,8 @@ defmodule Philomena.Forums.TransactionWorkflow do
               where: parent_as(:topic).forum_id == forum.id
           )
 
-    # TODO: user preload only needed for approvals
+    # The user is preloaded for every post.
+    # Approval is currently the only action that reads it.
     post_query =
       from post in Post,
         as: :post,

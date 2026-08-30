@@ -66,14 +66,6 @@ defmodule Philomena.Tags do
   @alias_preloads [:implied_tags, :aliased_tag]
   @image_preloads [:implied_tags]
 
-  # Creates a tag. Visible for testing.
-  @doc false
-  def create_tag(attrs \\ %{}) do
-    %Tag{}
-    |> Tag.creation_changeset(attrs)
-    |> Repo.insert()
-  end
-
   defp locked_tag_ids(tag_ids) do
     Tag
     |> where([tag], tag.id in ^tag_ids)
@@ -1554,6 +1546,7 @@ defmodule Philomena.Tags do
       iex> perform_reindex_images(123)
 
   """
+  @spec perform_reindex_images(integer()) :: :ok
   def perform_reindex_images(tag_id) do
     tag = Repo.get!(Tag, tag_id)
 
@@ -1616,6 +1609,7 @@ defmodule Philomena.Tags do
       [1, 2, 3]
 
   """
+  @spec cleanup!() :: [integer()]
   def cleanup! do
     cleanup_query =
       from tag in Tag,
@@ -1676,6 +1670,7 @@ defmodule Philomena.Tags do
       [:aliased_tag, :aliases, :implied_tags, :implied_by_tags]
 
   """
+  @spec indexing_preloads() :: [atom()]
   def indexing_preloads do
     [:aliased_tag, :aliases, :implied_tags, :implied_by_tags]
   end
@@ -1695,6 +1690,7 @@ defmodule Philomena.Tags do
       {:ok, []}
 
   """
+  @spec perform_reindex(atom(), [term()]) :: :ok
   def perform_reindex(column, condition) do
     Tag
     |> preload(^indexing_preloads())

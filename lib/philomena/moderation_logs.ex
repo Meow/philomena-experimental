@@ -141,7 +141,7 @@ defmodule Philomena.ModerationLogs do
   @doc """
   Removes moderation logs older than the two-week retention window.
 
-  This operational release task raises on database failure.
+  The release task raises on database failure.
 
   ## Examples
 
@@ -149,6 +149,7 @@ defmodule Philomena.ModerationLogs do
       {31, nil}
 
   """
+  @spec cleanup!() :: {non_neg_integer(), nil}
   def cleanup! do
     ModerationLog
     |> where([ml], ml.created_at < ago(2, "week"))

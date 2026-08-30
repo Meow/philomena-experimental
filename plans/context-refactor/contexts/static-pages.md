@@ -3,6 +3,14 @@
 Source: `lib/philomena/static_pages.ex`; consumers: page show/admin CRUD and page
 history controllers.
 
+## Status
+
+Complete in wave 5. Show and actor-scoped history use one missing-first slug
+loader. New/edit and create/update enforce identical write prerequisites and
+action permissions. Page and version writes commit together, validation returns
+the page changeset, and successful writes return the saved page. Raw bang/CRUD
+functions used only by tests are gone; fixtures own their direct persistence.
+
 ## Findings
 
 - `get_static_page!/1` and raw create/update functions remain public above the

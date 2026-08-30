@@ -43,6 +43,7 @@ defmodule Philomena.Subscriptions do
 
     quote do
       @doc false
+      @spec subscribed?(struct(), Philomena.Users.User.t() | nil) :: boolean()
       def subscribed?(object, user) do
         Philomena.Subscriptions.subscribed?(
           unquote(subscription_module),
@@ -53,6 +54,9 @@ defmodule Philomena.Subscriptions do
       end
 
       @doc false
+      @spec subscriptions(Enumerable.t(), Philomena.Users.User.t() | nil) :: %{
+              optional(term()) => true
+            }
       def subscriptions(objects, user) do
         Philomena.Subscriptions.subscriptions(
           unquote(subscription_module),
@@ -63,6 +67,8 @@ defmodule Philomena.Subscriptions do
       end
 
       @doc false
+      @spec create_subscription(struct(), Philomena.Users.User.t()) ::
+              {:ok, struct()} | {:error, Ecto.Changeset.t()}
       def create_subscription(object, user) do
         Philomena.Subscriptions.create_subscription(
           unquote(subscription_module),
@@ -73,6 +79,7 @@ defmodule Philomena.Subscriptions do
       end
 
       @doc false
+      @spec delete_subscription(struct(), Philomena.Users.User.t()) :: {:ok, struct()}
       def delete_subscription(object, user) do
         unquote(on_delete)
 
@@ -85,6 +92,12 @@ defmodule Philomena.Subscriptions do
       end
 
       @doc false
+      @spec maybe_subscribe_on(
+              Philomena.Multi.t(),
+              Philomena.Multi.name(),
+              Philomena.Users.User.t() | nil,
+              :watch_on_reply | :watch_on_upload | :watch_on_new_topic
+            ) :: Philomena.Multi.t()
       def maybe_subscribe_on(multi, change_name, user, field) do
         Philomena.Subscriptions.maybe_subscribe_on(multi, __MODULE__, change_name, user, field)
       end
@@ -92,6 +105,7 @@ defmodule Philomena.Subscriptions do
   end
 
   @doc false
+  @spec subscribed?(module(), atom(), struct(), Philomena.Users.User.t() | nil) :: boolean()
   def subscribed?(subscription_module, field_name, object, user) do
     case user do
       nil ->
@@ -105,6 +119,9 @@ defmodule Philomena.Subscriptions do
   end
 
   @doc false
+  @spec subscriptions(module(), atom(), Enumerable.t(), Philomena.Users.User.t() | nil) :: %{
+          optional(term()) => true
+        }
   def subscriptions(subscription_module, field_name, objects, user) do
     case user do
       nil ->
@@ -121,6 +138,8 @@ defmodule Philomena.Subscriptions do
   end
 
   @doc false
+  @spec create_subscription(module(), atom(), struct(), Philomena.Users.User.t()) ::
+          {:ok, struct()} | {:error, Ecto.Changeset.t()}
   def create_subscription(subscription_module, field_name, object, user) do
     struct!(subscription_module, [{field_name, object.id}, {:user_id, user.id}])
     |> subscription_module.changeset(%{})
@@ -128,6 +147,8 @@ defmodule Philomena.Subscriptions do
   end
 
   @doc false
+  @spec delete_subscription(module(), atom(), struct(), Philomena.Users.User.t()) ::
+          {:ok, struct()}
   def delete_subscription(subscription_module, field_name, object, user) do
     subscription = struct!(subscription_module, [{field_name, object.id}, {:user_id, user.id}])
 
@@ -139,6 +160,13 @@ defmodule Philomena.Subscriptions do
   end
 
   @doc false
+  @spec maybe_subscribe_on(
+          Multi.t(),
+          module(),
+          Multi.name(),
+          Philomena.Users.User.t() | nil,
+          :watch_on_reply | :watch_on_upload | :watch_on_new_topic
+        ) :: Multi.t()
   def maybe_subscribe_on(multi, module, change_name, user, field)
       when field in [:watch_on_reply, :watch_on_upload, :watch_on_new_topic] do
     case user do

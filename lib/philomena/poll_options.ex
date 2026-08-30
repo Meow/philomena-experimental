@@ -8,8 +8,6 @@ defmodule Philomena.PollOptions do
 
   import Ecto.Query, warn: false
 
-  alias Philomena.IntegerId
-  alias Philomena.Loader
   alias Philomena.Multi
   alias Philomena.PollOptions.PollOption
   alias Philomena.Polls.Poll
@@ -29,25 +27,6 @@ defmodule Philomena.PollOptions do
     poll
     |> Repo.preload(:options)
     |> Map.fetch!(:options)
-  end
-
-  @doc """
-  Safely loads one option beneath a loaded poll.
-
-  ## Examples
-
-      iex> load_option(poll, "1")
-      {:ok, %PollOption{}}
-
-  """
-  @spec load_option(Poll.t(), IntegerId.integer_id()) ::
-          {:ok, PollOption.t()} | {:error, :not_found}
-  def load_option(%Poll{} = poll, id) do
-    with {:ok, id} <- Loader.parse_id(id) do
-      PollOption
-      |> where([option], option.poll_id == ^poll.id and option.id == ^id)
-      |> Loader.one()
-    end
   end
 
   @doc """

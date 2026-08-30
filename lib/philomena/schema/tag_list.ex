@@ -1,5 +1,5 @@
 defmodule Philomena.Schema.TagList do
-  # TODO: remove this in favor of normalized relations
+  # Remove when tag lists are converted to normalized relations.
   alias Philomena.Tags.Tag
   alias Philomena.Repo
   import Ecto.Query

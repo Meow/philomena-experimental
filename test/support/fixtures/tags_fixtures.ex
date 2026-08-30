@@ -25,16 +25,16 @@ defmodule Philomena.TagsFixtures do
   @doc """
   Creates a tag.
 
-  `Tags.create_tag/1` only accepts `:name` (slug, namespace, and namespace
-  category are derived from it - e.g. `"artist:foo"` gets the `origin`
-  category automatically). A non-namespace `category:` attr is applied with
-  a direct update afterwards, the way the tag controller would.
+  The creation changeset accepts only `:name` (slug, namespace, and namespace
+  category are derived from it). Fixture persistence is direct so production
+  does not expose raw CRUD solely for tests. A non-namespace `category:` attr
+  is applied with a direct update afterwards, the way the tag controller would.
   """
   def tag_fixture(attrs \\ %{}) do
     attrs = Enum.into(attrs, %{name: unique_tag_name()})
     {category, attrs} = Map.pop(attrs, :category)
 
-    {:ok, tag} = Tags.create_tag(attrs)
+    {:ok, tag} = %Tag{} |> Tag.creation_changeset(attrs) |> Repo.insert()
 
     case category do
       nil ->

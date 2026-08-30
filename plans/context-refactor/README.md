@@ -17,6 +17,8 @@ utilities (`Attribution`, `IntegerId`, `Markdown`, `SearchIndexer`,
 `SearchMigrator`, `SearchPolicy`, and `Slug`), and background-job entry points.
 `Authorization`, `Loader`, `RateLimiter`, and `Subscriptions` are covered by the
 shared plan because changing them affects several contexts at once.
+`ContextBoundaryCheck` is repository architecture tooling rather than a domain
+context and implements Wave 5's ongoing enforcement.
 
 ## Plans
 
@@ -72,3 +74,7 @@ shared plan because changing them affects several contexts at once.
 Each checklist is intended to be independently mergeable after the shared
 loading contract lands, but contexts coupled by nested resources should be done
 in the waves described in the all-context plan.
+
+All five implementation waves are complete. The final enforcement rules and
+retained service-boundary audit are recorded in
+[wave-5-public-api.md](wave-5-public-api.md).

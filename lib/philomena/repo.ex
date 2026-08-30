@@ -5,6 +5,7 @@ defmodule Philomena.Repo do
 
   use Scrivener, page_size: 250
 
-  # TODO: unify this with the Search version
+  # Database pagination accepts Scrivener's map or keyword inputs. Search owns
+  # a narrower typed map because it applies its own defaults and page limits.
   @type pagination_params :: map() | keyword()
 end

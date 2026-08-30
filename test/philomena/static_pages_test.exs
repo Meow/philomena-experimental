@@ -3,16 +3,14 @@ defmodule Philomena.StaticPagesTest do
   Context-level tests for the controller-facing `Philomena.StaticPages`
   functions.
 
-  These pin the staff-only index gate, the public show loader (including the
-  unknown-slug unauthorized/not-found split), and the create/update authorization
-  matrix - including the `Ecto.Multi` 4-tuple error shape
-  (`{:error, :static_page, changeset, changes}`) the write paths surface on a
-  validation failure.
+  These pin the staff-only index gate, missing-first public show/history
+  loaders, write-access parity, action authorization, atomic revisions, and
+  changeset failures.
   """
 
   use Philomena.DataCase, async: true
 
-  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+  import Philomena.AttributionFixtures, only: [actor: 0, actor: 1, actor: 2]
   import Philomena.StaticPagesFixtures
   import Philomena.UsersFixtures
 
@@ -66,12 +64,37 @@ defmodule Philomena.StaticPagesTest do
       assert loaded.id == page.id
     end
 
-    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+    test "an unknown slug is not-found for every actor" do
       assert StaticPages.load_page_for_show(actor(confirmed_user_fixture()), "no-such-page") ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert StaticPages.load_page_for_show(actor(admin_user_fixture()), "no-such-page") ==
                {:error, :not_found}
+    end
+  end
+
+  describe "load_page_history/2" do
+    test "an anonymous viewer loads newest-first revision history" do
+      admin = admin_user_fixture()
+      page = static_page_fixture(admin, %{body: "First"})
+
+      assert {:ok, _updated} =
+               StaticPages.update_page(actor(admin), page.slug, %{
+                 title: page.title,
+                 slug: page.slug,
+                 body: "Second"
+               })
+
+      assert {:ok, {%StaticPage{id: page_id}, [latest, initial]}} =
+               StaticPages.load_page_history(actor(), page.slug)
+
+      assert page_id == page.id
+      assert latest.body == "Second"
+      assert initial.body == "First"
+    end
+
+    test "an unknown slug is not-found" do
+      assert StaticPages.load_page_history(actor(), "no-such-page") == {:error, :not_found}
     end
   end
 
@@ -84,13 +107,22 @@ defmodule Philomena.StaticPagesTest do
     test "a regular user is unauthorized" do
       assert StaticPages.new_page(actor(confirmed_user_fixture())) == {:error, :unauthorized}
     end
+
+    test "write-access failures precede authorization" do
+      admin = admin_user_fixture()
+
+      assert StaticPages.new_page(actor(admin, ban: %{})) == {:error, :ban}
+
+      assert StaticPages.new_page(actor(admin, fingerprint: nil)) ==
+               {:error, :unauthorized}
+    end
   end
 
   describe "create_page/2" do
     test "an admin creates a page and its initial version" do
       slug = unique_static_page_slug()
 
-      assert {:ok, %{static_page: %StaticPage{} = page, version: _version}} =
+      assert {:ok, %StaticPage{} = page} =
                StaticPages.create_page(actor(admin_user_fixture()), %{
                  "title" => "Created Page",
                  "slug" => slug,
@@ -100,8 +132,8 @@ defmodule Philomena.StaticPagesTest do
       assert page.slug == slug
     end
 
-    test "invalid attrs surface the Multi static_page error tuple" do
-      assert {:error, :static_page, %Ecto.Changeset{} = changeset, _changes} =
+    test "invalid attrs return the page changeset" do
+      assert {:error, %Ecto.Changeset{} = changeset} =
                StaticPages.create_page(actor(admin_user_fixture()), %{"title" => ""})
 
       refute changeset.valid?
@@ -113,6 +145,12 @@ defmodule Philomena.StaticPagesTest do
                "slug" => "y",
                "body" => "z"
              }) == {:error, :unauthorized}
+    end
+
+    test "write-access failures precede authorization" do
+      admin = admin_user_fixture()
+
+      assert StaticPages.create_page(actor(admin, ban: %{}), %{}) == {:error, :ban}
     end
   end
 
@@ -132,6 +170,14 @@ defmodule Philomena.StaticPagesTest do
       assert StaticPages.load_page_for_edit(actor(confirmed_user_fixture()), page.slug) ==
                {:error, :unauthorized}
     end
+
+    test "write-access failures match update" do
+      admin = admin_user_fixture()
+      page = static_page_fixture(admin)
+
+      assert StaticPages.load_page_for_edit(actor(admin, ban: %{}), page.slug) ==
+               {:error, :ban}
+    end
   end
 
   describe "update_page/3" do
@@ -149,10 +195,10 @@ defmodule Philomena.StaticPagesTest do
                })
 
       assert updated.title == "Updated Title"
-      assert StaticPages.get_static_page!(page.id).title == "Updated Title"
+      assert Repo.get!(StaticPage, page.id).title == "Updated Title"
     end
 
-    test "an invalid update surfaces the Multi static_page error tuple" do
+    test "an invalid update returns the page changeset" do
       admin = admin_user_fixture()
       page = static_page_fixture(admin)
 
@@ -160,19 +206,26 @@ defmodule Philomena.StaticPagesTest do
                StaticPages.update_page(actor(admin), page.slug, %{"title" => ""})
 
       refute changeset.valid?
-      assert StaticPages.get_static_page!(page.id).title == page.title
+      assert Repo.get!(StaticPage, page.id).title == page.title
     end
 
-    test "an unknown slug is unauthorized for a user, not-found for an admin" do
+    test "an unknown slug is not-found for every actor with write access" do
       assert StaticPages.update_page(actor(confirmed_user_fixture()), "no-such-page", %{
                "title" => "x"
              }) ==
-               {:error, :unauthorized}
+               {:error, :not_found}
 
       assert StaticPages.update_page(actor(admin_user_fixture()), "no-such-page", %{
                "title" => "x"
              }) ==
                {:error, :not_found}
+    end
+
+    test "write-access failures precede loading" do
+      admin = admin_user_fixture()
+
+      assert StaticPages.update_page(actor(admin, ban: %{}), "no-such-page", %{}) ==
+               {:error, :ban}
     end
 
     test "a regular user is unauthorized" do

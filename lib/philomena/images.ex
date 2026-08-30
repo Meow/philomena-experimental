@@ -495,12 +495,10 @@ defmodule Philomena.Images do
     |> Multi.one(:verification_candidate, where(User, id: ^user_id))
     |> Multi.merge(fn
       %{verification_candidate: %{images_count: 5, verified: false}} ->
-        # TODO: this report occurs at exactly 5 images to prevent subsequent
-        # approved uploads from generating redundant user verification reports.
-        # This may result in some users not receiving verification reports.
-        # It would be better to check existence of the verification report,
-        # and then create it if no report exists for any approved image 5 or
-        # greater.
+        # This deliberately fires only at the fifth approved image so later
+        # uploads cannot create duplicate verification reports. Users who cross
+        # the threshold through maintenance updates are handled manually rather
+        # than adding an existence query to every approval transaction.
         Reports.put_create_system_report(
           Multi.new(),
           "Verification",
@@ -2477,24 +2475,22 @@ defmodule Philomena.Images do
   updated and attributed, the actor's metadata-update stat is incremented when
   sources actually changed, and the image is reindexed.
 
-  Returns `{:ok, %{image: image, added: added_sources, removed: removed_sources,
-  source_change_count: count}}`. The context broadcasts the source and image
-  updates after persistence. Returns `{:error, %Ecto.Changeset{}}` when
+  Returns `{:ok, %{image: image, source_change_count: count}}`. The context
+  broadcasts the source and image updates after persistence. Returns
+  `{:error, %Ecto.Changeset{}}` when
   the update is rejected (e.g. more than the allowed number of sources), leaving
   the image untouched.
 
   ## Examples
 
       iex> update_sources(actor, "42", %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => "http://example.com"}}})
-      {:ok, %{image: %Image{}, added: ["http://example.com"], removed: [], source_change_count: 1}}
+      {:ok, %{image: %Image{}, source_change_count: 1}}
 
   """
   @spec update_sources(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok,
            %{
              image: Image.t(),
-             added: [String.t()],
-             removed: [String.t()],
              source_change_count: non_neg_integer()
            }}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited | Ecto.Changeset.t()}
@@ -2610,9 +2606,9 @@ defmodule Philomena.Images do
   the image, its comments, and the affected tags are reindexed, and the
   actor's metadata-update stat is incremented when tags actually changed.
 
-  On success, returns `{:ok, %{image: image, added: added_tags, removed: removed_tags,
-  tag_change_count: count, tag_change_tag_count: tag_count}}`. The context
-  broadcasts the tag and image updates after persistence.
+  On success, returns `{:ok, %{image: image, tag_change_count: count,
+  tag_change_tag_count: tag_count}}`. The context broadcasts the tag and image
+  updates after persistence.
 
   ## Failure shapes
 
@@ -2629,15 +2625,13 @@ defmodule Philomena.Images do
   ## Examples
 
       iex> update_tags(actor, "42", %{"old_tag_input" => "safe", "tag_input" => "safe, cute"})
-      {:ok, %{image: %Image{}, added: [%Tag{}], removed: [], tag_change_count: 1, tag_change_tag_count: 1}}
+      {:ok, %{image: %Image{}, tag_change_count: 1, tag_change_tag_count: 1}}
 
   """
   @spec update_tags(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok,
            %{
              image: Image.t(),
-             added: [Tag.t()],
-             removed: [Tag.t()],
              tag_change_count: non_neg_integer(),
              tag_change_tag_count: non_neg_integer()
            }}

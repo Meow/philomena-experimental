@@ -87,6 +87,21 @@ defmodule Philomena.DuplicateReports do
       limit: ^limit
   end
 
+  defp put_reject_open_reports(%Multi{} = multi) do
+    Multi.update_all(
+      multi,
+      :reject_open_reports,
+      fn %{locked_source_image: %{id: source_id}, locked_target_image: %{id: target_id}} ->
+        from report in DuplicateReport,
+          where:
+            (report.image_id == ^source_id and report.duplicate_of_image_id == ^target_id) or
+              (report.duplicate_of_image_id == ^source_id and report.image_id == ^target_id),
+          where: report.state in ~w(open claimed)
+      end,
+      set: [state: "rejected"]
+    )
+  end
+
   @doc """
   Loads the staff duplicate-report index described by `params`.
 
@@ -648,27 +663,6 @@ defmodule Philomena.DuplicateReports do
       )
 
     Multi.update_all(multi, step, query, set: [state: "rejected"])
-  end
-
-  @doc """
-  Rejects all open or claimed duplicate reports for the locked image pair.
-
-  Accept workflows compose this step after locking the image pair.
-  """
-  @spec put_reject_open_reports(Multi.t()) :: Multi.t()
-  def put_reject_open_reports(%Multi{} = multi) do
-    Multi.update_all(
-      multi,
-      :reject_open_reports,
-      fn %{locked_source_image: %{id: source_id}, locked_target_image: %{id: target_id}} ->
-        from report in DuplicateReport,
-          where:
-            (report.image_id == ^source_id and report.duplicate_of_image_id == ^target_id) or
-              (report.duplicate_of_image_id == ^source_id and report.image_id == ^target_id),
-          where: report.state in ~w(open claimed)
-      end,
-      set: [state: "rejected"]
-    )
   end
 
   @doc """

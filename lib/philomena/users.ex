@@ -201,7 +201,7 @@ defmodule Philomena.Users do
         Forum
         |> order_by(asc: :name)
         |> repo.all()
-        |> Enum.reject(&Canada.Can.can?(user, :show, &1))
+        |> Enum.reject(&(authorize(user, :show, &1) == :ok))
         |> Enum.map(& &1.id)
 
       {_count, nil} =
@@ -458,6 +458,7 @@ defmodule Philomena.Users do
       :ok
 
   """
+  @spec delete_user_sessions(User.t()) :: :ok
   def delete_user_sessions(user) do
     Repo.delete_all(UserToken.user_and_contexts_query(user, ["session", "totp"]))
     :ok

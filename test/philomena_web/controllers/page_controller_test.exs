@@ -107,7 +107,7 @@ defmodule PhilomenaWeb.PageControllerTest do
       conn = get(conn, ~p"/pages/nonexistent-page")
 
       assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You can't access that page."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Couldn't find"
     end
   end
 
@@ -250,10 +250,6 @@ defmodule PhilomenaWeb.PageControllerTest do
     end
 
     test "redirects with a not-found flash on an unknown slug for an admin", %{conn: conn} do
-      # NOTE: the context loads the page (nil for an unknown slug) and
-      # authorizes the actor against it. An admin, for whom can?(admin, _, nil)
-      # is true, is authorized on the nil load and takes the not-found branch
-      # rather than crashing on change_static_page(nil).
       %{conn: conn} = register_and_log_in_admin(%{conn: conn})
 
       conn = get(conn, ~p"/pages/no-such-slug/edit")

@@ -32,15 +32,15 @@ defmodule PhilomenaWeb.PageController do
 
   def create(conn, %{"static_page" => static_page_params}) do
     case StaticPages.create_page(conn.assigns.actor, static_page_params) do
-      {:ok, %{static_page: static_page}} ->
+      {:ok, static_page} ->
         conn
         |> put_flash(:info, "Static page successfully created.")
         |> redirect(to: ~p"/pages/#{static_page}")
 
-      {:error, :static_page, changeset, _changes} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

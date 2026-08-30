@@ -41,6 +41,7 @@ defmodule Philomena.Rules do
       [%Rule{name: "Rule #0", ...}, ...]
 
   """
+  @spec list_reportable_rules() :: [Rule.t()]
   def list_reportable_rules do
     Repo.all(
       from r in Rule,
@@ -94,6 +95,7 @@ defmodule Philomena.Rules do
       [%RuleVersion{...}, ...]
 
   """
+  @spec list_rule_versions(Rule.t()) :: [RuleVersion.t()]
   def list_rule_versions(%Rule{} = rule) do
     Repo.all(
       from rv in RuleVersion,

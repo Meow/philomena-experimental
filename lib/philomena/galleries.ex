@@ -226,7 +226,7 @@ defmodule Philomena.Galleries do
     |> Map.put_new(:leading, %Scrivener.Page{})
   end
 
-  def map_lock_errors(result) do
+  defp map_lock_errors(result) do
     case result do
       {:error, _step, :unauthorized, _changes} ->
         {:error, :unauthorized}

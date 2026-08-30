@@ -1,11 +1,16 @@
 defmodule Philomena.StaticPages do
   @moduledoc """
-  The StaticPages context.
+  Public page presentation, staff-authored revisions, and generated site
+  statistics content.
+
+  The generated statistics page deliberately bypasses revision history because
+  it is replaced by a periodic system service rather than a human editor.
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
+  alias Philomena.Loader
   alias Philomena.Multi
   alias Philomena.Repo
 
@@ -13,18 +18,19 @@ defmodule Philomena.StaticPages do
   alias Philomena.StaticPages.StaticPage
   alias Philomena.StaticPages.Version
 
-  # Returns the list of static pages.
   defp list_static_pages do
     Repo.all(StaticPage)
   end
 
-  # Gets a single static page. Visible for testing.
-  @doc false
-  def get_static_page!(id), do: Repo.get!(StaticPage, id)
+  defp load_static_page(actor, action, slug) when is_binary(slug) do
+    StaticPage
+    |> where(slug: ^slug)
+    |> Loader.one_and_authorize(actor, action)
+  end
 
-  # Creates a static_page. Visible for testing.
-  @doc false
-  def create_static_page(user, attrs \\ %{}) do
+  defp load_static_page(_actor, _action, _slug), do: {:error, :not_found}
+
+  defp create_static_page(user, attrs) do
     static_page = StaticPage.changeset(%StaticPage{}, attrs)
 
     Multi.new()
@@ -36,9 +42,7 @@ defmodule Philomena.StaticPages do
     |> Multi.transact()
   end
 
-  # Updates a static page. Visible for testing.
-  @doc false
-  def update_static_page(%StaticPage{} = static_page, user, attrs) do
+  defp update_static_page(%StaticPage{} = static_page, user, attrs) do
     version =
       %Version{static_page_id: static_page.id, user_id: user.id}
       |> Version.changeset(attrs)
@@ -53,7 +57,6 @@ defmodule Philomena.StaticPages do
     |> Multi.transact()
   end
 
-  # Returns an `%Ecto.Changeset{}` for tracking static page changes.
   defp change_static_page(%StaticPage{} = static_page) do
     StaticPage.changeset(static_page, %{})
   end
@@ -63,6 +66,12 @@ defmodule Philomena.StaticPages do
 
   The listing is staff-only. Returns `{:error, :unauthorized}` when the viewer
   may not manage static pages, otherwise `{:ok, static_pages}`.
+
+  ## Examples
+
+      iex> load_page_listing(admin_actor)
+      {:ok, [%StaticPage{}]}
+
   """
   @spec load_page_listing(Actor.t()) :: {:ok, [StaticPage.t()]} | {:error, :unauthorized}
   def load_page_listing(%Actor{} = actor) do
@@ -74,51 +83,72 @@ defmodule Philomena.StaticPages do
   @doc """
   Loads the static page named by `slug`, on behalf of `actor`.
 
-  Returns `{:error, :not_found}` for an unknown slug the viewer may otherwise
-  read, `{:error, :unauthorized}` when the viewer may not see it, and otherwise
-  `{:ok, static_page}`. Individual pages are public.
+  Missing pages are always not-found, while an existing forbidden page is
+  unauthorized. Individual pages are public.
+
+  ## Examples
+
+      iex> load_page_for_show(actor, "about")
+      {:ok, %StaticPage{}}
+
+      iex> load_page_for_show(actor, "missing")
+      {:error, :not_found}
+
   """
   @spec load_page_for_show(Actor.t(), String.t()) ::
           {:ok, StaticPage.t()} | {:error, :not_found | :unauthorized}
   def load_page_for_show(%Actor{} = actor, slug) do
-    load_authorized_static_page(actor, slug, :show)
+    load_static_page(actor, :show, slug)
   end
 
   @doc """
-  Loads the revision history for the static page named by `slug`.
+  Loads the revision history for the static page named by `slug`, on behalf of
+  `actor`.
 
-  Returns `{:error, :not_found}` for an unknown slug. On success returns
-  `{:ok, {static_page, versions}}`: the page and its versions newest first
-  (ties broken by id), each with the acting user preloaded.
+  The page is loaded and authorized before its history query runs. On success,
+  versions are newest first (ties broken by id) with their editors preloaded.
+
+  ## Examples
+
+      iex> load_page_history(actor, "about")
+      {:ok, {%StaticPage{}, [%Version{}]}}
+
   """
-  @spec load_page_history(String.t()) ::
-          {:ok, {StaticPage.t(), [Version.t()]}} | {:error, :not_found}
-  def load_page_history(slug) do
-    case Repo.get_by(StaticPage, slug: slug) do
-      nil ->
-        {:error, :not_found}
+  @spec load_page_history(Actor.t(), String.t()) ::
+          {:ok, {StaticPage.t(), [Version.t()]}} | {:error, :not_found | :unauthorized}
+  def load_page_history(%Actor{} = actor, slug) do
+    with {:ok, static_page} <- load_static_page(actor, :show, slug) do
+      versions =
+        Version
+        |> where(static_page_id: ^static_page.id)
+        |> preload(:user)
+        |> order_by(desc: :created_at, desc: :id)
+        |> Repo.all()
 
-      static_page ->
-        versions =
-          Version
-          |> where(static_page_id: ^static_page.id)
-          |> preload(:user)
-          |> order_by(desc: :created_at, desc: :id)
-          |> Repo.all()
-
-        {:ok, {static_page, versions}}
+      {:ok, {static_page, versions}}
     end
   end
 
   @doc """
   Prepares a new static page, on behalf of `actor`.
 
-  Returns `{:error, :unauthorized}` when the viewer may not manage static pages,
-  otherwise `{:ok, changeset}`.
+  The form enforces the same write-access and `:new` authorization checks as
+  creation.
+
+  ## Examples
+
+      iex> new_page(admin_actor)
+      {:ok, %Ecto.Changeset{}}
+
+      iex> new_page(banned_actor)
+      {:error, :ban}
+
   """
-  @spec new_page(Actor.t()) :: {:ok, Ecto.Changeset.t()} | {:error, :unauthorized}
+  @spec new_page(Actor.t()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
   def new_page(%Actor{} = actor) do
-    with :ok <- authorize(actor, :new, StaticPage) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :new, StaticPage) do
       {:ok, change_static_page(%StaticPage{})}
     end
   end
@@ -126,31 +156,54 @@ defmodule Philomena.StaticPages do
   @doc """
   Creates a static page (with its initial version), on behalf of `actor`.
 
-  Returns `{:error, :unauthorized}` when the viewer may not manage static pages,
-  `{:error, :static_page, changeset, changes}` on a validation failure, and
-  `{:ok, %{static_page: static_page, version: version}}` on success.
+  The page and its initial revision commit atomically. Validation failures
+  return the page changeset; successful calls return the created page.
+
+  ## Examples
+
+      iex> create_page(admin_actor, %{title: "About", slug: "about", body: "..."})
+      {:ok, %StaticPage{}}
+
+      iex> create_page(admin_actor, %{title: ""})
+      {:error, %Ecto.Changeset{}}
+
   """
   @spec create_page(Actor.t(), map()) ::
-          {:ok, map()}
-          | {:error, :static_page, Ecto.Changeset.t(), map()}
-          | {:error, :unauthorized}
+          {:ok, StaticPage.t()}
+          | {:error, Ecto.Changeset.t() | :ban | :unauthorized}
   def create_page(%Actor{} = actor, attrs) do
-    with :ok <- authorize(actor, :create, StaticPage) do
-      create_static_page(actor.user, attrs)
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :create, StaticPage) do
+      actor.user
+      |> create_static_page(attrs)
+      |> case do
+        {:ok, %{static_page: %StaticPage{} = static_page}} ->
+          {:ok, static_page}
+
+        {:error, :static_page, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
   @doc """
   Loads the static page named by `slug` for edit, on behalf of `actor`.
 
-  Returns `{:error, :not_found}` for an unknown slug the viewer may otherwise
-  manage, `{:error, :unauthorized}` when the viewer may not edit static pages,
-  and otherwise `{:ok, {static_page, changeset}}`.
+  The form enforces the same write-access and `:edit` authorization checks as
+  update. Missing pages are always not-found.
+
+  ## Examples
+
+      iex> load_page_for_edit(admin_actor, "about")
+      {:ok, {%StaticPage{}, %Ecto.Changeset{}}}
+
   """
   @spec load_page_for_edit(Actor.t(), String.t()) ::
-          {:ok, {StaticPage.t(), Ecto.Changeset.t()}} | {:error, :not_found | :unauthorized}
+          {:ok, {StaticPage.t(), Ecto.Changeset.t()}}
+          | {:error, :ban | :not_found | :unauthorized}
   def load_page_for_edit(%Actor{} = actor, slug) do
-    with {:ok, static_page} <- load_authorized_static_page(actor, slug, :edit) do
+    with :ok <- verify_write_access(actor),
+         {:ok, static_page} <- load_static_page(actor, :edit, slug) do
       {:ok, {static_page, change_static_page(static_page)}}
     end
   end
@@ -159,16 +212,21 @@ defmodule Philomena.StaticPages do
   Updates the static page named by `slug` (with a new version), on behalf of
   `actor`.
 
-  Returns `{:error, :not_found}` for an unknown slug the viewer may otherwise
-  manage, `{:error, :unauthorized}` when the viewer may not edit static pages,
-  `{:error, :static_page, changeset, changes}` on a validation failure, and
-  `{:ok, %{static_page: static_page, version: version}}` on success.
+  The page update and revision insert commit atomically. Missing pages are
+  always not-found; validation failures return the page changeset.
+
+  ## Examples
+
+      iex> update_page(admin_actor, "about", %{body: "Updated"})
+      {:ok, %StaticPage{}}
+
   """
   @spec update_page(Actor.t(), String.t(), map()) ::
           {:ok, StaticPage.t()}
-          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
+          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_page(%Actor{} = actor, slug, attrs) do
-    with {:ok, static_page} <- load_authorized_static_page(actor, slug, :update) do
+    with :ok <- verify_write_access(actor),
+         {:ok, static_page} <- load_static_page(actor, :update, slug) do
       static_page
       |> update_static_page(actor.user, attrs)
       |> case do
@@ -184,8 +242,8 @@ defmodule Philomena.StaticPages do
   @doc """
   Creates or replaces the generated statistics page body.
 
-  This service is used by the periodic site-statistics renderer and does not
-  create staff-authored page versions.
+  This service is used by the site statistics renderer. As there is no
+  relevance to auditing its changes, it does not create any edit history.
 
   ## Examples
 
@@ -211,20 +269,5 @@ defmodule Philomena.StaticPages do
       on_conflict: {:replace, [:body, :updated_at]},
       conflict_target: :slug
     )
-  end
-
-  # Loads and authorizes the page named by `slug` for `action`. Authorization
-  # runs against the loaded record, nil included, before the not-found decision:
-  # an unknown slug the viewer may not act on comes back unauthorized, and one it
-  # may act on comes back not-found.
-  defp load_authorized_static_page(user, slug, action) do
-    static_page = Repo.get_by(StaticPage, slug: slug)
-
-    with :ok <- authorize(user, action, static_page) do
-      case static_page do
-        nil -> {:error, :not_found}
-        static_page -> {:ok, static_page}
-      end
-    end
   end
 end

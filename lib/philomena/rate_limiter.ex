@@ -75,8 +75,18 @@ defmodule Philomena.RateLimiter do
     :ok
   end
 
-  # Resets all rate limits. Visible for testing.
-  @doc false
+  @doc """
+  Deletes every rate limit counter.
+
+  This maintenance service is used by development seeds. It is
+  deliberately global and must not be called from request paths.
+
+  ## Examples
+
+      iex> reset_limits_globally!()
+      :ok
+
+  """
   @spec reset_limits_globally!() :: :ok
   def reset_limits_globally! do
     case Redix.command!(redix_connection(), ["KEYS", "#{@key_prefix}*"]) do
