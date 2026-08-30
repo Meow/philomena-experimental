@@ -113,10 +113,10 @@ defmodule Philomena.PollVotes do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{ballot: ballot}} ->
+        {:ok, %{ballot: %Ballot{} = ballot}} ->
           {:ok, ballot}
 
-        {:error, :ballot, changeset, _changes} ->
+        {:error, :ballot, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

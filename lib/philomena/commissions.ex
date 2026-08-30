@@ -276,10 +276,10 @@ defmodule Philomena.Commissions do
       |> Multi.delete(:commission, commission)
       |> Multi.transact()
       |> case do
-        {:ok, %{commission: commission}} ->
+        {:ok, %{commission: %Commission{} = commission}} ->
           {:ok, commission}
 
-        {:error, :commission, changeset, _changes} ->
+        {:error, :commission, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -347,10 +347,10 @@ defmodule Philomena.Commissions do
       |> Multi.update_all(:commission, counter_query, [])
       |> Multi.transact()
       |> case do
-        {:ok, %{item: item}} ->
+        {:ok, %{item: %Item{} = item}} ->
           {:ok, item}
 
-        {:error, :item, changeset, _changes} ->
+        {:error, :item, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -441,10 +441,10 @@ defmodule Philomena.Commissions do
       |> Multi.update_all(:commission, counter_query, [])
       |> Multi.transact()
       |> case do
-        {:ok, %{item: item}} ->
+        {:ok, %{item: %Item{} = item}} ->
           {:ok, item}
 
-        {:error, :item, changeset, _changes} ->
+        {:error, :item, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

@@ -330,10 +330,10 @@ defmodule Philomena.DnpEntries do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{dnp_entry: dnp_entry}} ->
+        {:ok, %{dnp_entry: %DnpEntry{} = dnp_entry}} ->
           {:ok, dnp_entry}
 
-        {:error, :dnp_entry, changeset, _changes} ->
+        {:error, :dnp_entry, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

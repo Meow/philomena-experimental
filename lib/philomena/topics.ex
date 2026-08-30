@@ -377,7 +377,7 @@ defmodule Philomena.Topics do
       |> Posts.put_reindex_posts_in_topic()
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_forum: forum, topic: %Topic{} = topic}} ->
+        {:ok, %{locked_forum: %Forum{} = forum, topic: %Topic{} = topic}} ->
           result = %{topic: topic, forum: forum, post: hd(topic.posts)}
 
           {:ok, broadcast_topic_creation(result)}
@@ -670,7 +670,7 @@ defmodule Philomena.Topics do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{topic: topic}} ->
+        {:ok, %{topic: %Topic{} = topic}} ->
           {:ok, {forum, topic}}
 
         _error ->
@@ -717,7 +717,7 @@ defmodule Philomena.Topics do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{topic: topic}} ->
+        {:ok, %{topic: %Topic{} = topic}} ->
           {:ok, {forum, topic}}
 
         _error ->
@@ -779,7 +779,7 @@ defmodule Philomena.Topics do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{topic: topic}} ->
+        {:ok, %{topic: %Topic{} = topic}} ->
           {:ok, {forum, topic}}
 
         _error ->
@@ -826,7 +826,7 @@ defmodule Philomena.Topics do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{topic: topic}} ->
+        {:ok, %{topic: %Topic{} = topic}} ->
           {:ok, {forum, topic}}
 
         _error ->

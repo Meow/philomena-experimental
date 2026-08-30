@@ -178,10 +178,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -541,10 +541,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{valid_password?: true, user: user}} ->
+      {:ok, %{valid_password?: true, user: %User{} = user}} ->
         verify_user_for_password_authentication(user, password_compromised?(password))
 
-      {:ok, %{valid_password?: false, user: user}} ->
+      {:ok, %{valid_password?: false, user: %User{} = user}} ->
         if user.locked_at do
           deliver_user_unlock_instructions(user, unlock_url_fun)
         end
@@ -580,10 +580,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -719,7 +719,7 @@ defmodule Philomena.Users do
   def unlock_user_by_token(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "unlock"),
          %User{} = user <- Repo.one(query),
-         {:ok, %{user: user}} <-
+         {:ok, %{user: %User{} = user}} <-
            user
            |> unlock_user_multi()
            |> put_reindex_user()
@@ -794,10 +794,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _} ->
         {:error, changeset}
     end
   end
@@ -853,10 +853,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user, backup_codes}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -1058,7 +1058,7 @@ defmodule Philomena.Users do
   def confirm_user(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "confirm"),
          %User{} = user <- Repo.one(query),
-         {:ok, %{user: user}} <-
+         {:ok, %{user: %User{} = user}} <-
            user
            |> confirm_user_multi()
            |> put_reindex_user()
@@ -1134,10 +1134,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changeset} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changeset} ->
         {:error, changeset}
     end
   end
@@ -1180,7 +1180,7 @@ defmodule Philomena.Users do
   def reactivate_user_by_token(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "reactivate"),
          %User{} = user <- Repo.one(query),
-         {:ok, %{user: user}} <-
+         {:ok, %{user: %User{} = user}} <-
            Multi.transact(
              Multi.new()
              |> Multi.update(:user, User.reactivate_changeset(user))
@@ -1221,12 +1221,12 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           deliver_user_reactivation_instructions(user, reactivation_url_fun)
 
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -1316,10 +1316,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -1348,10 +1348,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -1381,10 +1381,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -1467,10 +1467,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -1500,10 +1500,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -1532,10 +1532,10 @@ defmodule Philomena.Users do
     |> put_reindex_user()
     |> Multi.transact()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{user: %User{} = user}} ->
         {:ok, user}
 
-      {:error, :user, changeset, _changes} ->
+      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
         {:error, changeset}
     end
   end
@@ -1596,10 +1596,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -1702,10 +1702,10 @@ defmodule Philomena.Users do
       |> put_rename_user_job(old_name: old_name)
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         {:error, :authorize, :unauthorized, _changes} ->
@@ -1823,10 +1823,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: updated_user}} ->
+        {:ok, %{user: %User{} = updated_user}} ->
           {:ok, updated_user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, admin_user_form(changeset)}
       end
     end
@@ -1873,10 +1873,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -1918,10 +1918,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -1962,10 +1962,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2007,10 +2007,10 @@ defmodule Philomena.Users do
       |> Uploader.put_unpersist_old_upload(:user)
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2049,7 +2049,7 @@ defmodule Philomena.Users do
       |> put_wipe_user_votes_job(upvotes_and_faves?: false)
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
       end
     end
@@ -2135,10 +2135,10 @@ defmodule Philomena.Users do
       |> put_erase_user_job(actor)
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2209,10 +2209,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2254,10 +2254,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2297,10 +2297,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2341,10 +2341,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2385,10 +2385,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -2428,7 +2428,7 @@ defmodule Philomena.Users do
       |> put_wipe_user_votes_job(upvotes_and_faves?: true)
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
       end
     end
@@ -2466,7 +2466,7 @@ defmodule Philomena.Users do
       |> put_wipe_user_job()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
       end
     end
@@ -2610,10 +2610,10 @@ defmodule Philomena.Users do
       |> put_reindex_user()
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

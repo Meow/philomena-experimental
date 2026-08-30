@@ -118,7 +118,7 @@ defmodule Philomena.Galleries do
     |> Multi.on_commit(fn %{interactions: {_, image_ids}} -> Images.reindex_images(image_ids) end)
     |> Multi.transact()
     |> case do
-      {:ok, %{gallery: gallery}} ->
+      {:ok, %{gallery: %Gallery{} = gallery}} ->
         {:ok, gallery}
 
       {:error, :locked_gallery, :not_found, _changes} ->
@@ -628,7 +628,7 @@ defmodule Philomena.Galleries do
       |> Images.put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{gallery: gallery}} ->
+        {:ok, %{gallery: %Gallery{} = gallery}} ->
           {:ok, gallery}
 
         {:error, :interaction, _changeset, %{locked_gallery: gallery}} ->
@@ -689,7 +689,7 @@ defmodule Philomena.Galleries do
       |> Images.put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{gallery: gallery}} ->
+        {:ok, %{gallery: %Gallery{} = gallery}} ->
           {:ok, gallery}
 
         error ->

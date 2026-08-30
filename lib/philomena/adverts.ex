@@ -204,10 +204,10 @@ defmodule Philomena.Adverts do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{advert: advert}} ->
+        {:ok, %{advert: %Advert{} = advert}} ->
           {:ok, advert}
 
-        {:error, :advert, changeset, _changes} ->
+        {:error, :advert, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -291,10 +291,10 @@ defmodule Philomena.Adverts do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{advert: advert}} ->
+        {:ok, %{advert: %Advert{} = advert}} ->
           {:ok, advert}
 
-        {:error, :advert, changeset, _changes} ->
+        {:error, :advert, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -330,10 +330,10 @@ defmodule Philomena.Adverts do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{advert: advert}} ->
+        {:ok, %{advert: %Advert{} = advert}} ->
           {:ok, advert}
 
-        {:error, :advert, changeset, _changes} ->
+        {:error, :advert, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -379,10 +379,10 @@ defmodule Philomena.Adverts do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{advert: advert}} ->
+        {:ok, %{advert: %Advert{} = advert}} ->
           {:ok, advert}
 
-        {:error, :advert, changeset, _changes} ->
+        {:error, :advert, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

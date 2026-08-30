@@ -107,10 +107,10 @@ defmodule Philomena.Badges do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{badge: badge}} ->
+        {:ok, %{badge: %Badge{} = badge}} ->
           {:ok, badge}
 
-        {:error, :badge, changeset, _changes} ->
+        {:error, :badge, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -198,10 +198,10 @@ defmodule Philomena.Badges do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{badge: badge}} ->
+        {:ok, %{badge: %Badge{} = badge}} ->
           {:ok, badge}
 
-        {:error, :badge, changeset, _changes} ->
+        {:error, :badge, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -251,10 +251,10 @@ defmodule Philomena.Badges do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{badge: badge}} ->
+        {:ok, %{badge: %Badge{} = badge}} ->
           {:ok, badge}
 
-        {:error, :badge, changeset, _changes} ->
+        {:error, :badge, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -397,10 +397,10 @@ defmodule Philomena.Badges do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{award: award}} ->
+        {:ok, %{award: %Award{} = award}} ->
           {:ok, {user, award}}
 
-        {:error, :award, changeset, _changes} ->
+        {:error, :award, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, {user, changeset, awardable_badges()}}
       end
     end
@@ -483,10 +483,10 @@ defmodule Philomena.Badges do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{award: award}} ->
+        {:ok, %{award: %Award{} = award}} ->
           {:ok, {award.user, award}}
 
-        {:error, :award, changeset, _changes} ->
+        {:error, :award, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, {award.user, award, changeset, awardable_badges()}}
       end
     end
@@ -534,10 +534,10 @@ defmodule Philomena.Badges do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{award: award}} ->
+        {:ok, %{award: %Award{} = award}} ->
           {:ok, {award.user, award}}
 
-        {:error, :award, changeset, _changes} ->
+        {:error, :award, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

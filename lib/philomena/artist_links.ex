@@ -351,10 +351,10 @@ defmodule Philomena.ArtistLinks do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{artist_link: artist_link}} ->
+        {:ok, %{artist_link: %ArtistLink{} = artist_link}} ->
           {:ok, artist_link}
 
-        {:error, :artist_link, changeset, _changes} ->
+        {:error, :artist_link, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -401,10 +401,10 @@ defmodule Philomena.ArtistLinks do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{artist_link: artist_link}} ->
+        {:ok, %{artist_link: %ArtistLink{} = artist_link}} ->
           {:ok, artist_link}
 
-        {:error, :artist_link, changeset, _changes} ->
+        {:error, :artist_link, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -451,10 +451,10 @@ defmodule Philomena.ArtistLinks do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{artist_link: artist_link}} ->
+        {:ok, %{artist_link: %ArtistLink{} = artist_link}} ->
           {:ok, artist_link}
 
-        {:error, :artist_link, changeset, _changes} ->
+        {:error, :artist_link, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

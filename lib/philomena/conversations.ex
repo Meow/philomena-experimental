@@ -247,13 +247,13 @@ defmodule Philomena.Conversations do
       |> put_approval_report(fn %{conversation: %{messages: [message]}} -> message end)
       |> Multi.transact()
       |> case do
-        {:ok, %{conversation: conversation}} ->
+        {:ok, %{conversation: %Conversation{} = conversation}} ->
           {:ok, conversation}
 
         {:error, :action_reservation, :rate_limited, _changes} ->
           {:error, :rate_limited}
 
-        {:error, :conversation, changeset, _changes} ->
+        {:error, :conversation, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -335,13 +335,18 @@ defmodule Philomena.Conversations do
       |> put_approval_report(fn %{message: message} -> message end)
       |> Multi.transact()
       |> case do
-        {:ok, %{conversation: conversation, message: message, message_count: message_count}} ->
+        {:ok,
+         %{
+           conversation: %Conversation{} = conversation,
+           message: %Message{} = message,
+           message_count: message_count
+         }} ->
           conversation = %{conversation | message_count: message_count}
           message = %{message | conversation: conversation}
 
           {:ok, message}
 
-        {:error, :message, changeset, _changes} ->
+        {:error, :message, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -389,10 +394,10 @@ defmodule Philomena.Conversations do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{message: message}} ->
+        {:ok, %{message: %Message{} = message}} ->
           {:ok, message}
 
-        {:error, :message, changeset, _changes} ->
+        {:error, :message, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

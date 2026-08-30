@@ -2456,7 +2456,7 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_image: old_image, image: %Image{} = image}} ->
+        {:ok, %{locked_image: %Image{} = old_image, image: %Image{} = image}} ->
           broadcast_description_update(image, old_image.description)
 
           {:ok, {image, old_image.description}}

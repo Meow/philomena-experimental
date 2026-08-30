@@ -466,10 +466,10 @@ defmodule Philomena.Filters do
       |> put_reindex_filter(:filter)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -510,10 +510,10 @@ defmodule Philomena.Filters do
       |> put_reindex_filter(:filter)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -552,10 +552,10 @@ defmodule Philomena.Filters do
       |> put_reindex_filter(:filter)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -594,10 +594,10 @@ defmodule Philomena.Filters do
       |> Multi.on_commit(fn %{filter: filter} -> Search.delete_document(filter.id, Filter) end)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -694,10 +694,10 @@ defmodule Philomena.Filters do
       |> put_reindex_filter(:filter)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -741,10 +741,10 @@ defmodule Philomena.Filters do
       |> put_reindex_filter(:filter)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -788,10 +788,10 @@ defmodule Philomena.Filters do
       |> put_reindex_filter(:filter)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -835,10 +835,10 @@ defmodule Philomena.Filters do
       |> put_reindex_filter(:filter)
       |> Multi.transact()
       |> case do
-        {:ok, %{filter: filter}} ->
+        {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
 
-        {:error, :filter, changeset, _changes} ->
+        {:error, :filter, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

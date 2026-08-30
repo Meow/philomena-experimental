@@ -229,7 +229,7 @@ defmodule Philomena.DuplicateReports do
       |> Multi.insert(:duplicate_report, changeset)
       |> Multi.transact()
       |> case do
-        {:ok, %{duplicate_report: report}} ->
+        {:ok, %{duplicate_report: %DuplicateReport{} = report}} ->
           {:ok, report}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _changes} ->
@@ -277,7 +277,7 @@ defmodule Philomena.DuplicateReports do
       |> Multi.insert(:duplicate_report, changeset)
       |> Multi.transact()
       |> case do
-        {:ok, %{duplicate_report: report}} ->
+        {:ok, %{duplicate_report: %DuplicateReport{} = report}} ->
           {:ok, report}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _changes} ->
@@ -405,7 +405,7 @@ defmodule Philomena.DuplicateReports do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{duplicate_report: duplicate_report}} ->
+        {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
           {:ok, duplicate_report}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _changes} ->
@@ -483,7 +483,7 @@ defmodule Philomena.DuplicateReports do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{reverse_report: reverse_report}} ->
+        {:ok, %{reverse_report: %DuplicateReport{} = reverse_report}} ->
           {:ok, reverse_report}
 
         {:error, :reverse_report, %Ecto.Changeset{} = changeset, _changes} ->
@@ -531,7 +531,7 @@ defmodule Philomena.DuplicateReports do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{duplicate_report: duplicate_report}} ->
+        {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
           {:ok, duplicate_report}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _steps} ->
@@ -575,7 +575,7 @@ defmodule Philomena.DuplicateReports do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{duplicate_report: duplicate_report}} ->
+        {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
           {:ok, duplicate_report}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _steps} ->
@@ -619,7 +619,7 @@ defmodule Philomena.DuplicateReports do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{duplicate_report: duplicate_report}} ->
+        {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
           {:ok, duplicate_report}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _steps} ->

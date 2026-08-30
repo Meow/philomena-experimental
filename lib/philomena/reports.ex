@@ -418,10 +418,10 @@ defmodule Philomena.Reports do
       |> put_reindex_report()
       |> Multi.transact()
       |> case do
-        {:ok, %{report: report}} ->
+        {:ok, %{report: %Report{} = report}} ->
           {:ok, report}
 
-        {:error, :report, changeset, _changes} ->
+        {:error, :report, %Ecto.Changeset{} = changeset, _changes} ->
           {:error,
            %ReportForm{
              target: target,
@@ -474,10 +474,10 @@ defmodule Philomena.Reports do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{report: report}} ->
+        {:ok, %{report: %Report{} = report}} ->
           {:ok, report}
 
-        {:error, :report, changeset, _changes} ->
+        {:error, :report, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
@@ -520,10 +520,10 @@ defmodule Philomena.Reports do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{report: report}} ->
+        {:ok, %{report: %Report{} = report}} ->
           {:ok, report}
 
-        {:error, :report, changeset, _changes} ->
+        {:error, :report, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
@@ -566,10 +566,10 @@ defmodule Philomena.Reports do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{report: report}} ->
+        {:ok, %{report: %Report{} = report}} ->
           {:ok, report}
 
-        {:error, :report, changeset, _changes} ->
+        {:error, :report, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->

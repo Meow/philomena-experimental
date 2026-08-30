@@ -25,6 +25,7 @@ defmodule Philomena.Posts do
   alias Philomena.Posts
   alias Philomena.IndexWorker
   alias Philomena.Forums
+  alias Philomena.Forums.Forum
   alias Philomena.Forums.Visibility
   alias Philomena.Notifications
   alias Philomena.Reports
@@ -309,7 +310,7 @@ defmodule Philomena.Posts do
       |> put_reindex_post()
       |> Multi.transact()
       |> case do
-        {:ok, %{locked_forum: forum, post: %Post{} = post}} ->
+        {:ok, %{locked_forum: %Forum{} = forum, post: %Post{} = post}} ->
           # The firehose representation includes the topic author.
           broadcast_post_creation(%{
             post: post,

@@ -149,10 +149,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{fingerprint: fingerprint}} ->
+        {:ok, %{fingerprint: %Fingerprint{} = fingerprint}} ->
           {:ok, fingerprint}
 
-        {:error, :fingerprint, changeset, _changes} ->
+        {:error, :fingerprint, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -227,10 +227,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{fingerprint: fingerprint}} ->
+        {:ok, %{fingerprint: %Fingerprint{} = fingerprint}} ->
           {:ok, fingerprint}
 
-        {:error, :fingerprint, changeset, _changes} ->
+        {:error, :fingerprint, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -274,10 +274,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{fingerprint: fingerprint}} ->
+        {:ok, %{fingerprint: %Fingerprint{} = fingerprint}} ->
           {:ok, fingerprint}
 
-        {:error, :fingerprint, changeset, _changes} ->
+        {:error, :fingerprint, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -398,10 +398,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{subnet: subnet}} ->
+        {:ok, %{subnet: %Subnet{} = subnet}} ->
           {:ok, subnet}
 
-        {:error, :subnet, changeset, _changes} ->
+        {:error, :subnet, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -476,10 +476,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{subnet: subnet}} ->
+        {:ok, %{subnet: %Subnet{} = subnet}} ->
           {:ok, subnet}
 
-        {:error, :subnet, changeset, _changes} ->
+        {:error, :subnet, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -523,10 +523,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{subnet: subnet}} ->
+        {:ok, %{subnet: %Subnet{} = subnet}} ->
           {:ok, subnet}
 
-        {:error, :subnet, changeset, _changes} ->
+        {:error, :subnet, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -657,10 +657,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -735,10 +735,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -782,10 +782,10 @@ defmodule Philomena.Bans do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{user: user}} ->
+        {:ok, %{user: %User{} = user}} ->
           {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end

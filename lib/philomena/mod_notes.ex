@@ -191,10 +191,10 @@ defmodule Philomena.ModNotes do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{mod_note: mod_note}} ->
+        {:ok, %{mod_note: %ModNote{} = mod_note}} ->
           {:ok, mod_note}
 
-        {:error, :mod_note, changeset, _changes} ->
+        {:error, :mod_note, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -253,10 +253,10 @@ defmodule Philomena.ModNotes do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{mod_note: mod_note}} ->
+        {:ok, %{mod_note: %ModNote{} = mod_note}} ->
           {:ok, mod_note}
 
-        {:error, :mod_note, changeset, _changes} ->
+        {:error, :mod_note, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
@@ -291,10 +291,10 @@ defmodule Philomena.ModNotes do
       )
       |> Multi.transact()
       |> case do
-        {:ok, %{mod_note: mod_note}} ->
+        {:ok, %{mod_note: %ModNote{} = mod_note}} ->
           {:ok, mod_note}
 
-        {:error, :mod_note, changeset, _changes} ->
+        {:error, :mod_note, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
       end
     end
