@@ -1,5 +1,6 @@
 defmodule Philomena.TagsConcurrencyTest do
   use Philomena.ConcurrentDataCase
+  use Patch
 
   import Philomena.TagsFixtures
 
@@ -8,6 +9,7 @@ defmodule Philomena.TagsConcurrencyTest do
   alias Philomena.Repo
   alias Philomena.Tags
   alias Philomena.Tags.Tag
+  alias PhilomenaQuery.Search
 
   import Philomena.AttributionFixtures
   import Philomena.ImagesFixtures
@@ -166,5 +168,58 @@ defmodule Philomena.TagsConcurrencyTest do
     refute source.id in tag_ids
     assert Repo.reload!(source).images_count == 0
     assert Repo.reload!(target).images_count == 1
+  end
+
+  test "concurrent reindex and tagging preserve the image counter" do
+    patch(Search, :reindex, :ok)
+
+    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      base_tag_names = ["safe", "filler", "initial"]
+
+      base_tag_ids =
+        from(tag in Tag, where: tag.name in ^base_tag_names, select: tag.id)
+        |> Repo.all()
+
+      tag = tag_fixture(name: unique_tag_name())
+      image = image_fixture(tags: "safe, filler, #{tag.name}")
+      other_image = image_fixture(tags: "safe, filler, initial")
+      admin = admin_user_fixture()
+
+      tag
+      |> Ecto.Changeset.change(images_count: 99)
+      |> Repo.update!()
+
+      try do
+        results =
+          concurrently([
+            fn -> Tags.perform_reindex_images(tag.id) end,
+            fn ->
+              Images.update_tags(
+                actor(admin),
+                other_image.id,
+                %{
+                  "old_tag_input" => "safe, filler, initial",
+                  "tag_input" => "safe, filler, initial, #{tag.name}"
+                }
+              )
+            end
+          ])
+
+        assert Enum.any?(results, &(&1 == :ok))
+        assert Enum.any?(results, &match?({:ok, %{added: [%Tag{}]}}, &1))
+        assert Repo.reload!(tag).images_count == 2
+      after
+        Repo.delete!(image)
+        Repo.delete!(other_image)
+        Repo.delete!(tag)
+
+        Repo.delete_all(
+          from tag in Tag,
+            where: tag.name in ^base_tag_names and tag.id not in ^base_tag_ids
+        )
+
+        Repo.delete!(admin)
+      end
+    end)
   end
 end

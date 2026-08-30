@@ -669,10 +669,28 @@ defmodule Philomena.Multi do
   @doc """
   Run the Multi steps inside a transaction.
 
-  See `c:Ecto.Repo.transact/2` for more information.
+  Allows setting the transaction isolation level to SERIALIZABLE if
+  `isolation: :serializable` is provided in `opts`.
+
+  See `c:Ecto.Repo.transact/2` for more information about options.
   """
   @spec transact(t(), Keyword.t()) :: {:ok, Ecto.Multi.changes()} | Ecto.Multi.failure()
   def transact(%__MODULE__{} = multi, opts \\ []) do
+    {isolation, opts} = Keyword.pop(opts, :isolation)
+
+    multi =
+      case isolation do
+        nil ->
+          multi
+
+        :serializable ->
+          new()
+          |> run(:set_isolation, fn repo, _ ->
+            repo.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+          end)
+          |> append(multi)
+      end
+
     multi.multi
     |> Philomena.Repo.transact(opts)
     |> case do
@@ -708,24 +726,36 @@ defmodule Philomena.Multi do
 
   @doc """
   Run the Multi steps inside a transaction, restarting the transaction while
-  any step returns `{:error, :conflict}`.
+  any step returns `{:error, :conflict}`, or if the database reports a
+  serialization failure.
 
-  See `c:Ecto.Repo.transact/2` for more information.
+  See `transact/2` for more information.
   """
   @spec transact_with_automatic_retry(t(), Keyword.t()) ::
           {:ok, Ecto.Multi.changes()} | Ecto.Multi.failure()
   def transact_with_automatic_retry(%__MODULE__{} = multi, opts \\ []) do
-    multi
-    |> transact(opts)
-    |> case do
-      {:ok, changes} ->
-        {:ok, changes}
+    try do
+      multi
+      |> transact(opts)
+      |> case do
+        {:ok, changes} ->
+          {:ok, changes}
 
-      {:error, _step, :conflict, _changes} ->
-        transact_with_automatic_retry(multi, opts)
+        {:error, _step, :conflict, _changes} ->
+          transact_with_automatic_retry(multi, opts)
 
-      error ->
-        error
+        error ->
+          error
+      end
+    rescue
+      error in Postgrex.Error ->
+        case error.postgres do
+          %{code: :serialization_failure} ->
+            transact_with_automatic_retry(multi, opts)
+
+          _postgres ->
+            reraise error, __STACKTRACE__
+        end
     end
   end
 

@@ -1567,7 +1567,7 @@ defmodule Philomena.Tags do
       []
     )
     |> Multi.on_commit(fn _changes -> reindex_tags([tag]) end)
-    |> Multi.transact()
+    |> Multi.transact_with_automatic_retry(isolation: :serializable)
 
     # Then reindex
     Image

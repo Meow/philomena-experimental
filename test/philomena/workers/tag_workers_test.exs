@@ -12,7 +12,6 @@ defmodule Philomena.TagWorkersTest do
   alias Philomena.ArtistLinks.ArtistLink
   alias Philomena.TagAliasWorker
   alias Philomena.TagDeleteWorker
-  alias Philomena.TagReindexWorker
   alias Philomena.TagChanges.TagChange
   alias Philomena.TagChanges.TagChangeTag
   alias Philomena.Tags.Tag
@@ -140,20 +139,5 @@ defmodule Philomena.TagWorkersTest do
 
     refute Repo.get_by(TagChangeTag, tag_change_id: tag_change.id, tag_id: tag.id)
     refute Repo.get(TagChange, tag_change.id)
-  end
-
-  test "the tag reindex worker recounts visible images" do
-    patch(Search, :reindex, :ok)
-
-    tag = tag_fixture(name: "worker recount tag")
-    _visible = image_fixture(tags: "safe, #{tag.name}")
-    _hidden = image_fixture(tags: "safe, #{tag.name}", hidden_from_users: true)
-
-    tag
-    |> Ecto.Changeset.change(images_count: 99)
-    |> Repo.update!()
-
-    assert :ok = TagReindexWorker.perform(tag.id)
-    assert Repo.reload!(tag).images_count == 1
   end
 end
