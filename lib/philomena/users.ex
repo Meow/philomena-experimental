@@ -162,8 +162,13 @@ defmodule Philomena.Users do
   end
 
   defp load_with_roles(query) do
-    query
-    |> Repo.one()
+    query |> Repo.one() |> load_user_with_roles()
+  end
+
+  defp load_user_with_roles(nil), do: nil
+
+  defp load_user_with_roles(user) do
+    user
     |> Repo.preload([:roles, :current_filter, :settings])
     |> setup_roles()
   end
@@ -995,6 +1000,27 @@ defmodule Philomena.Users do
   def get_user_by_session_token(token) do
     {:ok, query} = UserToken.verify_session_token_query(token)
     load_with_roles(query)
+  end
+
+  @doc group: "Session"
+  @doc """
+  Gets the user with the given signed token and the token's creation time.
+
+  The timestamp is used by the web authentication plug to periodically
+  replace active session tokens.
+  """
+  @spec get_user_by_session_token_with_timestamp(binary()) ::
+          {User.t(), DateTime.t()} | nil
+  def get_user_by_session_token_with_timestamp(token) do
+    {:ok, query} = UserToken.verify_session_token_query_with_timestamp(token)
+
+    case Repo.one(query) do
+      {user, token_inserted_at} ->
+        {load_user_with_roles(user), token_inserted_at}
+
+      nil ->
+        nil
+    end
   end
 
   @doc group: "Session"
