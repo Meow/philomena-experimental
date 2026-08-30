@@ -43,10 +43,19 @@ defmodule PhilomenaWeb.Image.DeleteController do
   end
 
   def delete(conn, params) do
-    with {:ok, _image} <- Images.unhide_image(conn.assigns.actor, params["image_id"]) do
-      conn
-      |> put_flash(:info, "Image successfully restored.")
-      |> redirect(to: ~p"/images/#{params["image_id"]}")
+    case Images.unhide_image(conn.assigns.actor, params["image_id"]) do
+      {:ok, _image} ->
+        conn
+        |> put_flash(:info, "Image successfully restored.")
+        |> redirect(to: ~p"/images/#{params["image_id"]}")
+
+      {:error, %Ecto.Changeset{}} ->
+        conn
+        |> put_flash(:error, "Failed to restore image.")
+        |> redirect(to: ~p"/images/#{params["image_id"]}")
+
+      error ->
+        error
     end
   end
 end

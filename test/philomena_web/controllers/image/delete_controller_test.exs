@@ -178,15 +178,13 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
       refute Repo.reload!(image).hidden_from_users
     end
 
-    # unhide_image/1 has a fall-through clause for non-hidden images, so the
-    # controller's {:ok, image} match still succeeds.
-    test "restoring a non-hidden image still succeeds", %{conn: conn} do
+    test "restoring a non-hidden image fails", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
       conn = delete(conn, ~p"/images/#{image}/delete")
 
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Image successfully restored."
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Failed to restore image."
       refute Repo.reload!(image).hidden_from_users
     end
 

@@ -2095,30 +2095,20 @@ defmodule Philomena.Images do
 
   """
   @spec unhide_image(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
   def unhide_image(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :unhide, image_id) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-      |> Multi.run(:restore_metadata, fn _repo, %{locked_image: image} ->
-        {:ok, {image.hidden_from_users, image.hidden_image_key}}
+      |> Multi.run(:hidden_image_key, fn _repo, %{locked_image: image} ->
+        {:ok, image.hidden_image_key}
       end)
-      |> Multi.run(:image, fn repo, %{locked_image: image} ->
-        # FIXME: don't allow unhiding visible images
-        if image.hidden_from_users do
-          repo.update(Image.unhide_changeset(image))
-        else
-          {:ok, image}
-        end
+      |> Multi.update(:image, fn %{locked_image: image} ->
+        Image.unhide_changeset(image)
       end)
-      |> Multi.run(:tags, fn repo, %{locked_image: locked_image, image: image} ->
-        if locked_image.hidden_from_users do
-          image = repo.preload(image, :tags, force: true)
-          {:ok, image.tags}
-        else
-          {:ok, []}
-        end
+      |> Multi.run(:tags, fn repo, %{image: image} ->
+        {:ok, repo.preload(image, :tags, force: true).tags}
       end)
       |> Tags.put_image_count_delta(
         :tag_image_counts,
@@ -2135,17 +2125,14 @@ defmodule Philomena.Images do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: image, tags: _tags, restore_metadata: {true, key}}} ->
+        {:ok, %{image: %Image{} = image, tags: _tags, hidden_image_key: key}} ->
           spawn(fn -> Thumbnailer.unhide_thumbnails(image, key) end)
           purge_files(image, key)
 
           {:ok, image}
 
-        {:ok, %{image: image, restore_metadata: {false, _key}}} ->
-          {:ok, image}
-
-        error ->
-          error
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end

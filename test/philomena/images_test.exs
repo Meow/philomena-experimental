@@ -3625,20 +3625,15 @@ defmodule Philomena.ImagesTest do
       assert log.body == "Restored image #{hidden.id}"
     end
 
-    test "restoring an already-visible image still succeeds and logs" do
-      # The engine's fall-through clause returns {:ok, image} for a non-hidden
-      # image, so the wrapper reports success and writes the restore log even
-      # though nothing changed.
+    test "restoring an already-visible image fails and writes no log" do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, restored} = Images.unhide_image(actor(moderator), to_string(image.id))
-      assert restored.id == image.id
-      refute Repo.reload!(image).hidden_from_users
+      assert {:error, %Ecto.Changeset{}} =
+               Images.unhide_image(actor(moderator), to_string(image.id))
 
-      log = only_moderation_log!()
-      assert log.type == "Image.Delete:delete"
-      assert log.body == "Restored image #{image.id}"
+      refute Repo.reload!(image).hidden_from_users
+      assert moderation_log_count() == 0
     end
 
     test "accepts an integer id" do
