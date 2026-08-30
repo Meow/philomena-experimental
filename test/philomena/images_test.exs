@@ -4775,6 +4775,27 @@ defmodule Philomena.ImagesTest do
       refute "removeme" in image_tag_names(image)
     end
 
+    test "canonicalizes aliases for additions and removals" do
+      actor = actor(admin_user_fixture())
+      canonical = tag_fixture(name: unique_tag_name())
+
+      alias_tag =
+        tag_fixture(name: unique_tag_name())
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      image = image_fixture()
+
+      assert {:ok, result} = Images.batch_update_tags(actor, alias_tag.name, [image.id])
+      assert result.added == [canonical.name]
+      assert canonical.name in image_tag_names(image)
+      refute alias_tag.name in image_tag_names(image)
+
+      assert {:ok, result} = Images.batch_update_tags(actor, "-#{alias_tag.name}", [image.id])
+      assert result.removed == [canonical.name]
+      refute canonical.name in image_tag_names(image)
+    end
+
     test "a moderator with a Tag batch_update grant is authorized" do
       user = %{confirmed_user_fixture() | role_map: %{"Tag" => %{"batch_update" => []}}}
       tag_fixture(%{name: "batchadd"})

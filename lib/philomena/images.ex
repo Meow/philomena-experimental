@@ -579,7 +579,61 @@ defmodule Philomena.Images do
     end)
   end
 
-  defp non_uniform_reversion_batch_multi(changes, attributes) do
+  defp batch_tag_pairs(image_ids, added_tags, removed_tags) do
+    # Compute cartesian products of image IDs and tag IDs.
+    added =
+      for image_id <- image_ids, tag <- added_tags do
+        %{image_id: image_id, tag_id: tag.id}
+      end
+
+    removed =
+      for image_id <- image_ids, tag <- removed_tags do
+        %{image_id: image_id, tag_id: tag.id}
+      end
+
+    {added, removed}
+  end
+
+  defp put_perform_batch_update(%Multi{} = multi, attributes) do
+    multi
+    |> Multi.insert_all(
+      :inserted_taggings,
+      Tagging,
+      fn %{locked_image_ids: image_ids, pairs: {added, _removed}} ->
+        # Scope insertions to existing, requested images.
+        Enum.filter(added, &(&1.image_id in image_ids))
+      end,
+      on_conflict: :nothing,
+      returning: [:image_id, :tag_id]
+    )
+    |> Multi.delete_all(:deleted_taggings, fn
+      %{locked_image_ids: image_ids, pairs: {_added, removed}} ->
+        # Scope deletions to existing, requested images.
+        removed
+        |> Enum.filter(&(&1.image_id in image_ids))
+        |> case do
+          [] ->
+            # The values API rejects an empty list.
+            from t in Tagging,
+              where: false,
+              select: [t.image_id, t.tag_id]
+
+          pairs ->
+            from t in Tagging,
+              join: pair in values(pairs, %{image_id: :integer, tag_id: :integer}),
+              on: t.image_id == pair.image_id and t.tag_id == pair.tag_id,
+              select: [t.image_id, t.tag_id]
+        end
+    end)
+    |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
+    |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings, :visible_images)
+    |> Multi.on_commit(fn %{locked_image_ids: image_ids} ->
+      reindex_images(image_ids)
+      Comments.reindex_comments_on_images(image_ids)
+    end)
+  end
+
+  defp put_batch_revert_tag_changes(%Multi{} = multi, changes, attributes) do
     image_ids =
       changes
       |> Enum.map(& &1.image_id)
@@ -596,141 +650,47 @@ defmodule Philomena.Images do
       |> where([i], i.id in ^image_ids)
       |> order_by([i], asc: i.id)
 
-    Multi.new()
+    multi
     |> Multi.lock_all(:locked_image_ids, select(image_query, [i], i.id))
     |> Multi.all(:visible_images, where(image_query, [i], i.hidden_from_users == false))
     |> Tags.put_lock_tag_alias_families(tag_ids)
-    |> Multi.run(:reversion_pairs, fn
+    |> Multi.run(:pairs, fn
       _repo, %{locked_image_ids: image_ids, tag_alias_families: families} ->
         {:ok, reversion_pairs(changes, image_ids, families)}
     end)
-    |> Multi.insert_all(
-      :inserted_taggings,
-      Tagging,
-      fn %{reversion_pairs: {added, _removed}} ->
-        # Scope insertions to existing, requested images.
-        Enum.filter(added, &(&1.image_id in image_ids))
-      end,
-      on_conflict: :nothing,
-      returning: [:image_id, :tag_id]
-    )
-    |> Multi.delete_all(:deleted_taggings, fn %{reversion_pairs: {_added, removed}} ->
-      # Scope deletions to existing, requested images.
-      removed
-      |> Enum.filter(&(&1.image_id in image_ids))
-      |> case do
-        [] ->
-          # The values API rejects an empty list.
-          from t in Tagging,
-            where: false,
-            select: [t.image_id, t.tag_id]
-
-        pairs ->
-          from t in Tagging,
-            join: pair in values(pairs, %{image_id: :integer, tag_id: :integer}),
-            on: t.image_id == pair.image_id and t.tag_id == pair.tag_id,
-            select: [t.image_id, t.tag_id]
-      end
-    end)
-    |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
-    |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings, :visible_images)
-    |> Multi.on_commit(fn %{locked_image_ids: image_ids} ->
-      reindex_images(image_ids)
-      Comments.reindex_comments_on_images(image_ids)
-    end)
+    |> put_perform_batch_update(attributes)
   end
 
-  defp prepare_change_batches(changes) do
-    # Merge any change batches belonging to the same image ID into
-    # one single batch, then deduplicate added_tags by filtering out
-    # any tags which are marked for removal in the same batch.
-    changes
-    |> Enum.group_by(& &1.image_id)
-    |> Enum.reduce({[], [], []}, fn {image_id, instances},
-                                    {image_ids, added_pairs, removed_pairs} ->
-      removed_ids =
-        instances
-        |> Enum.flat_map(& &1.removed_tags)
-        |> Enum.map(& &1.id)
-        |> Enum.uniq()
-
-      added_ids =
-        instances
-        |> Enum.flat_map(& &1.added_tags)
-        |> Enum.map(& &1.id)
-        |> Enum.uniq()
-        |> Enum.reject(&(&1 in removed_ids))
-
-      if Enum.empty?(added_ids) and Enum.empty?(removed_ids) do
-        {image_ids, added_pairs, removed_pairs}
-      else
-        added = Enum.map(added_ids, &%{image_id: image_id, tag_id: &1})
-        removed = Enum.map(removed_ids, &%{image_id: image_id, tag_id: &1})
-
-        {
-          Enum.concat([image_id], image_ids),
-          Enum.concat(added, added_pairs),
-          Enum.concat(removed, removed_pairs)
-        }
-      end
-    end)
-  end
-
-  defp non_uniform_batch_multi(changes, attributes) do
-    {requested_image_ids, added_pairs, removed_pairs} =
-      prepare_change_batches(changes)
-
+  defp put_batch_tag(%Multi{} = multi, image_ids, added_names, removed_names, attributes) do
     image_query =
       Image
-      |> where([i], i.id in ^requested_image_ids)
-      |> order_by([i], asc: i.id)
+      |> where([i], i.id in ^image_ids)
+      |> order_by(asc: :id)
 
-    Multi.new()
+    multi
     |> Multi.lock_all(:locked_image_ids, select(image_query, [i], i.id))
-    |> Multi.all(:visible_images, where(image_query, [i], i.hidden_from_users == false))
-    |> Multi.insert_all(
-      :inserted_taggings,
-      Tagging,
-      fn %{locked_image_ids: image_ids} ->
-        # Scope insertions to existing, requested images.
-        Enum.filter(added_pairs, &(&1.image_id in image_ids))
-      end,
-      on_conflict: :nothing,
-      returning: [:image_id, :tag_id]
-    )
-    |> Multi.delete_all(
-      :deleted_taggings,
-      fn %{locked_image_ids: image_ids} ->
-        # Scope deletions to existing, requested images.
-        removed_pairs
-        |> Enum.filter(&(&1.image_id in image_ids))
-        |> case do
-          [] ->
-            # The values API rejects an empty list.
-            from t in Tagging,
-              where: false,
-              select: [t.image_id, t.tag_id]
-
-          pairs ->
-            from t in Tagging,
-              join: pair in values(pairs, %{image_id: :integer, tag_id: :integer}),
-              on: t.image_id == pair.image_id and t.tag_id == pair.tag_id,
-              select: [t.image_id, t.tag_id]
+    |> Multi.all(:visible_images, where(image_query, hidden_from_users: false))
+    |> Tags.put_canonicalize_tag_name_sets([
+      {:removed_tags, removed_names, []},
+      {:added_tags, added_names, expand_implications?: true}
+    ])
+    |> Multi.run(:changes, fn
+      _repo, %{canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}} ->
+        if Enum.empty?(added_tags) and Enum.empty?(removed_tags) do
+          {:error, :no_change}
+        else
+          {:ok, nil}
         end
-      end
-    )
-    |> TagChanges.put_batch_tag_changes(:inserted_taggings, :deleted_taggings, attributes)
-    |> Tags.put_batch_image_count_changes(:inserted_taggings, :deleted_taggings, :visible_images)
-    |> Multi.on_commit(fn %{locked_image_ids: image_ids} ->
-      reindex_images(image_ids)
-      Comments.reindex_comments_on_images(image_ids)
     end)
-  end
-
-  defp uniform_batch_multi(image_ids, added_tags, removed_tags, attributes) do
-    image_ids
-    |> Enum.map(&%{image_id: &1, added_tags: added_tags, removed_tags: removed_tags})
-    |> non_uniform_batch_multi(attributes)
+    |> Multi.run(:pairs, fn
+      _repo,
+      %{
+        locked_image_ids: image_ids,
+        canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}
+      } ->
+        {:ok, batch_tag_pairs(image_ids, added_tags, removed_tags)}
+    end)
+    |> put_perform_batch_update(attributes)
   end
 
   ## Voting and hiding
@@ -2952,19 +2912,6 @@ defmodule Philomena.Images do
         |> Enum.filter(&String.starts_with?(&1, "-"))
         |> Enum.map(&String.replace_leading(&1, "-", ""))
 
-      added_tags =
-        Tag
-        |> where([t], t.name in ^added_tag_names)
-        |> preload([:implied_tags, aliased_tag: :implied_tags])
-        |> Repo.all()
-        |> Enum.map(&(&1.aliased_tag || &1))
-        |> Enum.flat_map(&[&1 | &1.implied_tags])
-
-      removed_tags =
-        Tag
-        |> where([t], t.name in ^removed_tag_names)
-        |> Repo.all()
-
       attributes = %{
         ip: actor.ip,
         fingerprint: actor.fingerprint,
@@ -2973,8 +2920,8 @@ defmodule Philomena.Images do
 
       {requested_ids, unparsable_ids} = partition_image_ids(image_ids)
 
-      requested_ids
-      |> uniform_batch_multi(added_tags, removed_tags, attributes)
+      Multi.new()
+      |> put_batch_tag(requested_ids, added_tag_names, removed_tag_names, attributes)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{locked_image_ids: image_ids} ->
         {
           "Admin.Batch.Tag:update",
@@ -2982,9 +2929,13 @@ defmodule Philomena.Images do
           "Batch tagged '#{tag_list}' on #{Enum.count(image_ids)} images"
         }
       end)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
-        {:ok, %{locked_image_ids: image_ids}} ->
+        {:ok,
+         %{
+           locked_image_ids: image_ids,
+           canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}
+         }} ->
           # IDs which parsed but matched no existing image were
           # never touched by the batch, so they are reported as failed.
           unmatched_ids = requested_ids -- image_ids
@@ -3021,8 +2972,8 @@ defmodule Philomena.Images do
   """
   @spec batch_revert([map()], map()) :: {:ok, [integer()]} | :error
   def batch_revert(changes, attributes) do
-    changes
-    |> non_uniform_reversion_batch_multi(attributes)
+    Multi.new()
+    |> put_batch_revert_tag_changes(changes, attributes)
     |> Multi.transact_with_automatic_retry()
     |> case do
       {:ok, %{locked_image_ids: image_ids}} ->

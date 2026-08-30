@@ -136,4 +136,35 @@ defmodule Philomena.TagsConcurrencyTest do
     assert Repo.reload!(source).images_count == 0
     assert Repo.reload!(target).images_count == 1
   end
+
+  test "an alias worker and a batch tag edit serialize on the image row" do
+    source = tag_fixture(name: unique_tag_name())
+    target = tag_fixture(name: unique_tag_name())
+    image = image_fixture(tags: "safe, #{source.name}")
+
+    source =
+      source
+      |> Ecto.Changeset.change(aliased_tag_id: target.id, images_count: 1)
+      |> Repo.update!()
+
+    results =
+      concurrently([
+        fn -> Tags.perform_alias(source.id, target.id) end,
+        fn -> Images.batch_update_tags(actor(admin_user_fixture()), source.name, [image.id]) end
+      ])
+
+    assert Enum.count(results, &(&1 == :ok)) == 1
+    assert Enum.count(results, &match?({:ok, %{added: [_ | _]}}, &1)) == 1
+
+    tag_ids =
+      image
+      |> Repo.preload(:tags, force: true)
+      |> Map.fetch!(:tags)
+      |> Enum.map(& &1.id)
+
+    assert target.id in tag_ids
+    refute source.id in tag_ids
+    assert Repo.reload!(source).images_count == 0
+    assert Repo.reload!(target).images_count == 1
+  end
 end
