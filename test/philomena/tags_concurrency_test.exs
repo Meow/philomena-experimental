@@ -172,11 +172,16 @@ defmodule Philomena.TagsConcurrencyTest do
     results =
       concurrently([
         fn -> Tags.perform_alias(source.id, target.id) end,
-        fn -> Images.batch_update_tags(actor(admin_user_fixture()), source.name, [image.id]) end
+        fn ->
+          Images.batch_update_tags(actor(admin_user_fixture()), %{
+            tag_list: source.name,
+            image_ids: [image.id]
+          })
+        end
       ])
 
     assert Enum.count(results, &(&1 == :ok)) == 1
-    assert Enum.count(results, &match?({:ok, %{added: [_ | _]}}, &1)) == 1
+    assert Enum.count(results, &match?({:ok, %{succeeded: 1, failed: 0}}, &1)) == 1
 
     tag_ids =
       image

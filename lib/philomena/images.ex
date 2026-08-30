@@ -31,6 +31,7 @@ defmodule Philomena.Images do
   alias Philomena.Images.SourceDiffer
   alias Philomena.Images.TagDiffer
   alias Philomena.Images.TagInputForm
+  alias Philomena.Images.BatchTagForm
   alias Philomena.Images.VoteForm
   alias Philomena.Images.Subscription
   alias Philomena.Images
@@ -68,6 +69,7 @@ defmodule Philomena.Images do
 
   @source_update_window 5
   @tag_update_window 5
+  @batch_tag_size 1_000
 
   use Philomena.Subscriptions,
     on_delete: :clear_image_notification,
@@ -189,6 +191,18 @@ defmodule Philomena.Images do
       %{
         image: ImageView.render("image.json", %{image: image}),
         duplicate_of_image: ImageView.render("image.json", %{image: duplicate_of_image})
+      }
+    )
+  end
+
+  defp broadcast_batch_update(image_ids, added_tags, removed_tags) do
+    Endpoint.broadcast!(
+      "firehose",
+      "image:batch_tag_update",
+      %{
+        image_ids: image_ids,
+        added: Enum.map(added_tags, & &1.name),
+        removed: Enum.map(removed_tags, & &1.name)
       }
     )
   end
@@ -321,15 +335,13 @@ defmodule Philomena.Images do
     |> Multi.run(:check_limits, fn _repo, %{image: image} ->
       record_tag_change_limits(image, actor)
     end)
-    |> Multi.on_rollback(fn changes ->
-      case changes[:check_limits] do
-        {tag_changed_count, rating_changed_count} ->
-          %Actor{ip: ip, user: user} = actor
-          Limits.rollback_action(user, ip, tag_changed_count, rating_changed_count)
+    |> Multi.on_rollback(fn
+      %{check_limits: {tag_changed_count, rating_changed_count}} ->
+        %Actor{ip: ip, user: user} = actor
+        Limits.rollback_action(user, ip, tag_changed_count, rating_changed_count)
 
-        _ ->
-          :ok
-      end
+      _ ->
+        :ok
     end)
     |> TagChanges.put_tag_change(actor)
     |> Tags.put_image_tag_count_changes()
@@ -544,17 +556,6 @@ defmodule Philomena.Images do
 
   ## Bulk operations
 
-  # An id that is not an integer cannot name an image, so it is reported as
-  # failed rather than crashing the whole batch.
-  defp partition_image_ids(image_ids) do
-    {parsed, unparsable} =
-      image_ids
-      |> Enum.map(&{&1, IntegerId.parse(&1)})
-      |> Enum.split_with(&match?({_id, {:ok, _int}}, &1))
-
-    {Enum.map(parsed, fn {_id, {:ok, int}} -> int end), Enum.map(unparsable, &elem(&1, 0))}
-  end
-
   defp reversion_pairs(changes, locked_image_ids, families) do
     changes
     |> Enum.group_by(& &1.image_id)
@@ -702,6 +703,13 @@ defmodule Philomena.Images do
         {:ok, batch_tag_pairs(image_ids, added_tags, removed_tags)}
     end)
     |> put_perform_batch_update(attributes)
+    |> Multi.on_commit(fn
+      %{
+        locked_image_ids: image_ids,
+        canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}
+      } ->
+        broadcast_batch_update(image_ids, added_tags, removed_tags)
+    end)
   end
 
   ## Voting and hiding
@@ -2890,35 +2898,35 @@ defmodule Philomena.Images do
   @doc """
   Applies a batch tag edit to `image_ids` on behalf of `actor`.
 
-  Authorizes `:batch_update` against the tag model, parses the tag list into the
-  added and removed tags (resolving aliases and implications for additions),
-  splits the raw ids into castable integers and unparsable leftovers, and runs
-  the batch update transaction. Batch tagging is a staff feature and is
-  not rate-limited. Writes an `"Admin.Batch.Tag:update"` moderation log, whose
-  subject is the acting user's own profile, on success.
+  Authorizes `:batch_update` against the tag model, parses the tag list and
+  image IDs, and runs the batch update in chunks of 1,000 IDs. Batch tagging is
+  a staff feature and is not rate-limited. Each successful chunk writes an
+  `"Admin.Batch.Tag:update"` moderation log and broadcasts its update to the
+  firehose.
 
   On success returns `{:ok, result}` where `result` is a map with:
 
-    * `:succeeded` - ids the batch matched (existing images);
-    * `:failed` - ids that matched no such image plus the unparsable ids;
-    * `:added` / `:removed` - the resolved tag names, for the firehose broadcast.
+    * `:succeeded` - the number of image IDs successfully updated;
+    * `:failed` - the number of image IDs in failed chunks or matching no image.
 
-  Returns `{:error, :unauthorized}` when `actor` may not batch-tag, or
-  `{:error, {:batch_failed, failed_ids}}` (every castable id plus the
-  unparsable ids) when the batch transaction does not commit.
+  Returns `{:error, :unauthorized}` when `actor` may not batch-tag, or an
+  invalid `BatchTagForm` changeset when the parameters cannot be cast.
   """
-  @spec batch_update_tags(Actor.t(), String.t(), [IntegerId.integer_id()]) ::
-          {:ok,
-           %{succeeded: [integer()], failed: [any()], added: [String.t()], removed: [String.t()]}}
-          | {:error, :unauthorized | {:batch_failed, [any()]}}
-  def batch_update_tags(%Actor{} = actor, tag_list, image_ids) do
-    with :ok <- authorize(actor, :batch_update, Tag) do
-      tags = Tag.parse_tag_list(tag_list)
+  @spec batch_update_tags(Actor.t(), map()) ::
+          {:ok, %{succeeded: non_neg_integer(), failed: non_neg_integer()}}
+          | {:error, :unauthorized | Ecto.Changeset.t()}
+  def batch_update_tags(%Actor{} = actor, params) do
+    with :ok <- authorize(actor, :batch_update, Tag),
+         {:ok, form} <-
+           %BatchTagForm{}
+           |> BatchTagForm.changeset(params)
+           |> Ecto.Changeset.apply_action(:create) do
+      tag_names = Tag.parse_tag_list(form.tag_list)
 
-      added_tag_names = Enum.reject(tags, &String.starts_with?(&1, "-"))
+      added_names = Enum.reject(tag_names, &String.starts_with?(&1, "-"))
 
-      removed_tag_names =
-        tags
+      removed_names =
+        tag_names
         |> Enum.filter(&String.starts_with?(&1, "-"))
         |> Enum.map(&String.replace_leading(&1, "-", ""))
 
@@ -2928,39 +2936,32 @@ defmodule Philomena.Images do
         user_id: actor.user.id
       }
 
-      {requested_ids, unparsable_ids} = partition_image_ids(image_ids)
+      form.image_ids
+      |> Enum.chunk_every(@batch_tag_size)
+      |> Enum.reduce({0, 0}, fn image_ids, {succeeded, failed} ->
+        Multi.new()
+        |> put_batch_tag(image_ids, added_names, removed_names, attributes)
+        |> ModerationLogs.put_log(:moderation_log, actor, fn %{locked_image_ids: image_ids} ->
+          {
+            "Admin.Batch.Tag:update",
+            Paths.profile_path(actor.user),
+            "Batch tagged '#{form.tag_list}' on #{Enum.count(image_ids)} images"
+          }
+        end)
+        |> Multi.transact_with_automatic_retry()
+        |> case do
+          {:ok, %{locked_image_ids: processed_ids}} ->
+            unprocessed_ids = image_ids -- processed_ids
 
-      Multi.new()
-      |> put_batch_tag(requested_ids, added_tag_names, removed_tag_names, attributes)
-      |> ModerationLogs.put_log(:moderation_log, actor, fn %{locked_image_ids: image_ids} ->
-        {
-          "Admin.Batch.Tag:update",
-          Paths.profile_path(actor.user),
-          "Batch tagged '#{tag_list}' on #{Enum.count(image_ids)} images"
-        }
+            {succeeded + Enum.count(processed_ids), failed + Enum.count(unprocessed_ids)}
+
+          _error ->
+            {succeeded, failed + Enum.count(image_ids)}
+        end
       end)
-      |> Multi.transact_with_automatic_retry()
-      |> case do
-        {:ok,
-         %{
-           locked_image_ids: image_ids,
-           canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}
-         }} ->
-          # IDs which parsed but matched no existing image were
-          # never touched by the batch, so they are reported as failed.
-          unmatched_ids = requested_ids -- image_ids
-
-          {:ok,
-           %{
-             succeeded: image_ids,
-             failed: unmatched_ids ++ unparsable_ids,
-             added: Enum.map(added_tags, & &1.name),
-             removed: Enum.map(removed_tags, & &1.name)
-           }}
-
-        _error ->
-          {:error, {:batch_failed, requested_ids ++ unparsable_ids}}
-      end
+      |> then(fn {succeeded, failed} ->
+        {:ok, %{succeeded: succeeded, failed: failed}}
+      end)
     end
   end
 

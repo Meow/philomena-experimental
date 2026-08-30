@@ -4734,7 +4734,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "batch_update_tags/3" do
+  describe "batch_update_tags/2" do
     test "an admin adds a tag to matched images and logs against their own profile" do
       # A letters-only name keeps the profile subject_path identical to
       # "/profiles/<slug>" with no percent-encoding.
@@ -4743,28 +4743,39 @@ defmodule Philomena.ImagesTest do
       tag_fixture(%{name: "batchadd"})
       image = image_fixture(tags: "safe")
 
-      assert {:ok, result} = Images.batch_update_tags(actor, "batchadd", [image.id])
-      assert result.succeeded == [image.id]
-      assert result.failed == []
-      assert result.added == ["batchadd"]
-      assert result.removed == []
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, %{tag_list: "batchadd", image_ids: [image.id]})
+
+      assert result == %{succeeded: 1, failed: 0}
       assert "batchadd" in image_tag_names(image)
 
-      log = only_moderation_log!()
+      :ok = Endpoint.subscribe("firehose")
+
+      assert {:ok, _result} =
+               Images.batch_update_tags(actor, %{tag_list: "-batchadd", image_ids: [image.id]})
+
+      assert_receive %Broadcast{
+        event: "image:batch_tag_update",
+        payload: %{image_ids: [image_id], added: [], removed: ["batchadd"]}
+      }
+
+      assert image_id == image.id
+
+      log = Repo.one!(from log in ModerationLog, order_by: [desc: log.id], limit: 1)
       assert log.user_id == admin.id
       assert log.type == "Admin.Batch.Tag:update"
       assert log.subject_path == "/profiles/#{admin.slug}"
-      assert log.body == "Batch tagged 'batchadd' on 1 images"
+      assert log.body == "Batch tagged '-batchadd' on 1 images"
     end
 
     test "an admin removes a tag from matched images" do
       actor = actor(admin_user_fixture())
       image = image_fixture(tags: "safe, removeme")
 
-      assert {:ok, result} = Images.batch_update_tags(actor, "-removeme", [image.id])
-      assert result.succeeded == [image.id]
-      assert result.removed == ["removeme"]
-      assert result.added == []
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, %{tag_list: "-removeme", image_ids: [image.id]})
+
+      assert result == %{succeeded: 1, failed: 0}
       refute "removeme" in image_tag_names(image)
     end
 
@@ -4779,13 +4790,20 @@ defmodule Philomena.ImagesTest do
 
       image = image_fixture()
 
-      assert {:ok, result} = Images.batch_update_tags(actor, alias_tag.name, [image.id])
-      assert result.added == [canonical.name]
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, %{tag_list: alias_tag.name, image_ids: [image.id]})
+
+      assert result == %{succeeded: 1, failed: 0}
       assert canonical.name in image_tag_names(image)
       refute alias_tag.name in image_tag_names(image)
 
-      assert {:ok, result} = Images.batch_update_tags(actor, "-#{alias_tag.name}", [image.id])
-      assert result.removed == [canonical.name]
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, %{
+                 tag_list: "-#{alias_tag.name}",
+                 image_ids: [image.id]
+               })
+
+      assert result == %{succeeded: 1, failed: 0}
       refute canonical.name in image_tag_names(image)
     end
 
@@ -4794,28 +4812,39 @@ defmodule Philomena.ImagesTest do
       tag_fixture(%{name: "batchadd"})
       image = image_fixture(tags: "safe")
 
-      assert {:ok, result} = Images.batch_update_tags(actor(user), "batchadd", [image.id])
-      assert result.succeeded == [image.id]
+      assert {:ok, result} =
+               Images.batch_update_tags(actor(user), %{
+                 tag_list: "batchadd",
+                 image_ids: [image.id]
+               })
+
+      assert result == %{succeeded: 1, failed: 0}
     end
 
     test "a plain moderator is not authorized" do
       image = image_fixture(tags: "safe")
 
-      assert Images.batch_update_tags(actor(moderator_user_fixture()), "batchadd", [image.id]) ==
+      assert Images.batch_update_tags(
+               actor(moderator_user_fixture()),
+               %{tag_list: "batchadd", image_ids: [image.id]}
+             ) ==
                {:error, :unauthorized}
     end
 
     test "a regular user is not authorized" do
       image = image_fixture(tags: "safe")
 
-      assert Images.batch_update_tags(actor(confirmed_user_fixture()), "batchadd", [image.id]) ==
+      assert Images.batch_update_tags(
+               actor(confirmed_user_fixture()),
+               %{tag_list: "batchadd", image_ids: [image.id]}
+             ) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous actor is not authorized" do
       image = image_fixture(tags: "safe")
 
-      assert Images.batch_update_tags(actor(), "batchadd", [image.id]) ==
+      assert Images.batch_update_tags(actor(), %{tag_list: "batchadd", image_ids: [image.id]}) ==
                {:error, :unauthorized}
     end
 
@@ -4825,20 +4854,42 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(tags: "safe")
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, "batchadd", [image.id, 2_147_483_647])
+               Images.batch_update_tags(actor, %{
+                 tag_list: "batchadd",
+                 image_ids: [image.id, 2_147_483_647]
+               })
 
-      assert result.succeeded == [image.id]
-      assert result.failed == [2_147_483_647]
+      assert result == %{succeeded: 1, failed: 1}
     end
 
-    test "a non-castable id lands in failed without crashing the batch" do
+    test "processes image IDs in chunks of 1,000" do
+      actor = actor(admin_user_fixture())
+      tag_fixture(%{name: "batchadd"})
+      :ok = Endpoint.subscribe("firehose")
+
+      image_ids = Enum.to_list(2_000_000_000..2_000_001_000)
+
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, %{tag_list: "batchadd", image_ids: image_ids})
+
+      assert result == %{succeeded: 0, failed: 1_001}
+      assert moderation_log_count() == 2
+      assert_receive %Broadcast{event: "image:batch_tag_update", payload: %{image_ids: []}}
+      assert_receive %Broadcast{event: "image:batch_tag_update", payload: %{image_ids: []}}
+    end
+
+    test "a non-castable id returns the form changeset" do
       actor = actor(admin_user_fixture())
       tag_fixture(%{name: "batchadd"})
       image = image_fixture(tags: "safe")
 
-      assert {:ok, result} = Images.batch_update_tags(actor, "batchadd", [image.id, "abc"])
-      assert result.succeeded == [image.id]
-      assert result.failed == ["abc"]
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Images.batch_update_tags(actor, %{
+                 tag_list: "batchadd",
+                 image_ids: [image.id, "abc"]
+               })
+
+      assert changeset.errors[:image_ids]
     end
 
     test "the log counts only the images the batch matched" do
@@ -4846,7 +4897,11 @@ defmodule Philomena.ImagesTest do
       tag_fixture(%{name: "batchadd"})
       image = image_fixture(tags: "safe")
 
-      assert {:ok, _} = Images.batch_update_tags(actor, "batchadd", [image.id, "abc"])
+      assert {:ok, %{succeeded: 1, failed: 1}} =
+               Images.batch_update_tags(actor, %{
+                 tag_list: "batchadd",
+                 image_ids: [image.id, 2_147_483_647]
+               })
 
       log = only_moderation_log!()
       assert log.body == "Batch tagged 'batchadd' on 1 images"
@@ -4859,18 +4914,23 @@ defmodule Philomena.ImagesTest do
       tag_fixture(%{name: "batchhiddentag"})
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, "batchhiddentag", [hidden.id, visible.id])
+               Images.batch_update_tags(actor, %{
+                 tag_list: "batchhiddentag",
+                 image_ids: [hidden.id, visible.id]
+               })
 
-      assert result.succeeded == Enum.sort([hidden.id, visible.id])
-      assert result.failed == []
-      assert result.added == ["batchhiddentag"]
+      assert result == %{succeeded: 2, failed: 0}
       assert "batchhiddentag" in image_tag_names(hidden)
       assert "batchhiddentag" in image_tag_names(visible)
       assert Repo.get_by!(Tag, name: "batchhiddentag").images_count == 1
 
-      assert {:ok, result} = Images.batch_update_tags(actor, "-batchhiddentag", [hidden.id])
-      assert result.succeeded == [hidden.id]
-      assert result.removed == ["batchhiddentag"]
+      assert {:ok, result} =
+               Images.batch_update_tags(actor, %{
+                 tag_list: "-batchhiddentag",
+                 image_ids: [hidden.id]
+               })
+
+      assert result == %{succeeded: 1, failed: 0}
       refute "batchhiddentag" in image_tag_names(hidden)
       assert "batchhiddentag" in image_tag_names(visible)
       assert Repo.get_by!(Tag, name: "batchhiddentag").images_count == 1
