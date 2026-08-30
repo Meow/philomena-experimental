@@ -19,6 +19,7 @@ defmodule Philomena.Filters do
   alias Philomena.Filters
   alias Philomena.Attribution.Actor
   alias Philomena.Schema.TagList
+  alias Philomena.Tags
   alias Philomena.Tags.Tag
   alias Philomena.Users
   alias Philomena.Users.User
@@ -462,9 +463,25 @@ defmodule Philomena.Filters do
         |> Filter.creation_changeset(attrs)
 
       Multi.new()
-      |> Multi.insert(:filter, filter_changeset)
+      |> Tags.put_canonicalize_tag_name_sets([
+        {:spoilered_filter_tags, Filter.tag_names(filter_changeset, :spoilered_tag_list), []},
+        {:hidden_filter_tags, Filter.tag_names(filter_changeset, :hidden_tag_list), []}
+      ])
+      |> Multi.insert(:filter, fn
+        %{
+          canonical_tags: %{
+            spoilered_filter_tags: spoilered_tags,
+            hidden_filter_tags: hidden_tags
+          }
+        } ->
+          Filter.put_tag_ids(
+            filter_changeset,
+            Enum.map(spoilered_tags, & &1.id),
+            Enum.map(hidden_tags, & &1.id)
+          )
+      end)
       |> put_reindex_filter(:filter)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
@@ -506,9 +523,25 @@ defmodule Philomena.Filters do
       filter_changeset = Filter.update_changeset(filter, attrs)
 
       Multi.new()
-      |> Multi.update(:filter, filter_changeset)
+      |> Tags.put_canonicalize_tag_name_sets([
+        {:spoilered_filter_tags, Filter.tag_names(filter_changeset, :spoilered_tag_list), []},
+        {:hidden_filter_tags, Filter.tag_names(filter_changeset, :hidden_tag_list), []}
+      ])
+      |> Multi.update(:filter, fn
+        %{
+          canonical_tags: %{
+            spoilered_filter_tags: spoilered_tags,
+            hidden_filter_tags: hidden_tags
+          }
+        } ->
+          Filter.put_tag_ids(
+            filter_changeset,
+            Enum.map(spoilered_tags, & &1.id),
+            Enum.map(hidden_tags, & &1.id)
+          )
+      end)
       |> put_reindex_filter(:filter)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
@@ -686,13 +719,15 @@ defmodule Philomena.Filters do
   def hide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :hide_tag, filter, tag_slug) do
-      hidden_tag_ids = Enum.uniq([tag.id | filter.hidden_tag_ids])
-      filter_changeset = Filter.hidden_tags_changeset(filter, hidden_tag_ids)
-
       Multi.new()
-      |> Multi.update(:filter, filter_changeset)
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, [tag.name], []}])
+      |> Multi.update(:filter, fn %{canonical_tags: %{tag: [tag]}} ->
+        tag_ids = Enum.uniq([tag.id | filter.hidden_tag_ids])
+
+        Filter.hidden_tags_changeset(filter, tag_ids)
+      end)
       |> put_reindex_filter(:filter)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
@@ -733,13 +768,15 @@ defmodule Philomena.Filters do
   def unhide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :unhide_tag, filter, tag_slug) do
-      hidden_tag_ids = filter.hidden_tag_ids -- [tag.id]
-      filter_changeset = Filter.hidden_tags_changeset(filter, hidden_tag_ids)
-
       Multi.new()
-      |> Multi.update(:filter, filter_changeset)
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, [tag.name], []}])
+      |> Multi.update(:filter, fn %{canonical_tags: %{tag: [tag]}} ->
+        tag_ids = filter.hidden_tag_ids -- [tag.id]
+
+        Filter.hidden_tags_changeset(filter, tag_ids)
+      end)
       |> put_reindex_filter(:filter)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
@@ -780,13 +817,15 @@ defmodule Philomena.Filters do
   def spoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :spoiler_tag, filter, tag_slug) do
-      spoilered_tag_ids = Enum.uniq([tag.id | filter.spoilered_tag_ids])
-      filter_changeset = Filter.spoilered_tags_changeset(filter, spoilered_tag_ids)
-
       Multi.new()
-      |> Multi.update(:filter, filter_changeset)
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, [tag.name], []}])
+      |> Multi.update(:filter, fn %{canonical_tags: %{tag: [tag]}} ->
+        tag_ids = Enum.uniq([tag.id | filter.spoilered_tag_ids])
+
+        Filter.spoilered_tags_changeset(filter, tag_ids)
+      end)
       |> put_reindex_filter(:filter)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}
@@ -827,13 +866,15 @@ defmodule Philomena.Filters do
   def unspoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :unspoiler_tag, filter, tag_slug) do
-      spoilered_tag_ids = filter.spoilered_tag_ids -- [tag.id]
-      filter_changeset = Filter.spoilered_tags_changeset(filter, spoilered_tag_ids)
-
       Multi.new()
-      |> Multi.update(:filter, filter_changeset)
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, [tag.name], []}])
+      |> Multi.update(:filter, fn %{canonical_tags: %{tag: [tag]}} ->
+        tag_ids = filter.spoilered_tag_ids -- [tag.id]
+
+        Filter.spoilered_tags_changeset(filter, tag_ids)
+      end)
       |> put_reindex_filter(:filter)
-      |> Multi.transact()
+      |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{filter: %Filter{} = filter}} ->
           {:ok, filter}

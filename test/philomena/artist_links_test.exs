@@ -145,6 +145,25 @@ defmodule Philomena.ArtistLinksTest do
       assert link.aasm_state == "unverified"
     end
 
+    test "an aliased tag resolves to its canonical tag" do
+      user = confirmed_user_fixture()
+      canonical = artist_tag_fixture()
+
+      alias_tag =
+        artist_tag_fixture()
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      assert {:ok, {_user, link}} =
+               ArtistLinks.create_artist_link(
+                 actor(user),
+                 user.slug,
+                 Map.merge(link_params(), %{"tag_name" => alias_tag.name})
+               )
+
+      assert link.tag_id == canonical.id
+    end
+
     test "an actor with no fingerprint is unauthorized" do
       user = confirmed_user_fixture()
 
@@ -278,6 +297,27 @@ defmodule Philomena.ArtistLinksTest do
       assert loaded_user.id == user.id
       assert updated.uri == "https://example.com/updated-gallery"
       assert Repo.get(ArtistLink, link.id).uri == "https://example.com/updated-gallery"
+    end
+
+    test "an aliased tag resolves to its canonical tag" do
+      user = confirmed_user_fixture()
+      link = artist_link_fixture(user, artist_tag_fixture())
+      canonical = artist_tag_fixture()
+
+      alias_tag =
+        artist_tag_fixture()
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      assert {:ok, {_user, updated}} =
+               ArtistLinks.update_artist_link(
+                 actor(moderator_user_fixture()),
+                 user.slug,
+                 "#{link.id}",
+                 %{"tag_name" => alias_tag.name, "uri" => link.uri}
+               )
+
+      assert updated.tag_id == canonical.id
     end
 
     test "the profile owner may not update their own link" do

@@ -188,7 +188,7 @@ defmodule Philomena.TagsTest do
     test "assembles the page for a real tag, carrying its tagged image" do
       created_at = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)
       image = image_fixture(tags: "safe", created_at: created_at)
-      tag = Tags.find_canonical_tag_by_name("safe")
+      tag = Repo.get_by!(Tag, name: "safe")
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %TagPage{} = page} = Tags.load_tag_page(actor(), scope(nil), tag.slug)
@@ -804,6 +804,22 @@ defmodule Philomena.TagsTest do
       assert Repo.reload!(user).watched_tag_ids == []
     end
 
+    test "watching and unwatching an alias uses its canonical tag" do
+      user = confirmed_user_fixture()
+      canonical = tag_fixture(name: "watched canonical")
+
+      alias_tag =
+        tag_fixture(name: "watched alias")
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      assert {:ok, watching} = Tags.watch_tag(actor(user), alias_tag.slug)
+      assert watching.watched_tag_ids == [canonical.id]
+
+      assert {:ok, _} = Tags.unwatch_tag(actor(watching), alias_tag.slug)
+      assert Repo.reload!(user).watched_tag_ids == []
+    end
+
     test "unwatching a tag that is not watched is an idempotent success" do
       user = confirmed_user_fixture()
       tag = tag_fixture()
@@ -851,14 +867,12 @@ defmodule Philomena.TagsTest do
       target = image_fixture(tags: "copy shared")
 
       shared =
-        "copy shared"
-        |> Tags.find_canonical_tag_by_name()
+        Repo.get_by!(Tag, name: "copy shared")
         |> Ecto.Changeset.change(images_count: 2)
         |> Repo.update!()
 
       source_only =
-        "copy source only"
-        |> Tags.find_canonical_tag_by_name()
+        Repo.get_by!(Tag, name: "copy source only")
         |> Ecto.Changeset.change(images_count: 1)
         |> Repo.update!()
 
@@ -991,7 +1005,7 @@ defmodule Philomena.TagsTest do
                |> Tags.put_canonicalize_tag_name_sets([{:tags, [name], []}])
                |> Multi.transact()
 
-      assert Tags.find_canonical_tag_by_name(name) == nil
+      assert Repo.get_by(Tag, name: name) == nil
     end
 
     test "creates tags when requested and filters oversized names" do
@@ -1005,7 +1019,7 @@ defmodule Philomena.TagsTest do
                ])
                |> Multi.transact()
 
-      assert Tags.find_canonical_tag_by_name(oversized) == nil
+      assert Repo.get_by(Tag, name: oversized) == nil
     end
   end
 

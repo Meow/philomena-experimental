@@ -3,8 +3,12 @@ defmodule Philomena.TagsConcurrencyTest do
   use Patch
 
   import Philomena.TagsFixtures
+  import Philomena.DnpEntriesFixtures
+  import Philomena.FiltersFixtures
 
   alias Philomena.Images
+  alias Philomena.DnpEntries
+  alias Philomena.Filters
   alias Philomena.ModerationLogs.ModerationLog
   alias Philomena.Multi
   alias Philomena.Repo
@@ -115,6 +119,57 @@ defmodule Philomena.TagsConcurrencyTest do
 
     assert Repo.reload!(source).images_count == 0
     assert Repo.reload!(target).images_count == length(images)
+  end
+
+  test "a filter update racing an alias stores the canonical tag" do
+    source = tag_fixture(name: unique_tag_name())
+    target = tag_fixture(name: unique_tag_name())
+    user = confirmed_user_fixture()
+    filter = filter_fixture(user)
+
+    results =
+      concurrently([
+        fn ->
+          Tags.alias_tag(actor(admin_user_fixture()), source.slug, %{"target_tag" => target.name})
+        end,
+        fn ->
+          Filters.update_filter(actor(user), filter.id, %{
+            "hidden_tag_list" => source.name,
+            "spoilered_tag_list" => ""
+          })
+        end
+      ])
+
+    assert Enum.all?(results, &match?({:ok, _}, &1))
+    assert Repo.reload!(filter).hidden_tag_ids == [target.id]
+  end
+
+  test "a DNP update racing an alias stores the canonical tag" do
+    source = tag_fixture(name: unique_tag_name())
+    target = tag_fixture(name: unique_tag_name())
+    moderator = moderator_user_fixture()
+    entry = dnp_entry_fixture(moderator, source)
+
+    results =
+      concurrently([
+        fn ->
+          Tags.alias_tag(actor(admin_user_fixture()), source.slug, %{"target_tag" => target.name})
+        end,
+        fn ->
+          DnpEntries.update_dnp_entry(
+            actor(moderator),
+            entry.id,
+            %{
+              "tag_id" => to_string(source.id),
+              "dnp_type" => "No Edits",
+              "reason" => "Updated reason"
+            }
+          )
+        end
+      ])
+
+    assert Enum.all?(results, &match?({:ok, _}, &1))
+    assert Repo.reload!(entry).tag_id == target.id
   end
 
   test "an alias worker and an image tag edit serialize on the image row" do

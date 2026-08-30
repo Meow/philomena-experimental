@@ -196,17 +196,24 @@ defmodule Philomena.ArtistLinks do
           | {:error, :ban | :unauthorized | :not_found}
   def create_artist_link(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, user} <- load_authorized_profile(actor, :create_links, slug) do
-      tag = Tags.find_canonical_tag_by_name(attrs["tag_name"])
+         {:ok, user} <- load_authorized_profile(actor, :create_links, slug),
+         {:ok, artist_link} <-
+           %ArtistLink{}
+           |> ArtistLink.tag_name_changeset(attrs)
+           |> Ecto.Changeset.apply_action(:create) do
+      tag_names = List.wrap(artist_link.tag_name)
 
-      %ArtistLink{}
-      |> ArtistLink.creation_changeset(attrs, user, tag)
-      |> Repo.insert()
+      Multi.new()
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, tag_names, []}])
+      |> Multi.insert(:artist_link, fn %{canonical_tags: %{tag: tags}} ->
+        ArtistLink.creation_changeset(%ArtistLink{}, attrs, user, List.first(tags))
+      end)
+      |> Multi.transact_with_automatic_retry()
       |> case do
-        {:ok, artist_link} ->
+        {:ok, %{artist_link: %ArtistLink{} = artist_link}} ->
           {:ok, {user, artist_link}}
 
-        {:error, changeset} ->
+        {:error, :artist_link, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, {user, changeset}}
       end
     end
@@ -293,17 +300,24 @@ defmodule Philomena.ArtistLinks do
           | {:error, Authorization.write_error_reason() | :not_found}
   def update_artist_link(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, artist_link} <- load_scoped_artist_link(actor, :update, slug, id) do
-      tag = Tags.find_canonical_tag_by_name(attrs["tag_name"])
+         {:ok, artist_link} <- load_scoped_artist_link(actor, :update, slug, id),
+         {:ok, artist_link} <-
+           artist_link
+           |> ArtistLink.tag_name_changeset(attrs)
+           |> Ecto.Changeset.apply_action(:update) do
+      tag_names = List.wrap(artist_link.tag_name)
 
-      artist_link
-      |> ArtistLink.edit_changeset(attrs, tag)
-      |> Repo.update()
+      Multi.new()
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, tag_names, []}])
+      |> Multi.update(:artist_link, fn %{canonical_tags: %{tag: tags}} ->
+        ArtistLink.edit_changeset(artist_link, attrs, List.first(tags))
+      end)
+      |> Multi.transact_with_automatic_retry()
       |> case do
-        {:ok, artist_link} ->
+        {:ok, %{artist_link: %ArtistLink{} = artist_link}} ->
           {:ok, {artist_link.user, artist_link}}
 
-        {:error, changeset} ->
+        {:error, :artist_link, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, {artist_link, changeset}}
       end
     end

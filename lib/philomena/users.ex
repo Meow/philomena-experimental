@@ -15,6 +15,7 @@ defmodule Philomena.Users do
 
   alias Philomena.Multi
   alias Philomena.Repo
+  alias Philomena.Tags
 
   alias Philomena.Attribution.Actor
   alias PhilomenaQuery.Search
@@ -1375,11 +1376,22 @@ defmodule Philomena.Users do
   @spec update_settings(Actor.t(), map()) ::
           {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
   def update_settings(%Actor{user: %User{} = user}, attrs) do
+    watched_tag_names = User.watched_tag_names(attrs)
+
     Multi.new()
+    |> Tags.put_canonicalize_tag_name_sets([{:watched_tags, watched_tag_names, []}])
     |> Multi.lock_one(:locked_user, preload(user_lock_query(user), :settings))
-    |> Multi.update(:user, fn %{locked_user: user} -> User.settings_changeset(user, attrs) end)
+    |> Multi.update(:user, fn
+      %{
+        locked_user: user,
+        canonical_tags: %{watched_tags: watched_tags}
+      } ->
+        user
+        |> User.settings_changeset(attrs)
+        |> User.put_watched_tag_ids(Enum.map(watched_tags, & &1.id))
+    end)
     |> put_reindex_user()
-    |> Multi.transact()
+    |> Multi.transact_with_automatic_retry()
     |> case do
       {:ok, %{user: %User{} = user}} ->
         {:ok, user}
@@ -1493,12 +1505,12 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
   def watch_tag(%Actor{user: %User{} = user}, tag) do
     Multi.new()
+    |> Tags.put_canonicalize_tag_name_sets([{:tag, [tag.name], []}])
     |> Multi.lock_one(:locked_user, user_lock_query(user))
-    |> Multi.update(:user, fn %{locked_user: user} ->
+    |> Multi.update(:user, fn %{locked_user: user, canonical_tags: %{tag: [tag]}} ->
       User.watched_tags_changeset(user, Enum.uniq([tag.id | user.watched_tag_ids]))
     end)
-    |> put_reindex_user()
-    |> Multi.transact()
+    |> Multi.transact_with_automatic_retry()
     |> case do
       {:ok, %{user: %User{} = user}} ->
         {:ok, user}
@@ -1525,12 +1537,13 @@ defmodule Philomena.Users do
           {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
   def unwatch_tag(%Actor{user: %User{} = user}, tag) do
     Multi.new()
+    |> Tags.put_canonicalize_tag_name_sets([{:tag, [tag.name], []}])
     |> Multi.lock_one(:locked_user, user_lock_query(user))
-    |> Multi.update(:user, fn %{locked_user: user} ->
+    |> Multi.update(:user, fn %{locked_user: user, canonical_tags: %{tag: [tag]}} ->
       User.watched_tags_changeset(user, user.watched_tag_ids -- [tag.id])
     end)
     |> put_reindex_user()
-    |> Multi.transact()
+    |> Multi.transact_with_automatic_retry()
     |> case do
       {:ok, %{user: %User{} = user}} ->
         {:ok, user}

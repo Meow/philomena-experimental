@@ -6,6 +6,7 @@ defmodule Philomena.Filters.Filter do
   alias Philomena.Schema.TagList
   alias Philomena.Images.Query
   alias Philomena.Users.User
+  alias Philomena.Tags.Tag
   alias Philomena.Repo
 
   @type t :: %__MODULE__{}
@@ -65,14 +66,26 @@ defmodule Philomena.Filters.Filter do
       :hidden_complex_str
     ])
     |> validate_length(:description, max: 10_000, count: :bytes)
-    |> TagList.propagate_tag_list(:spoilered_tag_list, :spoilered_tag_ids)
-    |> TagList.propagate_tag_list(:hidden_tag_list, :hidden_tag_ids)
     |> validate_required([:name])
     |> validate_my_downvotes(:spoilered_complex_str)
     |> validate_my_downvotes(:hidden_complex_str)
     |> validate_query(:spoilered_complex_str, with: &Query.compile(&1, user: user, filter: true))
     |> validate_query(:hidden_complex_str, with: &Query.compile(&1, user: user, filter: true))
     |> unsafe_validate_unique([:user_id, :name], Repo)
+  end
+
+  @doc false
+  def tag_names(changeset, field) when field in [:spoilered_tag_list, :hidden_tag_list] do
+    changeset
+    |> get_field(field)
+    |> Tag.parse_tag_list()
+  end
+
+  @doc false
+  def put_tag_ids(changeset, spoilered_tag_ids, hidden_tag_ids) do
+    changeset
+    |> put_change(:spoilered_tag_ids, spoilered_tag_ids)
+    |> put_change(:hidden_tag_ids, hidden_tag_ids)
   end
 
   def creation_changeset(filter, attrs) do

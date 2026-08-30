@@ -283,6 +283,24 @@ defmodule Philomena.ChannelsTest do
 
       assert channel.associated_artist_tag_id == tag.id
     end
+
+    test "an aliased artist tag resolves to its canonical tag" do
+      canonical = tag_fixture(%{name: "artist:channelcanonical"})
+
+      alias_tag =
+        tag_fixture(%{name: "artist:channelalias"})
+        |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
+        |> Repo.update!()
+
+      assert {:ok, %Channel{} = channel} =
+               Channels.create_channel(actor(moderator_user_fixture()), %{
+                 "type" => "PicartoChannel",
+                 "short_name" => unique_channel_short_name(),
+                 "artist_tag" => alias_tag.name
+               })
+
+      assert channel.associated_artist_tag_id == canonical.id
+    end
   end
 
   describe "load_channel_for_edit/2" do

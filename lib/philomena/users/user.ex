@@ -5,7 +5,6 @@ defmodule Philomena.Users.User do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Philomena.Schema.TagList
   alias Philomena.Schema.Approval
 
   alias Philomena.Filters.Filter
@@ -22,6 +21,7 @@ defmodule Philomena.Users.User do
   alias Philomena.Bans
   alias Philomena.Donations.Donation
   alias Philomena.UserNameChanges.UserNameChange
+  alias Philomena.Tags.Tag
 
   @type t :: %__MODULE__{}
 
@@ -312,8 +312,20 @@ defmodule Philomena.Users.User do
   def settings_changeset(user, attrs) do
     user
     |> cast(attrs, [:watched_tag_list])
-    |> TagList.propagate_tag_list(:watched_tag_list, :watched_tag_ids)
     |> cast_assoc(:settings, with: &Settings.changeset(&1, &2, user))
+  end
+
+  @doc false
+  def watched_tag_names(attrs) do
+    %__MODULE__{}
+    |> cast(attrs, [:watched_tag_list])
+    |> get_field(:watched_tag_list)
+    |> Tag.parse_tag_list()
+  end
+
+  @doc false
+  def put_watched_tag_ids(changeset, watched_tag_ids) do
+    put_change(changeset, :watched_tag_ids, watched_tag_ids)
   end
 
   def description_changeset(user, attrs) do

@@ -15,6 +15,7 @@ defmodule Philomena.DnpEntries do
   alias Philomena.ModNotes
   alias Philomena.Multi
   alias Philomena.Repo
+  alias Philomena.Tags
   alias Philomena.Tags.Tag
   alias Philomena.Users.User
 
@@ -57,6 +58,15 @@ defmodule Philomena.DnpEntries do
       user
       |> linked_tags()
       |> nonempty_tags()
+    end
+  end
+
+  defp selected_tag_names(params, selectable_tags) do
+    with {:ok, tag_id} <- DnpEntry.fetch_tag_id(params),
+         %Tag{name: name} <- Enum.find(selectable_tags, &(&1.id == tag_id)) do
+      [name]
+    else
+      _ -> []
     end
   end
 
@@ -219,14 +229,24 @@ defmodule Philomena.DnpEntries do
          :ok <- authorize(actor, :create, DnpEntry),
          default_tag = get_tag_from_params(params),
          {:ok, selectable_tags} <- selectable_tags(actor, default_tag) do
-      %DnpEntry{}
-      |> DnpEntry.creation_changeset(params, user, Enum.map(selectable_tags, & &1.id))
-      |> Repo.insert()
+      selectable_tag_ids = Enum.map(selectable_tags, & &1.id)
+      tag_names = selected_tag_names(params, selectable_tags)
+
+      Multi.new()
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, tag_names, []}])
+      |> Multi.insert(:dnp_entry, fn
+        %{canonical_tags: %{tag: [tag]}} ->
+          DnpEntry.creation_changeset(%DnpEntry{}, params, user, tag)
+
+        %{canonical_tags: %{tag: []}} ->
+          DnpEntry.creation_changeset(%DnpEntry{}, params, user, selectable_tag_ids)
+      end)
+      |> Multi.transact_with_automatic_retry()
       |> case do
-        {:ok, dnp_entry} ->
+        {:ok, %{dnp_entry: %DnpEntry{} = dnp_entry}} ->
           {:ok, dnp_entry}
 
-        {:error, changeset} ->
+        {:error, :dnp_entry, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, dnp_entry_form(changeset.data, selectable_tags, changeset)}
       end
     end
@@ -279,14 +299,24 @@ defmodule Philomena.DnpEntries do
     with :ok <- verify_write_access(actor),
          {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :update),
          {:ok, selectable_tags} <- selectable_tags(actor, dnp_entry.tag) do
-      dnp_entry
-      |> DnpEntry.update_changeset(params, Enum.map(selectable_tags, & &1.id))
-      |> Repo.update()
+      selectable_tag_ids = Enum.map(selectable_tags, & &1.id)
+      tag_names = selected_tag_names(params, selectable_tags)
+
+      Multi.new()
+      |> Tags.put_canonicalize_tag_name_sets([{:tag, tag_names, []}])
+      |> Multi.update(:dnp_entry, fn
+        %{canonical_tags: %{tag: [tag]}} ->
+          DnpEntry.update_changeset(dnp_entry, params, tag)
+
+        %{canonical_tags: %{tag: []}} ->
+          DnpEntry.update_changeset(dnp_entry, params, selectable_tag_ids)
+      end)
+      |> Multi.transact_with_automatic_retry()
       |> case do
-        {:ok, dnp_entry} ->
+        {:ok, %{dnp_entry: %DnpEntry{} = dnp_entry}} ->
           {:ok, dnp_entry}
 
-        {:error, changeset} ->
+        {:error, :dnp_entry, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, dnp_entry_form(dnp_entry, selectable_tags, changeset)}
       end
     end

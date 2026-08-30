@@ -31,7 +31,7 @@ defmodule Philomena.DnpEntries.DnpEntry do
   end
 
   @doc false
-  def update_changeset(dnp_entry, attrs, selectable_tag_ids) do
+  def update_changeset(dnp_entry, attrs, selectable_tag_ids) when is_list(selectable_tag_ids) do
     dnp_entry
     |> cast(attrs, [
       :conditions,
@@ -51,10 +51,38 @@ defmodule Philomena.DnpEntries.DnpEntry do
   end
 
   @doc false
-  def creation_changeset(dnp_entry, attrs, %User{} = user, selectable_tag_ids) do
+  def update_changeset(dnp_entry, attrs, %Tag{} = tag) do
+    dnp_entry
+    |> cast(attrs, [
+      :conditions,
+      :reason,
+      :hide_reason,
+      :instructions,
+      :feedback,
+      :dnp_type
+    ])
+    |> put_change(:tag_id, tag.id)
+    |> validate_required([:reason, :dnp_type])
+    |> validate_inclusion(:dnp_type, types())
+    |> validate_required(:tag_id, message: "must be one of your linked tags")
+    |> validate_inclusion(:tag_id, [tag.id], message: "must be one of your linked tags")
+    |> validate_conditions()
+    |> foreign_key_constraint(:tag_id, name: "fk_rails_473a736b4a")
+  end
+
+  @doc false
+  def creation_changeset(dnp_entry, attrs, %User{} = user, selectable_tag_ids)
+      when is_list(selectable_tag_ids) do
     dnp_entry
     |> change(requesting_user_id: user.id)
     |> update_changeset(attrs, selectable_tag_ids)
+  end
+
+  @doc false
+  def creation_changeset(dnp_entry, attrs, %User{} = user, %Tag{} = tag) do
+    dnp_entry
+    |> change(requesting_user_id: user.id)
+    |> update_changeset(attrs, tag)
   end
 
   @doc false

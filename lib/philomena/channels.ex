@@ -21,19 +21,13 @@ defmodule Philomena.Channels do
   use Philomena.Subscriptions,
     id_name: :channel_id
 
-  defp change_channel(%Channel{} = channel, attrs) do
+  defp change_channel(%Channel{} = channel, attrs, canonical_tags) do
     changeset = Channel.changeset(channel, attrs)
 
-    case Channel.artist_tag_name(changeset) do
-      {:ok, nil = artist_tag_name} ->
-        Channel.artist_tag_changeset(changeset, artist_tag_name, nil)
-
-      {:ok, artist_tag_name} ->
-        tag = Tags.find_canonical_tag_by_name(artist_tag_name)
-        Channel.artist_tag_changeset(changeset, artist_tag_name, tag)
-
-      _error ->
-        changeset
+    if is_nil(channel.artist_tag) do
+      Channel.artist_tag_changeset(changeset, nil, nil)
+    else
+      Channel.artist_tag_changeset(changeset, channel.artist_tag, List.first(canonical_tags))
     end
   end
 
@@ -42,8 +36,8 @@ defmodule Philomena.Channels do
     :ok
   end
 
-  defp load_channel(actor, id, action) do
-    Loader.fetch_and_authorize(Channel, actor, action, id)
+  defp load_channel(actor, id, action, preloads \\ []) do
+    Loader.fetch_and_authorize(Channel, actor, action, id, preloads)
   end
 
   defp maybe_show_nsfw(query, true), do: query
@@ -207,10 +201,26 @@ defmodule Philomena.Channels do
           {:ok, Channel.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
   def create_channel(%Actor{} = actor, attrs) do
     with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, :create, Channel) do
-      %Channel{}
-      |> change_channel(attrs)
-      |> Repo.insert()
+         :ok <- authorize(actor, :create, Channel),
+         {:ok, channel} <-
+           %Channel{}
+           |> Channel.artist_tag_name_changeset(attrs)
+           |> Ecto.Changeset.apply_action(:create) do
+      tag_names = List.wrap(channel.artist_tag)
+
+      Multi.new()
+      |> Tags.put_canonicalize_tag_name_sets([{:artist_tag, tag_names, []}])
+      |> Multi.insert(:channel, fn %{canonical_tags: %{artist_tag: tags}} ->
+        change_channel(channel, attrs, tags)
+      end)
+      |> Multi.transact_with_automatic_retry()
+      |> case do
+        {:ok, %{channel: %Channel{} = channel}} ->
+          {:ok, channel}
+
+        {:error, :channel, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -266,10 +276,26 @@ defmodule Philomena.Channels do
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_channel(%Actor{} = actor, id, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, channel} <- load_channel(actor, id, :update) do
-      channel
-      |> change_channel(attrs)
-      |> Repo.update()
+         {:ok, channel} <- load_channel(actor, id, :update, [:associated_artist_tag]),
+         {:ok, channel} <-
+           channel
+           |> Channel.artist_tag_name_changeset(attrs)
+           |> Ecto.Changeset.apply_action(:update) do
+      tag_names = List.wrap(channel.artist_tag)
+
+      Multi.new()
+      |> Tags.put_canonicalize_tag_name_sets([{:artist_tag, tag_names, []}])
+      |> Multi.update(:channel, fn %{canonical_tags: %{artist_tag: tags}} ->
+        change_channel(channel, attrs, tags)
+      end)
+      |> Multi.transact_with_automatic_retry()
+      |> case do
+        {:ok, %{channel: %Channel{} = channel}} ->
+          {:ok, channel}
+
+        {:error, :channel, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 

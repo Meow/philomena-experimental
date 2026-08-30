@@ -7,6 +7,7 @@ defmodule Philomena.UsersConcurrencyTest do
   import Philomena.TagsFixtures
 
   alias Philomena.Repo
+  alias Philomena.Tags
   alias Philomena.Users
   alias Philomena.Users.User
 
@@ -53,6 +54,23 @@ defmodule Philomena.UsersConcurrencyTest do
 
     assert Enum.all?(results, &match?({:ok, %User{}}, &1))
     assert Repo.get!(User, user.id).watched_tag_ids in [[], [tag.id]]
+  end
+
+  test "watched-tag settings racing an alias store the canonical tag" do
+    user = confirmed_user_fixture()
+    source = tag_fixture(name: unique_tag_name())
+    target = tag_fixture(name: unique_tag_name())
+
+    results =
+      concurrently([
+        fn ->
+          Tags.alias_tag(actor(admin_user_fixture()), source.slug, %{"target_tag" => target.name})
+        end,
+        fn -> Users.update_settings(actor(user), %{"watched_tag_list" => source.name}) end
+      ])
+
+    assert Enum.all?(results, &match?({:ok, _}, &1))
+    assert Repo.get!(User, user.id).watched_tag_ids == [target.id]
   end
 
   test "setting the current filter races safely with clearing recent filters" do

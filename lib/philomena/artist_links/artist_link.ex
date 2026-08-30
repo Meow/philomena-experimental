@@ -20,6 +20,8 @@ defmodule Philomena.ArtistLinks.ArtistLink do
     field :next_check_at, :utc_datetime
     field :contacted_at, :utc_datetime
 
+    field :tag_name, :string, virtual: true
+
     timestamps(inserted_at: :created_at, type: :utc_datetime)
   end
 
@@ -28,6 +30,13 @@ defmodule Philomena.ArtistLinks.ArtistLink do
     artist_link
     |> cast(attrs, [])
     |> validate_required([])
+  end
+
+  @doc false
+  def tag_name_changeset(artist_link, attrs) do
+    artist_link
+    |> cast(attrs, [:tag_name])
+    |> update_change(:tag_name, &Tag.clean_tag_name/1)
   end
 
   def edit_changeset(artist_link, attrs, nil) do

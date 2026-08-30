@@ -835,7 +835,9 @@ defmodule Philomena.Tags do
           {:ok, User.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def watch_tag(%Actor{} = actor, slug) do
-    with {:ok, tag} <- load_canonical_tag(actor, slug), do: Users.watch_tag(actor, tag)
+    with {:ok, tag} <- load_tag_for_action(actor, :show, slug, []) do
+      Users.watch_tag(actor, tag)
+    end
   end
 
   @doc """
@@ -858,7 +860,9 @@ defmodule Philomena.Tags do
           {:ok, User.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def unwatch_tag(%Actor{} = actor, slug) do
-    with {:ok, tag} <- load_canonical_tag(actor, slug), do: Users.unwatch_tag(actor, tag)
+    with {:ok, tag} <- load_tag_for_action(actor, :show, slug, []) do
+      Users.unwatch_tag(actor, tag)
+    end
   end
 
   @doc """
@@ -1221,35 +1225,6 @@ defmodule Philomena.Tags do
       end
     end
   end
-
-  @doc """
-  Finds the canonical tag named by `name`, resolving one stored alias.
-
-  This is a trusted composition lookup for changesets in other contexts; it
-  returns `nil` when the submitted name cannot identify a tag.
-
-  ## Examples
-
-      iex> find_canonical_tag_by_name("safe")
-      %Tag{}
-
-      iex> find_canonical_tag_by_name("nonexistent")
-      nil
-
-  """
-  @spec find_canonical_tag_by_name(String.t() | nil) :: Tag.t() | nil
-  def find_canonical_tag_by_name(name) when is_binary(name) do
-    Tag
-    |> where(name: ^Tag.clean_tag_name(name))
-    |> preload(:aliased_tag)
-    |> Repo.one()
-    |> case do
-      nil -> nil
-      tag -> tag.aliased_tag || tag
-    end
-  end
-
-  def find_canonical_tag_by_name(_name), do: nil
 
   @doc """
   Applies `diff` to each tag's image count inside the caller's transaction.

@@ -28,7 +28,7 @@ defmodule Philomena.Channels.Channel do
   @doc false
   def changeset(channel, attrs \\ %{}) do
     channel
-    |> cast(attrs, [:type, :short_name, :artist_tag])
+    |> cast(attrs, [:type, :short_name])
     |> validate_required([:type, :short_name])
     |> validate_inclusion(:type, ["PicartoChannel", "PiczelChannel"])
   end
@@ -46,8 +46,10 @@ defmodule Philomena.Channels.Channel do
   end
 
   @doc false
-  def artist_tag_name(changeset) do
-    fetch_change(changeset, :artist_tag)
+  def artist_tag_name_changeset(channel, attrs) do
+    channel
+    |> cast(attrs, [:artist_tag])
+    |> update_change(:artist_tag, &Tag.clean_tag_name/1)
   end
 
   @doc false
