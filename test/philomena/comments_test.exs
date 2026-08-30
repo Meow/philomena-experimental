@@ -1388,13 +1388,14 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "erase_user_comment/2" do
-    test "atomically erases content, closes reports, and updates counters" do
+  describe "sequential comment erasure" do
+    test "hides then destroys content, closes reports, and updates counters" do
       moderator = moderator_user_fixture()
       author = confirmed_user_fixture()
       image = image_fixture()
       comment = comment_fixture(image, author, %{"body" => "Personal content"})
       report = report_fixture(confirmed_user_fixture(), comment_id: comment.id)
+      moderator_actor = actor(moderator)
 
       author
       |> Ecto.Changeset.change(comments_count: 1)
@@ -1402,7 +1403,15 @@ defmodule Philomena.CommentsTest do
 
       assert Repo.reload!(image).comments_count == 1
 
-      assert {:ok, erased} = Comments.erase_user_comment(comment, moderator)
+      assert {:ok, _hidden} =
+               Comments.hide_comment(
+                 moderator_actor,
+                 image.id,
+                 comment.id,
+                 %{"deletion_reason" => "Site abuse"}
+               )
+
+      assert {:ok, erased} = Comments.destroy_comment(moderator_actor, image.id, comment.id)
       assert erased.hidden_from_users
       assert erased.destroyed_content
       assert erased.body == ""
@@ -1413,11 +1422,7 @@ defmodule Philomena.CommentsTest do
       closed_report = Repo.reload!(report)
       refute closed_report.open
       assert closed_report.state == "closed"
-      assert Repo.aggregate(ModerationLog, :count) == 0
-
-      assert {:ok, _erased} = Comments.erase_user_comment(comment, moderator)
-      assert Repo.reload!(image).comments_count == 0
-      assert Repo.reload!(author).comments_count == 0
+      assert Repo.aggregate(ModerationLog, :count) == 2
     end
   end
 

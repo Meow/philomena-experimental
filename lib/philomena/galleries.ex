@@ -356,40 +356,6 @@ defmodule Philomena.Galleries do
   end
 
   @doc """
-  Deletes every gallery owned by `user` as part of permanent account erasure.
-
-  `moderator` is recorded as the closer for reports targeting each gallery.
-  Each deletion also removes its search document and queues affected images and
-  closed reports for reindexing. The operation stops at the first failed
-  gallery and otherwise returns the number deleted.
-
-  This is a trusted account-erasure service; request code must use
-  `delete_gallery/2` so actor authorization and write-access checks run.
-
-  ## Examples
-
-      iex> erase_user_galleries(user, moderator)
-      {:ok, 2}
-
-  """
-  @spec erase_user_galleries(User.t(), User.t()) ::
-          {:ok, non_neg_integer()} | Ecto.Multi.failure()
-  def erase_user_galleries(%User{} = user, %User{} = moderator) do
-    Gallery
-    |> where(user_id: ^user.id)
-    |> Repo.all()
-    |> Enum.reduce_while({:ok, 0}, fn gallery, {:ok, count} ->
-      case persist_gallery_deletion(gallery, moderator) do
-        {:ok, _gallery} ->
-          {:cont, {:ok, count + 1}}
-
-        error ->
-          {:halt, error}
-      end
-    end)
-  end
-
-  @doc """
   Loads the gallery named by `gallery_id` for editing, on
   behalf of `actor`, pairing it with a change-tracking changeset for it.
 

@@ -27,8 +27,9 @@ Complete for wave 4.
   The caller now receives only the authenticated actor's choices; anonymous
   actors receive none.
 - Loaded-record CRUD, membership persistence, synchronous reorder, queries, and
-  notification steps are private and precede the public API. User erasure uses
-  the narrow `erase_user_galleries/2` service. User-rename, index queue, and
+  notification steps are private and precede the public API. User erasure
+  enumerates owned IDs and calls the actor-scoped `delete_gallery/2` action.
+  User-rename, index queue, and
   subscription notification callbacks remain explicit documented service APIs.
 - Context/controller coverage now includes malformed, missing, and forbidden
   galleries/images; duplicate and absent membership errors; invalid and stale
@@ -56,17 +57,16 @@ Complete for wave 4.
   and ordering failures explicit.
 - Bound `user_image_galleries/2`: paginate it for a controller, limit it for a
   selector, or replace it with an existence/ID query suited to its actual caller.
-- Introduce a named erasure service in Galleries and make generic loaded
-  `delete_gallery/3` private. Classify/restrict raw CRUD, reindex,
-  reorder persistence, and notification helpers as private or documented
-  service APIs.
+- Keep gallery deletion behind actor-scoped `delete_gallery/2`. Classify/restrict
+  raw CRUD, reindex, reorder persistence, and notification helpers as private or
+  documented service APIs.
 - Reorder private persistence/query/index/notification functions before public
   APIs. Document visibility, watcher side effects, synchronous behavior, and
   search consistency.
 
 ## TODO resolution
 
-- Replace the eraser-driven public delete escape hatch with a narrow API.
+- Have Eraser enumerate owned gallery IDs and use the actor-scoped delete API.
 - Eliminate the unbounded user/image gallery query.
 
 ## Verification

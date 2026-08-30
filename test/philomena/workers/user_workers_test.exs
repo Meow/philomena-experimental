@@ -4,6 +4,7 @@ defmodule Philomena.UserWorkersTest do
 
   import Philomena.AttributionFixtures
   import Philomena.ImagesFixtures
+  import Philomena.SourceChangesFixtures
   import Philomena.UserFingerprintsFixtures
   import Philomena.UserIpsFixtures
   import Philomena.UsersFixtures
@@ -13,6 +14,7 @@ defmodule Philomena.UserWorkersTest do
   alias Philomena.Images
   alias Philomena.ImageVotes.ImageVote
   alias Philomena.Repo
+  alias Philomena.SourceChanges.SourceChange
   alias Philomena.UserEraseWorker
   alias Philomena.UserFingerprints.UserFingerprint
   alias Philomena.UserIps.UserIp
@@ -69,6 +71,8 @@ defmodule Philomena.UserWorkersTest do
 
   test "the erase worker clears the profile and bans the account" do
     moderator = moderator_user_fixture()
+    role = Repo.insert!(%Philomena.Roles.Role{name: "moderator", resource_type: "User"})
+    Repo.insert_all("users_roles", [%{user_id: moderator.id, role_id: role.id}])
 
     user =
       user_fixture()
@@ -88,6 +92,43 @@ defmodule Philomena.UserWorkersTest do
              from ban in UserBan,
                where: ban.user_id == ^user.id and ban.banning_user_id == ^moderator.id,
                where: ban.reason == "Site abuse" and ban.enabled == true
+           )
+  end
+
+  test "the erase worker removes source history without recording reversions" do
+    moderator = moderator_user_fixture()
+    role = Repo.insert!(%Philomena.Roles.Role{name: "moderator", resource_type: "User"})
+    Repo.insert_all("users_roles", [%{user_id: moderator.id, role_id: role.id}])
+
+    user = user_fixture()
+    added_source = "https://spam.example/added"
+    removed_source = "https://spam.example/removed"
+    added_image = image_fixture(sources: [added_source])
+    removed_image = image_fixture()
+
+    source_change_fixture(added_image,
+      user_id: user.id,
+      source_url: added_source,
+      added: true
+    )
+
+    source_change_fixture(removed_image,
+      user_id: user.id,
+      source_url: removed_source,
+      added: false
+    )
+
+    assert :ok = UserEraseWorker.perform(user.id, moderator.id)
+
+    assert Repo.reload!(added_image) |> Repo.preload(:sources) |> Map.fetch!(:sources) == []
+
+    [restored_source] =
+      Repo.reload!(removed_image) |> Repo.preload(:sources) |> Map.fetch!(:sources)
+
+    assert restored_source.source == removed_source
+
+    refute Repo.exists?(
+             from source_change in SourceChange, where: source_change.user_id == ^user.id
            )
   end
 end

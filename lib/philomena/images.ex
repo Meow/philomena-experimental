@@ -61,6 +61,7 @@ defmodule Philomena.Images do
   alias Philomena.Images.Query, as: ImageQuery
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
+  alias Philomena.SourceChanges.SourceChange
   alias Philomena.Users
   alias Philomena.Users.User
   alias PhilomenaWeb.Api.Json.ImageView
@@ -1277,33 +1278,39 @@ defmodule Philomena.Images do
 
   @doc group: "Cross-context transaction helpers"
   @doc """
-  Reverts one loaded image source change during account erasure.
+  Adds the inverse of a source change to `multi` without recording a new
+  source-change row.
 
-  The erasure workflow supplies its system attribution and owns target
-  selection; this service records the compensating source-history rows in the
-  same form as an ordinary source update, without request rate limiting.
+  The image is locked and reindexed after the transaction commits. The
+  corresponding source-change row can be deleted by composing this operation
+  with `Philomena.SourceChanges.put_erase_source_change/2`.
 
   ## Examples
 
-      iex> revert_source_change_for_erasure(image, system_actor, attrs)
-      {:ok, %Image{}}
+      iex> put_revert_source_change(multi, source_change)
+      %Philomena.Multi{}
 
   """
-  @spec revert_source_change_for_erasure(Image.t(), Actor.t(), map()) ::
-          {:ok, Image.t()} | {:error, Ecto.Changeset.t()}
-  def revert_source_change_for_erasure(%Image{} = image, %Actor{} = actor, attrs) do
-    with {:ok, source_input_form} <-
-           %SourceInputForm{}
-           |> SourceInputForm.changeset(attrs)
-           |> SourceInputForm.apply(image) do
-      case update_loaded_sources(image, actor, source_input_form) do
-        {:ok, image} ->
-          {:ok, image}
-
-        {:error, :no_change} ->
-          {:ok, image}
+  @spec put_revert_source_change(Multi.t(), SourceChange.t()) :: Multi.t()
+  def put_revert_source_change(%Multi{} = multi, %SourceChange{} = source_change) do
+    {added_sources, removed_sources} =
+      if source_change.added do
+        {[], [source_change.source_url]}
+      else
+        {[source_change.source_url], []}
       end
-    end
+
+    image_query =
+      Image
+      |> where(id: ^source_change.image_id)
+      |> preload(:sources)
+
+    multi
+    |> Multi.lock_one(:locked_image, image_query)
+    |> Multi.update(:image, fn %{locked_image: image} ->
+      Image.source_changeset(image, added_sources, removed_sources)
+    end)
+    |> put_reindex_image(:image)
   end
 
   @doc group: "Cross-context transaction helpers"

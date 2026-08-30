@@ -559,31 +559,6 @@ defmodule Philomena.Bans do
   end
 
   @doc """
-  Creates a user ban for a trusted, already-authorized system workflow.
-
-  This function exists for permanent account erasure, which has already
-  authenticated its moderator before reaching the workflow. Request-facing
-  callers must use `create_user_ban/2` so write policy and authorization are
-  applied and a moderation log is recorded.
-  """
-  @spec create_system_user_ban(Users.User.t(), Loader.integer_id(), map()) ::
-          {:ok, User.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def create_system_user_ban(%Users.User{} = creator, user_id, attrs) do
-    with {:ok, target} <- Loader.fetch(Users.User, user_id) do
-      creator
-      |> create_user_multi(target, attrs)
-      |> Multi.transact()
-      |> case do
-        {:ok, %{user: user}} ->
-          {:ok, user}
-
-        {:error, :user, changeset, _changes} ->
-          {:error, changeset}
-      end
-    end
-  end
-
-  @doc """
   Returns paginated user bans for the admin listing, on behalf of
   `actor`.
 

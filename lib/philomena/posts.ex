@@ -659,66 +659,6 @@ defmodule Philomena.Posts do
   end
 
   @doc """
-  Hides and destroys one loaded post for permanent user erasure.
-
-  This function owns the post counters, report cleanup, and indexing required
-  by `Philomena.Users.Eraser`. It is not a request authorization boundary;
-  the erasure workflow has already selected both the post and the staff user
-  responsible for the wipe.
-
-  ## Examples
-
-      iex> erase_post(post, moderator)
-      {:ok, %Post{destroyed_content: true}}
-
-  """
-  @spec erase_post(Post.t(), User.t()) :: {:ok, Post.t()} | {:error, term()}
-  def erase_post(%Post{topic: topic} = post, %User{} = moderator) do
-    Multi.new()
-    |> put_forum_and_topic_and_post_locks(
-      moderator,
-      topic.forum.short_name,
-      :show,
-      topic.slug,
-      :show,
-      post.id,
-      :delete
-    )
-    |> Multi.update(:post, fn %{locked_post: post} ->
-      post
-      |> Post.hide_changeset(%{deletion_reason: "Site abuse"}, moderator)
-      |> Post.destroy_changeset()
-    end)
-    |> Reports.put_close_reports(:reports, moderator, post_id: post.id)
-    |> Topics.put_post_visibility_counters(visible?: false)
-    |> Forums.put_post_visibility_counters(visible?: false)
-    |> Topics.put_refresh_last_post()
-    |> Forums.put_refresh_last_post()
-    |> UserStatistics.put_increment(
-      fn %{post: post} ->
-        if post.approved, do: post.user_id
-      end,
-      :posts_count,
-      -1
-    )
-    |> put_reindex_post()
-    |> Multi.transact()
-    |> case do
-      {:ok, %{post: post}} ->
-        {:ok, post}
-
-      {:error, :post, %{errors: [destroyed_content: {"has already been destroyed", []}]},
-       _changes} ->
-        # Skips all of the above if the post was already destroyed.
-        # This is the only expected error.
-        {:ok, post}
-
-      error ->
-        map_lock_errors(error)
-    end
-  end
-
-  @doc """
   Approves the post named by `post_id`, on behalf of `actor`.
 
   The post is authorized for `:approve`. On success, the post's associated

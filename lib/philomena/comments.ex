@@ -788,53 +788,6 @@ defmodule Philomena.Comments do
   end
 
   @doc """
-  Hides and destroys an already loaded user comment for account erasure.
-
-  This internal function does not perform any request authorization. It
-  closes reports and updates counters in a single transaction.
-
-  ## Examples
-
-      iex> erase_user_comment(comment, moderator)
-      {:ok, %Comment{destroyed_content: true}}
-
-  """
-  @spec erase_user_comment(Comment.t(), User.t()) ::
-          {:ok, Comment.t()} | {:error, Ecto.Changeset.t() | term()}
-  def erase_user_comment(%Comment{} = comment, %User{} = moderator) do
-    comment_query = from(c in Comment, where: c.id == ^comment.id)
-    image_query = from(i in Image, where: i.id == ^comment.image_id)
-
-    Multi.new()
-    |> Multi.lock_one(:locked_image, image_query)
-    |> Multi.lock_one(:locked_comment, comment_query)
-    |> Multi.update(:comment, fn %{locked_comment: comment} ->
-      comment
-      |> Comment.hide_changeset(%{deletion_reason: "Site abuse"}, moderator)
-      |> Comment.destroy_changeset()
-    end)
-    |> Images.put_image_counter_delta(:update_image, comment.image_id, :comments_count, -1)
-    |> Reports.put_close_reports(:reports, moderator, comment_id: comment.id)
-    |> UserStatistics.put_increment(comment.user_id, :comments_count, -1)
-    |> Images.put_reindex_image(:locked_image)
-    |> put_reindex_comment()
-    |> Multi.transact()
-    |> case do
-      {:ok, %{comment: comment}} ->
-        {:ok, comment}
-
-      {:error, :comment, %{errors: [destroyed_content: {"has already been destroyed", []}]},
-       _changes} ->
-        # Skips all of the above if the comment was already destroyed.
-        # This is the only expected error.
-        {:ok, comment}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
   Moves comments from one image to another inside `multi`.
 
   Image merge workflows compose this operation and then adjust the target

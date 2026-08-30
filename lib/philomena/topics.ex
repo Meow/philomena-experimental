@@ -882,40 +882,6 @@ defmodule Philomena.Topics do
   end
 
   @doc """
-  Hides one loaded topic for permanent user erasure.
-
-  This collaboration service owns the counter, indexing, and visibility
-  side effects required by `Philomena.Users.Eraser`. It is not a request
-  authorization boundary; the erasure workflow has already selected the topic
-  and staff user.
-
-  ## Examples
-
-      iex> erase_topic(topic, moderator)
-      {:ok, %Topic{hidden_from_users: true}}
-
-  """
-  @spec erase_topic(Topic.t(), User.t()) ::
-          {:ok, Topic.t()} | {:error, Ecto.Changeset.t()} | {:error, :unauthorized | :not_found}
-  def erase_topic(%Topic{} = topic, %User{} = moderator) do
-    moderator
-    |> hide_topic_steps(topic.forum.short_name, topic.slug, %{deletion_reason: "Site abuse"})
-    |> Multi.transact()
-    |> case do
-      {:ok, %{topic: topic}} ->
-        {:ok, topic}
-
-      {:error, :topic, %{errors: [hidden_from_users: {"is already hidden", []}]}, _changes} ->
-        # Skips all of the above if the topic was already hidden.
-        # This is the only expected error.
-        {:ok, topic}
-
-      error ->
-        map_lock_errors(error)
-    end
-  end
-
-  @doc """
   Adds an update step that recalculates a topic's cached last visible post.
 
   Maintains `Topic.last_post_id` and `Topic.last_replied_to_at` from the

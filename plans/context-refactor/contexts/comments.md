@@ -34,10 +34,9 @@ controllers, JSON search/show APIs, indexing, and user erasure.
 - Extract one private moderation transaction used by hide/unhide/destroy/approve,
   parameterized by action and modifier. Preserve log, notification, counter,
   broadcast, and reindex effects atomically where feasible.
-- Give erasure a narrow explicit function (for example,
-  `erase_user_comment/2`) or move orchestration into Comments; make
-  `hide_loaded_comment/3`, raw CRUD, query builders, and reindex helpers private
-  unless workers require a documented service API.
+- Have erasure call the actor-scoped `hide_comment/4` and `destroy_comment/3`
+  actions sequentially; make `hide_loaded_comment/3`, raw CRUD, query builders,
+  and reindex helpers private unless workers require a documented service API.
 - Move all private persistence/query/index helpers before the public controller
   and service APIs. Update docs with hidden-resource precedence and side effects.
 
@@ -46,7 +45,8 @@ controllers, JSON search/show APIs, indexing, and user erasure.
 - Do not raise from user-controlled comment IDs.
 - Remove direct role checks.
 - Require the same fingerprint/write access on form and mutation routes.
-- Replace the ambiguous Eraser exposure with a named erasure boundary.
+- Keep Eraser on the actor-scoped hide/destroy boundary rather than exposing a
+  loaded-record combination action.
 
 ## Verification
 

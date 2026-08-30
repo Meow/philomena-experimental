@@ -8,7 +8,7 @@ admin controllers plus request-time ban lookup.
 Implemented in wave 1. All three admin flows now share missing-first class and
 instance authorization, enforce the global write prerequisite, and transact the
 ban change with its moderation log. Raw CRUD and form changesets are private;
-account erasure uses the narrow `create_system_user_ban/2` service. Admin-only
+account erasure uses the actor-scoped `create_user_ban/3` action. Admin-only
 deletion is encoded in Ability, target-user loading is guarded inside the
 context, and request-time lookup has deterministic subnet/fingerprint and
 newest-ban precedence.

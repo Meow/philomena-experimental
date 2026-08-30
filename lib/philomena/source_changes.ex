@@ -9,7 +9,7 @@ defmodule Philomena.SourceChanges do
   """
 
   import Ecto.Query, warn: false
-  import Philomena.Authorization, only: [authorize: 3]
+  import Philomena.Authorization, only: [authorize: 3, verify_write_access: 1]
 
   alias Philomena.Repo
   alias Philomena.Attribution.Actor
@@ -22,6 +22,8 @@ defmodule Philomena.SourceChanges do
   alias Philomena.SourceChanges.SourceChangePage
   alias Philomena.UserFingerprints
   alias Philomena.Users
+  alias Philomena.Users.User
+  alias Philomena.Loader
   alias PhilomenaQuery.Batch
   alias PhilomenaQuery.IpMask
 
@@ -281,14 +283,32 @@ defmodule Philomena.SourceChanges do
   end
 
   @doc """
-  Deletes all source-change history belonging to a user.
+  Deletes one source change while undoing the change to its image.
 
-  Permanent user erasure delegates this table delete to SourceChanges.
+  This action removes the history entirely and does not create a new source
+  change row, so erased source URLs will not be visible in history.
+
+  ## Examples
+
+      iex> erase_source_change(actor, source_change_id)
+      {:ok, %SourceChange{}}
+
   """
-  @spec delete_for_user!(integer()) :: :ok
-  def delete_for_user!(user_id) do
-    Repo.delete_all(where(SourceChange, user_id: ^user_id))
-    :ok
+  @spec erase_source_change(Actor.t(), Loader.integer_id()) ::
+          {:ok, SourceChange.t()} | {:error, :ban | :unauthorized | :not_found}
+  def erase_source_change(%Actor{} = actor, source_change_id) do
+    with :ok <- verify_write_access(actor),
+         :ok <- authorize(actor, :erase, %User{}),
+         {:ok, source_change} <- Loader.fetch(SourceChange, source_change_id) do
+      Multi.new()
+      |> Images.put_revert_source_change(source_change)
+      |> Multi.delete(:source_change, source_change)
+      |> Multi.transact()
+      |> case do
+        {:ok, %{source_change: %SourceChange{} = source_change}} ->
+          {:ok, source_change}
+      end
+    end
   end
 
   @doc """

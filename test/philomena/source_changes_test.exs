@@ -4,8 +4,10 @@ defmodule Philomena.SourceChangesTest do
   use Philomena.DataCase, async: true
 
   alias Philomena.SourceChanges
+  alias Philomena.SourceChanges.SourceChange
   alias Philomena.SourceChanges.QueryForm
   alias Philomena.SourceChanges.SourceChangePage
+  alias Philomena.Repo
   alias Scrivener.Page
 
   import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
@@ -175,6 +177,39 @@ defmodule Philomena.SourceChangesTest do
       # the row is ever queried, ahead of any authorization.
       assert SourceChanges.image_source_changes(actor(), "99999999999999999999", %{}, @pagination) ==
                {:error, :not_found}
+    end
+  end
+
+  describe "put_erase_source_change/2" do
+    test "deletes an added source change and removes its source from the image" do
+      source = "https://spam.example/artwork"
+      image = image_fixture(sources: [source])
+      source_change = source_change_fixture(image, source_url: source, added: true)
+      admin = admin_user_fixture()
+
+      assert {:ok, %SourceChange{} = deleted_source_change} =
+               SourceChanges.erase_source_change(actor(admin), source_change.id)
+
+      assert deleted_source_change.id == source_change.id
+      assert Repo.reload!(image) |> Repo.preload(:sources) |> Map.fetch!(:sources) == []
+      refute Repo.get(SourceChange, source_change.id)
+    end
+
+    test "deletes a removed source change and restores its source to the image" do
+      source = "https://spam.example/artwork"
+      image = image_fixture()
+      source_change = source_change_fixture(image, source_url: source, added: false)
+      admin = admin_user_fixture()
+
+      assert {:ok, %SourceChange{} = deleted_source_change} =
+               SourceChanges.erase_source_change(actor(admin), source_change.id)
+
+      assert deleted_source_change.id == source_change.id
+
+      [restored_source] = Repo.reload!(image) |> Repo.preload(:sources) |> Map.fetch!(:sources)
+      assert restored_source.source == source
+
+      refute Repo.get(SourceChange, source_change.id)
     end
   end
 

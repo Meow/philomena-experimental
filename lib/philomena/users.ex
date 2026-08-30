@@ -2697,48 +2697,6 @@ defmodule Philomena.Users do
 
   @doc group: "Background jobs"
   @doc """
-  Clears an already loaded user's avatar during the trusted erase workflow.
-
-  ## Examples
-
-      iex> clear_avatar_for_erasure(user)
-      {:ok, %User{}}
-
-  """
-  @spec clear_avatar_for_erasure(User.t()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def clear_avatar_for_erasure(%User{} = user), do: clear_avatar(user)
-
-  @doc group: "Background jobs"
-  @doc """
-  Clears public profile text during the trusted erase workflow.
-
-  ## Examples
-
-      iex> clear_profile_for_erasure(user)
-      {:ok, %User{}}
-
-  """
-  @spec clear_profile_for_erasure(User.t()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def clear_profile_for_erasure(%User{} = user) do
-    changeset = User.description_changeset(user, %{description: "", personal_title: ""})
-
-    Multi.new()
-    |> Multi.update(:user, changeset)
-    |> put_reindex_user()
-    |> Multi.transact()
-    |> case do
-      {:ok, %{user: user}} ->
-        {:ok, user}
-
-      {:error, :user, changeset, _changes} ->
-        {:error, changeset}
-    end
-  end
-
-  @doc group: "Background jobs"
-  @doc """
   Queues a single user for search index updates.
   Returns the user struct unchanged, for use in a pipeline.
 
@@ -2788,6 +2746,22 @@ defmodule Philomena.Users do
   """
   @spec fetch_user_for_worker!(integer()) :: User.t()
   def fetch_user_for_worker!(id) when is_integer(id), do: Repo.get!(User, id)
+
+  @doc group: "Background jobs"
+  @doc """
+  Loads the moderator for the account-erasure worker with role grants
+  available for authorization.
+
+  The erasure workflow uses the loaded role map when its synthetic system actor
+  calls actor-scoped administration actions.
+  """
+  @spec fetch_user_for_erase!(integer()) :: User.t()
+  def fetch_user_for_erase!(id) when is_integer(id) do
+    User
+    |> Repo.get!(id)
+    |> Repo.preload(:roles)
+    |> setup_roles()
+  end
 
   @doc group: "Background jobs"
   @doc """

@@ -238,7 +238,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "erase_user_galleries/2" do
+  describe "sequential gallery erasure" do
     test "deletes all owned galleries and closes their reports" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
@@ -249,7 +249,8 @@ defmodule Philomena.GalleriesTest do
       assert report.open
       assert report.gallery_id == gallery.id
 
-      assert {:ok, 2} = Galleries.erase_user_galleries(user, admin)
+      assert {:ok, _deleted} = Galleries.delete_gallery(actor(admin), gallery.id)
+      assert {:ok, _deleted} = Galleries.delete_gallery(actor(admin), other_gallery.id)
 
       closed = Repo.get!(Report, report.id)
       refute closed.open
