@@ -240,22 +240,6 @@ defmodule Philomena.Adverts do
   end
 
   @doc """
-  Loads the advert named by `id` for the image edit form, on behalf of `actor`.
-  The form authorizes the same `:update_image` action as its mutation.
-  """
-  @spec load_advert_for_image_edit(Actor.t(), Loader.integer_id()) ::
-          {:ok, {Advert.t(), Ecto.Changeset.t()}}
-          | {:error, Authorization.write_error_reason() | :not_found}
-  def load_advert_for_image_edit(%Actor{} = actor, id) do
-    # TODO: this is the same function and the authorization is not separate in practice.
-    # Just combine these.
-    with :ok <- verify_write_access(actor),
-         {:ok, advert} <- load_advert(actor, :update_image, id) do
-      {:ok, {advert, Advert.changeset(advert)}}
-    end
-  end
-
-  @doc """
   Updates the advert named by the `id` without touching its image,
   on behalf of `actor`.
 
@@ -322,9 +306,9 @@ defmodule Philomena.Adverts do
   def delete_advert(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :delete, id) do
-      # TODO: this orphans the file.
       Multi.new()
-      |> Multi.delete(:advert, advert)
+      |> Multi.delete(:advert, Advert.remove_image_changeset(advert))
+      |> Uploader.put_unpersist_old_upload(:advert)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{advert: advert} ->
         {"Admin.Advert:delete", "/admin/adverts", "Deleted advert #{advert.id}"}
       end)

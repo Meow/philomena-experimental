@@ -103,23 +103,6 @@ defmodule Philomena.Images do
   defp custom_ordering?(%{sf: sf}) when sf not in [nil, "id", "first_seen_at"], do: true
   defp custom_ordering?(_scope), do: false
 
-  defp navigation_query(actor, scope) do
-    # TODO: probably should make this its own form
-    scope.q
-    |> match_all_if_blank()
-    |> ImageQuery.compile(user: actor.user)
-  end
-
-  defp match_all_if_blank(nil), do: "*"
-
-  defp match_all_if_blank(input) do
-    if String.trim(input) == "" do
-      "*"
-    else
-      input
-    end
-  end
-
   defp maybe_jump_to_last_page(
          %Actor{
            user: %{
@@ -1003,9 +986,9 @@ defmodule Philomena.Images do
   @spec find_consecutive_image(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), {Image.t(), map()} | nil}}
           | {:error, :unauthorized | :not_found}
-  def find_consecutive_image(%Actor{} = actor, scope, image_id) do
+  def find_consecutive_image(%Actor{user: user} = actor, scope, image_id) do
     with {:ok, image} <- load_image_member(actor, :show, image_id),
-         {:ok, query} <- navigation_query(actor, scope) do
+         {:ok, query} <- ImageQuery.compile(scope.q || "*", user: user) do
       {:ok, {image, ImageSearch.find_consecutive(actor, scope, image, query)}}
     end
   end

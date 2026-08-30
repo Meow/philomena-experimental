@@ -58,15 +58,15 @@ defmodule PhilomenaWeb.PageController do
 
   def update(conn, %{"id" => slug, "static_page" => static_page_params}) do
     case StaticPages.update_page(conn.assigns.actor, slug, static_page_params) do
-      {:ok, %{static_page: static_page}} ->
+      {:ok, static_page} ->
         conn
         |> put_flash(:info, "Static page successfully updated.")
         |> redirect(to: ~p"/pages/#{static_page}")
 
-      {:error, :static_page, changeset, _changes} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html", static_page: changeset.data, changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

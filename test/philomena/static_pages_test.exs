@@ -141,7 +141,7 @@ defmodule Philomena.StaticPagesTest do
 
       # The new Version row requires the full page fields, not just the changed
       # one, so the update carries slug and body alongside the new title.
-      assert {:ok, %{static_page: %StaticPage{} = updated, version: _version}} =
+      assert {:ok, %StaticPage{} = updated} =
                StaticPages.update_page(actor(admin), page.slug, %{
                  "title" => "Updated Title",
                  "slug" => page.slug,
@@ -156,7 +156,7 @@ defmodule Philomena.StaticPagesTest do
       admin = admin_user_fixture()
       page = static_page_fixture(admin)
 
-      assert {:error, :static_page, %Ecto.Changeset{} = changeset, _changes} =
+      assert {:error, %Ecto.Changeset{} = changeset} =
                StaticPages.update_page(actor(admin), page.slug, %{"title" => ""})
 
       refute changeset.valid?

@@ -273,7 +273,6 @@ defmodule Philomena.BadgesTest do
       for operation <- [
             fn actor -> Badges.new_badge(actor) end,
             fn actor -> Badges.load_badge_for_edit(actor, badge.id) end,
-            fn actor -> Badges.load_badge_for_image_edit(actor, badge.id) end,
             fn actor -> Badges.load_award_for_new(actor, user.slug) end,
             fn actor -> Badges.load_award_for_edit(actor, user.slug, award.id) end
           ] do

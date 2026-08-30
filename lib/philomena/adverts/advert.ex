@@ -53,4 +53,11 @@ defmodule Philomena.Adverts.Advert do
     |> validate_inclusion(:image_height, 79..91)
     |> validate_inclusion(:image_size, 0..1_048_576)
   end
+
+  @doc false
+  def remove_image_changeset(advert) do
+    advert
+    |> change(removed_image: advert.image)
+    |> change(image: nil)
+  end
 end

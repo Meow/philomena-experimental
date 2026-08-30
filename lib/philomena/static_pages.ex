@@ -29,10 +29,9 @@ defmodule Philomena.StaticPages do
 
     Multi.new()
     |> Multi.insert(:static_page, static_page)
-    |> Multi.run(:version, fn repo, %{static_page: static_page} ->
+    |> Multi.insert(:version, fn %{static_page: static_page} ->
       %Version{static_page_id: static_page.id, user_id: user.id}
       |> Version.changeset(attrs)
-      |> repo.insert()
     end)
     |> Multi.transact()
   end
@@ -166,13 +165,19 @@ defmodule Philomena.StaticPages do
   `{:ok, %{static_page: static_page, version: version}}` on success.
   """
   @spec update_page(Actor.t(), String.t(), map()) ::
-          {:ok, map()}
-          | {:error, :static_page, Ecto.Changeset.t(), map()}
-          | {:error, :not_found | :unauthorized}
+          {:ok, StaticPage.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def update_page(%Actor{} = actor, slug, attrs) do
-    # TODO: maybe just return the static page instead of the multi result map on success here?
     with {:ok, static_page} <- load_authorized_static_page(actor, slug, :update) do
-      update_static_page(static_page, actor.user, attrs)
+      static_page
+      |> update_static_page(actor.user, attrs)
+      |> case do
+        {:ok, %{static_page: %StaticPage{} = static_page}} ->
+          {:ok, static_page}
+
+        {:error, :static_page, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 

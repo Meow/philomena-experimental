@@ -143,22 +143,6 @@ defmodule Philomena.Badges do
   end
 
   @doc """
-  Loads the badge named by `id` for the image edit form, on behalf of `actor`.
-  The form authorizes the same `:update_image` action as its mutation.
-  """
-  @spec load_badge_for_image_edit(Actor.t(), Loader.integer_id()) ::
-          {:ok, {Badge.t(), Ecto.Changeset.t()}}
-          | {:error, Authorization.write_error_reason() | :not_found}
-  def load_badge_for_image_edit(%Actor{} = actor, id) do
-    # TODO: this is the same function and the authorization is not separate in practice.
-    # Just combine these.
-    with :ok <- verify_write_access(actor),
-         {:ok, badge} <- load_badge(actor, :update_image, id) do
-      {:ok, {badge, Badge.changeset(badge)}}
-    end
-  end
-
-  @doc """
   Updates the badge named by `id` without touching its image, on behalf of
   `actor`.
 
@@ -299,7 +283,6 @@ defmodule Philomena.Badges do
   end
 
   defp load_authorized_profile(%Actor{} = actor, action, slug) do
-    # TODO: duplicated in ArtistLinks context
     User
     |> where(slug: ^slug)
     |> where([u], is_nil(u.deleted_at))
@@ -378,23 +361,15 @@ defmodule Philomena.Badges do
 
       Multi.new()
       |> Multi.insert(:award, award_changeset)
-      |> ModerationLogs.put_log(
-        :moderation_log,
-        actor,
-        fn %{award: award} ->
-          # TODO: this problem occurs because we don't take the badge id
-          # as an argument and load it separately. That would also allow
-          # use of Ecto.build_assoc above instead of casting the badge
-          # from form parameters.
-          award = Repo.preload(award, :badge)
+      |> ModerationLogs.put_log(:moderation_log, actor, fn %{award: award} ->
+        award = Repo.preload(award, :badge)
 
-          {
-            "Profile.Award:create",
-            Paths.profile_path(user),
-            "Awarded badge '#{award.badge.title}' to #{user.name}"
-          }
-        end
-      )
+        {
+          "Profile.Award:create",
+          Paths.profile_path(user),
+          "Awarded badge '#{award.badge.title}' to #{user.name}"
+        }
+      end)
       |> Multi.transact()
       |> case do
         {:ok, %{award: %Award{} = award}} ->

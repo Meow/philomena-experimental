@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.Badge.ImageController do
   action_fallback PhilomenaWeb.FallbackController
 
   def edit(conn, %{"badge_id" => id}) do
-    with {:ok, {badge, changeset}} <- Badges.load_badge_for_image_edit(conn.assigns.actor, id) do
+    with {:ok, {badge, changeset}} <- Badges.load_badge_for_edit(conn.assigns.actor, id) do
       render(conn, "edit.html", title: "Editing Badge", badge: badge, changeset: changeset)
     end
   end
@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.Admin.Badge.ImageController do
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html", badge: changeset.data, changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

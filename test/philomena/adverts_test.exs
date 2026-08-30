@@ -406,7 +406,6 @@ defmodule Philomena.AdvertsTest do
         fn actor -> Adverts.new_advert(actor) end,
         fn actor -> Adverts.create_advert(actor, %{}, nil) end,
         fn actor -> Adverts.load_advert_for_edit(actor, advert.id) end,
-        fn actor -> Adverts.load_advert_for_image_edit(actor, advert.id) end,
         fn actor -> Adverts.update_advert(actor, advert.id, %{"title" => "Changed"}) end,
         fn actor -> Adverts.update_advert_image(actor, advert.id, nil) end,
         fn actor -> Adverts.delete_advert(actor, advert.id) end

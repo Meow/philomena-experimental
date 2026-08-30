@@ -359,8 +359,7 @@ serially where they touch shared indexes.
   public raw CRUD, `verify_not_banned/1`, and resolved TODO/FIXME comments.
 - Add a lightweight architectural check (Credo check or repository script) that
   flags context use of `Canada.Can.can?/3`, new controller `Repo` calls,
-  undocumented public context functions, bang loaders on controller paths, and
-  TODO/FIXME markers under `lib/philomena/`, including nested support modules.
+  undocumented public context functions, and bang loaders on controller paths.
 - Re-run the public API inventory and ensure every retained non-controller
   function has an identified caller and documented reason to remain public.
 
