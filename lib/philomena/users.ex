@@ -1277,7 +1277,8 @@ defmodule Philomena.Users do
   @doc """
   Updates a user's spoiler type settings.
 
-  Unlike most writes, banned users are permitted to set spoiler type.
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`.
 
   ## Examples
 
@@ -1289,7 +1290,7 @@ defmodule Philomena.Users do
 
   """
   @spec update_spoiler_type(Actor.t(), map()) ::
-          {:ok, Settings.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
+          {:ok, Settings.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
   def update_spoiler_type(%Actor{user: %User{} = user}, attrs) do
     user.settings
     |> Settings.spoiler_type_changeset(attrs)
@@ -1327,6 +1328,9 @@ defmodule Philomena.Users do
   @doc """
   Clears a user's recent filter history.
 
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`.
+
   ## Examples
 
       iex> clear_recent_filters(actor)
@@ -1334,29 +1338,30 @@ defmodule Philomena.Users do
 
   """
   @spec clear_recent_filters(Actor.t()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def clear_recent_filters(%Actor{user: %User{} = user} = actor) do
-    with :ok <- verify_write_access(actor) do
-      Multi.new()
-      |> Multi.lock_one(:locked_user, user_lock_query(user))
-      |> Multi.update(:user, fn %{locked_user: user} ->
-        User.clear_recent_filters_changeset(user)
-      end)
-      |> put_reindex_user()
-      |> Multi.transact()
-      |> case do
-        {:ok, %{user: user}} ->
-          {:ok, user}
+          {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def clear_recent_filters(%Actor{user: %User{} = user}) do
+    Multi.new()
+    |> Multi.lock_one(:locked_user, user_lock_query(user))
+    |> Multi.update(:user, fn %{locked_user: user} ->
+      User.clear_recent_filters_changeset(user)
+    end)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
-          {:error, changeset}
-      end
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 
   @doc group: "Settings"
   @doc """
   Updates a user's general settings.
+
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`.
 
   ## Examples
 
@@ -1368,21 +1373,19 @@ defmodule Philomena.Users do
 
   """
   @spec update_settings(Actor.t(), map()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def update_settings(%Actor{user: %User{} = user} = actor, attrs) do
-    with :ok <- verify_write_access(actor) do
-      Multi.new()
-      |> Multi.lock_one(:locked_user, preload(user_lock_query(user), :settings))
-      |> Multi.update(:user, fn %{locked_user: user} -> User.settings_changeset(user, attrs) end)
-      |> put_reindex_user()
-      |> Multi.transact()
-      |> case do
-        {:ok, %{user: user}} ->
-          {:ok, user}
+          {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def update_settings(%Actor{user: %User{} = user}, attrs) do
+    Multi.new()
+    |> Multi.lock_one(:locked_user, preload(user_lock_query(user), :settings))
+    |> Multi.update(:user, fn %{locked_user: user} -> User.settings_changeset(user, attrs) end)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
-          {:error, changeset}
-      end
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 
@@ -1477,7 +1480,8 @@ defmodule Philomena.Users do
   @doc """
   Adds a tag to a user's watched tags list.
 
-  Write access is checked first; otherwise returns the user after update.
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`.
 
   ## Examples
 
@@ -1486,23 +1490,21 @@ defmodule Philomena.Users do
 
   """
   @spec watch_tag(Actor.t(), Philomena.Tags.Tag.t()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def watch_tag(%Actor{user: %User{} = user} = actor, tag) do
-    with :ok <- verify_write_access(actor) do
-      Multi.new()
-      |> Multi.lock_one(:locked_user, user_lock_query(user))
-      |> Multi.update(:user, fn %{locked_user: user} ->
-        User.watched_tags_changeset(user, Enum.uniq([tag.id | user.watched_tag_ids]))
-      end)
-      |> put_reindex_user()
-      |> Multi.transact()
-      |> case do
-        {:ok, %{user: user}} ->
-          {:ok, user}
+          {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def watch_tag(%Actor{user: %User{} = user}, tag) do
+    Multi.new()
+    |> Multi.lock_one(:locked_user, user_lock_query(user))
+    |> Multi.update(:user, fn %{locked_user: user} ->
+      User.watched_tags_changeset(user, Enum.uniq([tag.id | user.watched_tag_ids]))
+    end)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
-          {:error, changeset}
-      end
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 
@@ -1510,7 +1512,8 @@ defmodule Philomena.Users do
   @doc """
   Removes a tag from a user's watched tags list.
 
-  Write access is checked first; otherwise returns the user after update.
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`.
 
   ## Examples
 
@@ -1519,23 +1522,21 @@ defmodule Philomena.Users do
 
   """
   @spec unwatch_tag(Actor.t(), Philomena.Tags.Tag.t()) ::
-          {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def unwatch_tag(%Actor{user: %User{} = user} = actor, tag) do
-    with :ok <- verify_write_access(actor) do
-      Multi.new()
-      |> Multi.lock_one(:locked_user, user_lock_query(user))
-      |> Multi.update(:user, fn %{locked_user: user} ->
-        User.watched_tags_changeset(user, user.watched_tag_ids -- [tag.id])
-      end)
-      |> put_reindex_user()
-      |> Multi.transact()
-      |> case do
-        {:ok, %{user: user}} ->
-          {:ok, user}
+          {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def unwatch_tag(%Actor{user: %User{} = user}, tag) do
+    Multi.new()
+    |> Multi.lock_one(:locked_user, user_lock_query(user))
+    |> Multi.update(:user, fn %{locked_user: user} ->
+      User.watched_tags_changeset(user, user.watched_tag_ids -- [tag.id])
+    end)
+    |> put_reindex_user()
+    |> Multi.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        {:ok, user}
 
-        {:error, :user, changeset, _changes} ->
-          {:error, changeset}
-      end
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 

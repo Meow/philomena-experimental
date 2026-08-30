@@ -482,15 +482,14 @@ defmodule Philomena.ChannelsTest do
                {:error, :not_found}
     end
 
-    test "the global write prerequisite rejects banned and unattributed users" do
+    test "subscription management is exempt from the global write prerequisite" do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert Channels.subscribe(actor(user, ban: %{}), to_string(channel.id)) ==
-               {:error, :ban}
+      assert {:ok, _} = Channels.subscribe(actor(user, ban: %{}), to_string(channel.id))
+      assert Channels.subscribed?(channel, user)
 
-      assert Channels.subscribe(actor(user, fingerprint: nil), to_string(channel.id)) ==
-               {:error, :unauthorized}
+      assert {:ok, _} = Channels.unsubscribe(actor(user, fingerprint: nil), to_string(channel.id))
 
       refute Channels.subscribed?(channel, user)
     end

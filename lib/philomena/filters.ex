@@ -396,7 +396,8 @@ defmodule Philomena.Filters do
   @doc """
   Switches `actor`'s current filter to the one named by `id`.
 
-  Unlike most writes, banned users are permitted to switch filters.
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`; banned users are permitted to switch filters.
 
   Authorizes `:switch` before loading. `nil` explicitly selects the canonical default
   filter. Malformed and missing non-nil IDs are not-found.
@@ -419,7 +420,7 @@ defmodule Philomena.Filters do
   """
   @spec switch_current_filter(Actor.t(), Loader.integer_id() | nil) ::
           {:ok, Filter.t()}
-          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def switch_current_filter(%Actor{user: user} = actor, id) do
     with :ok <- authorize(actor, :switch, Filter),
          {:ok, filter} <- filter_for_switch(actor, id) do

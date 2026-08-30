@@ -70,6 +70,21 @@ defmodule Philomena.Authorization do
     * `:ok` otherwise.
 
   The fingerprint requirement applies regardless of whether a user is signed in.
+
+  ## Deliberate exceptions
+
+  These personal preference actions intentionally permit banned users:
+
+  - Switching the current filter
+  - Clearing recent filters
+  - Changing the active spoiler type
+  - Clearing notifications
+  - Updating user settings
+  - Watching/unwatching tags
+  - Creating/deleting subscriptions
+
+  The actions still perform their own authentication and resource
+  authorization checks.
   """
   @spec verify_write_access(actor :: Actor.t()) :: :ok | write_error()
   def verify_write_access(%Actor{ban: ban}) when not is_nil(ban), do: {:error, :ban}

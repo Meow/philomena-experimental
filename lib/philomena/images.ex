@@ -3079,7 +3079,8 @@ defmodule Philomena.Images do
   new comments on it.
 
   The image is loaded by id and authorized for `:subscribe`. Subscribing is
-  idempotent and uses the same write-access gate as other interactions.
+  idempotent and, as subscription management, is deliberately exempt from
+  `verify_write_access/1`.
 
   Returns `{:ok, image}`, or `{:error, %Ecto.Changeset{}}` if the subscription
   insert is rejected.
@@ -3094,10 +3095,9 @@ defmodule Philomena.Images do
 
   """
   @spec subscribe_image(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def subscribe_image(%Actor{} = actor, image_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :subscribe, image_id),
+    with {:ok, image} <- load_image_member(actor, :subscribe, image_id),
          {:ok, _subscription} <- create_subscription(image, actor.user) do
       {:ok, image}
     end
@@ -3108,7 +3108,9 @@ defmodule Philomena.Images do
   Unsubscribes `actor` from the image named by `image_id`.
 
   Loading and authorization mirror `subscribe_image/2`. Unsubscribing is
-  idempotent and cannot fail, so there is no changeset error shape.
+  idempotent and cannot fail, so there is no changeset error shape. Like
+  subscription creation, deletion is deliberately exempt from
+  `verify_write_access/1`.
 
   Returns `{:ok, image}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
 
@@ -3119,10 +3121,9 @@ defmodule Philomena.Images do
 
   """
   @spec unsubscribe_image(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
   def unsubscribe_image(%Actor{} = actor, image_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :unsubscribe, image_id) do
+    with {:ok, image} <- load_image_member(actor, :unsubscribe, image_id) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(image, actor.user)
       {:ok, image}
@@ -3133,8 +3134,9 @@ defmodule Philomena.Images do
   @doc """
   Clears `actor`'s unread notifications for the image named by `image_id`.
 
-  The image is loaded before `:mark_read` authorization. Missing IDs are
-  actor-independent.
+  This personal read-state operation is deliberately exempt from
+  `verify_write_access/1`. The image is loaded before `:mark_read`
+  authorization. Missing IDs are actor-independent.
 
   Returns `{:ok, image}` after clearing `actor`'s image comment and image merge
   notifications for it.

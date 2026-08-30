@@ -581,11 +581,16 @@ defmodule Philomena.GalleriesTest do
                {:error, :not_found}
     end
 
-    test "a banned actor cannot subscribe or unsubscribe" do
-      actor = actor(confirmed_user_fixture(), ban: @ban)
+    test "a banned actor can subscribe or unsubscribe" do
+      user = confirmed_user_fixture()
+      gallery = gallery_fixture(confirmed_user_fixture())
+      actor = actor(user, ban: @ban)
 
-      assert Galleries.subscribe_gallery(actor, "abc") == {:error, :ban}
-      assert Galleries.unsubscribe_gallery(actor, "abc") == {:error, :ban}
+      assert {:ok, %Gallery{}} = Galleries.subscribe_gallery(actor, "#{gallery.id}")
+      assert Galleries.subscribed?(gallery, user)
+
+      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(actor, "#{gallery.id}")
+      refute Galleries.subscribed?(gallery, user)
     end
   end
 

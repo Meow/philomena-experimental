@@ -60,15 +60,14 @@ defmodule PhilomenaWeb.Tag.WatchControllerTest do
     assert Repo.reload!(user).watched_tag_ids == []
   end
 
-  test "banned users are rejected by the write prerequisite", %{conn: conn} do
+  test "banned users can update their watched tags", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_banned_user(%{conn: conn})
     tag = tag_fixture()
 
     conn = post(conn, ~p"/tags/#{tag}/watch")
 
-    assert redirected_to(conn) == "/"
-    assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You are currently banned."
-    assert Repo.reload!(user).watched_tag_ids == []
+    assert response(conn, 200) == ""
+    assert Repo.reload!(user).watched_tag_ids == [tag.id]
   end
 
   test "POST for an unknown tag redirects with the not-found flash", %{conn: conn} do

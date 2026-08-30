@@ -41,13 +41,13 @@ defmodule PhilomenaWeb.Image.SubscriptionControllerTest do
              "Couldn't find what you were looking for!"
   end
 
-  test "banned users cannot subscribe", %{conn: conn} do
+  test "banned users can subscribe", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_banned_user(%{conn: conn})
     target = subscription_target(user)
 
     conn = post(conn, target.path)
 
-    assert redirected_to(conn) == "/"
-    refute target.subscribed?.()
+    assert response(conn, 200) =~ "js-subscription-target"
+    assert target.subscribed?.()
   end
 end

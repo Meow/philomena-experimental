@@ -31,5 +31,16 @@ defmodule PhilomenaWeb.Filter.ClearRecentControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Cleared recent filters."
       assert Repo.get!(User, user.id).recent_filter_ids == [filter.id]
     end
+
+    test "banned users can clear their recent filter list", %{conn: conn} do
+      %{conn: conn, user: user} = register_and_log_in_banned_user(%{conn: conn})
+      filter = filter_fixture(user)
+      {:ok, _user} = Users.set_current_filter(user, filter)
+
+      conn = delete(conn, ~p"/filters/clear_recent")
+
+      assert redirected_to(conn) == ~p"/filters"
+      assert Repo.get!(User, user.id).recent_filter_ids == [filter.id]
+    end
   end
 end

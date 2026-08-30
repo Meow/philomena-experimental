@@ -1156,14 +1156,13 @@ defmodule Philomena.ImagesTest do
       assert Images.subscribed?(image, user)
     end
 
-    test "a banned actor cannot subscribe" do
+    test "a banned actor can subscribe" do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.subscribe_image(actor(user, ban: @ban), to_string(image.id)) ==
-               {:error, :ban}
+      assert {:ok, _} = Images.subscribe_image(actor(user, ban: @ban), to_string(image.id))
 
-      refute Images.subscribed?(image, user)
+      assert Images.subscribed?(image, user)
     end
 
     test "accepts an integer id" do
@@ -1232,15 +1231,14 @@ defmodule Philomena.ImagesTest do
       refute Images.subscribed?(image, user)
     end
 
-    test "a banned actor cannot unsubscribe" do
+    test "a banned actor can unsubscribe" do
       user = confirmed_user_fixture()
       image = image_fixture()
       {:ok, _} = Images.create_subscription(image, user)
 
-      assert Images.unsubscribe_image(actor(user, ban: @ban), to_string(image.id)) ==
-               {:error, :ban}
+      assert {:ok, _} = Images.unsubscribe_image(actor(user, ban: @ban), to_string(image.id))
 
-      assert Images.subscribed?(image, user)
+      refute Images.subscribed?(image, user)
     end
 
     test "accepts an integer id" do

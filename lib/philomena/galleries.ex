@@ -831,6 +831,10 @@ defmodule Philomena.Galleries do
   @doc """
   Subscribes `user` to the gallery named by `gallery_id`.
 
+  Subscription management is deliberately exempt from
+  `verify_write_access/1`; gallery visibility and subscription authorization
+  still apply.
+
   ## Examples
 
       iex> subscribe_gallery(user, "1")
@@ -839,10 +843,9 @@ defmodule Philomena.Galleries do
   """
   @spec subscribe_gallery(Actor.t(), Loader.integer_id()) ::
           {:ok, Gallery.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def subscribe_gallery(%Actor{} = actor, gallery_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, gallery} <- load_gallery(actor, gallery_id, :subscribe),
+    with {:ok, gallery} <- load_gallery(actor, gallery_id, :subscribe),
          {:ok, _subscription} <- create_subscription(gallery, actor.user) do
       {:ok, gallery}
     end
@@ -858,10 +861,9 @@ defmodule Philomena.Galleries do
 
   """
   @spec unsubscribe_gallery(Actor.t(), Loader.integer_id()) ::
-          {:ok, Gallery.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Gallery.t()} | {:error, :unauthorized | :not_found}
   def unsubscribe_gallery(%Actor{} = actor, gallery_id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, gallery} <- load_gallery(actor, gallery_id, :unsubscribe) do
+    with {:ok, gallery} <- load_gallery(actor, gallery_id, :unsubscribe) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(gallery, actor.user)
       {:ok, gallery}

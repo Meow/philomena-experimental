@@ -145,7 +145,7 @@ defmodule Philomena.Channels do
   `id`, returning the channel.
 
   This authenticated read-state operation authorizes `:mark_read`. It is
-  specifically exempt from `verify_write_access`.
+  specifically exempt from `verify_write_access/1`.
 
   ## Examples
 
@@ -319,6 +319,10 @@ defmodule Philomena.Channels do
   Repeated subscription is an idempotent success. Unexpected persistence
   failures are returned as changeset errors.
 
+  Subscription management is deliberately exempt from
+  `verify_write_access/1`; channel visibility and subscription authorization
+  still apply.
+
   ## Examples
 
       iex> subscribe(user, "1")
@@ -333,10 +337,9 @@ defmodule Philomena.Channels do
   """
   @spec subscribe(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()}
-          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def subscribe(%Actor{} = actor, id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, channel} <- load_channel(actor, id, :subscribe),
+    with {:ok, channel} <- load_channel(actor, id, :subscribe),
          {:ok, _subscription} <- create_subscription(channel, actor.user) do
       {:ok, channel}
     end
@@ -346,7 +349,9 @@ defmodule Philomena.Channels do
   Unsubscribes `actor` from the channel named by the `id`.
 
   Repeated unsubscription is an idempotent success and also clears any live
-  notification for the channel.
+  notification for the channel. Subscription management is deliberately
+  exempt from `verify_write_access/1`; channel visibility and subscription
+  authorization still apply.
 
   ## Examples
 
@@ -361,10 +366,9 @@ defmodule Philomena.Channels do
 
   """
   @spec unsubscribe(Actor.t(), Loader.integer_id()) ::
-          {:ok, Channel.t()} | {:error, :ban | :not_found | :unauthorized}
+          {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
   def unsubscribe(%Actor{} = actor, id) do
-    with :ok <- verify_write_access(actor),
-         {:ok, channel} <- load_channel(actor, id, :unsubscribe),
+    with {:ok, channel} <- load_channel(actor, id, :unsubscribe),
          {:ok, _subscription} <- delete_subscription(channel, actor.user) do
       clear_notification_for(channel, actor.user)
       {:ok, channel}

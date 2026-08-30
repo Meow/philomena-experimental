@@ -818,8 +818,9 @@ defmodule Philomena.Tags do
   @doc """
   Adds the tag named by `slug` to `actor`'s watched tags.
 
-  An unknown slug is `{:error, :not_found}`. Otherwise this defers to the
-  watched-tags update, which reindexes the user.
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`. An unknown slug is `{:error, :not_found}`.
+  Otherwise this defers to the watched-tags update, which reindexes the user.
 
   Returns `{:ok, user}`, `{:error, %Ecto.Changeset{}}`, or
   `{:error, :not_found}`.
@@ -832,7 +833,7 @@ defmodule Philomena.Tags do
   """
   @spec watch_tag(Actor.t(), String.t()) ::
           {:ok, User.t()}
-          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def watch_tag(%Actor{} = actor, slug) do
     with {:ok, tag} <- load_canonical_tag(actor, slug), do: Users.watch_tag(actor, tag)
   end
@@ -840,8 +841,9 @@ defmodule Philomena.Tags do
   @doc """
   Removes the tag named by `slug` from `actor`'s watched tags.
 
-  An unknown slug is `{:error, :not_found}`. Otherwise this defers to the
-  watched-tags update, which reindexes the user.
+  This personal preference update is deliberately exempt from
+  `verify_write_access/1`. An unknown slug is `{:error, :not_found}`.
+  Otherwise this defers to the watched-tags update, which reindexes the user.
 
   Returns `{:ok, user}`, `{:error, %Ecto.Changeset{}}`, or
   `{:error, :not_found}`.
@@ -854,7 +856,7 @@ defmodule Philomena.Tags do
   """
   @spec unwatch_tag(Actor.t(), String.t()) ::
           {:ok, User.t()}
-          | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
+          | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def unwatch_tag(%Actor{} = actor, slug) do
     with {:ok, tag} <- load_canonical_tag(actor, slug), do: Users.unwatch_tag(actor, tag)
   end

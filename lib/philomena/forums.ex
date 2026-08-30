@@ -138,7 +138,8 @@ defmodule Philomena.Forums do
   end
 
   @doc """
-  Subscribes `actor` to a visible forum after verifying write access.
+  Subscribes `actor` to a visible forum. Subscription management is
+  deliberately exempt from `verify_write_access/1`.
 
   ## Examples
 
@@ -147,18 +148,17 @@ defmodule Philomena.Forums do
 
   """
   @spec subscribe(Actor.t(), String.t()) ::
-          {:ok, Forum.t()} | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
+          {:ok, Forum.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
   def subscribe(%Actor{} = actor, short_name) do
-    with :ok <- verify_write_access(actor),
-         {:ok, forum} <- load_authorized_forum(actor, :subscribe, short_name),
+    with {:ok, forum} <- load_authorized_forum(actor, :subscribe, short_name),
          {:ok, _subscription} <- create_subscription(forum, actor.user) do
       {:ok, forum}
     end
   end
 
   @doc """
-  Idempotently unsubscribes `actor` from a visible forum after verifying write
-  access.
+  Idempotently unsubscribes `actor` from a visible forum. Subscription
+  management is deliberately exempt from `verify_write_access/1`.
 
   ## Examples
 
@@ -167,10 +167,9 @@ defmodule Philomena.Forums do
 
   """
   @spec unsubscribe(Actor.t(), String.t()) ::
-          {:ok, Forum.t()} | {:error, :ban | :not_found | :unauthorized}
+          {:ok, Forum.t()} | {:error, :not_found | :unauthorized}
   def unsubscribe(%Actor{} = actor, short_name) do
-    with :ok <- verify_write_access(actor),
-         {:ok, forum} <- load_authorized_forum(actor, :unsubscribe, short_name),
+    with {:ok, forum} <- load_authorized_forum(actor, :unsubscribe, short_name),
          {:ok, _subscription} <- delete_subscription(forum, actor.user) do
       {:ok, forum}
     end

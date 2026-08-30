@@ -136,8 +136,9 @@ defmodule Philomena.Topics do
   Subscribes `actor` to the topic named by `topic_slug` within the forum
   named by `forum_slug`.
 
-  Write access is verified first. The forum is then authorized for `:show`, and
-  the topic is queried beneath it and authorized for `:subscribe`.
+  Subscription management is deliberately exempt from
+  `verify_write_access/1`. The forum is authorized for `:show`, and the topic
+  is queried beneath it and authorized for `:subscribe`.
 
   Returns `{:ok, {forum, topic}}` (both are returned for the caller to reuse),
   `{:error, :unauthorized}` when the forum or topic is not visible to
@@ -155,10 +156,9 @@ defmodule Philomena.Topics do
   """
   @spec subscribe(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def subscribe(%Actor{} = actor, forum_slug, topic_slug) do
-    with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
          {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :subscribe),
          {:ok, _subscription} <- create_subscription(topic, actor.user) do
       {:ok, {forum, topic}}
@@ -169,9 +169,10 @@ defmodule Philomena.Topics do
   Unsubscribes `actor` from the topic named by `topic_slug` within the forum
   named by `forum_slug`.
 
-  Write access is verified first. Loading mirrors `subscribe/3`, but the topic
-  uses the separate `:unsubscribe` action so a user may stop watching a topic
-  that became hidden after subscription.
+  Subscription management is deliberately exempt from
+  `verify_write_access/1`. Loading mirrors `subscribe/3`, but the topic uses
+  the separate `:unsubscribe` action so a user may stop watching a topic that
+  became hidden after subscription.
 
   Returns `{:ok, {forum, topic}}`, `{:error, :unauthorized}` when the forum is
   not visible to the actor, or `{:error, :not_found}` when the forum exists but
@@ -184,10 +185,9 @@ defmodule Philomena.Topics do
 
   """
   @spec unsubscribe(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
-          {:ok, {Forum.t(), Topic.t()}} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, {Forum.t(), Topic.t()}} | {:error, :unauthorized | :not_found}
   def unsubscribe(%Actor{} = actor, forum_slug, topic_slug) do
-    with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
          {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :unsubscribe) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(topic, actor.user)
@@ -220,9 +220,11 @@ defmodule Philomena.Topics do
   Clears `actor`'s unread notifications for the topic named by `topic_slug`
   within the forum named by `forum_slug`.
 
-  The forum is authorized for `:show`, then the topic is queried beneath it and
-  authorized for `:mark_read`. That action deliberately permits a subscribed
-  user to clear notifications after the topic itself becomes hidden.
+  This personal read-state operation is deliberately exempt from
+  `verify_write_access/1`. The forum is authorized for `:show`, then the topic
+  is queried beneath it and authorized for `:mark_read`. That action permits a
+  subscribed user to clear notifications after the topic itself becomes
+  hidden.
 
   Returns `{:ok, topic}` after clearing the notifications, not-found for a
   missing route member, or unauthorized for a forbidden forum/topic.
