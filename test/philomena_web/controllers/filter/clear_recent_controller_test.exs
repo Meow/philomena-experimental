@@ -8,13 +8,13 @@ defmodule PhilomenaWeb.Filter.ClearRecentControllerTest do
   alias Philomena.Users.User
 
   describe "DELETE /filters/clear_recent" do
-    test "anonymous users are redirected with the sign-in flash", %{conn: conn} do
+    test "anonymous users are redirected with the authorization flash", %{conn: conn} do
       conn = delete(conn, ~p"/filters/clear_recent")
 
       assert redirected_to(conn) == "/"
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
-               "You must be signed in to see this page."
+               "You can't access that page."
     end
 
     test "resets the recent filter list to the current filter", %{conn: conn} do

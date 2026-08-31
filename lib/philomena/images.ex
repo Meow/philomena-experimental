@@ -847,7 +847,7 @@ defmodule Philomena.Images do
   @spec list_watched_images(Actor.t(), Scope.t()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized | String.t()}
   def list_watched_images(%Actor{} = actor, scope) do
-    with :ok <- authorize(actor, :index, Image),
+    with :ok <- authorize(actor, :index_watched, Image),
          {:ok, {definition, _tags}} <- ImageSearch.search_string(actor, scope, "my:watched") do
       {:ok, ImageSearch.execute(definition)}
     end

@@ -3,13 +3,13 @@ defmodule PhilomenaWeb.Filter.ClearRecentController do
 
   alias Philomena.Users
 
-  plug PhilomenaWeb.RequireUserPlug
+  action_fallback PhilomenaWeb.FallbackController
 
   def delete(conn, _params) do
-    {:ok, _user} = Users.delete_recent_filters(conn.assigns.actor)
-
-    conn
-    |> put_flash(:info, "Cleared recent filters.")
-    |> redirect(to: ~p"/filters")
+    with {:ok, _user} <- Users.delete_recent_filters(conn.assigns.actor) do
+      conn
+      |> put_flash(:info, "Cleared recent filters.")
+      |> redirect(to: ~p"/filters")
+    end
   end
 end

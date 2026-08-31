@@ -112,7 +112,7 @@ defmodule PhilomenaWeb.Router do
   end
 
   scope "/api/v1/rss", PhilomenaWeb.Api.Rss, as: :api_rss do
-    pipe_through [:accepts_rss, :api, :require_authenticated_user]
+    pipe_through [:accepts_rss, :api]
     resources "/watched", WatchedController, only: [:index]
   end
 

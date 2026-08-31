@@ -3,8 +3,6 @@ defmodule PhilomenaWeb.FilterController do
 
   alias Philomena.Filters
 
-  plug PhilomenaWeb.RequireUserPlug when action not in [:index, :show]
-
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"fq" => fq}) do
@@ -54,6 +52,9 @@ defmodule PhilomenaWeb.FilterController do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
+
+      error ->
+        error
     end
   end
 
@@ -73,7 +74,7 @@ defmodule PhilomenaWeb.FilterController do
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "edit.html", filter: changeset.data, changeset: changeset)
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
@@ -90,7 +91,7 @@ defmodule PhilomenaWeb.FilterController do
         |> put_flash(:error, "Filter is still in use, not deleted.")
         |> redirect(to: ~p"/filters/#{changeset.data}")
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end

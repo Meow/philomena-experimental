@@ -625,6 +625,10 @@ defimpl Canada.Can, for: Philomena.Users.User do
   def can?(%User{id: id}, :edit_title, %User{id: id}), do: true
   def can?(%User{id: id}, :deactivate_account, %User{id: id}), do: true
 
+  # Update their personal filter settings
+  def can?(%User{id: id}, :update_spoiler_type, %User{id: id}), do: true
+  def can?(%User{id: id}, :delete_recent_filters, %User{id: id}), do: true
+
   # Edit their username
   def can?(%User{id: id}, :change_username, %User{id: id} = user) do
     time_ago = DateTime.utc_now() |> DateTime.add(-1 * 60 * 60 * 24 * 90)
@@ -675,9 +679,9 @@ defimpl Canada.Can, for: Philomena.Users.User do
       when action in @commission_management_actions,
       do: true
 
-  # View non-deleted images
+  # View non-deleted and watched images
   def can?(%User{}, action, Image)
-      when action in [:new, :create, :index],
+      when action in [:new, :create, :index, :index_watched],
       do: true
 
   def can?(%User{}, action, %Image{hidden_from_users: false})

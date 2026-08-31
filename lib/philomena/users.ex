@@ -1320,7 +1320,8 @@ defmodule Philomena.Users do
   Updates a user's spoiler type settings.
 
   This personal preference update is deliberately exempt from
-  `verify_write_access/1`.
+  `verify_write_access/1`, but the actor must be authorized to update their
+  own settings.
 
   ## Examples
 
@@ -1333,10 +1334,12 @@ defmodule Philomena.Users do
   """
   @spec update_spoiler_type(Actor.t(), map()) ::
           {:ok, Settings.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def update_spoiler_type(%Actor{user: %User{} = user}, attrs) do
-    user.settings
-    |> Settings.spoiler_type_changeset(attrs)
-    |> Repo.update()
+  def update_spoiler_type(%Actor{user: user} = actor, attrs) do
+    with :ok <- authorize(actor, :update_spoiler_type, user) do
+      user.settings
+      |> Settings.spoiler_type_changeset(attrs)
+      |> Repo.update()
+    end
   end
 
   @doc group: "Settings"
@@ -1371,7 +1374,8 @@ defmodule Philomena.Users do
   Clears a user's recent filter history.
 
   This personal preference update is deliberately exempt from
-  `verify_write_access/1`.
+  `verify_write_access/1`, but the actor must be authorized to clear their own
+  history.
 
   ## Examples
 
@@ -1381,20 +1385,22 @@ defmodule Philomena.Users do
   """
   @spec delete_recent_filters(Actor.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def delete_recent_filters(%Actor{user: %User{} = user}) do
-    Multi.new()
-    |> Multi.lock_one(:locked_user, user_lock_query(user))
-    |> Multi.update(:user, fn %{locked_user: user} ->
-      User.clear_recent_filters_changeset(user)
-    end)
-    |> put_reindex_user()
-    |> Multi.transact()
-    |> case do
-      {:ok, %{user: %User{} = user}} ->
-        {:ok, user}
+  def delete_recent_filters(%Actor{user: user} = actor) do
+    with :ok <- authorize(actor, :delete_recent_filters, user) do
+      Multi.new()
+      |> Multi.lock_one(:locked_user, user_lock_query(user))
+      |> Multi.update(:user, fn %{locked_user: user} ->
+        User.clear_recent_filters_changeset(user)
+      end)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: %User{} = user}} ->
+          {:ok, user}
 
-      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
-        {:error, changeset}
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
