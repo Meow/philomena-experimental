@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Image.FileController do
   def update(conn, %{"image" => image_params} = params) do
     upload = PhilomenaMedia.Upload.cast(image_params, "image")
 
-    case Images.update_file(conn.assigns.actor, params["image_id"], upload) do
+    case Images.update_image_file(conn.assigns.actor, params["image_id"], upload) do
       {:ok, image} ->
         conn
         |> put_flash(:info, "Successfully updated file.")

@@ -36,7 +36,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
   end
 
   # Fills the user's Valkey tag bucket to the 50-change limit so the next
-  # multi-tag update trips Images.update_tags' check_limits step and takes the
+  # multi-tag update trips Images.update_image_tags' check_limits step and takes the
   # controller's rate-limited error branch. Registers cleanup of the counters
   # (they carry a 10-minute TTL and the SQL sandbox does not roll them back).
   defp fill_tag_bucket!(user) do

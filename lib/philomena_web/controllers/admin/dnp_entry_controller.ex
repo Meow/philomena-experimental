@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Admin.DnpEntryController do
 
   def index(conn, params) do
     with {:ok, dnp_entries, changeset} <-
-           DnpEntries.load_admin_dnp_entries(
+           DnpEntries.list_admin_dnp_entries(
              conn.assigns.actor,
              params["eq"] || %{},
              conn.assigns.scrivener

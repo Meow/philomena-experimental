@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.User.EraseController do
   action_fallback PhilomenaWeb.FallbackController
 
   def new(conn, %{"user_id" => slug}) do
-    case Users.load_user_for_erase(conn.assigns.actor, slug) do
+    case Users.new_user_erase(conn.assigns.actor, slug) do
       {:ok, user} ->
         render(conn, "new.html", title: "Erase user", user: user)
 
@@ -16,7 +16,7 @@ defmodule PhilomenaWeb.Admin.User.EraseController do
   end
 
   def create(conn, %{"user_id" => slug}) do
-    case Users.admin_erase_user(conn.assigns.actor, slug) do
+    case Users.create_user_erase(conn.assigns.actor, slug) do
       {:ok, user} ->
         conn
         |> put_flash(:info, "User erase started")

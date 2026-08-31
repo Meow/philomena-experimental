@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Image.TagController do
   plug PhilomenaWeb.CheckCaptchaPlug
 
   def update(conn, %{"image" => image_params} = params) do
-    case Images.update_tags(conn.assigns.actor, params["image_id"], image_params) do
+    case Images.update_image_tags(conn.assigns.actor, params["image_id"], image_params) do
       {:ok,
        %{
          image: image,

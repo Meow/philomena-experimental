@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.DuplicateReport.ClaimController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"duplicate_report_id" => id}) do
-    case DuplicateReports.claim_duplicate_report(conn.assigns.actor, id) do
+    case DuplicateReports.create_duplicate_report_claim(conn.assigns.actor, id) do
       {:ok, _report} ->
         conn
         |> put_flash(:info, "Successfully claimed report.")
@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.DuplicateReport.ClaimController do
   end
 
   def delete(conn, %{"duplicate_report_id" => id}) do
-    case DuplicateReports.unclaim_duplicate_report(conn.assigns.actor, id) do
+    case DuplicateReports.delete_duplicate_report_claim(conn.assigns.actor, id) do
       {:ok, _report} ->
         conn
         |> put_flash(:info, "Successfully released report.")

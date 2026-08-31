@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.DuplicateReportController do
 
   def index(conn, params) do
     with {:ok, duplicate_reports, changeset} <-
-           DuplicateReports.load_duplicate_report_index(
+           DuplicateReports.list_duplicate_reports(
              conn.assigns.actor,
              params,
              conn.assigns.scrivener
@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.DuplicateReportController do
 
   def show(conn, %{"id" => id}) do
     with {:ok, duplicate_report} <-
-           DuplicateReports.load_duplicate_report(conn.assigns.actor, id) do
+           DuplicateReports.show_duplicate_report(conn.assigns.actor, id) do
       render(conn, "show.html",
         title: "Showing Duplicate Report",
         duplicate_report: duplicate_report,

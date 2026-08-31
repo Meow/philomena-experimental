@@ -33,7 +33,7 @@ defmodule PhilomenaWeb.TagChangeControllerTest do
     # The tag changeset requires at least 3 tags, so the update keeps the
     # fixture's "safe" tag and adds two more.
     {:ok, _} =
-      Images.update_tags(actor(user), image.id, %{
+      Images.update_image_tags(actor(user), image.id, %{
         "old_tag_input" => "safe",
         "tag_input" => "safe, #{added_tags}"
       })

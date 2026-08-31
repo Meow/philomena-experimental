@@ -6,11 +6,17 @@ defmodule PhilomenaWeb.Filter.HideController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    render_result(conn, Filters.hide_tag(actor(conn), current_filter(conn), params["tag"]))
+    render_result(
+      conn,
+      Filters.create_filter_hide(actor(conn), current_filter(conn), params["tag"])
+    )
   end
 
   def delete(conn, params) do
-    render_result(conn, Filters.unhide_tag(actor(conn), current_filter(conn), params["tag"]))
+    render_result(
+      conn,
+      Filters.delete_filter_hide(actor(conn), current_filter(conn), params["tag"])
+    )
   end
 
   defp actor(conn), do: conn.assigns.actor

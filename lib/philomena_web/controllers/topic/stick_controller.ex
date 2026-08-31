@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Topic.StickController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Topics.stick_topic(
+    case Topics.create_topic_stick(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]
@@ -27,7 +27,7 @@ defmodule PhilomenaWeb.Topic.StickController do
   end
 
   def delete(conn, params) do
-    case Topics.unstick_topic(
+    case Topics.delete_topic_stick(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]

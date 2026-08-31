@@ -27,7 +27,7 @@ defmodule PhilomenaWeb.Image.RepairControllerTest do
       assert Repo.reload!(image).processed
     end
 
-    # repair_image flags the image for reprocessing (the actual thumbnail
+    # create_image_repair flags the image for reprocessing (the actual thumbnail
     # job is enqueued to a dead queue in tests).
     test "as a moderator enqueues the repair and flags the image", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})

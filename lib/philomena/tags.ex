@@ -481,9 +481,9 @@ defmodule Philomena.Tags do
       {:error, :not_found}
 
   """
-  @spec load_tag(Actor.t(), String.t()) ::
+  @spec show_tag(Actor.t(), String.t()) ::
           {:ok, Tag.t()} | {:error, :not_found | :unauthorized}
-  def load_tag(%Actor{} = actor, slug) do
+  def show_tag(%Actor{} = actor, slug) do
     load_tag_for_action(actor, :show, slug, @api_preloads)
   end
 
@@ -529,10 +529,10 @@ defmodule Philomena.Tags do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec search_tags(Actor.t(), map(), Search.pagination_params()) ::
+  @spec query_tags(Actor.t(), map(), Search.pagination_params()) ::
           {:ok, Scrivener.Page.t(), Ecto.Changeset.t()}
           | {:error, :unauthorized | Ecto.Changeset.t()}
-  def search_tags(%Actor{} = actor, params, pagination) do
+  def query_tags(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Tag),
          {:ok, body, query_form} <- QueryBuilder.build_query(params) do
       tags =
@@ -665,9 +665,9 @@ defmodule Philomena.Tags do
       {:aliased_to, %Tag{}}
 
   """
-  @spec load_tag_page(Actor.t(), Scope.t(), String.t()) ::
+  @spec show_tag_page(Actor.t(), Scope.t(), String.t()) ::
           {:ok, TagPage.t()} | {:aliased_to, Tag.t()} | {:error, :not_found | :unauthorized}
-  def load_tag_page(%Actor{} = actor, %Scope{} = scope, slug) do
+  def show_tag_page(%Actor{} = actor, %Scope{} = scope, slug) do
     with {:ok, tag} <- load_tag_for_action(actor, :show, slug, @show_preloads) do
       case tag do
         %{aliased_tag: %Tag{}} ->
@@ -703,10 +703,10 @@ defmodule Philomena.Tags do
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_tag_for_edit(Actor.t(), String.t()) ::
+  @spec edit_tag(Actor.t(), String.t()) ::
           {:ok, {Tag.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_tag_for_edit(%Actor{} = actor, slug) do
+  def edit_tag(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :edit, slug, @show_preloads) do
       {:ok, {tag, Tag.changeset(tag)}}
@@ -724,10 +724,10 @@ defmodule Philomena.Tags do
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_tag_image_for_edit(Actor.t(), String.t()) ::
+  @spec edit_tag_image(Actor.t(), String.t()) ::
           {:ok, {Tag.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_tag_image_for_edit(%Actor{} = actor, slug) do
+  def edit_tag_image(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :edit_image, slug, @image_preloads) do
       {:ok, {tag, Tag.changeset(tag)}}
@@ -749,10 +749,10 @@ defmodule Philomena.Tags do
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_tag_alias_for_edit(Actor.t(), String.t()) ::
+  @spec edit_tag_alias(Actor.t(), String.t()) ::
           {:ok, {Tag.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_tag_alias_for_edit(%Actor{} = actor, slug) do
+  def edit_tag_alias(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :edit_alias, slug, @alias_preloads) do
       {:ok, {tag, Tag.alias_form_changeset(tag)}}
@@ -773,9 +773,9 @@ defmodule Philomena.Tags do
       {:ok, %TagDetail{tag: %Tag{}}}
 
   """
-  @spec tag_detail(Actor.t(), String.t()) ::
+  @spec list_tag_details(Actor.t(), String.t()) ::
           {:ok, TagDetail.t()} | {:error, :not_found | :unauthorized}
-  def tag_detail(%Actor{} = actor, slug) do
+  def list_tag_details(%Actor{} = actor, slug) do
     with {:ok, tag} <- load_tag_for_action(actor, :show_details, slug, []) do
       filters_spoilering =
         Filter
@@ -823,10 +823,10 @@ defmodule Philomena.Tags do
       {:ok, %User{}}
 
   """
-  @spec watch_tag(Actor.t(), String.t()) ::
+  @spec create_tag_watch(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def watch_tag(%Actor{} = actor, slug) do
+  def create_tag_watch(%Actor{} = actor, slug) do
     with {:ok, tag} <- load_tag_for_action(actor, :show, slug, []) do
       Users.watch_tag(actor, tag)
     end
@@ -848,10 +848,10 @@ defmodule Philomena.Tags do
       {:ok, %User{}}
 
   """
-  @spec unwatch_tag(Actor.t(), String.t()) ::
+  @spec delete_tag_watch(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def unwatch_tag(%Actor{} = actor, slug) do
+  def delete_tag_watch(%Actor{} = actor, slug) do
     with {:ok, tag} <- load_tag_for_action(actor, :show, slug, []) do
       Users.unwatch_tag(actor, tag)
     end
@@ -982,10 +982,10 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec remove_tag_image(Actor.t(), String.t()) ::
+  @spec delete_tag_image(Actor.t(), String.t()) ::
           {:ok, Tag.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def remove_tag_image(%Actor{} = actor, slug) do
+  def delete_tag_image(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :delete_image, slug, @image_preloads) do
       Multi.new()
@@ -1064,10 +1064,10 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec alias_tag(Actor.t(), String.t(), map()) ::
+  @spec update_tag_alias(Actor.t(), String.t(), map()) ::
           {:ok, Tag.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def alias_tag(%Actor{} = actor, slug, attrs) do
+  def update_tag_alias(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, %{name: source_tag_name}} <- load_tag_for_action(actor, :alias, slug, []),
          {:ok, %{target_tag: target_tag_name}} =
@@ -1156,9 +1156,9 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec reindex_tag_by_slug(Actor.t(), String.t()) ::
+  @spec create_tag_reindex(Actor.t(), String.t()) ::
           {:ok, Tag.t()} | {:error, :ban | :not_found | :unauthorized}
-  def reindex_tag_by_slug(%Actor{} = actor, slug) do
+  def create_tag_reindex(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :reindex, slug, @alias_preloads) do
       reindex_tag_images(tag)
@@ -1180,10 +1180,10 @@ defmodule Philomena.Tags do
       {:ok, %Tag{}}
 
   """
-  @spec unalias_tag(Actor.t(), String.t()) ::
+  @spec delete_tag_alias(Actor.t(), String.t()) ::
           {:ok, Tag.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def unalias_tag(%Actor{} = actor, slug) do
+  def delete_tag_alias(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- load_tag_for_action(actor, :unalias, slug, @alias_preloads) do
       tag_query =

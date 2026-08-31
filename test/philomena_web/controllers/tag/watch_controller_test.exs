@@ -31,7 +31,7 @@ defmodule PhilomenaWeb.Tag.WatchControllerTest do
   test "POST when already watching keeps a single entry", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     tag = tag_fixture()
-    {:ok, _} = Tags.watch_tag(actor(user), tag.slug)
+    {:ok, _} = Tags.create_tag_watch(actor(user), tag.slug)
 
     conn = post(conn, ~p"/tags/#{tag}/watch")
 
@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.Tag.WatchControllerTest do
   test "DELETE removes the tag from the user's watched tags", %{conn: conn} do
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     tag = tag_fixture()
-    {:ok, _} = Tags.watch_tag(actor(user), tag.slug)
+    {:ok, _} = Tags.create_tag_watch(actor(user), tag.slug)
 
     conn = delete(conn, ~p"/tags/#{tag}/watch")
 

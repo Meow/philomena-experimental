@@ -4,7 +4,7 @@ defmodule PhilomenaWeb.Autocomplete.CompiledController do
   alias Philomena.Autocomplete
 
   def show(conn, _params) do
-    case Autocomplete.get_autocomplete() do
+    case Autocomplete.show_compiled_autocomplete() do
       {:error, :not_found} ->
         conn
         |> put_status(:not_found)

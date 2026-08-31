@@ -9,13 +9,13 @@ defmodule Philomena.AutocompleteTest do
 
   describe "get_autocomplete/0" do
     test "returns not-found before an artifact has been generated" do
-      assert Autocomplete.get_autocomplete() == {:error, :not_found}
+      assert Autocomplete.show_compiled_autocomplete() == {:error, :not_found}
     end
 
     test "returns stored bytes unchanged because the artifact is opaque" do
       artifact = autocomplete_fixture(<<255, 0, 17>>)
 
-      assert {:ok, loaded} = Autocomplete.get_autocomplete()
+      assert {:ok, loaded} = Autocomplete.show_compiled_autocomplete()
       assert loaded.created_at == artifact.created_at
       assert loaded.content == <<255, 0, 17>>
     end
@@ -31,7 +31,7 @@ defmodule Philomena.AutocompleteTest do
       assert %Artifact{} = generated
       assert is_binary(generated.content)
       assert Repo.aggregate(Artifact, :count) == 1
-      assert {:ok, loaded} = Autocomplete.get_autocomplete()
+      assert {:ok, loaded} = Autocomplete.show_compiled_autocomplete()
       assert loaded.content == generated.content
     end
   end

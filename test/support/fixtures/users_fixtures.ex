@@ -23,7 +23,7 @@ defmodule Philomena.UsersFixtures do
         email: email,
         password: valid_user_password()
       })
-      |> Users.register_user()
+      |> Users.create_registration()
 
     user
   end

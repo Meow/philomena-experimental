@@ -35,16 +35,16 @@ defmodule Philomena.DuplicateReportsTest do
       rejected = duplicate_report_fixture(image_fixture(), image_fixture())
       moderator = actor(moderator_user_fixture())
 
-      {:ok, _rejected} = DuplicateReports.reject_duplicate_report(moderator, rejected.id)
+      {:ok, _rejected} = DuplicateReports.create_duplicate_report_reject(moderator, rejected.id)
 
       assert {:ok, page, changeset} =
-               DuplicateReports.load_duplicate_report_index(moderator, %{}, @pagination)
+               DuplicateReports.list_duplicate_reports(moderator, %{}, @pagination)
 
       assert Enum.map(page.entries, & &1.id) == [open.id]
       assert changeset.valid?
 
       assert {:ok, page, changeset} =
-               DuplicateReports.load_duplicate_report_index(
+               DuplicateReports.list_duplicate_reports(
                  moderator,
                  %{"states" => ["rejected"]},
                  @pagination
@@ -54,7 +54,7 @@ defmodule Philomena.DuplicateReportsTest do
       assert changeset.valid?
 
       assert {:ok, _page, _changeset} =
-               DuplicateReports.load_duplicate_report_index(actor(), %{}, @pagination)
+               DuplicateReports.list_duplicate_reports(actor(), %{}, @pagination)
 
       assistant = %{
         assistant_user_fixture()
@@ -62,7 +62,7 @@ defmodule Philomena.DuplicateReportsTest do
       }
 
       assert {:ok, _page, _changeset} =
-               DuplicateReports.load_duplicate_report_index(actor(assistant), %{}, @pagination)
+               DuplicateReports.list_duplicate_reports(actor(assistant), %{}, @pagination)
     end
 
     test "blank states use the default and invalid states match nothing" do
@@ -70,7 +70,7 @@ defmodule Philomena.DuplicateReportsTest do
       moderator = actor(moderator_user_fixture())
 
       assert {:ok, blank_page, blank_changeset} =
-               DuplicateReports.load_duplicate_report_index(
+               DuplicateReports.list_duplicate_reports(
                  moderator,
                  %{"states" => ""},
                  @pagination
@@ -80,7 +80,7 @@ defmodule Philomena.DuplicateReportsTest do
       assert blank_changeset.valid?
 
       assert {:ok, invalid_page, invalid_changeset} =
-               DuplicateReports.load_duplicate_report_index(
+               DuplicateReports.list_duplicate_reports(
                  moderator,
                  %{"states" => ["bogus"]},
                  @pagination
@@ -94,7 +94,7 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
       assert {:ok, %{entries: [loaded]}, _changeset} =
-               DuplicateReports.load_duplicate_report_index(
+               DuplicateReports.list_duplicate_reports(
                  actor(moderator_user_fixture()),
                  %{},
                  @pagination
@@ -114,17 +114,17 @@ defmodule Philomena.DuplicateReportsTest do
       target = image_fixture()
       report = duplicate_report_fixture(source, target)
 
-      assert {:ok, loaded} = DuplicateReports.load_duplicate_report(actor(), report.id)
+      assert {:ok, loaded} = DuplicateReports.show_duplicate_report(actor(), report.id)
       assert loaded.image.id == source.id
       assert loaded.duplicate_of_image.id == target.id
 
       hide_image(target)
 
-      assert DuplicateReports.load_duplicate_report(actor(), report.id) ==
+      assert DuplicateReports.show_duplicate_report(actor(), report.id) ==
                {:error, :unauthorized}
 
       assert {:ok, _loaded} =
-               DuplicateReports.load_duplicate_report(
+               DuplicateReports.show_duplicate_report(
                  actor(moderator_user_fixture()),
                  report.id
                )
@@ -133,7 +133,7 @@ defmodule Philomena.DuplicateReportsTest do
     test "normalizes malformed and missing IDs before authorization" do
       for viewer <- [actor(), actor(confirmed_user_fixture()), actor(moderator_user_fixture())],
           id <- ["not-an-id", "2147483647", "99999999999999999999"] do
-        assert DuplicateReports.load_duplicate_report(viewer, id) == {:error, :not_found}
+        assert DuplicateReports.show_duplicate_report(viewer, id) == {:error, :not_found}
       end
     end
   end
@@ -272,11 +272,11 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
       actions = [
-        &DuplicateReports.accept_duplicate_report/2,
-        &DuplicateReports.accept_reverse_duplicate_report/2,
-        &DuplicateReports.claim_duplicate_report/2,
-        &DuplicateReports.unclaim_duplicate_report/2,
-        &DuplicateReports.reject_duplicate_report/2
+        &DuplicateReports.create_duplicate_report_accept/2,
+        &DuplicateReports.create_duplicate_report_accept_reverse/2,
+        &DuplicateReports.create_duplicate_report_claim/2,
+        &DuplicateReports.delete_duplicate_report_claim/2,
+        &DuplicateReports.create_duplicate_report_reject/2
       ]
 
       for action <- actions do
@@ -295,11 +295,11 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
       for action <- [
-            &DuplicateReports.accept_duplicate_report/2,
-            &DuplicateReports.accept_reverse_duplicate_report/2,
-            &DuplicateReports.claim_duplicate_report/2,
-            &DuplicateReports.unclaim_duplicate_report/2,
-            &DuplicateReports.reject_duplicate_report/2
+            &DuplicateReports.create_duplicate_report_accept/2,
+            &DuplicateReports.create_duplicate_report_accept_reverse/2,
+            &DuplicateReports.create_duplicate_report_claim/2,
+            &DuplicateReports.delete_duplicate_report_claim/2,
+            &DuplicateReports.create_duplicate_report_reject/2
           ] do
         assert action.(actor(moderator_user_fixture(), ban: @ban), report.id) ==
                  {:error, :ban}
@@ -316,7 +316,7 @@ defmodule Philomena.DuplicateReportsTest do
       other = duplicate_report_fixture(target, source)
 
       assert {:ok, result} =
-               DuplicateReports.accept_duplicate_report(actor(moderator), report.id)
+               DuplicateReports.create_duplicate_report_accept(actor(moderator), report.id)
 
       assert result.state == "accepted"
       assert Repo.get!(DuplicateReport, other.id).state == "rejected"
@@ -335,10 +335,12 @@ defmodule Philomena.DuplicateReportsTest do
     test "an already accepted report returns a changeset and writes no second log" do
       moderator = actor(moderator_user_fixture())
       report = duplicate_report_fixture(image_fixture(), image_fixture())
-      assert {:ok, _results} = DuplicateReports.accept_duplicate_report(moderator, report.id)
+
+      assert {:ok, _results} =
+               DuplicateReports.create_duplicate_report_accept(moderator, report.id)
 
       assert {:error, changeset} =
-               DuplicateReports.accept_duplicate_report(moderator, report.id)
+               DuplicateReports.create_duplicate_report_accept(moderator, report.id)
 
       assert changeset.errors[:state] == {"must be open or claimed", []}
       assert Repo.aggregate(ModerationLog, :count) == 1
@@ -358,7 +360,7 @@ defmodule Philomena.DuplicateReportsTest do
         end
 
         assert {:error, %Ecto.Changeset{}} =
-                 DuplicateReports.accept_duplicate_report(moderator, report.id)
+                 DuplicateReports.create_duplicate_report_accept(moderator, report.id)
 
         assert Repo.get!(DuplicateReport, report.id).state == "open"
       end
@@ -375,7 +377,7 @@ defmodule Philomena.DuplicateReportsTest do
       original = duplicate_report_fixture(source, target)
 
       assert {:ok, result} =
-               DuplicateReports.accept_reverse_duplicate_report(
+               DuplicateReports.create_duplicate_report_accept_reverse(
                  actor(moderator),
                  original.id
                )
@@ -406,7 +408,7 @@ defmodule Philomena.DuplicateReportsTest do
       original = duplicate_report_fixture(source, target, nil, %{"reason" => reason})
 
       assert {:ok, reverse_report} =
-               DuplicateReports.accept_reverse_duplicate_report(
+               DuplicateReports.create_duplicate_report_accept_reverse(
                  actor(moderator),
                  original.id
                )
@@ -423,23 +425,25 @@ defmodule Philomena.DuplicateReportsTest do
       staff_actor = actor(moderator)
       report = duplicate_report_fixture(image_fixture(), image_fixture())
 
-      assert {:ok, claimed} = DuplicateReports.claim_duplicate_report(staff_actor, report.id)
+      assert {:ok, claimed} =
+               DuplicateReports.create_duplicate_report_claim(staff_actor, report.id)
+
       assert claimed.state == "claimed"
       assert claimed.modifier_id == moderator.id
 
       assert {:error, already_claimed} =
-               DuplicateReports.claim_duplicate_report(staff_actor, report.id)
+               DuplicateReports.create_duplicate_report_claim(staff_actor, report.id)
 
       assert already_claimed.errors[:state] == {"must be open", []}
 
       assert {:ok, released} =
-               DuplicateReports.unclaim_duplicate_report(staff_actor, report.id)
+               DuplicateReports.delete_duplicate_report_claim(staff_actor, report.id)
 
       assert released.state == "open"
       assert released.modifier_id == nil
 
       assert {:error, not_claimed} =
-               DuplicateReports.unclaim_duplicate_report(staff_actor, report.id)
+               DuplicateReports.delete_duplicate_report_claim(staff_actor, report.id)
 
       assert not_claimed.errors[:state] == {"must be claimed", []}
 
@@ -455,7 +459,7 @@ defmodule Philomena.DuplicateReportsTest do
       report = duplicate_report_fixture(source, target)
 
       assert {:ok, rejected} =
-               DuplicateReports.reject_duplicate_report(actor(moderator), report.id)
+               DuplicateReports.create_duplicate_report_reject(actor(moderator), report.id)
 
       assert rejected.state == "rejected"
       assert rejected.modifier_id == moderator.id
@@ -465,7 +469,7 @@ defmodule Philomena.DuplicateReportsTest do
       assert log.body == "Rejected duplicate report (#{source.id} -> #{target.id})"
 
       assert {:error, changeset} =
-               DuplicateReports.reject_duplicate_report(actor(moderator), report.id)
+               DuplicateReports.create_duplicate_report_reject(actor(moderator), report.id)
 
       assert changeset.errors[:state] == {"must be open or claimed", []}
       assert Repo.aggregate(ModerationLog, :count) == 1
@@ -475,12 +479,12 @@ defmodule Philomena.DuplicateReportsTest do
   describe "reverse search boundary" do
     test "returns a named empty result and explicit validation errors" do
       assert {:ok, %SearchResult{images: nil, changeset: changeset}} =
-               DuplicateReports.new_reverse_search(actor())
+               DuplicateReports.create_reverse_search(actor())
 
       assert changeset.valid?
 
       assert {:error, invalid} =
-               DuplicateReports.search_duplicates(actor(), %{"distance" => "invalid"}, nil)
+               DuplicateReports.create_reverse_search(actor(), %{"distance" => "invalid"}, nil)
 
       refute invalid.valid?
       assert invalid.errors[:distance]

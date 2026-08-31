@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.User.VerificationController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"user_id" => slug}) do
-    with {:ok, user} <- Users.admin_verify_user(conn.assigns.actor, slug) do
+    with {:ok, user} <- Users.create_user_verification(conn.assigns.actor, slug) do
       conn
       |> put_flash(:info, "User verification granted.")
       |> redirect(to: ~p"/profiles/#{user}")
@@ -14,7 +14,7 @@ defmodule PhilomenaWeb.Admin.User.VerificationController do
   end
 
   def delete(conn, %{"user_id" => slug}) do
-    with {:ok, user} <- Users.admin_unverify_user(conn.assigns.actor, slug) do
+    with {:ok, user} <- Users.delete_user_verification(conn.assigns.actor, slug) do
       conn
       |> put_flash(:info, "User verification revoked.")
       |> redirect(to: ~p"/profiles/#{user}")

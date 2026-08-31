@@ -45,7 +45,7 @@ defmodule Philomena.TopicsTest do
     type: "User"
   }
 
-  # The request pagination map load_topic_page reads.
+  # The request pagination map show_topic_page reads.
   @first_page %{page_number: 1, page_size: 25}
 
   defp subscribed?(topic, user) do
@@ -77,21 +77,21 @@ defmodule Philomena.TopicsTest do
     {forum, topic}
   end
 
-  # A hidden topic in a normal forum, the shape unhide_topic/3 operates on.
+  # A hidden topic in a normal forum, the shape delete_topic_hide/3 operates on.
   defp hidden_topic do
     forum = forum_fixture()
     topic = topic_fixture(forum)
     moderator = moderator_user_fixture()
 
     {:ok, {_forum, hidden}} =
-      Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+      Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{
         "deletion_reason" => "Spam"
       })
 
     {forum, hidden}
   end
 
-  # A locked topic in a normal forum, the shape unlock_topic/3 operates on.
+  # A locked topic in a normal forum, the shape delete_topic_lock/3 operates on.
   # Locking (unlike hiding) leaves the topic visible, so the loader still admits
   # a regular user.
   defp locked_topic do
@@ -101,21 +101,24 @@ defmodule Philomena.TopicsTest do
     moderator = moderator_user_fixture()
 
     {:ok, {_forum, locked}} =
-      Topics.lock_topic(actor(moderator), forum.short_name, topic.slug, %{
+      Topics.create_topic_lock(actor(moderator), forum.short_name, topic.slug, %{
         "lock_reason" => "Off topic"
       })
 
     {forum, locked}
   end
 
-  # A sticky topic in a normal forum, the shape unstick_topic/3 operates on.
+  # A sticky topic in a normal forum, the shape delete_topic_stick/3 operates on.
   # Sticking (like locking) leaves the topic visible, so the loader still admits
   # a regular user.
   defp sticky_topic do
     forum = forum_fixture()
     topic = topic_fixture(forum)
     moderator = moderator_user_fixture()
-    {:ok, {_forum, sticky}} = Topics.stick_topic(actor(moderator), forum.short_name, topic.slug)
+
+    {:ok, {_forum, sticky}} =
+      Topics.create_topic_stick(actor(moderator), forum.short_name, topic.slug)
+
     {forum, sticky}
   end
 
@@ -131,7 +134,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.subscribe(actor(user), forum.short_name, topic.slug)
+               Topics.create_topic_subscription(actor(user), forum.short_name, topic.slug)
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id
@@ -144,8 +147,11 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert {:ok, _} = Topics.subscribe(actor(user), forum.short_name, topic.slug)
-      assert {:ok, _} = Topics.subscribe(actor(user), forum.short_name, topic.slug)
+      assert {:ok, _} =
+               Topics.create_topic_subscription(actor(user), forum.short_name, topic.slug)
+
+      assert {:ok, _} =
+               Topics.create_topic_subscription(actor(user), forum.short_name, topic.slug)
 
       assert subscription_count(topic, user) == 1
     end
@@ -155,7 +161,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {_forum, _topic}} =
-               Topics.subscribe(actor(moderator), forum.short_name, topic.slug)
+               Topics.create_topic_subscription(actor(moderator), forum.short_name, topic.slug)
 
       assert subscribed?(topic, moderator)
     end
@@ -165,7 +171,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {_forum, _topic}} =
-               Topics.subscribe(actor(admin), forum.short_name, topic.slug)
+               Topics.create_topic_subscription(actor(admin), forum.short_name, topic.slug)
 
       assert subscribed?(topic, admin)
     end
@@ -173,18 +179,23 @@ defmodule Philomena.TopicsTest do
     test "an unknown forum slug is unauthorized for a regular user" do
       # An unknown short name loads nil, and authorizing nil for :show is
       # unauthorized for every non-admin actor.
-      assert Topics.subscribe(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.create_topic_subscription(
+               actor(confirmed_user_fixture()),
+               "nonexistent",
+               "whatever"
+             ) ==
                {:error, :not_found}
     end
 
     test "an unknown forum slug is unauthorized for anonymous" do
-      assert Topics.subscribe(actor(), "nonexistent", "whatever") == {:error, :not_found}
+      assert Topics.create_topic_subscription(actor(), "nonexistent", "whatever") ==
+               {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic slug is not found" do
       forum = forum_fixture()
 
-      assert Topics.subscribe(
+      assert Topics.create_topic_subscription(
                actor(confirmed_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -197,7 +208,7 @@ defmodule Philomena.TopicsTest do
       forum = forum_fixture(access_level: "staff")
       topic = topic_fixture(forum)
 
-      assert Topics.subscribe(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.create_topic_subscription(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
 
       refute subscribed?(topic, user)
@@ -209,7 +220,7 @@ defmodule Philomena.TopicsTest do
       topic = topic_fixture(forum)
 
       assert {:ok, {_forum, _topic}} =
-               Topics.subscribe(actor(moderator), forum.short_name, topic.slug)
+               Topics.create_topic_subscription(actor(moderator), forum.short_name, topic.slug)
 
       assert subscribed?(topic, moderator)
     end
@@ -222,11 +233,11 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+        Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{
           "deletion_reason" => "test hiding"
         })
 
-      assert Topics.subscribe(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.create_topic_subscription(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
 
       refute subscribed?(topic, user)
@@ -237,12 +248,12 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+        Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{
           "deletion_reason" => "test hiding"
         })
 
       assert {:ok, {_forum, _topic}} =
-               Topics.subscribe(actor(moderator), forum.short_name, topic.slug)
+               Topics.create_topic_subscription(actor(moderator), forum.short_name, topic.slug)
 
       assert subscribed?(topic, moderator)
     end
@@ -250,12 +261,16 @@ defmodule Philomena.TopicsTest do
     test "anonymous cannot subscribe to a visible topic" do
       {forum, topic} = visible_topic()
 
-      assert Topics.subscribe(actor(), forum.short_name, topic.slug) ==
+      assert Topics.create_topic_subscription(actor(), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin with an unknown forum gets not-found" do
-      assert Topics.subscribe(actor(admin_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.create_topic_subscription(
+               actor(admin_user_fixture()),
+               "nonexistent",
+               "whatever"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -268,7 +283,7 @@ defmodule Philomena.TopicsTest do
       assert subscribed?(topic, user)
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.unsubscribe(actor(user), forum.short_name, topic.slug)
+               Topics.delete_topic_subscription(actor(user), forum.short_name, topic.slug)
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id
@@ -283,7 +298,7 @@ defmodule Philomena.TopicsTest do
       refute subscribed?(topic, user)
 
       assert {:ok, {_forum, _topic}} =
-               Topics.unsubscribe(actor(user), forum.short_name, topic.slug)
+               Topics.delete_topic_subscription(actor(user), forum.short_name, topic.slug)
 
       refute subscribed?(topic, user)
     end
@@ -294,7 +309,7 @@ defmodule Philomena.TopicsTest do
       {:ok, _} = Topics.create_subscription(topic, moderator)
 
       assert {:ok, {_forum, _topic}} =
-               Topics.unsubscribe(actor(moderator), forum.short_name, topic.slug)
+               Topics.delete_topic_subscription(actor(moderator), forum.short_name, topic.slug)
 
       refute subscribed?(topic, moderator)
     end
@@ -308,25 +323,29 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+        Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{
           "deletion_reason" => "test hiding"
         })
 
       assert {:ok, {_forum, _topic}} =
-               Topics.unsubscribe(actor(user), forum.short_name, topic.slug)
+               Topics.delete_topic_subscription(actor(user), forum.short_name, topic.slug)
 
       refute subscribed?(topic, user)
     end
 
     test "an unknown forum slug is unauthorized for a regular user" do
-      assert Topics.unsubscribe(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.delete_topic_subscription(
+               actor(confirmed_user_fixture()),
+               "nonexistent",
+               "whatever"
+             ) ==
                {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic slug is not found" do
       forum = forum_fixture()
 
-      assert Topics.unsubscribe(
+      assert Topics.delete_topic_subscription(
                actor(confirmed_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -339,28 +358,28 @@ defmodule Philomena.TopicsTest do
       forum = forum_fixture(access_level: "staff")
       topic = topic_fixture(forum)
 
-      assert Topics.unsubscribe(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.delete_topic_subscription(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
     end
   end
 
   describe "mark_topic_read/3" do
     test "an unknown forum slug is not found for a regular user" do
-      # Divergence from subscribe/3: the read path loads the forum with a plain
+      # Divergence from create_topic_subscription/3: the read path loads the forum with a plain
       # required load and no authorization, so a missing forum is :not_found
       # rather than the :unauthorized that subscribe returns for a regular user.
-      assert Topics.mark_topic_read(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.create_topic_read(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
                {:error, :not_found}
     end
 
     test "an unknown forum slug is not found for anonymous" do
-      assert Topics.mark_topic_read(actor(), "nonexistent", "whatever") == {:error, :not_found}
+      assert Topics.create_topic_read(actor(), "nonexistent", "whatever") == {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic slug is not found" do
       forum = forum_fixture()
 
-      assert Topics.mark_topic_read(
+      assert Topics.create_topic_read(
                actor(confirmed_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -370,19 +389,19 @@ defmodule Philomena.TopicsTest do
 
     test "a hidden topic is marked read by a regular user with no visibility gate" do
       # The read path loads the topic with show_hidden: true and runs no :show
-      # authorization, so a regular user reaches a hidden topic that subscribe/3
+      # authorization, so a regular user reaches a hidden topic that create_topic_subscription/3
       # would refuse with :unauthorized.
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
       moderator = moderator_user_fixture()
 
       {:ok, {_forum, topic}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+        Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{
           "deletion_reason" => "test hiding"
         })
 
       assert {:ok, loaded_topic} =
-               Topics.mark_topic_read(actor(user), forum.short_name, topic.slug)
+               Topics.create_topic_read(actor(user), forum.short_name, topic.slug)
 
       assert loaded_topic.id == topic.id
     end
@@ -392,7 +411,7 @@ defmodule Philomena.TopicsTest do
       forum = forum_fixture(access_level: "staff")
       topic = topic_fixture(forum)
 
-      assert Topics.mark_topic_read(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.create_topic_read(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
     end
 
@@ -409,7 +428,7 @@ defmodule Philomena.TopicsTest do
       {:ok, 1} = Notifications.broadcast_forum_post(author, topic, post)
       assert post_notification?(topic, user)
 
-      assert {:ok, _topic} = Topics.mark_topic_read(actor(user), forum.short_name, topic.slug)
+      assert {:ok, _topic} = Topics.create_topic_read(actor(user), forum.short_name, topic.slug)
       refute post_notification?(topic, user)
     end
 
@@ -419,7 +438,7 @@ defmodule Philomena.TopicsTest do
       refute post_notification?(topic, user)
 
       assert {:ok, loaded_topic} =
-               Topics.mark_topic_read(actor(user), forum.short_name, topic.slug)
+               Topics.create_topic_read(actor(user), forum.short_name, topic.slug)
 
       assert loaded_topic.id == topic.id
     end
@@ -428,11 +447,11 @@ defmodule Philomena.TopicsTest do
       # clear_topic_notification/2 forwards nil to the notification clear
       # service, which returns {:ok, 0}, so an anonymous actor reaching
       # a visible topic is a successful no-op rather than a crash (contrast
-      # subscribe/3, where the anonymous actor's nil user raises BadMapError in
+      # create_topic_subscription/3, where the anonymous actor's nil user raises BadMapError in
       # create_subscription).
       {forum, topic} = visible_topic()
 
-      assert {:ok, loaded_topic} = Topics.mark_topic_read(actor(), forum.short_name, topic.slug)
+      assert {:ok, loaded_topic} = Topics.create_topic_read(actor(), forum.short_name, topic.slug)
       assert loaded_topic.id == topic.id
     end
   end
@@ -444,7 +463,7 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert Topics.hide_topic(actor(user), forum.short_name, topic.slug, %{
+      assert Topics.create_topic_hide(actor(user), forum.short_name, topic.slug, %{
                "deletion_reason" => "Spam"
              }) ==
                {:error, :unauthorized}
@@ -458,7 +477,7 @@ defmodule Philomena.TopicsTest do
       # crash on the nil actor.
       {forum, topic} = visible_topic()
 
-      assert Topics.hide_topic(actor(), forum.short_name, topic.slug, %{
+      assert Topics.create_topic_hide(actor(), forum.short_name, topic.slug, %{
                "deletion_reason" => "Spam"
              }) ==
                {:error, :unauthorized}
@@ -467,14 +486,19 @@ defmodule Philomena.TopicsTest do
     end
 
     test "an unknown forum is unauthorized for a regular user" do
-      assert Topics.hide_topic(actor(confirmed_user_fixture()), "nonexistent", "whatever", "Spam") ==
+      assert Topics.create_topic_hide(
+               actor(confirmed_user_fixture()),
+               "nonexistent",
+               "whatever",
+               "Spam"
+             ) ==
                {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.hide_topic(
+      assert Topics.create_topic_hide(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic",
@@ -488,7 +512,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{
                  "deletion_reason" => "Rule violation"
                })
 
@@ -506,7 +530,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, _} =
-               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{
                  "deletion_reason" => "Rule violation"
                })
 
@@ -518,7 +542,7 @@ defmodule Philomena.TopicsTest do
     end
 
     test "a missing reason errors and writes no moderation log" do
-      # hide_changeset requires deletion_reason; hide_topic/4 surfaces the
+      # hide_changeset requires deletion_reason; create_topic_hide/4 surfaces the
       # normalized changeset failure as {:error, forum, topic} (both the loaded
       # forum and the pre-update topic) so the controller can still redirect.
       moderator = moderator_user_fixture()
@@ -526,7 +550,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:error, blank_forum, blank_topic} =
-               Topics.hide_topic(actor(moderator), forum.short_name, topic.slug, %{})
+               Topics.create_topic_hide(actor(moderator), forum.short_name, topic.slug, %{})
 
       assert blank_forum.id == forum.id
       assert blank_topic.id == topic.id
@@ -534,7 +558,12 @@ defmodule Philomena.TopicsTest do
       {nil_forum, nil_topic} = visible_topic()
 
       assert {:error, error_forum, error_topic} =
-               Topics.hide_topic(actor(moderator), nil_forum.short_name, nil_topic.slug, %{})
+               Topics.create_topic_hide(
+                 actor(moderator),
+                 nil_forum.short_name,
+                 nil_topic.slug,
+                 %{}
+               )
 
       assert error_forum.id == nil_forum.id
       assert error_topic.id == nil_topic.id
@@ -547,13 +576,13 @@ defmodule Philomena.TopicsTest do
 
   describe "unhide_topic/3" do
     test "a regular user cannot reach a hidden topic through the visibility loader" do
-      # unhide_topic/3 loads with show_hidden: false, so a hidden topic falls to
+      # delete_topic_hide/3 loads with show_hidden: false, so a hidden topic falls to
       # the topic :show check, which a regular user fails before :hide is even
       # considered.
       user = confirmed_user_fixture()
       {forum, topic} = hidden_topic()
 
-      assert Topics.unhide_topic(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.delete_topic_hide(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(topic).hidden_from_users
@@ -562,19 +591,21 @@ defmodule Philomena.TopicsTest do
     test "an anonymous actor cannot reach a hidden topic" do
       {forum, topic} = hidden_topic()
 
-      assert Topics.unhide_topic(actor(), forum.short_name, topic.slug) == {:error, :unauthorized}
+      assert Topics.delete_topic_hide(actor(), forum.short_name, topic.slug) ==
+               {:error, :unauthorized}
+
       assert Repo.reload!(topic).hidden_from_users
     end
 
     test "an unknown forum is unauthorized for a regular user" do
-      assert Topics.unhide_topic(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.delete_topic_hide(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
                {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.unhide_topic(
+      assert Topics.delete_topic_hide(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -590,7 +621,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = hidden_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.unhide_topic(actor(moderator), forum.short_name, topic.slug)
+               Topics.delete_topic_hide(actor(moderator), forum.short_name, topic.slug)
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id
@@ -605,7 +636,7 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
       {forum, topic} = hidden_topic()
 
-      assert {:ok, _} = Topics.unhide_topic(actor(moderator), forum.short_name, topic.slug)
+      assert {:ok, _} = Topics.delete_topic_hide(actor(moderator), forum.short_name, topic.slug)
 
       log = latest_moderation_log!()
       assert log.user_id == moderator.id
@@ -622,7 +653,7 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert Topics.lock_topic(actor(user), forum.short_name, topic.slug, %{
+      assert Topics.create_topic_lock(actor(user), forum.short_name, topic.slug, %{
                "lock_reason" => "Off topic"
              }) ==
                {:error, :unauthorized}
@@ -636,7 +667,7 @@ defmodule Philomena.TopicsTest do
       # crash on the nil actor.
       {forum, topic} = visible_topic()
 
-      assert Topics.lock_topic(actor(), forum.short_name, topic.slug, %{
+      assert Topics.create_topic_lock(actor(), forum.short_name, topic.slug, %{
                "lock_reason" => "Off topic"
              }) ==
                {:error, :unauthorized}
@@ -645,7 +676,7 @@ defmodule Philomena.TopicsTest do
     end
 
     test "an unknown forum is unauthorized for a regular user" do
-      assert Topics.lock_topic(
+      assert Topics.create_topic_lock(
                actor(confirmed_user_fixture()),
                "nonexistent",
                "whatever",
@@ -656,7 +687,7 @@ defmodule Philomena.TopicsTest do
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.lock_topic(
+      assert Topics.create_topic_lock(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic",
@@ -669,7 +700,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.lock_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_lock(actor(moderator), forum.short_name, topic.slug, %{
                  "lock_reason" => "Off topic"
                })
 
@@ -687,7 +718,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, _} =
-               Topics.lock_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_lock(actor(moderator), forum.short_name, topic.slug, %{
                  "lock_reason" => "Off topic"
                })
 
@@ -699,14 +730,14 @@ defmodule Philomena.TopicsTest do
     end
 
     test "a blank lock reason yields the 3-tuple error and writes no moderation log" do
-      # lock_changeset requires lock_reason; lock_topic/4 surfaces the rejected
+      # lock_changeset requires lock_reason; create_topic_lock/4 surfaces the rejected
       # changeset as {:error, forum, topic} (both the loaded forum and the
       # pre-update topic) so the controller can still redirect.
       moderator = moderator_user_fixture()
       {forum, topic} = visible_topic()
 
       assert {:error, error_forum, error_topic} =
-               Topics.lock_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_lock(actor(moderator), forum.short_name, topic.slug, %{
                  "lock_reason" => ""
                })
 
@@ -725,7 +756,7 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = locked_topic()
 
-      assert Topics.unlock_topic(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.delete_topic_lock(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(topic).locked_at != nil
@@ -734,19 +765,21 @@ defmodule Philomena.TopicsTest do
     test "an anonymous actor cannot unlock a topic" do
       {forum, topic} = locked_topic()
 
-      assert Topics.unlock_topic(actor(), forum.short_name, topic.slug) == {:error, :unauthorized}
+      assert Topics.delete_topic_lock(actor(), forum.short_name, topic.slug) ==
+               {:error, :unauthorized}
+
       assert Repo.reload!(topic).locked_at != nil
     end
 
     test "an unknown forum is unauthorized for a regular user" do
-      assert Topics.unlock_topic(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.delete_topic_lock(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
                {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.unlock_topic(
+      assert Topics.delete_topic_lock(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -759,7 +792,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = locked_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.unlock_topic(actor(moderator), forum.short_name, topic.slug)
+               Topics.delete_topic_lock(actor(moderator), forum.short_name, topic.slug)
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id
@@ -774,7 +807,7 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
       {forum, topic} = locked_topic()
 
-      assert {:ok, _} = Topics.unlock_topic(actor(moderator), forum.short_name, topic.slug)
+      assert {:ok, _} = Topics.delete_topic_lock(actor(moderator), forum.short_name, topic.slug)
 
       log = latest_moderation_log!()
       assert log.user_id == moderator.id
@@ -791,7 +824,7 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert Topics.stick_topic(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.create_topic_stick(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(topic).sticky
@@ -804,14 +837,15 @@ defmodule Philomena.TopicsTest do
       # crash on the nil actor.
       {forum, topic} = visible_topic()
 
-      assert Topics.stick_topic(actor(), forum.short_name, topic.slug) == {:error, :unauthorized}
+      assert Topics.create_topic_stick(actor(), forum.short_name, topic.slug) ==
+               {:error, :unauthorized}
 
       refute Repo.reload!(topic).sticky
       assert moderation_log_count() == 0
     end
 
     test "an unknown forum is unauthorized for a regular user" do
-      assert Topics.stick_topic(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.create_topic_stick(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -820,7 +854,7 @@ defmodule Philomena.TopicsTest do
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.stick_topic(
+      assert Topics.create_topic_stick(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -835,7 +869,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.stick_topic(actor(moderator), forum.short_name, topic.slug)
+               Topics.create_topic_stick(actor(moderator), forum.short_name, topic.slug)
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id
@@ -847,7 +881,7 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert {:ok, _} = Topics.stick_topic(actor(moderator), forum.short_name, topic.slug)
+      assert {:ok, _} = Topics.create_topic_stick(actor(moderator), forum.short_name, topic.slug)
 
       log = latest_moderation_log!()
       assert log.user_id == moderator.id
@@ -864,7 +898,7 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = sticky_topic()
 
-      assert Topics.unstick_topic(actor(user), forum.short_name, topic.slug) ==
+      assert Topics.delete_topic_stick(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(topic).sticky
@@ -874,7 +908,7 @@ defmodule Philomena.TopicsTest do
     test "an anonymous actor cannot unstick a topic" do
       {forum, topic} = sticky_topic()
 
-      assert Topics.unstick_topic(actor(), forum.short_name, topic.slug) ==
+      assert Topics.delete_topic_stick(actor(), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(topic).sticky
@@ -882,7 +916,7 @@ defmodule Philomena.TopicsTest do
     end
 
     test "an unknown forum is unauthorized for a regular user" do
-      assert Topics.unstick_topic(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Topics.delete_topic_stick(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -891,7 +925,7 @@ defmodule Philomena.TopicsTest do
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.unstick_topic(
+      assert Topics.delete_topic_stick(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -906,7 +940,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = sticky_topic()
 
       assert {:ok, {loaded_forum, loaded_topic}} =
-               Topics.unstick_topic(actor(moderator), forum.short_name, topic.slug)
+               Topics.delete_topic_stick(actor(moderator), forum.short_name, topic.slug)
 
       assert loaded_forum.id == forum.id
       assert loaded_topic.id == topic.id
@@ -922,7 +956,7 @@ defmodule Philomena.TopicsTest do
       refute Repo.reload!(topic).sticky
 
       assert {:ok, {_forum, _topic}} =
-               Topics.unstick_topic(actor(moderator), forum.short_name, topic.slug)
+               Topics.delete_topic_stick(actor(moderator), forum.short_name, topic.slug)
 
       refute Repo.reload!(topic).sticky
     end
@@ -931,7 +965,7 @@ defmodule Philomena.TopicsTest do
       moderator = moderator_user_fixture()
       {forum, topic} = sticky_topic()
 
-      assert {:ok, _} = Topics.unstick_topic(actor(moderator), forum.short_name, topic.slug)
+      assert {:ok, _} = Topics.delete_topic_stick(actor(moderator), forum.short_name, topic.slug)
 
       log = latest_moderation_log!()
       assert log.user_id == moderator.id
@@ -946,7 +980,7 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert Topics.move_topic(actor(user), forum.short_name, topic.slug, %{
+      assert Topics.create_topic_move(actor(user), forum.short_name, topic.slug, %{
                "target_forum" => "garbage"
              }) == {:error, :not_found}
 
@@ -960,7 +994,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
       target = forum_fixture()
 
-      assert Topics.move_topic(actor(), forum.short_name, topic.slug, %{
+      assert Topics.create_topic_move(actor(), forum.short_name, topic.slug, %{
                "target_forum" => target.short_name
              }) == {:error, :unauthorized}
 
@@ -971,16 +1005,21 @@ defmodule Philomena.TopicsTest do
     test "an unknown source forum is not-found for a regular user" do
       target = forum_fixture()
 
-      assert Topics.move_topic(actor(confirmed_user_fixture()), "nonexistent", "whatever", %{
-               "target_forum" => target.short_name
-             }) == {:error, :not_found}
+      assert Topics.create_topic_move(
+               actor(confirmed_user_fixture()),
+               "nonexistent",
+               "whatever",
+               %{
+                 "target_forum" => target.short_name
+               }
+             ) == {:error, :not_found}
     end
 
     test "an existing source forum with an unknown topic is not found" do
       forum = forum_fixture()
       target = forum_fixture()
 
-      assert Topics.move_topic(
+      assert Topics.create_topic_move(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic",
@@ -1000,7 +1039,7 @@ defmodule Philomena.TopicsTest do
       assert Repo.reload!(target).topic_count == 0
 
       assert {:ok, {new_forum, moved_topic}} =
-               Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_move(actor(moderator), forum.short_name, topic.slug, %{
                  "target_forum" => target.short_name
                })
 
@@ -1019,7 +1058,7 @@ defmodule Philomena.TopicsTest do
       target = forum_fixture()
 
       assert {:ok, _} =
-               Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_move(actor(moderator), forum.short_name, topic.slug, %{
                  "target_forum" => target.short_name
                })
 
@@ -1035,7 +1074,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:error, :not_found} =
-               Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{})
+               Topics.create_topic_move(actor(moderator), forum.short_name, topic.slug, %{})
 
       assert Repo.reload!(topic).forum_id == forum.id
       assert moderation_log_count() == 0
@@ -1046,7 +1085,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:error, :not_found} =
-               Topics.move_topic(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.create_topic_move(actor(moderator), forum.short_name, topic.slug, %{
                  "target_forum" => "nonexistent-forum"
                })
 
@@ -1060,7 +1099,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, %TopicPage{} = page} =
-               Topics.load_topic_page(actor(), forum.short_name, topic.slug, nil, @first_page)
+               Topics.show_topic_page(actor(), forum.short_name, topic.slug, nil, @first_page)
 
       assert page.forum.id == forum.id
       assert page.topic.id == topic.id
@@ -1104,7 +1143,7 @@ defmodule Philomena.TopicsTest do
         |> Repo.update!()
 
       assert {:ok, page} =
-               Topics.load_topic_page(
+               Topics.show_topic_page(
                  actor(viewer),
                  forum.short_name,
                  topic.slug,
@@ -1134,7 +1173,7 @@ defmodule Philomena.TopicsTest do
         |> Repo.update!()
 
       assert {:ok, page} =
-               Topics.load_topic_page(
+               Topics.show_topic_page(
                  actor(moderator_user_fixture()),
                  forum.short_name,
                  topic.slug,
@@ -1151,12 +1190,12 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = hidden_topic()
 
-      assert Topics.load_topic_page(actor(user), forum.short_name, topic.slug, nil, @first_page) ==
+      assert Topics.show_topic_page(actor(user), forum.short_name, topic.slug, nil, @first_page) ==
                {:error, :unauthorized}
     end
 
     test "an unknown forum is unauthorized for a regular user" do
-      assert Topics.load_topic_page(
+      assert Topics.show_topic_page(
                actor(confirmed_user_fixture()),
                "nonexistent",
                "whatever",
@@ -1168,7 +1207,7 @@ defmodule Philomena.TopicsTest do
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.load_topic_page(
+      assert Topics.show_topic_page(
                actor(confirmed_user_fixture()),
                forum.short_name,
                "nonexistent-topic",
@@ -1188,7 +1227,7 @@ defmodule Philomena.TopicsTest do
       assert last.topic_position == 25
 
       assert {:ok, page} =
-               Topics.load_topic_page(
+               Topics.show_topic_page(
                  actor(),
                  forum.short_name,
                  topic.slug,
@@ -1209,7 +1248,7 @@ defmodule Philomena.TopicsTest do
       {:ok, _} = Topics.create_subscription(topic, user)
 
       assert {:ok, page} =
-               Topics.load_topic_page(actor(user), forum.short_name, topic.slug, nil, @first_page)
+               Topics.show_topic_page(actor(user), forum.short_name, topic.slug, nil, @first_page)
 
       assert page.watching
     end
@@ -1225,7 +1264,7 @@ defmodule Philomena.TopicsTest do
       assert post_notification?(topic, user)
 
       assert {:ok, _page} =
-               Topics.load_topic_page(actor(user), forum.short_name, topic.slug, nil, @first_page)
+               Topics.show_topic_page(actor(user), forum.short_name, topic.slug, nil, @first_page)
 
       refute post_notification?(topic, user)
     end
@@ -1235,11 +1274,11 @@ defmodule Philomena.TopicsTest do
     test "a banned actor is rejected before any loading" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Topics.load_new_topic(actor, "nonexistent") == {:error, :ban}
+      assert Topics.new_topic(actor, "nonexistent") == {:error, :ban}
     end
 
     test "an actor without a fingerprint is rejected before loading" do
-      assert Topics.load_new_topic(actor(nil, fingerprint: nil), "nonexistent") ==
+      assert Topics.new_topic(actor(nil, fingerprint: nil), "nonexistent") ==
                {:error, :unauthorized}
     end
 
@@ -1247,7 +1286,7 @@ defmodule Philomena.TopicsTest do
       forum = forum_fixture()
 
       assert {:ok, {loaded_forum, changeset}} =
-               Topics.load_new_topic(actor(confirmed_user_fixture()), forum.short_name)
+               Topics.new_topic(actor(confirmed_user_fixture()), forum.short_name)
 
       assert loaded_forum.id == forum.id
       assert %Ecto.Changeset{} = changeset
@@ -1256,7 +1295,7 @@ defmodule Philomena.TopicsTest do
     end
 
     test "an unknown forum is unauthorized for a regular actor" do
-      assert Topics.load_new_topic(actor(confirmed_user_fixture()), "nonexistent") ==
+      assert Topics.new_topic(actor(confirmed_user_fixture()), "nonexistent") ==
                {:error, :not_found}
     end
   end
@@ -1395,7 +1434,7 @@ defmodule Philomena.TopicsTest do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
 
-      assert Topics.update_topic_title(actor(user), forum.short_name, topic.slug, %{
+      assert Topics.update_topic(actor(user), forum.short_name, topic.slug, %{
                "title" => "New Title"
              }) == {:error, :unauthorized}
 
@@ -1407,7 +1446,7 @@ defmodule Philomena.TopicsTest do
       {forum, topic} = visible_topic()
 
       assert {:ok, {loaded_forum, updated_topic}} =
-               Topics.update_topic_title(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.update_topic(actor(moderator), forum.short_name, topic.slug, %{
                  "title" => "Renamed topic"
                })
 
@@ -1424,7 +1463,7 @@ defmodule Philomena.TopicsTest do
       original_title = topic.title
 
       assert {:error, error_forum, error_topic} =
-               Topics.update_topic_title(actor(moderator), forum.short_name, topic.slug, %{
+               Topics.update_topic(actor(moderator), forum.short_name, topic.slug, %{
                  "title" => ""
                })
 
@@ -1436,7 +1475,7 @@ defmodule Philomena.TopicsTest do
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Topics.update_topic_title(
+      assert Topics.update_topic(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic",

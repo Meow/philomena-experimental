@@ -24,7 +24,7 @@ defmodule PhilomenaWeb.TagChange.RevertControllerTest do
     image = image_fixture()
 
     {:ok, _} =
-      Images.update_tags(actor(user), image.id, %{
+      Images.update_image_tags(actor(user), image.id, %{
         "old_tag_input" => "safe",
         "tag_input" => "safe, added test tag, other added tag"
       })

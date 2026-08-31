@@ -28,7 +28,7 @@ defmodule Philomena.TagChangeRevertWorkerTest do
     arrangement_actor = actor(%{user | bypass_rate_limits: true})
 
     assert {:ok, result} =
-             Images.update_tags(
+             Images.update_image_tags(
                arrangement_actor,
                image.id,
                %{"old_tag_input" => old_input, "tag_input" => new_input}

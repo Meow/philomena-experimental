@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with {:ok, reports} <- Reports.load_user_reports(conn.assigns.actor, conn.assigns.scrivener) do
+    with {:ok, reports} <- Reports.list_user_reports(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html", title: "My Reports", reports: reports)
     end
   end

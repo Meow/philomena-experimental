@@ -111,21 +111,27 @@ defmodule Philomena.NotificationsTest do
       {:ok, _subscription} = Channels.create_subscription(channel, subscriber)
       assert {:ok, 1} = Notifications.broadcast_channel_live(channel)
 
-      assert {:ok, notifications} = Notifications.load_unread(actor(subscriber), @pagination)
+      assert {:ok, notifications} =
+               Notifications.list_unread_notifications(actor(subscriber), @pagination)
+
       assert Keyword.keys(notifications) == Enum.map(@categories, &String.to_existing_atom/1)
       assert [%ChannelLiveNotification{}] = notifications[:channel_live].entries
       assert Notifications.total_unread_count(actor(subscriber)) == 1
 
-      assert {:ok, other_notifications} = Notifications.load_unread(actor(other), @pagination)
+      assert {:ok, other_notifications} =
+               Notifications.list_unread_notifications(actor(other), @pagination)
+
       assert Enum.all?(other_notifications, fn {_category, page} -> page.entries == [] end)
       assert Notifications.total_unread_count(actor(other)) == 0
     end
 
     test "defines anonymous behavior explicitly" do
       assert Notifications.total_unread_count(actor()) == 0
-      assert Notifications.load_unread(actor(), @pagination) == {:error, :unauthorized}
 
-      assert Notifications.load_unread_category(actor(), "forum_post", @pagination) ==
+      assert Notifications.list_unread_notifications(actor(), @pagination) ==
+               {:error, :unauthorized}
+
+      assert Notifications.show_unread_notification_category(actor(), "forum_post", @pagination) ==
                {:error, :unauthorized}
     end
 
@@ -139,7 +145,7 @@ defmodule Philomena.NotificationsTest do
       end
 
       assert {:ok, {:channel_live, page}} =
-               Notifications.load_unread_category(
+               Notifications.show_unread_notification_category(
                  actor(subscriber),
                  "channel_live",
                  page: 2,
@@ -149,7 +155,11 @@ defmodule Philomena.NotificationsTest do
       assert length(page.entries) == 1
       assert page.page_number == 2
 
-      assert Notifications.load_unread_category(actor(subscriber), "unknown", @pagination) ==
+      assert Notifications.show_unread_notification_category(
+               actor(subscriber),
+               "unknown",
+               @pagination
+             ) ==
                {:error, :not_found}
     end
   end

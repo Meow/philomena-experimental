@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Image.Comment.HideControllerTest do
     comment = comment_fixture(image)
 
     {:ok, comment} =
-      Comments.hide_comment(
+      Comments.create_comment_hide(
         actor(moderator_user_fixture()),
         image.id,
         comment.id,

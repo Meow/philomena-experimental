@@ -44,7 +44,7 @@ defmodule Philomena.ChannelsTest do
       unfetched = channel_fixture()
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), true, %{}, @pagination)
+        Channels.list_channels(actor(), true, %{}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
 
@@ -57,7 +57,7 @@ defmodule Philomena.ChannelsTest do
       nsfw = listed_channel_fixture(%{}, %{nsfw: true})
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), false, %{}, @pagination)
+        Channels.list_channels(actor(), false, %{}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
 
@@ -69,7 +69,7 @@ defmodule Philomena.ChannelsTest do
       nsfw = listed_channel_fixture(%{}, %{nsfw: true})
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), true, %{}, @pagination)
+        Channels.list_channels(actor(), true, %{}, @pagination)
 
       assert nsfw.id in Enum.map(page.entries, & &1.id)
     end
@@ -79,7 +79,7 @@ defmodule Philomena.ChannelsTest do
       live = listed_channel_fixture(%{}, %{is_live: true, title: "aaa live"})
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), true, %{}, @pagination)
+        Channels.list_channels(actor(), true, %{}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
 
@@ -92,7 +92,7 @@ defmodule Philomena.ChannelsTest do
       other = listed_channel_fixture(%{}, %{title: "Cat Stream"})
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), true, %{"cq" => "Pony"}, @pagination)
+        Channels.list_channels(actor(), true, %{"cq" => "Pony"}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
 
@@ -105,7 +105,7 @@ defmodule Philomena.ChannelsTest do
       other = listed_channel_fixture()
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), true, %{"cq" => "searchable"}, @pagination)
+        Channels.list_channels(actor(), true, %{"cq" => "searchable"}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
 
@@ -119,7 +119,7 @@ defmodule Philomena.ChannelsTest do
       other = listed_channel_fixture()
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), true, %{"cq" => "cqsearchtarget"}, @pagination)
+        Channels.list_channels(actor(), true, %{"cq" => "cqsearchtarget"}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
 
@@ -132,7 +132,7 @@ defmodule Philomena.ChannelsTest do
       listed_channel_fixture(%{"artist_tag" => tag.name})
 
       {:ok, page, _subscriptions, _changeset} =
-        Channels.load_channels(actor(), true, %{}, @pagination)
+        Channels.list_channels(actor(), true, %{}, @pagination)
 
       [channel | _] = page.entries
 
@@ -146,12 +146,12 @@ defmodule Philomena.ChannelsTest do
       {:ok, _subscription} = Channels.create_subscription(channel, user)
 
       {:ok, _page, subscriptions, _changeset} =
-        Channels.load_channels(actor(user), true, %{}, @pagination)
+        Channels.list_channels(actor(user), true, %{}, @pagination)
 
       assert subscriptions == %{channel.id => true}
 
       {:ok, _page, subscriptions, _changeset} =
-        Channels.load_channels(actor(other_user), true, %{}, @pagination)
+        Channels.list_channels(actor(other_user), true, %{}, @pagination)
 
       assert subscriptions == %{}
     end
@@ -161,7 +161,7 @@ defmodule Philomena.ChannelsTest do
     test "an anonymous visitor visits a channel" do
       channel = channel_fixture()
 
-      assert {:ok, loaded} = Channels.visit_channel(actor(), to_string(channel.id))
+      assert {:ok, loaded} = Channels.show_channel(actor(), to_string(channel.id))
       assert loaded.id == channel.id
     end
 
@@ -169,33 +169,33 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:ok, loaded} =
-               Channels.visit_channel(actor(confirmed_user_fixture()), to_string(channel.id))
+               Channels.show_channel(actor(confirmed_user_fixture()), to_string(channel.id))
 
       assert loaded.id == channel.id
     end
 
     test "an unknown well-formed id is not found for an anonymous visitor" do
-      assert Channels.visit_channel(actor(), "2147483647") == {:error, :not_found}
+      assert Channels.show_channel(actor(), "2147483647") == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a regular user" do
-      assert Channels.visit_channel(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Channels.show_channel(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      assert Channels.visit_channel(actor(admin_user_fixture()), "2147483647") ==
+      assert Channels.show_channel(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-integer id is not found" do
-      assert Channels.visit_channel(actor(), "not-an-integer") == {:error, :not_found}
+      assert Channels.show_channel(actor(), "not-an-integer") == {:error, :not_found}
     end
 
     test "offline and NSFW channels remain directly visitable" do
       channel = listed_channel_fixture(%{}, %{is_live: false, nsfw: true})
 
-      assert {:ok, loaded} = Channels.visit_channel(actor(), to_string(channel.id))
+      assert {:ok, loaded} = Channels.show_channel(actor(), to_string(channel.id))
       assert loaded.id == channel.id
     end
   end
@@ -204,7 +204,7 @@ defmodule Philomena.ChannelsTest do
     test "an anonymous actor is unauthorized" do
       channel = channel_fixture()
 
-      assert Channels.clear_notification(actor(), to_string(channel.id)) ==
+      assert Channels.create_channel_read(actor(), to_string(channel.id)) ==
                {:error, :unauthorized}
     end
 
@@ -212,18 +212,21 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:ok, loaded} =
-               Channels.clear_notification(actor(confirmed_user_fixture()), to_string(channel.id))
+               Channels.create_channel_read(
+                 actor(confirmed_user_fixture()),
+                 to_string(channel.id)
+               )
 
       assert loaded.id == channel.id
     end
 
     test "an unknown well-formed id is not found, with no authorization involved" do
-      assert Channels.clear_notification(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Channels.create_channel_read(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-integer id is not found" do
-      assert Channels.clear_notification(actor(confirmed_user_fixture()), "not-an-integer") ==
+      assert Channels.create_channel_read(actor(confirmed_user_fixture()), "not-an-integer") ==
                {:error, :not_found}
     end
   end
@@ -308,7 +311,7 @@ defmodule Philomena.ChannelsTest do
       channel = channel_fixture()
 
       assert {:ok, {%Channel{} = loaded, %Ecto.Changeset{} = changeset}} =
-               Channels.load_channel_for_edit(
+               Channels.edit_channel(
                  actor(moderator_user_fixture()),
                  to_string(channel.id)
                )
@@ -320,7 +323,7 @@ defmodule Philomena.ChannelsTest do
     test "a regular user is unauthorized" do
       channel = channel_fixture()
 
-      assert Channels.load_channel_for_edit(
+      assert Channels.edit_channel(
                actor(confirmed_user_fixture()),
                to_string(channel.id)
              ) ==
@@ -328,15 +331,15 @@ defmodule Philomena.ChannelsTest do
     end
 
     test "a non-integer id is not found" do
-      assert Channels.load_channel_for_edit(actor(moderator_user_fixture()), "not-an-integer") ==
+      assert Channels.edit_channel(actor(moderator_user_fixture()), "not-an-integer") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for every actor" do
-      assert Channels.load_channel_for_edit(actor(moderator_user_fixture()), "2147483647") ==
+      assert Channels.edit_channel(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Channels.load_channel_for_edit(actor(admin_user_fixture()), "2147483647") ==
+      assert Channels.edit_channel(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -446,19 +449,26 @@ defmodule Philomena.ChannelsTest do
     test "an anonymous actor cannot mutate subscription state" do
       channel = channel_fixture()
 
-      assert Channels.subscribe(actor(), to_string(channel.id)) == {:error, :unauthorized}
-      assert Channels.unsubscribe(actor(), to_string(channel.id)) == {:error, :unauthorized}
+      assert Channels.create_channel_subscription(actor(), to_string(channel.id)) ==
+               {:error, :unauthorized}
+
+      assert Channels.delete_channel_subscription(actor(), to_string(channel.id)) ==
+               {:error, :unauthorized}
     end
 
     test "a user subscribes to and then unsubscribes from a channel" do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert {:ok, subscribed} = Channels.subscribe(actor(user), to_string(channel.id))
+      assert {:ok, subscribed} =
+               Channels.create_channel_subscription(actor(user), to_string(channel.id))
+
       assert subscribed.id == channel.id
       assert Channels.subscribed?(channel, user)
 
-      assert {:ok, unsubscribed} = Channels.unsubscribe(actor(user), to_string(channel.id))
+      assert {:ok, unsubscribed} =
+               Channels.delete_channel_subscription(actor(user), to_string(channel.id))
+
       assert unsubscribed.id == channel.id
       refute Channels.subscribed?(channel, user)
     end
@@ -467,8 +477,8 @@ defmodule Philomena.ChannelsTest do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert {:ok, _} = Channels.subscribe(actor(user), to_string(channel.id))
-      assert {:ok, _} = Channels.subscribe(actor(user), to_string(channel.id))
+      assert {:ok, _} = Channels.create_channel_subscription(actor(user), to_string(channel.id))
+      assert {:ok, _} = Channels.create_channel_subscription(actor(user), to_string(channel.id))
       assert Channels.subscribed?(channel, user)
     end
 
@@ -476,27 +486,33 @@ defmodule Philomena.ChannelsTest do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert {:ok, loaded} = Channels.unsubscribe(actor(user), to_string(channel.id))
+      assert {:ok, loaded} =
+               Channels.delete_channel_subscription(actor(user), to_string(channel.id))
+
       assert loaded.id == channel.id
     end
 
     test "an unknown well-formed id is not found for every actor" do
-      assert Channels.subscribe(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Channels.create_channel_subscription(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Channels.subscribe(actor(admin_user_fixture()), "2147483647") == {:error, :not_found}
+      assert Channels.create_channel_subscription(actor(admin_user_fixture()), "2147483647") ==
+               {:error, :not_found}
     end
 
     test "a non-integer id is not found on subscribe" do
-      assert Channels.subscribe(actor(confirmed_user_fixture()), "not-an-integer") ==
+      assert Channels.create_channel_subscription(
+               actor(confirmed_user_fixture()),
+               "not-an-integer"
+             ) ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found on unsubscribe" do
-      assert Channels.unsubscribe(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Channels.delete_channel_subscription(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Channels.unsubscribe(actor(admin_user_fixture()), "2147483647") ==
+      assert Channels.delete_channel_subscription(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
@@ -504,10 +520,16 @@ defmodule Philomena.ChannelsTest do
       user = confirmed_user_fixture()
       channel = channel_fixture()
 
-      assert {:ok, _} = Channels.subscribe(actor(user, ban: %{}), to_string(channel.id))
+      assert {:ok, _} =
+               Channels.create_channel_subscription(actor(user, ban: %{}), to_string(channel.id))
+
       assert Channels.subscribed?(channel, user)
 
-      assert {:ok, _} = Channels.unsubscribe(actor(user, fingerprint: nil), to_string(channel.id))
+      assert {:ok, _} =
+               Channels.delete_channel_subscription(
+                 actor(user, fingerprint: nil),
+                 to_string(channel.id)
+               )
 
       refute Channels.subscribed?(channel, user)
     end

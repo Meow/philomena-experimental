@@ -4,7 +4,7 @@ defmodule PhilomenaWeb.Api.Json.Search.FilterController do
   alias Philomena.Filters
 
   def index(conn, params) do
-    case Filters.search_filters(conn.assigns.actor, params["q"], conn.assigns.pagination) do
+    case Filters.query_filters(conn.assigns.actor, params["q"], conn.assigns.pagination) do
       {:ok, filters} ->
         conn
         |> put_view(PhilomenaWeb.Api.Json.FilterView)

@@ -12,7 +12,7 @@ defmodule PhilomenaWeb.Topic.Post.HideController do
         "post_id" => post_id,
         "post" => post_params
       }) do
-    case Posts.hide_post(conn.assigns.actor, forum_id, topic_id, post_id, post_params) do
+    case Posts.create_post_hide(conn.assigns.actor, forum_id, topic_id, post_id, post_params) do
       {:ok, post} ->
         conn
         |> put_flash(:info, "Post successfully deleted.")
@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.Topic.Post.HideController do
   end
 
   def delete(conn, %{"forum_id" => forum_id, "topic_id" => topic_id, "post_id" => post_id}) do
-    case Posts.unhide_post(conn.assigns.actor, forum_id, topic_id, post_id) do
+    case Posts.delete_post_hide(conn.assigns.actor, forum_id, topic_id, post_id) do
       {:ok, post} ->
         conn
         |> put_flash(:info, "Post successfully restored.")

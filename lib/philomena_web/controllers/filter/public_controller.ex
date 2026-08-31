@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Filter.PublicController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"filter_id" => id}) do
-    case Filters.make_filter_public(conn.assigns.actor, id) do
+    case Filters.create_filter_public(conn.assigns.actor, id) do
       {:ok, filter} ->
         conn
         |> put_flash(:info, "Successfully made filter public.")

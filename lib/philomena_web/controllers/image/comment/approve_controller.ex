@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Image.Comment.ApproveController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"image_id" => image_id, "comment_id" => comment_id}) do
-    case Comments.approve_comment(conn.assigns.actor, image_id, comment_id) do
+    case Comments.create_comment_approve(conn.assigns.actor, image_id, comment_id) do
       {:ok, comment} ->
         conn
         |> put_flash(:info, "Comment has been approved.")

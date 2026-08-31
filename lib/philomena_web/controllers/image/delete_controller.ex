@@ -9,7 +9,7 @@ defmodule PhilomenaWeb.Image.DeleteController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"image" => image_params} = params) do
-    case Images.hide_image(conn.assigns.actor, params["image_id"], image_params) do
+    case Images.create_image_hide(conn.assigns.actor, params["image_id"], image_params) do
       {:ok, _image} ->
         conn
         |> put_flash(:info, "Image successfully deleted.")
@@ -26,7 +26,7 @@ defmodule PhilomenaWeb.Image.DeleteController do
   end
 
   def update(conn, %{"image" => image_params} = params) do
-    case Images.update_hide_reason(conn.assigns.actor, params["image_id"], image_params) do
+    case Images.update_image_hide(conn.assigns.actor, params["image_id"], image_params) do
       {:ok, _image} ->
         conn
         |> put_flash(:info, "Deletion reason updated.")
@@ -43,7 +43,7 @@ defmodule PhilomenaWeb.Image.DeleteController do
   end
 
   def delete(conn, params) do
-    case Images.unhide_image(conn.assigns.actor, params["image_id"]) do
+    case Images.delete_image_hide(conn.assigns.actor, params["image_id"]) do
       {:ok, _image} ->
         conn
         |> put_flash(:info, "Image successfully restored.")

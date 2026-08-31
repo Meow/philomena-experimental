@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Conversation.Message.ApproveController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"conversation_id" => conversation_id, "message_id" => message_id}) do
-    case Conversations.approve_message(conn.assigns.actor, conversation_id, message_id) do
+    case Conversations.create_message_approve(conn.assigns.actor, conversation_id, message_id) do
       {:ok, _message} ->
         conn
         |> put_flash(:info, "Conversation message approved.")

@@ -14,7 +14,7 @@ defmodule PhilomenaWeb.Profile.ArtistLinkController do
 
   def new(conn, %{"profile_id" => slug}) do
     with {:ok, {user, changeset}} <-
-           ArtistLinks.load_artist_link_for_new(conn.assigns.actor, slug) do
+           ArtistLinks.new_artist_link(conn.assigns.actor, slug) do
       render(conn, "new.html", title: "New Artist Link", user: user, changeset: changeset)
     end
   end
@@ -39,7 +39,7 @@ defmodule PhilomenaWeb.Profile.ArtistLinkController do
 
   def show(conn, %{"profile_id" => slug, "id" => id}) do
     with {:ok, {user, artist_link}} <-
-           ArtistLinks.load_artist_link_for_show(conn.assigns.actor, slug, id) do
+           ArtistLinks.show_artist_link(conn.assigns.actor, slug, id) do
       render(conn, "show.html",
         title: "Showing Artist Link",
         user: user,
@@ -50,7 +50,7 @@ defmodule PhilomenaWeb.Profile.ArtistLinkController do
 
   def edit(conn, %{"profile_id" => slug, "id" => id}) do
     with {:ok, {artist_link, changeset}} <-
-           ArtistLinks.load_artist_link_for_edit(conn.assigns.actor, slug, id) do
+           ArtistLinks.edit_artist_link(conn.assigns.actor, slug, id) do
       render(conn, "edit.html",
         title: "Editing Artist Link",
         artist_link: artist_link,

@@ -18,14 +18,14 @@ defmodule Philomena.UsersConcurrencyTest do
     results =
       concurrently([
         fn ->
-          Users.register_user(%{
+          Users.create_registration(%{
             name: "concurrent-registration-one",
             email: email,
             password: valid_user_password()
           })
         end,
         fn ->
-          Users.register_user(%{
+          Users.create_registration(%{
             name: "concurrent-registration-two",
             email: email,
             password: valid_user_password()
@@ -91,7 +91,9 @@ defmodule Philomena.UsersConcurrencyTest do
     results =
       concurrently([
         fn ->
-          Tags.alias_tag(actor(admin_user_fixture()), source.slug, %{"target_tag" => target.name})
+          Tags.update_tag_alias(actor(admin_user_fixture()), source.slug, %{
+            "target_tag" => target.name
+          })
         end,
         fn -> Users.update_settings(actor(user), %{"watched_tag_list" => source.name}) end
       ])
@@ -108,7 +110,7 @@ defmodule Philomena.UsersConcurrencyTest do
     results =
       concurrently([
         fn -> Users.set_current_filter(user, filter) end,
-        fn -> Users.clear_recent_filters(actor) end
+        fn -> Users.delete_recent_filters(actor) end
       ])
 
     assert Enum.all?(results, &match?({:ok, %User{}}, &1))
@@ -124,8 +126,8 @@ defmodule Philomena.UsersConcurrencyTest do
 
     results =
       concurrently([
-        fn -> Users.admin_reactivate_user(admin, slug) end,
-        fn -> Users.admin_reactivate_user(admin, slug) end
+        fn -> Users.create_user_activation(admin, slug) end,
+        fn -> Users.create_user_activation(admin, slug) end
       ])
 
     assert Enum.count(results, &match?({:ok, %User{}}, &1)) == 1
@@ -138,8 +140,8 @@ defmodule Philomena.UsersConcurrencyTest do
 
     results =
       concurrently([
-        fn -> Users.admin_deactivate_user(admin, slug) end,
-        fn -> Users.admin_deactivate_user(admin, slug) end
+        fn -> Users.delete_user_activation(admin, slug) end,
+        fn -> Users.delete_user_activation(admin, slug) end
       ])
 
     assert Enum.count(results, &match?({:ok, %User{}}, &1)) == 1

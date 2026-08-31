@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Registration.TotpController do
 
     case user.encrypted_otp_secret do
       nil ->
-        {:ok, _user} = Users.setup_totp_secret(user)
+        {:ok, _user} = Users.edit_totp(user)
 
         # Redirect to have the conn pick up the changes
         redirect(conn, to: ~p"/registrations/totp/edit")

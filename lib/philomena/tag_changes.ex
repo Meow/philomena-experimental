@@ -157,9 +157,9 @@ defmodule Philomena.TagChanges do
       {:ok, %User{}}
 
   """
-  @spec full_revert_user_tag_changes(Actor.t(), String.t()) ::
+  @spec create_user_tag_change_revert(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def full_revert_user_tag_changes(%Actor{} = actor, slug) do
+  def create_user_tag_change_revert(%Actor{} = actor, slug) do
     with :ok <- authorize(actor, :revert, TagChange),
          {:ok, user} <- Users.load_profile(actor, slug) do
       Multi.new()
@@ -193,9 +193,9 @@ defmodule Philomena.TagChanges do
       {:ok, "203.0.113.5"}
 
   """
-  @spec full_revert_ip_tag_changes(Actor.t(), term()) ::
+  @spec create_ip_tag_change_revert(Actor.t(), term()) ::
           {:ok, String.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def full_revert_ip_tag_changes(%Actor{} = actor, ip) do
+  def create_ip_tag_change_revert(%Actor{} = actor, ip) do
     with :ok <- authorize(actor, :revert, TagChange),
          {:ok, ip} <- cast_ip(ip) do
       ip = to_string(ip)
@@ -231,10 +231,10 @@ defmodule Philomena.TagChanges do
       {:ok, "c123"}
 
   """
-  @spec full_revert_fingerprint_tag_changes(Actor.t(), term()) ::
+  @spec create_fingerprint_tag_change_revert(Actor.t(), term()) ::
           {:ok, String.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def full_revert_fingerprint_tag_changes(%Actor{} = actor, fingerprint) do
+  def create_fingerprint_tag_change_revert(%Actor{} = actor, fingerprint) do
     with :ok <- authorize(actor, :revert, TagChange),
          {:ok, fingerprint} <- cast_fingerprint(fingerprint) do
       Multi.new()
@@ -295,7 +295,7 @@ defmodule Philomena.TagChanges do
       {:error, :not_found}
 
   """
-  @spec image_tag_changes(
+  @spec list_image_tag_changes(
           Actor.t(),
           IntegerId.integer_id(),
           map(),
@@ -303,7 +303,7 @@ defmodule Philomena.TagChanges do
         ) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def image_tag_changes(%Actor{} = actor, image_id, params, pagination) do
+  def list_image_tag_changes(%Actor{} = actor, image_id, params, pagination) do
     with {:ok, image} <- Images.load_visible_image(actor, image_id) do
       search_tag_changes(actor, image, %{term: %{image_id: image.id}}, params, pagination)
     end
@@ -320,16 +320,16 @@ defmodule Philomena.TagChanges do
       {:ok, %TagChangePage{target: tag}, changeset}
 
   """
-  @spec tag_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+  @spec list_tag_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def tag_tag_changes(%Actor{} = actor, slug, params, pagination) when is_binary(slug) do
+  def list_tag_tag_changes(%Actor{} = actor, slug, params, pagination) when is_binary(slug) do
     with {:ok, tag} <- Tags.load_canonical_tag(actor, slug) do
       search_tag_changes(actor, tag, %{term: %{tag_id: tag.id}}, params, pagination)
     end
   end
 
-  def tag_tag_changes(%Actor{}, _slug, _params, _pagination), do: {:error, :not_found}
+  def list_tag_tag_changes(%Actor{}, _slug, _params, _pagination), do: {:error, :not_found}
 
   @doc """
   Searches tag changes attributed to the active user named by their profile slug.
@@ -344,10 +344,10 @@ defmodule Philomena.TagChanges do
       {:ok, %TagChangePage{target: user}, changeset}
 
   """
-  @spec user_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+  @spec list_user_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def user_tag_changes(%Actor{} = actor, slug, params, pagination) do
+  def list_user_tag_changes(%Actor{} = actor, slug, params, pagination) do
     with {:ok, user} <- Users.load_profile(actor, slug) do
       user_resource_filter =
         if authorize(actor, :show, :identity_metadata) == :ok do
@@ -381,10 +381,10 @@ defmodule Philomena.TagChanges do
       {:error, :not_found}
 
   """
-  @spec ip_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+  @spec list_ip_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def ip_tag_changes(%Actor{} = actor, ip, params, pagination) do
+  def list_ip_tag_changes(%Actor{} = actor, ip, params, pagination) do
     with {:ok, ip} <- cast_ip(ip),
          :ok <- authorize(actor, :show, :identity_metadata) do
       search_tag_changes(actor, ip, %{term: %{ip: to_string(ip)}}, params, pagination)
@@ -404,10 +404,10 @@ defmodule Philomena.TagChanges do
       {:ok, %TagChangePage{target: fingerprint}, changeset}
 
   """
-  @spec fingerprint_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
+  @spec list_fingerprint_tag_changes(Actor.t(), String.t(), map(), Search.pagination_params()) ::
           {:ok, TagChangePage.t(), Ecto.Changeset.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def fingerprint_tag_changes(%Actor{} = actor, fingerprint, params, pagination) do
+  def list_fingerprint_tag_changes(%Actor{} = actor, fingerprint, params, pagination) do
     with {:ok, fingerprint} <- cast_fingerprint(fingerprint),
          :ok <- authorize(actor, :show, :identity_metadata) do
       search_tag_changes(
@@ -476,9 +476,9 @@ defmodule Philomena.TagChanges do
       {:ok, [%TagChange{}, %TagChange{}]}
 
   """
-  @spec revert_tag_changes(Actor.t(), map()) ::
+  @spec create_tag_change_revert(Actor.t(), map()) ::
           {:ok, [TagChange.t()]} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def revert_tag_changes(%Actor{} = actor, params) do
+  def create_tag_change_revert(%Actor{} = actor, params) do
     with :ok <- authorize(actor, :revert, TagChange),
          {:ok, revert_form} <-
            %RevertForm{}

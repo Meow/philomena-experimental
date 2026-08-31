@@ -36,23 +36,23 @@ defmodule Philomena.StaticPagesTest do
     test "an admin gets the list of static pages" do
       page = static_page_fixture(admin_user_fixture())
 
-      assert {:ok, pages} = StaticPages.load_page_listing(actor(admin_user_fixture()))
+      assert {:ok, pages} = StaticPages.list_pages(actor(admin_user_fixture()))
       assert page.id in Enum.map(pages, & &1.id)
     end
 
     test "a moderator with the StaticPage admin grant may list them" do
       moderator = role_moderator_fixture("StaticPage")
 
-      assert {:ok, _pages} = StaticPages.load_page_listing(actor(moderator))
+      assert {:ok, _pages} = StaticPages.list_pages(actor(moderator))
     end
 
     test "a regular user is unauthorized" do
-      assert StaticPages.load_page_listing(actor(confirmed_user_fixture())) ==
+      assert StaticPages.list_pages(actor(confirmed_user_fixture())) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert StaticPages.load_page_listing(actor()) == {:error, :unauthorized}
+      assert StaticPages.list_pages(actor()) == {:error, :unauthorized}
     end
   end
 
@@ -60,15 +60,15 @@ defmodule Philomena.StaticPagesTest do
     test "an anonymous viewer loads a page by slug" do
       page = static_page_fixture(admin_user_fixture())
 
-      assert {:ok, loaded} = StaticPages.load_page_for_show(actor(), page.slug)
+      assert {:ok, loaded} = StaticPages.show_page(actor(), page.slug)
       assert loaded.id == page.id
     end
 
     test "an unknown slug is not-found for every actor" do
-      assert StaticPages.load_page_for_show(actor(confirmed_user_fixture()), "no-such-page") ==
+      assert StaticPages.show_page(actor(confirmed_user_fixture()), "no-such-page") ==
                {:error, :not_found}
 
-      assert StaticPages.load_page_for_show(actor(admin_user_fixture()), "no-such-page") ==
+      assert StaticPages.show_page(actor(admin_user_fixture()), "no-such-page") ==
                {:error, :not_found}
     end
   end
@@ -86,7 +86,7 @@ defmodule Philomena.StaticPagesTest do
                })
 
       assert {:ok, {%StaticPage{id: page_id}, [latest, initial]}} =
-               StaticPages.load_page_history(actor(), page.slug)
+               StaticPages.list_page_history(actor(), page.slug)
 
       assert page_id == page.id
       assert latest.body == "Second"
@@ -94,7 +94,7 @@ defmodule Philomena.StaticPagesTest do
     end
 
     test "an unknown slug is not-found" do
-      assert StaticPages.load_page_history(actor(), "no-such-page") == {:error, :not_found}
+      assert StaticPages.list_page_history(actor(), "no-such-page") == {:error, :not_found}
     end
   end
 
@@ -159,7 +159,7 @@ defmodule Philomena.StaticPagesTest do
       page = static_page_fixture(admin_user_fixture())
 
       assert {:ok, {%StaticPage{} = loaded, %Ecto.Changeset{}}} =
-               StaticPages.load_page_for_edit(actor(admin_user_fixture()), page.slug)
+               StaticPages.edit_page(actor(admin_user_fixture()), page.slug)
 
       assert loaded.id == page.id
     end
@@ -167,7 +167,7 @@ defmodule Philomena.StaticPagesTest do
     test "a regular user is unauthorized" do
       page = static_page_fixture(admin_user_fixture())
 
-      assert StaticPages.load_page_for_edit(actor(confirmed_user_fixture()), page.slug) ==
+      assert StaticPages.edit_page(actor(confirmed_user_fixture()), page.slug) ==
                {:error, :unauthorized}
     end
 
@@ -175,7 +175,7 @@ defmodule Philomena.StaticPagesTest do
       admin = admin_user_fixture()
       page = static_page_fixture(admin)
 
-      assert StaticPages.load_page_for_edit(actor(admin, ban: %{}), page.slug) ==
+      assert StaticPages.edit_page(actor(admin, ban: %{}), page.slug) ==
                {:error, :ban}
     end
   end

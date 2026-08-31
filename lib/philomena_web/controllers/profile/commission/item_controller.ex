@@ -38,7 +38,7 @@ defmodule PhilomenaWeb.Profile.Commission.ItemController do
 
   def edit(conn, %{"profile_id" => slug, "id" => id}) do
     with {:ok, %Ecto.Changeset{data: item} = changeset} <-
-           Commissions.load_item_for_edit(conn.assigns.actor, slug, id) do
+           Commissions.edit_item(conn.assigns.actor, slug, id) do
       render(conn, "edit.html",
         title: "Editing Commission Item",
         user: item.commission.user,

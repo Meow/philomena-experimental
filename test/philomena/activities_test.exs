@@ -79,7 +79,7 @@ defmodule Philomena.ActivitiesTest do
 
   describe "load_front_page/4 for an anonymous scope" do
     test "empty search and database sections stay empty" do
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       assert front.images.entries == []
       assert front.top_scoring.entries == []
@@ -99,7 +99,7 @@ defmodule Philomena.ActivitiesTest do
       SearchHelpers.reindex_all!(Image)
       SearchHelpers.reindex_all!(Comment)
 
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       assert %FrontPage{} = front
 
@@ -126,7 +126,7 @@ defmodule Philomena.ActivitiesTest do
       image = image_fixture(created_at: hours_ago(1))
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       entry = Enum.find(front.images.entries, &(&1.id == image.id))
       assert Ecto.assoc_loaded?(entry.tags)
@@ -134,11 +134,11 @@ defmodule Philomena.ActivitiesTest do
 
     test "the featured image is set when an image feature exists" do
       image = image_fixture(created_at: hours_ago(1))
-      {:ok, _feature} = Images.feature_image(actor(moderator_user_fixture()), image.id)
+      {:ok, _feature} = Images.create_image_feature(actor(moderator_user_fixture()), image.id)
 
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       assert front.featured_image.id == image.id
     end
@@ -149,7 +149,7 @@ defmodule Philomena.ActivitiesTest do
       user = confirmed_user_fixture()
 
       assert {:ok, front} =
-               Activities.load_front_page(actor(user), scope(), filter(), false)
+               Activities.list_activities(actor(user), scope(), filter(), false)
 
       assert %Scrivener.Page{} = front.watched
       assert is_list(front.watched.entries)
@@ -159,11 +159,11 @@ defmodule Philomena.ActivitiesTest do
       user = confirmed_user_fixture()
       tag = tag_fixture()
       image = image_fixture(tags: tag.name)
-      {:ok, watching_user} = Tags.watch_tag(actor(user), tag.slug)
+      {:ok, watching_user} = Tags.create_tag_watch(actor(user), tag.slug)
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, front} =
-               Activities.load_front_page(actor(watching_user), scope(), filter(), false)
+               Activities.list_activities(actor(watching_user), scope(), filter(), false)
 
       assert image.id in Enum.map(front.watched.entries, & &1.id)
     end
@@ -171,11 +171,11 @@ defmodule Philomena.ActivitiesTest do
     test "image strips carry the actor's interactions" do
       user = confirmed_user_fixture()
       image = image_fixture(created_at: hours_ago(1))
-      {:ok, _image} = Images.create_fave(actor(user), image.id)
+      {:ok, _image} = Images.create_image_fave(actor(user), image.id)
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, front} =
-               Activities.load_front_page(actor(user), scope(), filter(), false)
+               Activities.list_activities(actor(user), scope(), filter(), false)
 
       assert Enum.any?(front.interactions, fn interaction ->
                interaction.image_id == image.id and interaction.interaction_type == "faved"
@@ -185,18 +185,18 @@ defmodule Philomena.ActivitiesTest do
     test "a personal hide controls the featured image unless hidden results are requested" do
       user = confirmed_user_fixture()
       image = image_fixture(created_at: hours_ago(1))
-      {:ok, _feature} = Images.feature_image(actor(moderator_user_fixture()), image.id)
-      {:ok, _image} = Images.create_image_hide(actor(user), image.id)
+      {:ok, _feature} = Images.create_image_feature(actor(moderator_user_fixture()), image.id)
+      {:ok, _image} = Images.create_image_user_hide(actor(user), image.id)
 
       assert {:ok, hidden_front} =
-               Activities.load_front_page(actor(user), scope(), filter(), false)
+               Activities.list_activities(actor(user), scope(), filter(), false)
 
       assert hidden_front.featured_image == nil
 
       include_hidden_scope = %{scope() | hidden: true}
 
       assert {:ok, visible_front} =
-               Activities.load_front_page(actor(user), include_hidden_scope, filter(), false)
+               Activities.list_activities(actor(user), include_hidden_scope, filter(), false)
 
       assert visible_front.featured_image.id == image.id
     end
@@ -209,21 +209,21 @@ defmodule Philomena.ActivitiesTest do
       hidden = topic_fixture(forum)
 
       {:ok, {_forum, hidden}} =
-        Topics.hide_topic(actor(moderator), forum.short_name, hidden.slug, %{
+        Topics.create_topic_hide(actor(moderator), forum.short_name, hidden.slug, %{
           "deletion_reason" => "Rule #0"
         })
 
       staff_topic = topic_fixture(forum_fixture(%{access_level: "staff"}))
 
       assert {:ok, public_front} =
-               Activities.load_front_page(actor(), scope(), filter(), false)
+               Activities.list_activities(actor(), scope(), filter(), false)
 
       public_ids = Enum.map(public_front.topics, & &1.id)
       refute hidden.id in public_ids
       refute staff_topic.id in public_ids
 
       assert {:ok, moderator_front} =
-               Activities.load_front_page(actor(moderator), scope(), filter(), false)
+               Activities.list_activities(actor(moderator), scope(), filter(), false)
 
       moderator_ids = Enum.map(moderator_front.topics, & &1.id)
       assert hidden.id in moderator_ids
@@ -235,7 +235,7 @@ defmodule Philomena.ActivitiesTest do
     test "a channel with a fetch time appears in the streams" do
       channel = live_channel(%{})
 
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       assert Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -244,7 +244,7 @@ defmodule Philomena.ActivitiesTest do
       channel = channel_fixture(%{})
       assert channel.last_fetched_at == nil
 
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       refute Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -252,7 +252,7 @@ defmodule Philomena.ActivitiesTest do
     test "an nsfw channel is hidden when nsfw channels are off" do
       channel = live_channel(%{nsfw: true})
 
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       refute Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -260,7 +260,7 @@ defmodule Philomena.ActivitiesTest do
     test "an nsfw channel appears when nsfw channels are on" do
       channel = live_channel(%{nsfw: true})
 
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), true)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), true)
 
       assert Enum.any?(front.streams, &(&1.id == channel.id))
     end
@@ -269,7 +269,7 @@ defmodule Philomena.ActivitiesTest do
       channel = live_channel(%{nsfw: false})
 
       assert %Channel{} = channel
-      assert {:ok, front} = Activities.load_front_page(actor(), scope(), filter(), false)
+      assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
       assert Enum.any?(front.streams, &(&1.id == channel.id))
     end

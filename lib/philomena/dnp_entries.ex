@@ -88,10 +88,10 @@ defmodule Philomena.DnpEntries do
       %DnpListing{status_column: true}
 
   """
-  @spec load_dnp_listing(Actor.t(), map(), Repo.pagination_params()) :: DnpListing.t()
-  def load_dnp_listing(actor, params, pagination)
+  @spec list_dnp_entries(Actor.t(), map(), Repo.pagination_params()) :: DnpListing.t()
+  def list_dnp_entries(actor, params, pagination)
 
-  def load_dnp_listing(%Actor{user: %User{} = user}, %{"mine" => _mine}, pagination) do
+  def list_dnp_entries(%Actor{user: %User{} = user}, %{"mine" => _mine}, pagination) do
     entries =
       DnpEntry
       |> where(requesting_user_id: ^user.id)
@@ -102,7 +102,7 @@ defmodule Philomena.DnpEntries do
     %DnpListing{dnp_entries: entries, linked_tags: linked_tags(user), status_column: true}
   end
 
-  def load_dnp_listing(%Actor{} = actor, _params, pagination) do
+  def list_dnp_entries(%Actor{} = actor, _params, pagination) do
     entries =
       DnpEntry
       |> where(aasm_state: "listed")
@@ -129,10 +129,10 @@ defmodule Philomena.DnpEntries do
       {:error, :unauthorized}
 
   """
-  @spec load_admin_dnp_entries(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec list_admin_dnp_entries(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(DnpEntry.t()), Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def load_admin_dnp_entries(%Actor{} = actor, params, pagination) do
+  def list_admin_dnp_entries(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, DnpEntry) do
       {entries, changeset} =
         case QueryBuilder.search_dnp_entries(params) do
@@ -162,9 +162,9 @@ defmodule Philomena.DnpEntries do
       {:error, :not_found}
 
   """
-  @spec load_dnp_entry_page(Actor.t(), Loader.integer_id(), (list() -> list())) ::
+  @spec show_dnp_entry(Actor.t(), Loader.integer_id(), (list() -> list())) ::
           {:ok, DnpEntryPage.t()} | {:error, :not_found | :unauthorized}
-  def load_dnp_entry_page(%Actor{} = actor, id, collection_renderer) do
+  def show_dnp_entry(%Actor{} = actor, id, collection_renderer) do
     with {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :show) do
       mod_notes =
         case ModNotes.list_for_target(
@@ -196,9 +196,9 @@ defmodule Philomena.DnpEntries do
       {:error, :ban}
 
   """
-  @spec load_new_dnp_entry(Actor.t(), map()) ::
+  @spec new_dnp_entry(Actor.t(), map()) ::
           {:ok, DnpEntryForm.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_new_dnp_entry(%Actor{} = actor, params) do
+  def new_dnp_entry(%Actor{} = actor, params) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, DnpEntry),
          default_tag = get_tag_from_params(params),
@@ -268,9 +268,9 @@ defmodule Philomena.DnpEntries do
       {:error, :unauthorized}
 
   """
-  @spec load_dnp_entry_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_dnp_entry(Actor.t(), Loader.integer_id()) ::
           {:ok, DnpEntryForm.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_dnp_entry_for_edit(%Actor{} = actor, id) do
+  def edit_dnp_entry(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :edit),
          {:ok, tags} <- selectable_tags(actor, dnp_entry.tag) do
@@ -337,10 +337,10 @@ defmodule Philomena.DnpEntries do
       {:error, :unauthorized}
 
   """
-  @spec transition_dnp_entry(Actor.t(), Loader.integer_id(), String.t() | nil) ::
+  @spec create_dnp_entry_transition(Actor.t(), Loader.integer_id(), String.t() | nil) ::
           {:ok, DnpEntry.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def transition_dnp_entry(%Actor{user: user} = actor, id, new_state) do
+  def create_dnp_entry_transition(%Actor{user: user} = actor, id, new_state) do
     with :ok <- verify_write_access(actor),
          {:ok, dnp_entry} <- load_authorized_dnp_entry(actor, id, :transition) do
       dnp_entry_changeset = DnpEntry.transition_changeset(dnp_entry, user, new_state)

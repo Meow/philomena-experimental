@@ -7,13 +7,13 @@ defmodule PhilomenaWeb.Tag.AliasController do
 
   def edit(conn, params) do
     with {:ok, {tag, changeset}} <-
-           Tags.load_tag_alias_for_edit(conn.assigns.actor, params["tag_id"]) do
+           Tags.edit_tag_alias(conn.assigns.actor, params["tag_id"]) do
       render(conn, "edit.html", title: "Editing Tag Alias", tag: tag, changeset: changeset)
     end
   end
 
   def update(conn, %{"tag_id" => slug, "tag" => tag_params}) do
-    case Tags.alias_tag(conn.assigns.actor, slug, tag_params) do
+    case Tags.update_tag_alias(conn.assigns.actor, slug, tag_params) do
       {:ok, tag} ->
         conn
         |> put_flash(:info, "Tag alias queued.")
@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Tag.AliasController do
   end
 
   def delete(conn, params) do
-    with {:ok, tag} <- Tags.unalias_tag(conn.assigns.actor, params["tag_id"]) do
+    with {:ok, tag} <- Tags.delete_tag_alias(conn.assigns.actor, params["tag_id"]) do
       conn
       |> put_flash(:info, "Tag dealias successful.")
       |> redirect(to: ~p"/tags/#{tag}")

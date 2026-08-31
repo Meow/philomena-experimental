@@ -21,7 +21,7 @@ defmodule PhilomenaWeb.RuleController do
   end
 
   def new(conn, _params) do
-    with {:ok, changeset} <- Rules.load_new_rule(conn.assigns.actor) do
+    with {:ok, changeset} <- Rules.new_rule(conn.assigns.actor) do
       render(conn, :new, changeset: changeset)
     end
   end
@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.RuleController do
   end
 
   def show(conn, %{"id" => id}) do
-    case Rules.load_rule_for_show(conn.assigns.actor, id) do
+    case Rules.show_rule(conn.assigns.actor, id) do
       {:ok, rule} ->
         rule = render_rule(rule, conn)
 
@@ -59,7 +59,7 @@ defmodule PhilomenaWeb.RuleController do
   end
 
   def edit(conn, %{"id" => id}) do
-    with {:ok, {rule, changeset}} <- Rules.load_rule_for_edit(conn.assigns.actor, id) do
+    with {:ok, {rule, changeset}} <- Rules.edit_rule(conn.assigns.actor, id) do
       render(conn, :edit, rule: rule, changeset: changeset)
     end
   end

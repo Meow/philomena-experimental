@@ -92,22 +92,22 @@ defmodule Philomena.PostsTest do
 
   defp approve_post(actor, post_id) do
     {forum_slug, topic_slug} = route_parent(post_id)
-    Posts.approve_post(actor, forum_slug, topic_slug, post_id)
+    Posts.create_post_approve(actor, forum_slug, topic_slug, post_id)
   end
 
   defp hide_post(actor, post_id, attrs) do
     {forum_slug, topic_slug} = route_parent(post_id)
-    Posts.hide_post(actor, forum_slug, topic_slug, post_id, attrs)
+    Posts.create_post_hide(actor, forum_slug, topic_slug, post_id, attrs)
   end
 
   defp unhide_post(actor, post_id) do
     {forum_slug, topic_slug} = route_parent(post_id)
-    Posts.unhide_post(actor, forum_slug, topic_slug, post_id)
+    Posts.delete_post_hide(actor, forum_slug, topic_slug, post_id)
   end
 
   defp destroy_post(actor, post_id) do
     {forum_slug, topic_slug} = route_parent(post_id)
-    Posts.destroy_post(actor, forum_slug, topic_slug, post_id)
+    Posts.create_post_delete(actor, forum_slug, topic_slug, post_id)
   end
 
   describe "communication visibility" do
@@ -119,15 +119,15 @@ defmodule Philomena.PostsTest do
       other = confirmed_user_fixture()
 
       assert {:ok, loaded} =
-               Posts.load_topic_post(actor(author), forum.short_name, topic.slug, post.id)
+               Posts.show_topic_post(actor(author), forum.short_name, topic.slug, post.id)
 
       assert loaded.id == post.id
 
-      assert Posts.load_topic_post(actor(other), forum.short_name, topic.slug, post.id) ==
+      assert Posts.show_topic_post(actor(other), forum.short_name, topic.slug, post.id) ==
                {:error, :not_found}
 
       assert {:ok, _loaded} =
-               Posts.load_topic_post(
+               Posts.show_topic_post(
                  actor(other, ip: post.ip),
                  forum.short_name,
                  topic.slug,
@@ -135,7 +135,7 @@ defmodule Philomena.PostsTest do
                )
 
       assert {:ok, _loaded} =
-               Posts.load_topic_post(
+               Posts.show_topic_post(
                  actor(moderator_user_fixture()),
                  forum.short_name,
                  topic.slug,
@@ -152,11 +152,11 @@ defmodule Philomena.PostsTest do
         |> Ecto.Changeset.change(destroyed_content: true)
         |> Repo.update!()
 
-      assert Posts.load_topic_post(actor(), forum.short_name, topic.slug, post.id) ==
+      assert Posts.show_topic_post(actor(), forum.short_name, topic.slug, post.id) ==
                {:error, :not_found}
 
       assert {:ok, loaded} =
-               Posts.load_topic_post(
+               Posts.show_topic_post(
                  actor(moderator_user_fixture()),
                  forum.short_name,
                  topic.slug,
@@ -178,14 +178,14 @@ defmodule Philomena.PostsTest do
       visible = visible_post(topic)
       hidden = already_hidden_post(topic)
 
-      assert Posts.approve_post(
+      assert Posts.create_post_approve(
                actor(moderator),
                forum.short_name,
                wrong_topic.slug,
                unapproved.id
              ) == {:error, :not_found}
 
-      assert Posts.hide_post(
+      assert Posts.create_post_hide(
                actor(moderator),
                forum.short_name,
                wrong_topic.slug,
@@ -193,14 +193,14 @@ defmodule Philomena.PostsTest do
                %{"deletion_reason" => "Spam"}
              ) == {:error, :not_found}
 
-      assert Posts.unhide_post(
+      assert Posts.delete_post_hide(
                actor(moderator),
                forum.short_name,
                wrong_topic.slug,
                hidden.id
              ) == {:error, :not_found}
 
-      assert Posts.destroy_post(
+      assert Posts.create_post_delete(
                actor(moderator),
                forum.short_name,
                wrong_topic.slug,
@@ -542,7 +542,7 @@ defmodule Philomena.PostsTest do
       assert post.approved
 
       assert {:ok, _} =
-               Posts.hide_post(
+               Posts.create_post_hide(
                  actor(moderator_user_fixture()),
                  topic.forum.short_name,
                  topic.slug,
@@ -562,7 +562,7 @@ defmodule Philomena.PostsTest do
       refute post.approved
 
       assert {:ok, _} =
-               Posts.hide_post(
+               Posts.create_post_hide(
                  actor(moderator_user_fixture()),
                  topic.forum.short_name,
                  topic.slug,
@@ -604,7 +604,7 @@ defmodule Philomena.PostsTest do
   end
 
   describe "post_history/4" do
-    # Unlike the moderation actions above, post_history is a public read routed
+    # Unlike the moderation actions above, list_post_history is a public read routed
     # by forum short name and topic slug (not a bare post id), so it takes the
     # loaded topic's addressing rather than a raw "#{post.id}" string.
 
@@ -613,7 +613,7 @@ defmodule Philomena.PostsTest do
       [post] = topic.posts
 
       assert {:ok, {loaded_topic, %Post{} = loaded_post, versions}} =
-               Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
+               Posts.list_post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
       assert loaded_topic.id == topic.id
       assert loaded_post.id == post.id
@@ -630,17 +630,17 @@ defmodule Philomena.PostsTest do
     test "an unknown forum is not found", %{topic: topic} do
       [post] = topic.posts
 
-      assert Posts.post_history(actor(), "nonexistent", topic.slug, "#{post.id}") ==
+      assert Posts.list_post_history(actor(), "nonexistent", topic.slug, "#{post.id}") ==
                {:error, :not_found}
     end
 
     test "an unknown topic in a real forum is not found", %{forum: forum} do
-      assert Posts.post_history(actor(), forum.short_name, "nonexistent", "1") ==
+      assert Posts.list_post_history(actor(), forum.short_name, "nonexistent", "1") ==
                {:error, :not_found}
     end
 
     test "an unknown post id in a real topic is not found", %{forum: forum, topic: topic} do
-      assert Posts.post_history(actor(), forum.short_name, topic.slug, "999999999") ==
+      assert Posts.list_post_history(actor(), forum.short_name, topic.slug, "999999999") ==
                {:error, :not_found}
     end
 
@@ -648,7 +648,7 @@ defmodule Philomena.PostsTest do
          %{forum: forum, topic: topic} do
       post = already_hidden_post(topic)
 
-      assert Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}") ==
+      assert Posts.list_post_history(actor(), forum.short_name, topic.slug, "#{post.id}") ==
                {:error, :unauthorized}
     end
 
@@ -656,7 +656,7 @@ defmodule Philomena.PostsTest do
          %{forum: forum, topic: topic} do
       post = already_hidden_post(topic)
 
-      assert Posts.post_history(
+      assert Posts.list_post_history(
                actor(confirmed_user_fixture()),
                forum.short_name,
                topic.slug,
@@ -669,7 +669,7 @@ defmodule Philomena.PostsTest do
       post = already_hidden_post(topic)
 
       assert {:ok, {_topic, %Post{} = loaded_post, versions}} =
-               Posts.post_history(
+               Posts.list_post_history(
                  actor(moderator_user_fixture()),
                  forum.short_name,
                  topic.slug,
@@ -693,7 +693,7 @@ defmodule Philomena.PostsTest do
         })
 
       assert {:ok, {_topic, _post, [%PostVersion{} = version]}} =
-               Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
+               Posts.list_post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
       # previous_body records the body as it stood before the edit, so the
       # single version carries the original text and names its editor.
@@ -719,7 +719,7 @@ defmodule Philomena.PostsTest do
       end)
 
       assert {:ok, {_topic, _post, versions}} =
-               Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
+               Posts.list_post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
       assert length(versions) == 25
     end
@@ -849,7 +849,7 @@ defmodule Philomena.PostsTest do
       moderator = moderator_user_fixture()
 
       {:ok, {_forum, _topic}} =
-        Philomena.Topics.lock_topic(
+        Philomena.Topics.create_topic_lock(
           actor(moderator),
           forum.short_name,
           topic.slug,
@@ -943,7 +943,7 @@ defmodule Philomena.PostsTest do
     end
 
     test "the rate check precedes the topic load: over-limit against an unknown forum is still rate limited" do
-      # load_forum_topic runs after the rate check, so an over-limit actor gets
+      # show_forum_topic runs after the rate check, so an over-limit actor gets
       # :rate_limited rather than the :unauthorized a missing forum yields.
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :post_create)
@@ -960,12 +960,12 @@ defmodule Philomena.PostsTest do
     test "a banned actor is rejected before any loading, even with an unknown forum" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Posts.load_post_for_edit(actor, "nonexistent", "whatever", "1") ==
+      assert Posts.edit_post(actor, "nonexistent", "whatever", "1") ==
                {:error, :ban}
     end
 
     test "an actor without a fingerprint is rejected before loading" do
-      assert Posts.load_post_for_edit(
+      assert Posts.edit_post(
                actor(nil, fingerprint: nil),
                "nonexistent",
                "whatever",
@@ -978,7 +978,7 @@ defmodule Philomena.PostsTest do
       post = post_fixture(topic, author)
 
       assert {:ok, %Ecto.Changeset{data: %Post{} = loaded} = changeset} =
-               Posts.load_post_for_edit(actor(author), forum.short_name, topic.slug, "#{post.id}")
+               Posts.edit_post(actor(author), forum.short_name, topic.slug, "#{post.id}")
 
       assert loaded.id == post.id
 
@@ -990,7 +990,7 @@ defmodule Philomena.PostsTest do
     test "another regular user cannot load the form", %{forum: forum, topic: topic} do
       post = post_fixture(topic, confirmed_user_fixture())
 
-      assert Posts.load_post_for_edit(
+      assert Posts.edit_post(
                actor(confirmed_user_fixture()),
                forum.short_name,
                topic.slug,
@@ -1003,7 +1003,7 @@ defmodule Philomena.PostsTest do
       post = post_fixture(topic, confirmed_user_fixture())
 
       assert {:ok, %Ecto.Changeset{data: %Post{} = loaded}} =
-               Posts.load_post_for_edit(
+               Posts.edit_post(
                  actor(moderator_user_fixture()),
                  forum.short_name,
                  topic.slug,
@@ -1014,7 +1014,7 @@ defmodule Philomena.PostsTest do
     end
 
     test "an unknown post id in a real topic is not found", %{forum: forum, topic: topic} do
-      assert Posts.load_post_for_edit(
+      assert Posts.edit_post(
                actor(confirmed_user_fixture()),
                forum.short_name,
                topic.slug,
@@ -1026,7 +1026,7 @@ defmodule Philomena.PostsTest do
 
   describe "update_post/5" do
     # This is a write, so it runs verify_write_access first (ban -> :ban), then
-    # the same load-and-authorize chain load_post_for_edit/4 uses, then the edit
+    # the same load-and-authorize chain edit_post/4 uses, then the edit
     # engine which records a version.
 
     test "a banned actor is rejected before any loading, even with an unknown forum" do
@@ -1052,7 +1052,7 @@ defmodule Philomena.PostsTest do
       assert Repo.exists?(from v in PostVersion, where: v.post_id == ^post.id)
 
       assert {:ok, {_topic, _post, [%PostVersion{} = version]}} =
-               Posts.post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
+               Posts.list_post_history(actor(), forum.short_name, topic.slug, "#{post.id}")
 
       assert version.previous_body == "Original reply body"
     end
@@ -1081,7 +1081,7 @@ defmodule Philomena.PostsTest do
       assert Repo.aggregate(from(r in Report, where: r.post_id == ^post.id), :count) == 1
 
       assert {:ok, %Post{approved: true}} =
-               Posts.approve_post(
+               Posts.create_post_approve(
                  actor(moderator_user_fixture()),
                  forum.short_name,
                  topic.slug,

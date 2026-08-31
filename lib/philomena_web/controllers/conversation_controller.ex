@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.ConversationController do
 
   def index(conn, params) do
     with {:ok, %ConversationIndex{} = index} <-
-           Conversations.load_conversation_index(
+           Conversations.list_conversations(
              conn.assigns.actor,
              params,
              conn.assigns.scrivener
@@ -26,7 +26,7 @@ defmodule PhilomenaWeb.ConversationController do
 
   def show(conn, %{"id" => id}) do
     with {:ok, page} <-
-           Conversations.load_conversation_page(
+           Conversations.show_conversation(
              conn.assigns.actor,
              id,
              conn.assigns.scrivener

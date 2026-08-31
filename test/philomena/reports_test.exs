@@ -255,9 +255,9 @@ defmodule Philomena.ReportsTest do
       own = report_fixture(user, image_id: image.id)
       _other = report_fixture(other, image_id: image.id)
 
-      assert {:ok, page} = Reports.load_user_reports(actor(user), @pagination)
+      assert {:ok, page} = Reports.list_user_reports(actor(user), @pagination)
       assert Enum.map(page.entries, & &1.id) == [own.id]
-      assert Reports.load_user_reports(actor(), @pagination) == {:error, :unauthorized}
+      assert Reports.list_user_reports(actor(), @pagination) == {:error, :unauthorized}
     end
 
     test "count_open_reports/1 authorizes before querying" do
@@ -272,7 +272,7 @@ defmodule Philomena.ReportsTest do
 
       assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []},
               _query_changeset} =
-               Reports.load_report_index(actor(admin_user_fixture()), %{}, @pagination)
+               Reports.list_reports(actor(admin_user_fixture()), %{}, @pagination)
 
       assert report.id in Enum.map(reports.entries, & &1.id)
     end
@@ -284,21 +284,21 @@ defmodule Philomena.ReportsTest do
 
       assert {:ok, %ReportPage{reports: reports, my_reports: [], system_reports: []},
               _query_changeset} =
-               Reports.load_report_index(admin, %{"query" => "*"}, @pagination)
+               Reports.list_reports(admin, %{"query" => "*"}, @pagination)
 
       assert length(reports.entries) == 1
 
       assert {:error, %Ecto.Changeset{}} =
-               Reports.load_report_index(admin, %{"query" => "("}, @pagination)
+               Reports.list_reports(admin, %{"query" => "("}, @pagination)
 
       assert {:error, %Ecto.Changeset{}} =
-               Reports.load_report_index(admin, %{"query" => ["open:true"]}, @pagination)
+               Reports.list_reports(admin, %{"query" => ["open:true"]}, @pagination)
     end
 
     test "the index is unauthorized for regular users" do
-      assert Reports.load_report_index(actor(), %{}, @pagination) == {:error, :unauthorized}
+      assert Reports.list_reports(actor(), %{}, @pagination) == {:error, :unauthorized}
 
-      assert Reports.load_report_index(
+      assert Reports.list_reports(
                actor(confirmed_user_fixture()),
                %{},
                @pagination
@@ -311,15 +311,15 @@ defmodule Philomena.ReportsTest do
       image = image_fixture()
       report = report_fixture(image_id: image.id)
 
-      assert {:ok, loaded} = Reports.load_report(actor(moderator_user_fixture()), report.id)
+      assert {:ok, loaded} = Reports.show_report(actor(moderator_user_fixture()), report.id)
       assert loaded.image.id == image.id
 
       for actor <- [actor(), actor(confirmed_user_fixture()), actor(moderator_user_fixture())] do
-        assert Reports.load_report(actor, "not-an-id") == {:error, :not_found}
-        assert Reports.load_report(actor, "2147483647") == {:error, :not_found}
+        assert Reports.show_report(actor, "not-an-id") == {:error, :not_found}
+        assert Reports.show_report(actor, "2147483647") == {:error, :not_found}
       end
 
-      assert Reports.load_report(actor(confirmed_user_fixture()), report.id) ==
+      assert Reports.show_report(actor(confirmed_user_fixture()), report.id) ==
                {:error, :unauthorized}
     end
   end
@@ -365,7 +365,7 @@ defmodule Philomena.ReportsTest do
 
     test "claim commits its moderation log with the report", %{report: report} do
       moderator = moderator_user_fixture()
-      assert {:ok, claimed} = Reports.claim_report(actor(moderator), report.id)
+      assert {:ok, claimed} = Reports.create_report_claim(actor(moderator), report.id)
       assert claimed.state == "in_progress"
       assert claimed.admin_id == moderator.id
 
@@ -377,30 +377,34 @@ defmodule Philomena.ReportsTest do
 
     test "unclaim releases a claim", %{report: report} do
       moderator = actor(moderator_user_fixture())
-      assert {:ok, _claimed} = Reports.claim_report(moderator, report.id)
-      assert {:ok, released} = Reports.unclaim_report(moderator, report.id)
+      assert {:ok, _claimed} = Reports.create_report_claim(moderator, report.id)
+      assert {:ok, released} = Reports.delete_report_claim(moderator, report.id)
       assert released.state == "open"
       assert is_nil(released.admin_id)
-      assert {:error, %Ecto.Changeset{}} = Reports.unclaim_report(moderator, report.id)
+      assert {:error, %Ecto.Changeset{}} = Reports.delete_report_claim(moderator, report.id)
       assert Repo.aggregate(ModerationLog, :count) == 2
     end
 
     test "close cannot be undone by unclaim", %{report: report} do
       moderator = actor(moderator_user_fixture())
-      assert {:ok, closed} = Reports.close_report(moderator, report.id)
+      assert {:ok, closed} = Reports.create_report_close(moderator, report.id)
       refute closed.open
       assert closed.state == "closed"
-      assert {:error, %Ecto.Changeset{}} = Reports.close_report(moderator, report.id)
+      assert {:error, %Ecto.Changeset{}} = Reports.create_report_close(moderator, report.id)
       assert Repo.aggregate(ModerationLog, :count) == 1
 
-      assert {:error, changeset} = Reports.unclaim_report(moderator, report.id)
+      assert {:error, changeset} = Reports.delete_report_claim(moderator, report.id)
       assert changeset.errors[:state]
     end
 
     test "each action has a distinct authorization and stable ID contract", %{report: report} do
       user = actor(confirmed_user_fixture())
 
-      for action <- [&Reports.claim_report/2, &Reports.unclaim_report/2, &Reports.close_report/2] do
+      for action <- [
+            &Reports.create_report_claim/2,
+            &Reports.delete_report_claim/2,
+            &Reports.create_report_close/2
+          ] do
         assert action.(user, report.id) == {:error, :unauthorized}
         assert action.(actor(moderator_user_fixture()), "not-an-id") == {:error, :not_found}
 

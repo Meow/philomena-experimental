@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Filter.CurrentController do
   def update(conn, params) do
     user = conn.assigns.current_user
 
-    with {:ok, filter} <- Filters.switch_current_filter(conn.assigns.actor, params["id"]) do
+    with {:ok, filter} <- Filters.update_current_filter(conn.assigns.actor, params["id"]) do
       conn
       |> put_filter_cookie(user, filter)
       |> put_flash(:info, "Switched to filter #{filter.name}")

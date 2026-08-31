@@ -61,7 +61,7 @@ defmodule PhilomenaWeb.Topic.ReadControllerTest do
     moderator = moderator_user_fixture()
 
     {:ok, {_forum, topic}} =
-      Topics.hide_topic(
+      Topics.create_topic_hide(
         Philomena.AttributionFixtures.actor(moderator),
         forum.short_name,
         topic.slug,

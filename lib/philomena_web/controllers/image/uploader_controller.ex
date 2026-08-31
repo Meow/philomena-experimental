@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Image.UploaderController do
   action_fallback PhilomenaWeb.FallbackController
 
   def update(conn, params) do
-    case Images.update_uploader(conn.assigns.actor, params["image_id"], params["image"]) do
+    case Images.update_image_uploader(conn.assigns.actor, params["image_id"], params["image"]) do
       {:ok, image} ->
         changeset = Images.change_image(image)
 

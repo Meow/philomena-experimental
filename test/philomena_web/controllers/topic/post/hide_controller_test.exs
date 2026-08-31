@@ -25,7 +25,7 @@ defmodule PhilomenaWeb.Topic.Post.HideControllerTest do
     moderator = Philomena.UsersFixtures.moderator_user_fixture()
 
     {:ok, post} =
-      Posts.hide_post(
+      Posts.create_post_hide(
         Philomena.AttributionFixtures.actor(moderator),
         post.topic.forum.short_name,
         post.topic.slug,
@@ -79,7 +79,7 @@ defmodule PhilomenaWeb.Topic.Post.HideControllerTest do
       assert post.deletion_reason == "Rule violation"
     end
 
-    # Failure path: hide_changeset requires deletion_reason. hide_post now
+    # Failure path: hide_changeset requires deletion_reason. create_post_hide now
     # normalizes its Multi failure to {:error, changeset}, so a blank reason
     # redirects back with the "Unable to delete post!" flash instead of raising.
     test "with a blank deletion reason redirects back with the failure flash",

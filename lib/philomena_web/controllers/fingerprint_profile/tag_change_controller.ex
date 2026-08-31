@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.FingerprintProfile.TagChangeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"fingerprint_profile_id" => fingerprint} = params) do
-    case TagChanges.fingerprint_tag_changes(
+    case TagChanges.list_fingerprint_tag_changes(
            conn.assigns.actor,
            fingerprint,
            params,

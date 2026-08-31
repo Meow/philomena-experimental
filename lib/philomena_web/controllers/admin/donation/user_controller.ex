@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.Donation.UserController do
 
   def show(conn, %{"id" => slug}) do
     with {:ok, {user, changeset}} <-
-           Donations.load_user_donations(conn.assigns.actor, slug) do
+           Donations.show_user_donations(conn.assigns.actor, slug) do
       render(conn, "index.html",
         title: "Donations for User `#{user.name}'",
         user: user,

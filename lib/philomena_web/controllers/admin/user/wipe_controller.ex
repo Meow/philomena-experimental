@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.User.WipeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"user_id" => slug}) do
-    with {:ok, user} <- Users.admin_wipe_user(conn.assigns.actor, slug) do
+    with {:ok, user} <- Users.create_user_wipe(conn.assigns.actor, slug) do
       conn
       |> put_flash(
         :info,

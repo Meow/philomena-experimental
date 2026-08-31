@@ -72,7 +72,7 @@ defmodule Philomena.CommissionsTest do
       cheap = commission_item_fixture(commission, base_price: 10)
 
       assert {:ok, %Commission{} = loaded_commission} =
-               Commissions.load_commission_for_show(actor(), user.slug)
+               Commissions.show_commission(actor(), user.slug)
 
       assert loaded_commission.user.id == user.id
       assert loaded_commission.id == commission.id
@@ -88,16 +88,16 @@ defmodule Philomena.CommissionsTest do
       |> Repo.update!()
 
       for viewer <- [actor(), actor(admin_user_fixture())] do
-        assert Commissions.load_commission_for_show(viewer, "no-such-user") ==
+        assert Commissions.show_commission(viewer, "no-such-user") ==
                  {:error, :not_found}
 
-        assert Commissions.load_commission_for_show(viewer, deactivated.slug) ==
+        assert Commissions.show_commission(viewer, deactivated.slug) ==
                  {:error, :not_found}
       end
     end
 
     test "a user without a commission is not-found" do
-      assert Commissions.load_commission_for_show(actor(), confirmed_user_fixture().slug) ==
+      assert Commissions.show_commission(actor(), confirmed_user_fixture().slug) ==
                {:error, :not_found}
     end
   end
@@ -212,7 +212,7 @@ defmodule Philomena.CommissionsTest do
       commission = commission_fixture(user)
 
       assert {:ok, %Ecto.Changeset{data: loaded_commission}} =
-               Commissions.load_commission_for_edit(actor(user), user.slug)
+               Commissions.edit_commission(actor(user), user.slug)
 
       assert loaded_commission.user.id == user.id
       assert loaded_commission.id == commission.id
@@ -221,14 +221,14 @@ defmodule Philomena.CommissionsTest do
     test "a profile without a commission is not-found" do
       user = verified_user_with_link()
 
-      assert Commissions.load_commission_for_edit(actor(user), user.slug) == {:error, :not_found}
+      assert Commissions.edit_commission(actor(user), user.slug) == {:error, :not_found}
     end
 
     test "an unrelated user may not edit another owner's commission" do
       user = verified_user_with_link()
       commission_fixture(user)
 
-      assert Commissions.load_commission_for_edit(actor(confirmed_user_fixture()), user.slug) ==
+      assert Commissions.edit_commission(actor(confirmed_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
 
@@ -236,7 +236,7 @@ defmodule Philomena.CommissionsTest do
       user = verified_user_with_link()
       commission_fixture(user)
 
-      assert Commissions.load_commission_for_edit(
+      assert Commissions.edit_commission(
                actor(user, fingerprint: nil),
                user.slug
              ) == {:error, :unauthorized}
@@ -357,7 +357,7 @@ defmodule Philomena.CommissionsTest do
       item = commission_item_fixture(commission)
 
       assert {:ok, %Ecto.Changeset{data: item}} =
-               Commissions.load_item_for_edit(actor(user), user.slug, "#{item.id}")
+               Commissions.edit_item(actor(user), user.slug, "#{item.id}")
 
       assert item.commission.user.id == user.id
       assert item.id == item.id
@@ -370,7 +370,7 @@ defmodule Philomena.CommissionsTest do
       other_item = other_user |> commission_fixture() |> commission_item_fixture()
 
       for id <- ["bad", "2147483647", "#{other_item.id}"] do
-        assert Commissions.load_item_for_edit(actor(user), user.slug, id) ==
+        assert Commissions.edit_item(actor(user), user.slug, id) ==
                  {:error, :not_found}
       end
     end
@@ -379,7 +379,7 @@ defmodule Philomena.CommissionsTest do
       user = verified_user_with_link()
       commission_fixture(user)
 
-      assert Commissions.load_item_for_edit(
+      assert Commissions.edit_item(
                actor(user, fingerprint: nil),
                user.slug,
                "2147483647"
@@ -458,7 +458,7 @@ defmodule Philomena.CommissionsTest do
       {_user, commission} = directory_commission()
 
       assert {:ok, %Directory{} = directory} =
-               Commissions.load_directory(actor(), %{}, @pagination)
+               Commissions.list_commissions(actor(), %{}, @pagination)
 
       assert commission.id in Enum.map(directory.commissions.entries, & &1.id)
       assert %Ecto.Changeset{} = directory.changeset
@@ -469,7 +469,7 @@ defmodule Philomena.CommissionsTest do
       directory_commission()
 
       assert {:ok, %Directory{} = directory} =
-               Commissions.load_directory(
+               Commissions.list_commissions(
                  actor(),
                  %{"price_min" => "not-a-number"},
                  @pagination
@@ -484,7 +484,7 @@ defmodule Philomena.CommissionsTest do
       commission_fixture(viewer)
 
       assert {:ok, %Directory{current_user: current_user}} =
-               Commissions.load_directory(actor(viewer), %{}, @pagination)
+               Commissions.list_commissions(actor(viewer), %{}, @pagination)
 
       refute match?(%Ecto.Association.NotLoaded{}, current_user.commission)
       assert current_user.commission.user_id == viewer.id
@@ -498,7 +498,7 @@ defmodule Philomena.CommissionsTest do
       |> Repo.update!()
 
       assert {:ok, %Directory{} = directory} =
-               Commissions.load_directory(actor(), %{}, @pagination)
+               Commissions.list_commissions(actor(), %{}, @pagination)
 
       refute commission.id in Enum.map(directory.commissions.entries, & &1.id)
     end

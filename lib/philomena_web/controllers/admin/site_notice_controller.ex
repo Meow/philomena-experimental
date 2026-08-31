@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.SiteNoticeController do
 
   def index(conn, _params) do
     with {:ok, site_notices} <-
-           SiteNotices.load_site_notices(conn.assigns.actor, conn.assigns.scrivener) do
+           SiteNotices.list_site_notices(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html", title: "Admin - Site Notices", admin_site_notices: site_notices)
     end
   end
@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.Admin.SiteNoticeController do
 
   def edit(conn, params) do
     with {:ok, {site_notice, changeset}} <-
-           SiteNotices.load_site_notice_for_edit(conn.assigns.actor, params["id"]) do
+           SiteNotices.edit_site_notice(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html",
         title: "Editing Site Notices",
         site_notice: site_notice,

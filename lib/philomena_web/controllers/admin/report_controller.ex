@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.ReportController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Reports.load_report_index(
+    case Reports.list_reports(
            conn.assigns.actor,
            params["rq"] || %{},
            conn.assigns.pagination
@@ -38,7 +38,7 @@ defmodule PhilomenaWeb.Admin.ReportController do
   end
 
   def show(conn, %{"id" => report_id}) do
-    with {:ok, report} <- Reports.load_report(conn.assigns.actor, report_id) do
+    with {:ok, report} <- Reports.show_report(conn.assigns.actor, report_id) do
       body = MarkdownRenderer.render_one(%{body: report.reason}, conn)
 
       render(conn, "show.html",

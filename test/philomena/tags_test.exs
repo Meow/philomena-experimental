@@ -144,7 +144,7 @@ defmodule Philomena.TagsTest do
       SearchHelpers.reindex_all!(Tag)
 
       assert {:ok, tags, %Ecto.Changeset{data: %QueryForm{query: "*"}}} =
-               Tags.search_tags(actor(), %{"query" => "*"}, @pagination)
+               Tags.query_tags(actor(), %{"query" => "*"}, @pagination)
 
       assert %Tag{} = found = Enum.find(tags, &(&1.id == tag.id))
       assert Ecto.assoc_loaded?(found.aliases)
@@ -156,7 +156,7 @@ defmodule Philomena.TagsTest do
       SearchHelpers.reindex_all!(Tag)
 
       assert {:ok, tags, %Ecto.Changeset{data: %QueryForm{query: nil}}} =
-               Tags.search_tags(actor(), %{"query" => nil}, @pagination)
+               Tags.query_tags(actor(), %{"query" => nil}, @pagination)
 
       assert Enum.empty?(tags)
     end
@@ -168,7 +168,7 @@ defmodule Philomena.TagsTest do
       pagination = %{@pagination | page_size: 250}
 
       assert {:ok, tags, %Ecto.Changeset{}} =
-               Tags.search_tags(actor(), %{"query" => "*"}, pagination)
+               Tags.query_tags(actor(), %{"query" => "*"}, pagination)
 
       assert tags.page_size == 250
       assert %Tag{} = found = Enum.find(tags, &(&1.id == tag.id))
@@ -177,7 +177,7 @@ defmodule Philomena.TagsTest do
 
     test "a malformed query returns the rejected query form" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Tags.search_tags(actor(), %{"query" => "("}, @pagination)
+               Tags.query_tags(actor(), %{"query" => "("}, @pagination)
 
       assert %{query: [message]} = errors_on(changeset)
       assert is_binary(message)
@@ -191,7 +191,7 @@ defmodule Philomena.TagsTest do
       tag = Repo.get_by!(Tag, name: "safe")
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, %TagPage{} = page} = Tags.load_tag_page(actor(), scope(nil), tag.slug)
+      assert {:ok, %TagPage{} = page} = Tags.show_tag_page(actor(), scope(nil), tag.slug)
 
       assert page.tag.id == tag.id
       assert image.id in Enum.map(page.images, & &1.id)
@@ -209,24 +209,24 @@ defmodule Philomena.TagsTest do
         |> Repo.update!()
 
       assert {:aliased_to, %Tag{} = returned} =
-               Tags.load_tag_page(actor(), scope(nil), aliased.slug)
+               Tags.show_tag_page(actor(), scope(nil), aliased.slug)
 
       assert returned.id == aliased.id
       assert returned.aliased_tag.id == target.id
     end
 
     test "an unknown slug is not-found for every viewer" do
-      assert Tags.load_tag_page(actor(), scope(nil), "nonexistent-tag") ==
+      assert Tags.show_tag_page(actor(), scope(nil), "nonexistent-tag") ==
                {:error, :not_found}
 
       user = confirmed_user_fixture()
 
-      assert Tags.load_tag_page(actor(user), scope(user), "nonexistent-tag") ==
+      assert Tags.show_tag_page(actor(user), scope(user), "nonexistent-tag") ==
                {:error, :not_found}
 
       moderator = moderator_user_fixture()
 
-      assert Tags.load_tag_page(actor(moderator), scope(moderator), "nonexistent-tag") ==
+      assert Tags.show_tag_page(actor(moderator), scope(moderator), "nonexistent-tag") ==
                {:error, :not_found}
     end
   end
@@ -241,7 +241,7 @@ defmodule Philomena.TagsTest do
         |> Repo.update!()
 
       assert {:ok, %Tag{id: alias_id, aliased_tag: %Tag{id: target_id}}} =
-               Tags.load_tag(actor(), aliased.slug)
+               Tags.show_tag(actor(), aliased.slug)
 
       assert alias_id == aliased.id
       assert target_id == target.id
@@ -251,8 +251,8 @@ defmodule Philomena.TagsTest do
     end
 
     test "missing and malformed locators are not found" do
-      assert Tags.load_tag(actor(), "missing") == {:error, :not_found}
-      assert Tags.load_tag(actor(), nil) == {:error, :not_found}
+      assert Tags.show_tag(actor(), "missing") == {:error, :not_found}
+      assert Tags.show_tag(actor(), nil) == {:error, :not_found}
       assert Tags.load_canonical_tag(actor(), nil) == {:error, :not_found}
     end
   end
@@ -262,7 +262,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:ok, {%Tag{} = loaded, %Ecto.Changeset{} = changeset}} =
-               Tags.load_tag_for_edit(actor(moderator_user_fixture()), tag.slug)
+               Tags.edit_tag(actor(moderator_user_fixture()), tag.slug)
 
       assert loaded.id == tag.id
       assert changeset.data.id == tag.id
@@ -271,17 +271,17 @@ defmodule Philomena.TagsTest do
     test "anonymous and regular users are unauthorized" do
       tag = tag_fixture()
 
-      assert Tags.load_tag_for_edit(actor(), tag.slug) == {:error, :unauthorized}
+      assert Tags.edit_tag(actor(), tag.slug) == {:error, :unauthorized}
 
-      assert Tags.load_tag_for_edit(actor(confirmed_user_fixture()), tag.slug) ==
+      assert Tags.edit_tag(actor(confirmed_user_fixture()), tag.slug) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.load_tag_for_edit(actor(admin_user_fixture()), "nonexistent-tag") ==
+      assert Tags.edit_tag(actor(admin_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
 
-      assert Tags.load_tag_for_edit(actor(moderator_user_fixture()), "nonexistent-tag") ==
+      assert Tags.edit_tag(actor(moderator_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
     end
   end
@@ -416,7 +416,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:ok, {%Tag{} = loaded, %Ecto.Changeset{}}} =
-               Tags.load_tag_alias_for_edit(actor(admin_user_fixture()), tag.slug)
+               Tags.edit_tag_alias(actor(admin_user_fixture()), tag.slug)
 
       assert loaded.id == tag.id
     end
@@ -424,15 +424,15 @@ defmodule Philomena.TagsTest do
     test "a plain moderator lacks :alias and is unauthorized" do
       tag = tag_fixture()
 
-      assert Tags.load_tag_alias_for_edit(actor(moderator_user_fixture()), tag.slug) ==
+      assert Tags.edit_tag_alias(actor(moderator_user_fixture()), tag.slug) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.load_tag_alias_for_edit(actor(admin_user_fixture()), "nonexistent-tag") ==
+      assert Tags.edit_tag_alias(actor(admin_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
 
-      assert Tags.load_tag_alias_for_edit(actor(moderator_user_fixture()), "nonexistent-tag") ==
+      assert Tags.edit_tag_alias(actor(moderator_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
     end
   end
@@ -443,7 +443,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:ok, %Tag{} = aliased} =
-               Tags.alias_tag(actor(admin_user_fixture()), tag.slug, %{
+               Tags.update_tag_alias(actor(admin_user_fixture()), tag.slug, %{
                  "target_tag" => target.name
                })
 
@@ -460,7 +460,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:error, :not_found} =
-               Tags.alias_tag(actor(admin_user_fixture()), tag.slug, %{
+               Tags.update_tag_alias(actor(admin_user_fixture()), tag.slug, %{
                  "target_tag" => "no such tag"
                })
 
@@ -473,7 +473,9 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture(name: "atom alias source")
 
       assert {:ok, %Tag{aliased_tag_id: target_id}} =
-               Tags.alias_tag(actor(admin_user_fixture()), tag.slug, %{target_tag: target.name})
+               Tags.update_tag_alias(actor(admin_user_fixture()), tag.slug, %{
+                 target_tag: target.name
+               })
 
       assert target_id == target.id
     end
@@ -483,7 +485,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture(name: "alias conflict source")
 
       assert {:error, self_changeset} =
-               Tags.alias_tag(admin, tag.slug, %{"target_tag" => tag.name})
+               Tags.update_tag_alias(admin, tag.slug, %{"target_tag" => tag.name})
 
       assert %{aliased_tag: [_message]} = errors_on(self_changeset)
 
@@ -495,7 +497,7 @@ defmodule Philomena.TagsTest do
       target = tag_fixture(name: "alias conflict target")
 
       assert {:error, incoming_changeset} =
-               Tags.alias_tag(admin, tag.slug, %{"target_tag" => target.name})
+               Tags.update_tag_alias(admin, tag.slug, %{"target_tag" => target.name})
 
       assert %{tag: [_message]} = errors_on(incoming_changeset)
     end
@@ -512,7 +514,7 @@ defmodule Philomena.TagsTest do
       |> Repo.update!()
 
       assert {:error, changeset} =
-               Tags.alias_tag(admin, source.slug, %{"target_tag" => target.name})
+               Tags.update_tag_alias(admin, source.slug, %{"target_tag" => target.name})
 
       assert %{tag: ["is implied by other tags and cannot be aliased"]} = errors_on(changeset)
       assert Repo.reload!(source).aliased_tag_id == nil
@@ -522,7 +524,7 @@ defmodule Philomena.TagsTest do
       target = tag_fixture(name: "alias mod target")
       tag = tag_fixture()
 
-      assert Tags.alias_tag(actor(moderator_user_fixture()), tag.slug, %{
+      assert Tags.update_tag_alias(actor(moderator_user_fixture()), tag.slug, %{
                "target_tag" => target.name
              }) ==
                {:error, :unauthorized}
@@ -534,20 +536,22 @@ defmodule Philomena.TagsTest do
       target = tag_fixture(name: "alias anon target")
       tag = tag_fixture()
 
-      assert Tags.alias_tag(actor(), tag.slug, %{"target_tag" => target.name}) ==
+      assert Tags.update_tag_alias(actor(), tag.slug, %{"target_tag" => target.name}) ==
                {:error, :unauthorized}
 
-      assert Tags.alias_tag(actor(confirmed_user_fixture()), tag.slug, %{
+      assert Tags.update_tag_alias(actor(confirmed_user_fixture()), tag.slug, %{
                "target_tag" => target.name
              }) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.alias_tag(actor(admin_user_fixture()), "nonexistent-tag", %{"target_tag" => "x"}) ==
+      assert Tags.update_tag_alias(actor(admin_user_fixture()), "nonexistent-tag", %{
+               "target_tag" => "x"
+             }) ==
                {:error, :not_found}
 
-      assert Tags.alias_tag(actor(moderator_user_fixture()), "nonexistent-tag", %{
+      assert Tags.update_tag_alias(actor(moderator_user_fixture()), "nonexistent-tag", %{
                "target_tag" => "x"
              }) ==
                {:error, :not_found}
@@ -563,7 +567,9 @@ defmodule Philomena.TagsTest do
         |> Ecto.Changeset.change(aliased_tag_id: target.id)
         |> Repo.update!()
 
-      assert {:ok, %Tag{} = returned} = Tags.unalias_tag(actor(admin_user_fixture()), tag.slug)
+      assert {:ok, %Tag{} = returned} =
+               Tags.delete_tag_alias(actor(admin_user_fixture()), tag.slug)
+
       assert returned.id == tag.id
       assert Repo.reload!(tag).aliased_tag_id == nil
 
@@ -576,7 +582,7 @@ defmodule Philomena.TagsTest do
     test "a plain moderator lacks :alias and is unauthorized" do
       tag = tag_fixture()
 
-      assert Tags.unalias_tag(actor(moderator_user_fixture()), tag.slug) ==
+      assert Tags.delete_tag_alias(actor(moderator_user_fixture()), tag.slug) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -586,17 +592,17 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Tags.unalias_tag(actor(admin_user_fixture()), tag.slug)
+               Tags.delete_tag_alias(actor(admin_user_fixture()), tag.slug)
 
       assert %{aliased_tag: ["is not aliased"]} = errors_on(changeset)
       assert moderation_log_count() == 0
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.unalias_tag(actor(admin_user_fixture()), "nonexistent-tag") ==
+      assert Tags.delete_tag_alias(actor(admin_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
 
-      assert Tags.unalias_tag(actor(moderator_user_fixture()), "nonexistent-tag") ==
+      assert Tags.delete_tag_alias(actor(moderator_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
     end
   end
@@ -616,7 +622,7 @@ defmodule Philomena.TagsTest do
         |> Repo.update!()
 
       assert {:ok, %TagDetail{} = detail} =
-               Tags.tag_detail(actor(moderator_user_fixture()), tag.slug)
+               Tags.list_tag_details(actor(moderator_user_fixture()), tag.slug)
 
       assert detail.tag.id == tag.id
       assert Enum.map(detail.filters_spoilering, & &1.id) == [spoiler_filter.id]
@@ -627,19 +633,19 @@ defmodule Philomena.TagsTest do
     test "a fresh tag has empty usage lists" do
       tag = tag_fixture()
 
-      assert {:ok, detail} = Tags.tag_detail(actor(moderator_user_fixture()), tag.slug)
+      assert {:ok, detail} = Tags.list_tag_details(actor(moderator_user_fixture()), tag.slug)
       assert detail.filters_spoilering == []
       assert detail.filters_hiding == []
       assert detail.users_watching == []
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.tag_detail(actor(), "nonexistent-tag") == {:error, :not_found}
+      assert Tags.list_tag_details(actor(), "nonexistent-tag") == {:error, :not_found}
 
-      assert Tags.tag_detail(actor(confirmed_user_fixture()), "nonexistent-tag") ==
+      assert Tags.list_tag_details(actor(confirmed_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
 
-      assert Tags.tag_detail(actor(moderator_user_fixture()), "nonexistent-tag") ==
+      assert Tags.list_tag_details(actor(moderator_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
     end
   end
@@ -649,7 +655,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:ok, {%Tag{} = loaded, %Ecto.Changeset{}}} =
-               Tags.load_tag_image_for_edit(actor(moderator_user_fixture()), tag.slug)
+               Tags.edit_tag_image(actor(moderator_user_fixture()), tag.slug)
 
       assert loaded.id == tag.id
       assert Ecto.assoc_loaded?(loaded.implied_tags)
@@ -725,7 +731,7 @@ defmodule Philomena.TagsTest do
         |> Repo.update!()
 
       assert {:ok, %Tag{} = updated} =
-               Tags.remove_tag_image(actor(moderator_user_fixture()), tag.slug)
+               Tags.delete_tag_image(actor(moderator_user_fixture()), tag.slug)
 
       assert updated.id == tag.id
       assert Repo.reload!(tag).image == nil
@@ -739,17 +745,17 @@ defmodule Philomena.TagsTest do
     test "anonymous and regular users are unauthorized" do
       tag = tag_fixture()
 
-      assert Tags.remove_tag_image(actor(), tag.slug) == {:error, :unauthorized}
+      assert Tags.delete_tag_image(actor(), tag.slug) == {:error, :unauthorized}
 
-      assert Tags.remove_tag_image(actor(confirmed_user_fixture()), tag.slug) ==
+      assert Tags.delete_tag_image(actor(confirmed_user_fixture()), tag.slug) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.remove_tag_image(actor(admin_user_fixture()), "nonexistent-tag") ==
+      assert Tags.delete_tag_image(actor(admin_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
 
-      assert Tags.remove_tag_image(actor(moderator_user_fixture()), "nonexistent-tag") ==
+      assert Tags.delete_tag_image(actor(moderator_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
     end
   end
@@ -759,7 +765,7 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture()
 
       assert {:ok, %Tag{} = returned} =
-               Tags.reindex_tag_by_slug(actor(admin_user_fixture()), tag.slug)
+               Tags.create_tag_reindex(actor(admin_user_fixture()), tag.slug)
 
       assert returned.id == tag.id
       # No moderation log is written for a reindex.
@@ -769,24 +775,24 @@ defmodule Philomena.TagsTest do
     test "a plain moderator lacks :alias and is unauthorized" do
       tag = tag_fixture()
 
-      assert Tags.reindex_tag_by_slug(actor(moderator_user_fixture()), tag.slug) ==
+      assert Tags.create_tag_reindex(actor(moderator_user_fixture()), tag.slug) ==
                {:error, :unauthorized}
     end
 
     test "anonymous and regular users are unauthorized" do
       tag = tag_fixture()
 
-      assert Tags.reindex_tag_by_slug(actor(), tag.slug) == {:error, :unauthorized}
+      assert Tags.create_tag_reindex(actor(), tag.slug) == {:error, :unauthorized}
 
-      assert Tags.reindex_tag_by_slug(actor(confirmed_user_fixture()), tag.slug) ==
+      assert Tags.create_tag_reindex(actor(confirmed_user_fixture()), tag.slug) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before authorization" do
-      assert Tags.reindex_tag_by_slug(actor(admin_user_fixture()), "nonexistent-tag") ==
+      assert Tags.create_tag_reindex(actor(admin_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
 
-      assert Tags.reindex_tag_by_slug(actor(moderator_user_fixture()), "nonexistent-tag") ==
+      assert Tags.create_tag_reindex(actor(moderator_user_fixture()), "nonexistent-tag") ==
                {:error, :not_found}
     end
   end
@@ -796,11 +802,13 @@ defmodule Philomena.TagsTest do
       user = confirmed_user_fixture()
       tag = tag_fixture()
 
-      assert {:ok, %Philomena.Users.User{} = watching} = Tags.watch_tag(actor(user), tag.slug)
+      assert {:ok, %Philomena.Users.User{} = watching} =
+               Tags.create_tag_watch(actor(user), tag.slug)
+
       assert watching.watched_tag_ids == [tag.id]
       assert Repo.reload!(user).watched_tag_ids == [tag.id]
 
-      assert {:ok, %Philomena.Users.User{}} = Tags.unwatch_tag(actor(watching), tag.slug)
+      assert {:ok, %Philomena.Users.User{}} = Tags.delete_tag_watch(actor(watching), tag.slug)
       assert Repo.reload!(user).watched_tag_ids == []
     end
 
@@ -813,10 +821,10 @@ defmodule Philomena.TagsTest do
         |> Ecto.Changeset.change(aliased_tag_id: canonical.id)
         |> Repo.update!()
 
-      assert {:ok, watching} = Tags.watch_tag(actor(user), alias_tag.slug)
+      assert {:ok, watching} = Tags.create_tag_watch(actor(user), alias_tag.slug)
       assert watching.watched_tag_ids == [canonical.id]
 
-      assert {:ok, _} = Tags.unwatch_tag(actor(watching), alias_tag.slug)
+      assert {:ok, _} = Tags.delete_tag_watch(actor(watching), alias_tag.slug)
       assert Repo.reload!(user).watched_tag_ids == []
     end
 
@@ -824,15 +832,15 @@ defmodule Philomena.TagsTest do
       user = confirmed_user_fixture()
       tag = tag_fixture()
 
-      assert {:ok, %Philomena.Users.User{}} = Tags.unwatch_tag(actor(user), tag.slug)
+      assert {:ok, %Philomena.Users.User{}} = Tags.delete_tag_watch(actor(user), tag.slug)
       assert Repo.reload!(user).watched_tag_ids == []
     end
 
     test "an unknown slug is not-found for both watch and unwatch" do
       user = confirmed_user_fixture()
 
-      assert Tags.watch_tag(actor(user), "nonexistent-tag") == {:error, :not_found}
-      assert Tags.unwatch_tag(actor(user), "nonexistent-tag") == {:error, :not_found}
+      assert Tags.create_tag_watch(actor(user), "nonexistent-tag") == {:error, :not_found}
+      assert Tags.delete_tag_watch(actor(user), "nonexistent-tag") == {:error, :not_found}
     end
   end
 
@@ -843,19 +851,19 @@ defmodule Philomena.TagsTest do
       tag = tag_fixture(name: "banned tag source")
       target = tag_fixture(name: "banned tag target")
 
-      assert Tags.load_tag_for_edit(banned_actor, tag.slug) == {:error, :ban}
-      assert Tags.load_tag_image_for_edit(banned_actor, tag.slug) == {:error, :ban}
-      assert Tags.load_tag_alias_for_edit(banned_actor, tag.slug) == {:error, :ban}
+      assert Tags.edit_tag(banned_actor, tag.slug) == {:error, :ban}
+      assert Tags.edit_tag_image(banned_actor, tag.slug) == {:error, :ban}
+      assert Tags.edit_tag_alias(banned_actor, tag.slug) == {:error, :ban}
 
       assert Tags.update_tag(banned_actor, tag.slug, %{}) == {:error, :ban}
       assert Tags.update_tag_image(banned_actor, tag.slug, nil) == {:error, :ban}
-      assert Tags.remove_tag_image(banned_actor, tag.slug) == {:error, :ban}
+      assert Tags.delete_tag_image(banned_actor, tag.slug) == {:error, :ban}
 
-      assert Tags.alias_tag(banned_actor, tag.slug, %{"target_tag" => target.name}) ==
+      assert Tags.update_tag_alias(banned_actor, tag.slug, %{"target_tag" => target.name}) ==
                {:error, :ban}
 
-      assert Tags.unalias_tag(banned_actor, tag.slug) == {:error, :ban}
-      assert Tags.reindex_tag_by_slug(banned_actor, tag.slug) == {:error, :ban}
+      assert Tags.delete_tag_alias(banned_actor, tag.slug) == {:error, :ban}
+      assert Tags.create_tag_reindex(banned_actor, tag.slug) == {:error, :ban}
       assert Tags.delete_tag(banned_actor, tag.slug) == {:error, :ban}
       assert moderation_log_count() == 0
     end

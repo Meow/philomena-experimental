@@ -44,7 +44,7 @@ defmodule Philomena.UserFingerprintsTest do
                 user_fingerprints: user_fingerprints,
                 fingerprint_bans: fingerprint_bans
               }} =
-               UserFingerprints.load_fingerprint_profile(
+               UserFingerprints.show_fingerprint_profile(
                  actor(moderator_user_fixture()),
                  "  D015C342859DDE3  "
                )
@@ -55,7 +55,7 @@ defmodule Philomena.UserFingerprintsTest do
 
     test "an admin may load a fingerprint profile" do
       assert {:ok, %FingerprintProfile{}} =
-               UserFingerprints.load_fingerprint_profile(
+               UserFingerprints.show_fingerprint_profile(
                  actor(admin_user_fixture()),
                  "c637334158"
                )
@@ -63,21 +63,21 @@ defmodule Philomena.UserFingerprintsTest do
 
     test "a valid unmatched fingerprint returns an empty typed profile" do
       assert {:ok, %FingerprintProfile{user_fingerprints: [], fingerprint_bans: []}} =
-               UserFingerprints.load_fingerprint_profile(
+               UserFingerprints.show_fingerprint_profile(
                  actor(moderator_user_fixture()),
                  "d11111111111111"
                )
     end
 
     test "an invalid fingerprint is not found for a moderator" do
-      assert UserFingerprints.load_fingerprint_profile(
+      assert UserFingerprints.show_fingerprint_profile(
                actor(moderator_user_fixture()),
                "not-a-fingerprint"
              ) == {:error, :not_found}
     end
 
     test "a regular user is unauthorized for a valid fingerprint" do
-      assert UserFingerprints.load_fingerprint_profile(
+      assert UserFingerprints.show_fingerprint_profile(
                actor(confirmed_user_fixture()),
                "d11111111111111"
              ) ==
@@ -85,14 +85,14 @@ defmodule Philomena.UserFingerprintsTest do
     end
 
     test "invalid input is not found before the permission gate" do
-      assert UserFingerprints.load_fingerprint_profile(
+      assert UserFingerprints.show_fingerprint_profile(
                actor(confirmed_user_fixture()),
                "garbage"
              ) == {:error, :not_found}
     end
 
     test "an anonymous viewer is unauthorized for a valid fingerprint" do
-      assert UserFingerprints.load_fingerprint_profile(actor(), "d11111111111111") ==
+      assert UserFingerprints.show_fingerprint_profile(actor(), "d11111111111111") ==
                {:error, :unauthorized}
     end
   end

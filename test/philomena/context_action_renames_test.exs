@@ -81,4 +81,27 @@ defmodule Philomena.ContextActionRenamesTest do
     assert ContextActionRenames.rewrite_string(source, mappings, comments: false) =~
              "# search/1 is the public operation"
   end
+
+  test "rewriting is idempotent when a target is also a source name" do
+    source = """
+    defmodule Philomena.Example do
+      def unhide_image(image), do: image
+      def delete_image_hide(image), do: image
+    end
+    """
+
+    mappings = [
+      %{module: Philomena.Example, old: :unhide_image, new: :delete_image_hide, arity: 1},
+      %{
+        module: Philomena.Example,
+        old: :delete_image_hide,
+        new: :delete_image_user_hide,
+        arity: 1
+      }
+    ]
+
+    rewritten = ContextActionRenames.rewrite_string(source, mappings, comments: false)
+
+    assert ContextActionRenames.rewrite_string(rewritten, mappings, comments: false) == rewritten
+  end
 end

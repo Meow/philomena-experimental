@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Profile.FpHistoryController do
 
   def index(conn, %{"profile_id" => slug}) do
     with {:ok, history} <-
-           Profiles.load_fingerprint_history(
+           Profiles.list_profile_fingerprint_history(
              conn.assigns.actor,
              slug,
              conn.assigns.scrivener

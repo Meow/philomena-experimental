@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Channel.SubscriptionController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Channels.subscribe(conn.assigns.actor, params["channel_id"]) do
+    case Channels.create_channel_subscription(conn.assigns.actor, params["channel_id"]) do
       {:ok, channel} ->
         render(conn, "_subscription.html", channel: channel, watching: true, layout: false)
 
@@ -19,7 +19,8 @@ defmodule PhilomenaWeb.Channel.SubscriptionController do
   end
 
   def delete(conn, params) do
-    with {:ok, channel} <- Channels.unsubscribe(conn.assigns.actor, params["channel_id"]) do
+    with {:ok, channel} <-
+           Channels.delete_channel_subscription(conn.assigns.actor, params["channel_id"]) do
       render(conn, "_subscription.html", channel: channel, watching: false, layout: false)
     end
   end

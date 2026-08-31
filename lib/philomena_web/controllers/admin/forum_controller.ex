@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.ForumController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with {:ok, forums} <- Forums.load_admin_forums(conn.assigns.actor) do
+    with {:ok, forums} <- Forums.list_admin_forums(conn.assigns.actor) do
       render(conn, "index.html", title: "Admin - Forums", forums: forums)
     end
   end
@@ -34,7 +34,7 @@ defmodule PhilomenaWeb.Admin.ForumController do
 
   def edit(conn, params) do
     with {:ok, {forum, changeset}} <-
-           Forums.load_forum_for_edit(conn.assigns.actor, params["id"]) do
+           Forums.edit_forum(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Forum", forum: forum, changeset: changeset)
     end
   end

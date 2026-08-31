@@ -18,7 +18,7 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
     moderator = Philomena.UsersFixtures.moderator_user_fixture()
 
     {:ok, {_forum, topic}} =
-      Topics.hide_topic(
+      Topics.create_topic_hide(
         Philomena.AttributionFixtures.actor(moderator),
         forum.short_name,
         topic.slug,
@@ -71,7 +71,7 @@ defmodule PhilomenaWeb.Topic.HideControllerTest do
       assert topic.deleted_by_id == user.id
     end
 
-    # Failure path: hide_changeset requires deletion_reason. hide_topic now
+    # Failure path: hide_changeset requires deletion_reason. create_topic_hide now
     # normalizes its Multi failure to {:error, changeset}, so a blank reason
     # redirects back with the "Unable to delete the topic!" flash instead of
     # raising CaseClauseError.

@@ -76,7 +76,7 @@ defmodule PhilomenaWeb.Topic.PostControllerTest do
       moderator = Philomena.UsersFixtures.moderator_user_fixture()
 
       {:ok, {_forum, _topic}} =
-        Topics.lock_topic(
+        Topics.create_topic_lock(
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,

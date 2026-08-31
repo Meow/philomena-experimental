@@ -121,10 +121,10 @@ defmodule Philomena.DuplicateReports do
       {:error, :unauthorized}
 
   """
-  @spec load_duplicate_report_index(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec list_duplicate_reports(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(DuplicateReport.t()), Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def load_duplicate_report_index(%Actor{} = actor, params, pagination) do
+  def list_duplicate_reports(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :search, DuplicateReport) do
       case QueryBuilder.build_query(params) do
         {:ok, query, query_form} ->
@@ -153,9 +153,9 @@ defmodule Philomena.DuplicateReports do
       {:error, :not_found}
 
   """
-  @spec load_duplicate_report(Actor.t(), Loader.integer_id()) ::
+  @spec show_duplicate_report(Actor.t(), Loader.integer_id()) ::
           {:ok, DuplicateReport.t()} | {:error, :not_found | :unauthorized}
-  def load_duplicate_report(%Actor{} = actor, report_id) do
+  def show_duplicate_report(%Actor{} = actor, report_id) do
     load_report(actor, :show, report_id)
   end
 
@@ -313,9 +313,9 @@ defmodule Philomena.DuplicateReports do
       {:ok, %SearchResult{images: nil}}
 
   """
-  @spec new_reverse_search(Actor.t()) ::
+  @spec create_reverse_search(Actor.t()) ::
           {:ok, SearchResult.t()} | {:error, :unauthorized}
-  def new_reverse_search(%Actor{} = actor) do
+  def create_reverse_search(%Actor{} = actor) do
     with :ok <- authorize(actor, :search, DuplicateReport) do
       {:ok,
        %SearchResult{
@@ -342,9 +342,9 @@ defmodule Philomena.DuplicateReports do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec search_duplicates(Actor.t(), map(), PhilomenaMedia.Upload.t() | nil) ::
+  @spec create_reverse_search(Actor.t(), map(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, SearchResult.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def search_duplicates(%Actor{} = actor, attrs, upload) do
+  def create_reverse_search(%Actor{} = actor, attrs, upload) do
     with :ok <- authorize(actor, :search, DuplicateReport),
          {:ok, search_query} <-
            %SearchQuery{}
@@ -391,10 +391,10 @@ defmodule Philomena.DuplicateReports do
       {:error, :unauthorized}
 
   """
-  @spec accept_duplicate_report(Actor.t(), Loader.integer_id()) ::
+  @spec create_duplicate_report_accept(Actor.t(), Loader.integer_id()) ::
           {:ok, map()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def accept_duplicate_report(%Actor{user: user} = actor, report_id) do
+  def create_duplicate_report_accept(%Actor{user: user} = actor, report_id) do
     with :ok <- verify_write_access(actor),
          {:ok, report} <- load_report(actor, :accept, report_id) do
       Multi.new()
@@ -448,10 +448,10 @@ defmodule Philomena.DuplicateReports do
       {:ok, %DuplicateReport{}}
 
   """
-  @spec accept_reverse_duplicate_report(Actor.t(), Loader.integer_id()) ::
+  @spec create_duplicate_report_accept_reverse(Actor.t(), Loader.integer_id()) ::
           {:ok, map()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def accept_reverse_duplicate_report(%Actor{user: user} = actor, report_id) do
+  def create_duplicate_report_accept_reverse(%Actor{user: user} = actor, report_id) do
     with :ok <- verify_write_access(actor),
          {:ok, report} <- load_report(actor, :accept_reverse, report_id) do
       Multi.new()
@@ -526,10 +526,10 @@ defmodule Philomena.DuplicateReports do
       {:ok, %DuplicateReport{state: "claimed"}}
 
   """
-  @spec claim_duplicate_report(Actor.t(), Loader.integer_id()) ::
+  @spec create_duplicate_report_claim(Actor.t(), Loader.integer_id()) ::
           {:ok, DuplicateReport.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def claim_duplicate_report(%Actor{user: user} = actor, report_id) do
+  def create_duplicate_report_claim(%Actor{user: user} = actor, report_id) do
     with :ok <- verify_write_access(actor),
          {:ok, report} <- load_report(actor, :claim, report_id) do
       Multi.new()
@@ -570,10 +570,10 @@ defmodule Philomena.DuplicateReports do
       {:ok, %DuplicateReport{state: "open"}}
 
   """
-  @spec unclaim_duplicate_report(Actor.t(), Loader.integer_id()) ::
+  @spec delete_duplicate_report_claim(Actor.t(), Loader.integer_id()) ::
           {:ok, DuplicateReport.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def unclaim_duplicate_report(%Actor{} = actor, report_id) do
+  def delete_duplicate_report_claim(%Actor{} = actor, report_id) do
     with :ok <- verify_write_access(actor),
          {:ok, report} <- load_report(actor, :unclaim, report_id) do
       Multi.new()
@@ -614,10 +614,10 @@ defmodule Philomena.DuplicateReports do
       {:ok, %DuplicateReport{state: "rejected"}}
 
   """
-  @spec reject_duplicate_report(Actor.t(), Loader.integer_id()) ::
+  @spec create_duplicate_report_reject(Actor.t(), Loader.integer_id()) ::
           {:ok, DuplicateReport.t()}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
-  def reject_duplicate_report(%Actor{user: user} = actor, report_id) do
+  def create_duplicate_report_reject(%Actor{user: user} = actor, report_id) do
     with :ok <- verify_write_access(actor),
          {:ok, report} <- load_report(actor, :reject, report_id) do
       Multi.new()

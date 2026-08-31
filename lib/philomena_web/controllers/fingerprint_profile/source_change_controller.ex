@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.FingerprintProfile.SourceChangeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"fingerprint_profile_id" => fingerprint} = params) do
-    case SourceChanges.fingerprint_source_changes(
+    case SourceChanges.list_fingerprint_source_changes(
            conn.assigns.actor,
            fingerprint,
            params,

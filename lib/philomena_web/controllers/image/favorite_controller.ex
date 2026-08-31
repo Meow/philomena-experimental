@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.FavoriteController do
 
   def index(conn, params) do
     with {:ok, {image, has_votes}} <-
-           Images.image_fave_list(conn.assigns.actor, params["image_id"]) do
+           Images.list_image_faves(conn.assigns.actor, params["image_id"]) do
       render(conn, "index.html", layout: false, image: image, has_votes: has_votes)
     end
   end

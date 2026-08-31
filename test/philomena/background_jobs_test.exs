@@ -101,7 +101,7 @@ defmodule Philomena.BackgroundJobsTest do
       spy(Exq)
 
       assert {:ok, _image} =
-               Images.update_tags(actor(user), image.id, %{
+               Images.update_image_tags(actor(user), image.id, %{
                  "old_tag_input" => tags,
                  "tag_input" => "#{tags}, background added tag"
                })
@@ -144,8 +144,8 @@ defmodule Philomena.BackgroundJobsTest do
       video_id = video.id
       spy(Exq)
 
-      assert {:ok, repaired_image} = Images.repair_image(actor(moderator), image.id)
-      assert {:ok, repaired_video} = Images.repair_image(actor(moderator), video.id)
+      assert {:ok, repaired_image} = Images.create_image_repair(actor(moderator), image.id)
+      assert {:ok, repaired_video} = Images.create_image_repair(actor(moderator), video.id)
       assert repaired_image.id == image.id
       assert repaired_video.id == video.id
 
@@ -163,7 +163,7 @@ defmodule Philomena.BackgroundJobsTest do
 
       spy(Exq)
 
-      assert {:ok, _image} = Images.repair_image(actor(moderator), image.id)
+      assert {:ok, _image} = Images.create_image_repair(actor(moderator), image.id)
 
       assert_enqueued("indexing", Philomena.ImagePurgeWorker, [expected_files])
     end
@@ -183,14 +183,14 @@ defmodule Philomena.BackgroundJobsTest do
       assert {:ok, %Tag{id: ^delete_tag_id}} = Tags.delete_tag(actor(admin), delete_tag.slug)
 
       assert {:ok, aliased} =
-               Tags.alias_tag(actor(admin), alias_tag.slug, %{"target_tag" => target.name})
+               Tags.update_tag_alias(actor(admin), alias_tag.slug, %{"target_tag" => target.name})
 
       finalized_alias = Repo.get!(Tag, alias_tag_id)
       Repo.update!(Ecto.Changeset.change(finalized_alias, aliased_tag_id: target_id))
-      assert {:ok, %Tag{id: ^alias_tag_id}} = Tags.unalias_tag(actor(admin), aliased.slug)
+      assert {:ok, %Tag{id: ^alias_tag_id}} = Tags.delete_tag_alias(actor(admin), aliased.slug)
 
       assert {:ok, %Tag{id: ^target_id}} =
-               Tags.reindex_tag_by_slug(actor(admin), target.slug)
+               Tags.create_tag_reindex(actor(admin), target.slug)
 
       assert_enqueued("indexing", Philomena.TagDeleteWorker, [delete_tag_id])
       assert_enqueued("indexing", Philomena.TagAliasWorker, [alias_tag_id, target_id])
@@ -206,9 +206,9 @@ defmodule Philomena.BackgroundJobsTest do
       target_id = target.id
       spy(Exq)
 
-      assert {:ok, %User{id: ^target_id}} = Users.admin_wipe_downvotes(actor(admin), target.slug)
-      assert {:ok, %User{id: ^target_id}} = Users.admin_wipe_votes(actor(admin), target.slug)
-      assert {:ok, %User{id: ^target_id}} = Users.admin_wipe_user(actor(admin), target.slug)
+      assert {:ok, %User{id: ^target_id}} = Users.delete_user_downvotes(actor(admin), target.slug)
+      assert {:ok, %User{id: ^target_id}} = Users.delete_user_votes(actor(admin), target.slug)
+      assert {:ok, %User{id: ^target_id}} = Users.create_user_wipe(actor(admin), target.slug)
 
       assert_enqueued("indexing", Philomena.UserUnvoteWorker, [target_id, false])
       assert_enqueued("indexing", Philomena.UserUnvoteWorker, [target_id, true])
@@ -221,7 +221,7 @@ defmodule Philomena.BackgroundJobsTest do
 
       assert_enqueued("indexing", Philomena.UserRenameWorker, [old_name, new_name])
 
-      assert {:ok, erased} = Users.admin_erase_user(actor(renamed_admin), target.slug)
+      assert {:ok, erased} = Users.create_user_erase(actor(renamed_admin), target.slug)
       erased_id = erased.id
 
       assert_enqueued("indexing", Philomena.UserEraseWorker, [target_id, admin_id])
@@ -246,13 +246,13 @@ defmodule Philomena.BackgroundJobsTest do
       spy(Exq)
 
       assert {:ok, %User{id: ^target_id}} =
-               TagChanges.full_revert_user_tag_changes(moderator_actor, target.slug)
+               TagChanges.create_user_tag_change_revert(moderator_actor, target.slug)
 
       assert {:ok, "203.0.113.9"} =
-               TagChanges.full_revert_ip_tag_changes(moderator_actor, "203.0.113.9")
+               TagChanges.create_ip_tag_change_revert(moderator_actor, "203.0.113.9")
 
       assert {:ok, "c1774"} =
-               TagChanges.full_revert_fingerprint_tag_changes(moderator_actor, "c1774")
+               TagChanges.create_fingerprint_tag_change_revert(moderator_actor, "c1774")
 
       assert_enqueued("indexing", Philomena.TagChangeRevertWorker, [
         %{user_id: target_id, attributes: attributes}
@@ -277,7 +277,8 @@ defmodule Philomena.BackgroundJobsTest do
       report_id = report.id
       spy(Exq)
 
-      assert {:ok, %Report{id: ^report_id}} = Reports.close_report(actor(moderator), report_id)
+      assert {:ok, %Report{id: ^report_id}} =
+               Reports.create_report_close(actor(moderator), report_id)
 
       assert_enqueued("indexing", Philomena.IndexWorker, ["Reports", "id", [report_id]])
     end

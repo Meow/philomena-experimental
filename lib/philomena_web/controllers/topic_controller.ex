@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.TopicController do
 
   def show(conn, %{"forum_id" => forum_id, "id" => id} = params) do
     with {:ok, page} <-
-           Topics.load_topic_page(
+           Topics.show_topic_page(
              conn.assigns.actor,
              forum_id,
              id,
@@ -43,7 +43,7 @@ defmodule PhilomenaWeb.TopicController do
   end
 
   def new(conn, %{"forum_id" => forum_id}) do
-    with {:ok, {forum, changeset}} <- Topics.load_new_topic(conn.assigns.actor, forum_id) do
+    with {:ok, {forum, changeset}} <- Topics.new_topic(conn.assigns.actor, forum_id) do
       conn
       |> assign(:forum, forum)
       |> render("new.html", title: "New Topic", changeset: changeset)
@@ -71,7 +71,7 @@ defmodule PhilomenaWeb.TopicController do
   end
 
   def update(conn, %{"forum_id" => forum_id, "id" => id, "topic" => topic_params}) do
-    case Topics.update_topic_title(conn.assigns.actor, forum_id, id, topic_params) do
+    case Topics.update_topic(conn.assigns.actor, forum_id, id, topic_params) do
       {:ok, {forum, topic}} ->
         conn
         |> put_flash(:info, "Successfully updated topic.")

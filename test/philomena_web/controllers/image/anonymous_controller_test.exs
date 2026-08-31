@@ -53,7 +53,7 @@ defmodule PhilomenaWeb.Image.AnonymousControllerTest do
 
     # Missing image locators resolve to not-found before authorization.
     # authorized on it, so :create returns not_found - an unknown id redirects
-    # rather than crashing in update_anonymous.
+    # rather than crashing in update_image_anonymous.
     test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 

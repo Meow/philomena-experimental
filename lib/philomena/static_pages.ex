@@ -73,8 +73,8 @@ defmodule Philomena.StaticPages do
       {:ok, [%StaticPage{}]}
 
   """
-  @spec load_page_listing(Actor.t()) :: {:ok, [StaticPage.t()]} | {:error, :unauthorized}
-  def load_page_listing(%Actor{} = actor) do
+  @spec list_pages(Actor.t()) :: {:ok, [StaticPage.t()]} | {:error, :unauthorized}
+  def list_pages(%Actor{} = actor) do
     with :ok <- authorize(actor, :index, StaticPage) do
       {:ok, list_static_pages()}
     end
@@ -95,9 +95,9 @@ defmodule Philomena.StaticPages do
       {:error, :not_found}
 
   """
-  @spec load_page_for_show(Actor.t(), String.t()) ::
+  @spec show_page(Actor.t(), String.t()) ::
           {:ok, StaticPage.t()} | {:error, :not_found | :unauthorized}
-  def load_page_for_show(%Actor{} = actor, slug) do
+  def show_page(%Actor{} = actor, slug) do
     load_static_page(actor, :show, slug)
   end
 
@@ -114,9 +114,9 @@ defmodule Philomena.StaticPages do
       {:ok, {%StaticPage{}, [%Version{}]}}
 
   """
-  @spec load_page_history(Actor.t(), String.t()) ::
+  @spec list_page_history(Actor.t(), String.t()) ::
           {:ok, {StaticPage.t(), [Version.t()]}} | {:error, :not_found | :unauthorized}
-  def load_page_history(%Actor{} = actor, slug) do
+  def list_page_history(%Actor{} = actor, slug) do
     with {:ok, static_page} <- load_static_page(actor, :show, slug) do
       versions =
         Version
@@ -198,10 +198,10 @@ defmodule Philomena.StaticPages do
       {:ok, {%StaticPage{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_page_for_edit(Actor.t(), String.t()) ::
+  @spec edit_page(Actor.t(), String.t()) ::
           {:ok, {StaticPage.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_page_for_edit(%Actor{} = actor, slug) do
+  def edit_page(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, static_page} <- load_static_page(actor, :edit, slug) do
       {:ok, {static_page, change_static_page(static_page)}}

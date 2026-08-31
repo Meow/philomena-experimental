@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.DonationController do
 
   def index(conn, _params) do
     with {:ok, donations} <-
-           Donations.load_donations(conn.assigns.actor, conn.assigns.scrivener) do
+           Donations.list_donations(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html", title: "Admin - Donations", donations: donations)
     end
   end

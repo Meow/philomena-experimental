@@ -109,13 +109,13 @@ defmodule Philomena.ModNotes do
       {:error, :unauthorized}
 
   """
-  @spec load_mod_note_index(
+  @spec list_mod_notes(
           Actor.t(),
           map(),
           (list(ModNote.t()) -> list(term())),
           Repo.pagination_params()
         ) :: {:ok, Scrivener.Page.t()} | {:error, :not_found | :unauthorized}
-  def load_mod_note_index(%Actor{} = actor, params, collection_renderer, pagination) do
+  def list_mod_notes(%Actor{} = actor, params, collection_renderer, pagination) do
     with :ok <- authorize(actor, :index, ModNote) do
       with {:ok, target} <- Target.from_params(params),
            {:ok, _record} <- fetch_and_authorize_target(actor, target, :show_mod_notes) do
@@ -212,10 +212,10 @@ defmodule Philomena.ModNotes do
       {:error, :unauthorized}
 
   """
-  @spec load_mod_note_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_mod_note(Actor.t(), Loader.integer_id()) ::
           {:ok, {ModNote.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_mod_note_for_edit(%Actor{} = actor, id) do
+  def edit_mod_note(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, mod_note} <- load_mod_note(actor, id, :edit) do
       {:ok, {mod_note, ModNote.changeset(mod_note)}}

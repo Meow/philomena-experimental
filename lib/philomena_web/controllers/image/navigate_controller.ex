@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Image.NavigateController do
     scope = ImageScope.scope(conn)
 
     with {:ok, {image, result}} <-
-           Images.find_consecutive_image(
+           Images.list_image_navigation(
              conn.assigns.actor,
              ImageScope.search_scope(conn),
              params["image_id"]
@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.Image.NavigateController do
 
   def index(conn, %{"rel" => "find"} = params) do
     with {:ok, page_num} <-
-           Images.find_image_index_page(
+           Images.list_image_index_page(
              conn.assigns.actor,
              ImageScope.search_scope(conn),
              params["image_id"]

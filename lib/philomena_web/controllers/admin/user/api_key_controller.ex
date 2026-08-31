@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.User.ApiKeyController do
   action_fallback PhilomenaWeb.FallbackController
 
   def delete(conn, %{"user_id" => slug}) do
-    with {:ok, user} <- Users.admin_reset_api_key(conn.assigns.actor, slug) do
+    with {:ok, user} <- Users.delete_user_api_key(conn.assigns.actor, slug) do
       conn
       |> put_flash(:info, "API token successfully reset.")
       |> redirect(to: ~p"/profiles/#{user}")

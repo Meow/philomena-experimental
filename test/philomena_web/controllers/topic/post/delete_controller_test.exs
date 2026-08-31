@@ -18,7 +18,7 @@ defmodule PhilomenaWeb.Topic.Post.DeleteControllerTest do
     post = post_fixture(topic, nil, %{"body" => "Original post body"})
 
     {:ok, post} =
-      Posts.hide_post(
+      Posts.create_post_hide(
         Philomena.AttributionFixtures.actor(moderator_user_fixture()),
         forum.short_name,
         topic.slug,

@@ -11,7 +11,7 @@ defmodule Philomena.FiltersTest do
 
   use Philomena.DataCase, async: false
 
-  # search_filters/3 and delete_filter/2 (via unindex) touch OpenSearch, so this
+  # query_filters/3 and delete_filter/2 (via unindex) touch OpenSearch, so this
   # module follows the search rules: async: false, index cycled in setup.
   @moduletag :search
 
@@ -104,7 +104,7 @@ defmodule Philomena.FiltersTest do
     test "an anonymous visitor gets no personal filters, only system filters" do
       system = system_filter_fixture()
 
-      assert {:ok, {nil, system_filters}} = Filters.index_filters(actor(), @pagination)
+      assert {:ok, {nil, system_filters}} = Filters.list_filters(actor(), @pagination)
       assert system.id in Enum.map(system_filters, & &1.id)
     end
 
@@ -114,7 +114,7 @@ defmodule Philomena.FiltersTest do
       _theirs = filter_fixture(confirmed_user_fixture())
       system = system_filter_fixture()
 
-      assert {:ok, {my_filters, system_filters}} = Filters.index_filters(actor(user), @pagination)
+      assert {:ok, {my_filters, system_filters}} = Filters.list_filters(actor(user), @pagination)
 
       my_ids = Enum.map(my_filters, & &1.id)
       assert mine.id in my_ids
@@ -128,7 +128,7 @@ defmodule Philomena.FiltersTest do
       user = confirmed_user_fixture()
       filter_fixture(user)
 
-      {:ok, {mine, _system}} = Filters.index_filters(actor(user), @pagination)
+      {:ok, {mine, _system}} = Filters.list_filters(actor(user), @pagination)
       refute match?(%Ecto.Association.NotLoaded{}, Enum.at(mine, 0).user)
     end
   end
@@ -139,7 +139,7 @@ defmodule Philomena.FiltersTest do
       private = filter_fixture(confirmed_user_fixture())
       SearchHelpers.reindex_all!(Filter)
 
-      assert {:ok, page} = Filters.search_filters(actor(), "*", @pagination)
+      assert {:ok, page} = Filters.query_filters(actor(), "*", @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
       assert public.id in ids
@@ -152,7 +152,7 @@ defmodule Philomena.FiltersTest do
       theirs = filter_fixture(confirmed_user_fixture())
       SearchHelpers.reindex_all!(Filter)
 
-      assert {:ok, page} = Filters.search_filters(actor(user), "*", @pagination)
+      assert {:ok, page} = Filters.query_filters(actor(user), "*", @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
       assert mine.id in ids
@@ -164,7 +164,7 @@ defmodule Philomena.FiltersTest do
       theirs = filter_fixture(confirmed_user_fixture())
       SearchHelpers.reindex_all!(Filter)
 
-      assert {:ok, page} = Filters.search_filters(actor(moderator), "*", @pagination)
+      assert {:ok, page} = Filters.query_filters(actor(moderator), "*", @pagination)
       assert theirs.id in Enum.map(page.entries, & &1.id)
     end
 
@@ -173,12 +173,12 @@ defmodule Philomena.FiltersTest do
       mine = filter_fixture(user)
       SearchHelpers.reindex_all!(Filter)
 
-      assert {:ok, page} = Filters.search_filters(actor(user), "name:#{mine.name}", @pagination)
+      assert {:ok, page} = Filters.query_filters(actor(user), "name:#{mine.name}", @pagination)
       assert mine.id in Enum.map(page.entries, & &1.id)
     end
 
     test "a malformed query returns the compiler error" do
-      assert {:error, msg} = Filters.search_filters(actor(), "name:(", @pagination)
+      assert {:error, msg} = Filters.query_filters(actor(), "name:(", @pagination)
       assert is_binary(msg)
     end
   end
@@ -189,7 +189,7 @@ defmodule Philomena.FiltersTest do
 
       assert :ok = Filters.perform_reindex(:id, [filter.id])
       :ok = Search.refresh_index!(Filter)
-      assert {:ok, page} = Filters.search_filters(actor(), "name:#{filter.name}", @pagination)
+      assert {:ok, page} = Filters.query_filters(actor(), "name:#{filter.name}", @pagination)
       assert filter.id in Enum.map(page.entries, & &1.id)
     end
 
@@ -207,7 +207,7 @@ defmodule Philomena.FiltersTest do
       system = system_filter_fixture()
 
       assert {:ok, %FilterPage{filter: filter, spoilered_tags: [], hidden_tags: []}} =
-               Filters.load_filter_page(actor(), "#{system.id}")
+               Filters.show_filter_page(actor(), "#{system.id}")
 
       assert filter.id == system.id
       # The filter carries its :user preloaded for the page.
@@ -220,11 +220,11 @@ defmodule Philomena.FiltersTest do
       zed = tag_fixture(%{name: "zed tag"})
       abe = tag_fixture(%{name: "abe tag"})
 
-      {:ok, filter} = Filters.hide_tag(actor(user), filter, zed.slug)
-      {:ok, filter} = Filters.hide_tag(actor(user), filter, abe.slug)
+      {:ok, filter} = Filters.create_filter_hide(actor(user), filter, zed.slug)
+      {:ok, filter} = Filters.create_filter_hide(actor(user), filter, abe.slug)
 
       assert {:ok, %FilterPage{hidden_tags: hidden, spoilered_tags: []}} =
-               Filters.load_filter_page(actor(user), "#{filter.id}")
+               Filters.show_filter_page(actor(user), "#{filter.id}")
 
       # Tags come back ordered by name ascending.
       assert Enum.map(hidden, & &1.name) == ["abe tag", "zed tag"]
@@ -233,18 +233,18 @@ defmodule Philomena.FiltersTest do
     test "an anonymous viewer cannot load another user's private filter" do
       filter = filter_fixture(confirmed_user_fixture())
 
-      assert Filters.load_filter_page(actor(), "#{filter.id}") == {:error, :unauthorized}
+      assert Filters.show_filter_page(actor(), "#{filter.id}") == {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do
-      assert Filters.load_filter_page(actor(), "not-a-number") == {:error, :not_found}
+      assert Filters.show_filter_page(actor(), "not-a-number") == {:error, :not_found}
     end
 
     test "a well-formed id naming no row is not-found for every actor" do
-      assert Filters.load_filter_page(actor(confirmed_user_fixture()), "999999999") ==
+      assert Filters.show_filter_page(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
 
-      assert Filters.load_filter_page(actor(admin_user_fixture()), "999999999") ==
+      assert Filters.show_filter_page(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
   end
@@ -261,7 +261,7 @@ defmodule Philomena.FiltersTest do
       owner = confirmed_user_fixture()
       source = filter_fixture(owner, %{public: true})
       tag = tag_fixture()
-      {:ok, source} = Filters.hide_tag(actor(owner), source, tag.slug)
+      {:ok, source} = Filters.create_filter_hide(actor(owner), source, tag.slug)
 
       assert {:ok, %Ecto.Changeset{data: %Filter{} = data}} =
                Filters.new_filter(actor(confirmed_user_fixture()), "#{source.id}")
@@ -290,7 +290,7 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
 
       assert {:ok, {%Filter{} = loaded, %Ecto.Changeset{} = changeset}} =
-               Filters.load_filter_for_edit(actor(user), "#{filter.id}")
+               Filters.edit_filter(actor(user), "#{filter.id}")
 
       assert loaded.id == filter.id
       assert changeset.data.id == filter.id
@@ -299,20 +299,20 @@ defmodule Philomena.FiltersTest do
     test "an unrelated user is unauthorized" do
       filter = filter_fixture(confirmed_user_fixture())
 
-      assert Filters.load_filter_for_edit(actor(confirmed_user_fixture()), "#{filter.id}") ==
+      assert Filters.edit_filter(actor(confirmed_user_fixture()), "#{filter.id}") ==
                {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do
-      assert Filters.load_filter_for_edit(actor(confirmed_user_fixture()), "abc") ==
+      assert Filters.edit_filter(actor(confirmed_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "a well-formed id naming no row is not-found for every actor" do
-      assert Filters.load_filter_for_edit(actor(confirmed_user_fixture()), "999999999") ==
+      assert Filters.edit_filter(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
 
-      assert Filters.load_filter_for_edit(actor(admin_user_fixture()), "999999999") ==
+      assert Filters.edit_filter(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
   end
@@ -452,7 +452,7 @@ defmodule Philomena.FiltersTest do
       refute filter.public
 
       assert {:ok, %Filter{public: true}} =
-               Filters.make_filter_public(actor(user), "#{filter.id}")
+               Filters.create_filter_public(actor(user), "#{filter.id}")
 
       assert Repo.reload!(filter).public
     end
@@ -462,26 +462,26 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user, %{public: true})
 
       assert {:ok, %Filter{public: true}} =
-               Filters.make_filter_public(actor(user), "#{filter.id}")
+               Filters.create_filter_public(actor(user), "#{filter.id}")
     end
 
     test "an unrelated user is unauthorized" do
       filter = filter_fixture(confirmed_user_fixture())
 
-      assert Filters.make_filter_public(actor(confirmed_user_fixture()), "#{filter.id}") ==
+      assert Filters.create_filter_public(actor(confirmed_user_fixture()), "#{filter.id}") ==
                {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do
-      assert Filters.make_filter_public(actor(confirmed_user_fixture()), "abc") ==
+      assert Filters.create_filter_public(actor(confirmed_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "a well-formed id naming no row is not-found for every actor" do
-      assert Filters.make_filter_public(actor(confirmed_user_fixture()), "999999999") ==
+      assert Filters.create_filter_public(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
 
-      assert Filters.make_filter_public(actor(admin_user_fixture()), "999999999") ==
+      assert Filters.create_filter_public(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
   end
@@ -492,7 +492,7 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
 
       assert {:ok, %Filter{} = switched} =
-               Filters.switch_current_filter(actor(user), "#{filter.id}")
+               Filters.update_current_filter(actor(user), "#{filter.id}")
 
       assert switched.id == filter.id
       assert Repo.get!(User, user.id).current_filter_id == filter.id
@@ -503,29 +503,29 @@ defmodule Philomena.FiltersTest do
       others = filter_fixture(confirmed_user_fixture())
 
       assert {:error, :unauthorized} =
-               Filters.switch_current_filter(actor(user), "#{others.id}")
+               Filters.update_current_filter(actor(user), "#{others.id}")
     end
 
     test "an anonymous visitor gets the resolved filter back without persistence" do
       public = filter_fixture(confirmed_user_fixture(), %{public: true})
 
-      assert {:ok, %Filter{} = switched} = Filters.switch_current_filter(actor(), "#{public.id}")
+      assert {:ok, %Filter{} = switched} = Filters.update_current_filter(actor(), "#{public.id}")
       assert switched.id == public.id
     end
 
     test "an anonymous visitor is not authorized to switch to a private filter" do
       private = filter_fixture(confirmed_user_fixture())
 
-      assert {:error, :unauthorized} = Filters.switch_current_filter(actor(), "#{private.id}")
+      assert {:error, :unauthorized} = Filters.update_current_filter(actor(), "#{private.id}")
     end
 
     test "a well-formed id naming no row is not-found" do
-      assert Filters.switch_current_filter(actor(confirmed_user_fixture()), "999999999") ==
+      assert Filters.update_current_filter(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not-found" do
-      assert Filters.switch_current_filter(actor(confirmed_user_fixture()), "abc") ==
+      assert Filters.update_current_filter(actor(confirmed_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
@@ -533,7 +533,7 @@ defmodule Philomena.FiltersTest do
       default = system_filter_fixture(%{name: "Default"})
       user = confirmed_user_fixture()
 
-      assert {:ok, %Filter{} = switched} = Filters.switch_current_filter(actor(user), nil)
+      assert {:ok, %Filter{} = switched} = Filters.update_current_filter(actor(user), nil)
       assert switched.id == default.id
       assert Repo.get!(User, user.id).current_filter_id == default.id
     end
@@ -549,7 +549,7 @@ defmodule Philomena.FiltersTest do
         |> Repo.update!()
 
       assert {:ok, %Filter{id: selected_id}} =
-               Filters.switch_current_filter(actor(user), selected.id)
+               Filters.update_current_filter(actor(user), selected.id)
 
       assert selected_id == selected.id
       assert Repo.get!(User, user.id).forced_filter_id == forced.id
@@ -615,10 +615,10 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
       tag = tag_fixture()
 
-      assert {:ok, %Filter{} = hidden} = Filters.hide_tag(actor(user), filter, tag.slug)
+      assert {:ok, %Filter{} = hidden} = Filters.create_filter_hide(actor(user), filter, tag.slug)
       assert tag.id in hidden.hidden_tag_ids
 
-      assert {:ok, %Filter{} = shown} = Filters.unhide_tag(actor(user), hidden, tag.slug)
+      assert {:ok, %Filter{} = shown} = Filters.delete_filter_hide(actor(user), hidden, tag.slug)
       refute tag.id in shown.hidden_tag_ids
     end
 
@@ -626,14 +626,15 @@ defmodule Philomena.FiltersTest do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)
 
-      assert Filters.hide_tag(actor(user), filter, "no-such-tag") == {:error, :not_found}
+      assert Filters.create_filter_hide(actor(user), filter, "no-such-tag") ==
+               {:error, :not_found}
     end
 
     test "an unrelated user is unauthorized" do
       filter = filter_fixture(confirmed_user_fixture())
       tag = tag_fixture()
 
-      assert Filters.hide_tag(actor(confirmed_user_fixture()), filter, tag.slug) ==
+      assert Filters.create_filter_hide(actor(confirmed_user_fixture()), filter, tag.slug) ==
                {:error, :unauthorized}
     end
 
@@ -644,7 +645,8 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
       tag = tag_fixture()
 
-      assert Filters.hide_tag(actor(user, ban: @ban), filter, tag.slug) == {:error, :ban}
+      assert Filters.create_filter_hide(actor(user, ban: @ban), filter, tag.slug) ==
+               {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized" do
@@ -652,7 +654,7 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
       tag = tag_fixture()
 
-      assert Filters.hide_tag(actor(user, fingerprint: nil), filter, tag.slug) ==
+      assert Filters.create_filter_hide(actor(user, fingerprint: nil), filter, tag.slug) ==
                {:error, :unauthorized}
     end
 
@@ -661,7 +663,11 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
       tag = tag_fixture()
 
-      assert Filters.hide_tag(actor(user, ban: @ban, fingerprint: nil), filter, tag.slug) ==
+      assert Filters.create_filter_hide(
+               actor(user, ban: @ban, fingerprint: nil),
+               filter,
+               tag.slug
+             ) ==
                {:error, :ban}
     end
   end
@@ -672,10 +678,14 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
       tag = tag_fixture()
 
-      assert {:ok, %Filter{} = spoilered} = Filters.spoiler_tag(actor(user), filter, tag.slug)
+      assert {:ok, %Filter{} = spoilered} =
+               Filters.create_filter_spoiler(actor(user), filter, tag.slug)
+
       assert tag.id in spoilered.spoilered_tag_ids
 
-      assert {:ok, %Filter{} = plain} = Filters.unspoiler_tag(actor(user), spoilered, tag.slug)
+      assert {:ok, %Filter{} = plain} =
+               Filters.delete_filter_spoiler(actor(user), spoilered, tag.slug)
+
       refute tag.id in plain.spoilered_tag_ids
     end
 
@@ -683,14 +693,15 @@ defmodule Philomena.FiltersTest do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)
 
-      assert Filters.spoiler_tag(actor(user), filter, "no-such-tag") == {:error, :not_found}
+      assert Filters.create_filter_spoiler(actor(user), filter, "no-such-tag") ==
+               {:error, :not_found}
     end
 
     test "an unrelated user is unauthorized" do
       filter = filter_fixture(confirmed_user_fixture())
       tag = tag_fixture()
 
-      assert Filters.spoiler_tag(actor(confirmed_user_fixture()), filter, tag.slug) ==
+      assert Filters.create_filter_spoiler(actor(confirmed_user_fixture()), filter, tag.slug) ==
                {:error, :unauthorized}
     end
 
@@ -699,7 +710,8 @@ defmodule Philomena.FiltersTest do
       filter = filter_fixture(user)
       tag = tag_fixture()
 
-      assert Filters.spoiler_tag(actor(user, ban: @ban), filter, tag.slug) == {:error, :ban}
+      assert Filters.create_filter_spoiler(actor(user, ban: @ban), filter, tag.slug) ==
+               {:error, :ban}
     end
   end
 
@@ -710,10 +722,10 @@ defmodule Philomena.FiltersTest do
 
       operations = [
         new: fn actor -> Filters.new_filter(actor, nil) end,
-        edit: fn actor -> Filters.load_filter_for_edit(actor, filter.id) end,
+        edit: fn actor -> Filters.edit_filter(actor, filter.id) end,
         create: fn actor -> Filters.create_filter(actor, %{"name" => "Created"}) end,
         update: fn actor -> Filters.update_filter(actor, filter.id, %{"name" => "Updated"}) end,
-        publish: fn actor -> Filters.make_filter_public(actor, filter.id) end,
+        publish: fn actor -> Filters.create_filter_public(actor, filter.id) end,
         delete: fn actor -> Filters.delete_filter(actor, filter.id) end
       ]
 

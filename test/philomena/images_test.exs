@@ -214,7 +214,7 @@ defmodule Philomena.ImagesTest do
     moderator = moderator_user_fixture()
 
     {:ok, hidden} =
-      Images.hide_image(actor(moderator), image.id, %{"deletion_reason" => reason})
+      Images.create_image_hide(actor(moderator), image.id, %{"deletion_reason" => reason})
 
     Repo.delete_all(ModerationLog)
 
@@ -249,7 +249,7 @@ defmodule Philomena.ImagesTest do
       upload = media_png_upload()
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Images.upload_image(actor(user), attrs, upload)
+               Images.create_image(actor(user), attrs, upload)
 
       assert "has already been uploaded: it's image #{existing.id}" in errors_on(changeset).image
     end
@@ -267,7 +267,7 @@ defmodule Philomena.ImagesTest do
       gallery_image_fixture(gallery, image)
 
       assert {:ok, _hidden} =
-               Images.hide_image(actor(moderator), image.id, %{
+               Images.create_image_hide(actor(moderator), image.id, %{
                  "deletion_reason" => "Rule violation"
                })
 
@@ -280,7 +280,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _hidden} =
-               Images.hide_image(actor(moderator), image.id, %{
+               Images.create_image_hide(actor(moderator), image.id, %{
                  "deletion_reason" => "Rule violation"
                })
     end
@@ -378,7 +378,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), image.id, media_png_upload())
+               Images.update_image_file(actor(moderator), image.id, media_png_upload())
 
       # The dedup fingerprint is still set - it is overwritten with the (same)
       # new file's hash, never nulled.
@@ -387,7 +387,7 @@ defmodule Philomena.ImagesTest do
 
     # A file matching a *different* image is still rejected - the self-exclusion
     # only spares the image being updated, not genuine cross-image duplicates.
-    # update_file returns the changeset error tuple unchanged.
+    # update_image_file returns the changeset error tuple unchanged.
     test "rejects replacing a file with one already uploaded as another image" do
       dup_sha = png_upload_sha512()
       other = image_fixture(image_sha512_hash: dup_sha, image_orig_sha512_hash: dup_sha)
@@ -396,7 +396,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
 
       assert {:error, changeset} =
-               Images.update_file(actor(moderator), image.id, media_png_upload())
+               Images.update_image_file(actor(moderator), image.id, media_png_upload())
 
       assert "has already been uploaded: it's image #{other.id}" in errors_on(changeset).image
       # The target image keeps its own fingerprint.
@@ -411,7 +411,7 @@ defmodule Philomena.ImagesTest do
       arrange_comment_notification(image, user)
       assert comment_notification?(image, user)
 
-      assert {:ok, marked} = Images.mark_image_read(actor(user), to_string(image.id))
+      assert {:ok, marked} = Images.create_image_read(actor(user), to_string(image.id))
       assert marked.id == image.id
       refute comment_notification?(image, user)
     end
@@ -422,7 +422,7 @@ defmodule Philomena.ImagesTest do
       arrange_merge_notification(image, user)
       assert merge_notification?(image, user)
 
-      assert {:ok, marked} = Images.mark_image_read(actor(user), to_string(image.id))
+      assert {:ok, marked} = Images.create_image_read(actor(user), to_string(image.id))
       assert marked.id == image.id
       refute merge_notification?(image, user)
     end
@@ -435,7 +435,7 @@ defmodule Philomena.ImagesTest do
       assert comment_notification?(image, user)
       assert merge_notification?(image, user)
 
-      assert {:ok, marked} = Images.mark_image_read(actor(user), to_string(image.id))
+      assert {:ok, marked} = Images.create_image_read(actor(user), to_string(image.id))
       assert marked.id == image.id
       refute comment_notification?(image, user)
       refute merge_notification?(image, user)
@@ -452,7 +452,7 @@ defmodule Philomena.ImagesTest do
       assert comment_notification?(image, user)
       assert comment_notification?(image, other)
 
-      assert {:ok, _} = Images.mark_image_read(actor(user), to_string(image.id))
+      assert {:ok, _} = Images.create_image_read(actor(user), to_string(image.id))
       refute comment_notification?(image, user)
       assert comment_notification?(image, other)
     end
@@ -463,7 +463,7 @@ defmodule Philomena.ImagesTest do
       refute comment_notification?(image, user)
       refute merge_notification?(image, user)
 
-      assert {:ok, marked} = Images.mark_image_read(actor(user), to_string(image.id))
+      assert {:ok, marked} = Images.create_image_read(actor(user), to_string(image.id))
       assert marked.id == image.id
     end
 
@@ -471,20 +471,20 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, marked} = Images.mark_image_read(actor(user), image.id)
+      assert {:ok, marked} = Images.create_image_read(actor(user), image.id)
       assert marked.id == image.id
     end
 
     test "an unknown well-formed id is not found" do
       user = confirmed_user_fixture()
 
-      assert Images.mark_image_read(actor(user), "2147483647") == {:error, :not_found}
+      assert Images.create_image_read(actor(user), "2147483647") == {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
       user = confirmed_user_fixture()
 
-      assert Images.mark_image_read(actor(user), "not-a-number") == {:error, :not_found}
+      assert Images.create_image_read(actor(user), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
@@ -492,7 +492,7 @@ defmodule Philomena.ImagesTest do
       # the row is ever queried, so it is a plain not found rather than a crash.
       user = confirmed_user_fixture()
 
-      assert Images.mark_image_read(actor(user), "99999999999999999999") == {:error, :not_found}
+      assert Images.create_image_read(actor(user), "99999999999999999999") == {:error, :not_found}
     end
   end
 
@@ -502,7 +502,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       assert image.image_orig_sha512_hash != nil
 
-      assert {:ok, cleared} = Images.remove_image_hash(actor(moderator), to_string(image.id))
+      assert {:ok, cleared} = Images.delete_image_hash(actor(moderator), to_string(image.id))
       assert cleared.id == image.id
       assert cleared.image_orig_sha512_hash == nil
       assert Repo.reload!(image).image_orig_sha512_hash == nil
@@ -512,7 +512,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture()
 
-      assert {:ok, cleared} = Images.remove_image_hash(actor(admin), to_string(image.id))
+      assert {:ok, cleared} = Images.delete_image_hash(actor(admin), to_string(image.id))
       assert cleared.id == image.id
       assert Repo.reload!(image).image_orig_sha512_hash == nil
     end
@@ -521,7 +521,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.remove_image_hash(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.delete_image_hash(actor(user), to_string(image.id)) == {:error, :unauthorized}
       assert Repo.reload!(image).image_orig_sha512_hash == image.image_orig_sha512_hash
       assert moderation_log_count() == 0
     end
@@ -531,7 +531,7 @@ defmodule Philomena.ImagesTest do
       # a clean unauthorized rather than a crash.
       image = image_fixture()
 
-      assert Images.remove_image_hash(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.delete_image_hash(actor(), to_string(image.id)) == {:error, :unauthorized}
       assert Repo.reload!(image).image_orig_sha512_hash == image.image_orig_sha512_hash
       assert moderation_log_count() == 0
     end
@@ -540,7 +540,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.remove_image_hash(actor(moderator), to_string(image.id))
+      assert {:ok, _} = Images.delete_image_hash(actor(moderator), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -553,7 +553,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, cleared} = Images.remove_image_hash(actor(moderator), image.id)
+      assert {:ok, cleared} = Images.delete_image_hash(actor(moderator), image.id)
       assert cleared.id == image.id
     end
 
@@ -561,7 +561,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.remove_image_hash(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.delete_image_hash(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
@@ -569,14 +569,14 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.remove_image_hash(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.delete_image_hash(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.remove_image_hash(actor(moderator), "not-a-number") == {:error, :not_found}
+      assert Images.delete_image_hash(actor(moderator), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
@@ -584,7 +584,7 @@ defmodule Philomena.ImagesTest do
       # the row is ever queried, ahead of any authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.remove_image_hash(actor(moderator), "99999999999999999999") ==
+      assert Images.delete_image_hash(actor(moderator), "99999999999999999999") ==
                {:error, :not_found}
     end
   end
@@ -596,7 +596,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(processed: true, thumbnails_generated: true)
 
-      assert {:ok, repaired} = Images.repair_image(actor(moderator), to_string(image.id))
+      assert {:ok, repaired} = Images.create_image_repair(actor(moderator), to_string(image.id))
       assert repaired.id == image.id
 
       reloaded = Repo.reload!(image)
@@ -608,7 +608,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(processed: true, thumbnails_generated: true)
 
-      assert {:ok, repaired} = Images.repair_image(actor(admin), to_string(image.id))
+      assert {:ok, repaired} = Images.create_image_repair(actor(admin), to_string(image.id))
       assert repaired.id == image.id
 
       reloaded = Repo.reload!(image)
@@ -620,7 +620,8 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(processed: true, thumbnails_generated: true)
 
-      assert Images.repair_image(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_repair(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
 
       reloaded = Repo.reload!(image)
       assert reloaded.processed
@@ -633,7 +634,7 @@ defmodule Philomena.ImagesTest do
       # a clean unauthorized rather than a crash.
       image = image_fixture(processed: true, thumbnails_generated: true)
 
-      assert Images.repair_image(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_repair(actor(), to_string(image.id)) == {:error, :unauthorized}
 
       reloaded = Repo.reload!(image)
       assert reloaded.processed
@@ -645,7 +646,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.repair_image(actor(moderator), to_string(image.id))
+      assert {:ok, _} = Images.create_image_repair(actor(moderator), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -658,7 +659,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, repaired} = Images.repair_image(actor(moderator), image.id)
+      assert {:ok, repaired} = Images.create_image_repair(actor(moderator), image.id)
       assert repaired.id == image.id
     end
 
@@ -666,7 +667,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.repair_image(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.create_image_repair(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
@@ -674,14 +675,14 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.repair_image(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.create_image_repair(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.repair_image(actor(moderator), "not-a-number") == {:error, :not_found}
+      assert Images.create_image_repair(actor(moderator), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
@@ -689,7 +690,8 @@ defmodule Philomena.ImagesTest do
       # the row is ever queried, ahead of any authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.repair_image(actor(moderator), "99999999999999999999") == {:error, :not_found}
+      assert Images.create_image_repair(actor(moderator), "99999999999999999999") ==
+               {:error, :not_found}
     end
   end
 
@@ -701,7 +703,9 @@ defmodule Philomena.ImagesTest do
       source_change_fixture(image)
       assert source_change_count(image) == 2
 
-      assert {:ok, cleared} = Images.remove_source_history(actor(moderator), to_string(image.id))
+      assert {:ok, cleared} =
+               Images.delete_image_source_history(actor(moderator), to_string(image.id))
+
       assert cleared.id == image.id
 
       reloaded = Repo.reload!(image)
@@ -714,7 +718,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(source_url: "https://example.com/artwork")
       source_change_fixture(image)
 
-      assert {:ok, cleared} = Images.remove_source_history(actor(admin), to_string(image.id))
+      assert {:ok, cleared} =
+               Images.delete_image_source_history(actor(admin), to_string(image.id))
+
       assert cleared.id == image.id
 
       reloaded = Repo.reload!(image)
@@ -727,7 +733,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(source_url: "https://example.com/artwork")
       source_change_fixture(image)
 
-      assert Images.remove_source_history(actor(user), to_string(image.id)) ==
+      assert Images.delete_image_source_history(actor(user), to_string(image.id)) ==
                {:error, :unauthorized}
 
       reloaded = Repo.reload!(image)
@@ -742,7 +748,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(source_url: "https://example.com/artwork")
       source_change_fixture(image)
 
-      assert Images.remove_source_history(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.delete_image_source_history(actor(), to_string(image.id)) ==
+               {:error, :unauthorized}
 
       reloaded = Repo.reload!(image)
       assert reloaded.source_url == "https://example.com/artwork"
@@ -754,7 +761,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.remove_source_history(actor(moderator), to_string(image.id))
+      assert {:ok, _} = Images.delete_image_source_history(actor(moderator), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -767,7 +774,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, cleared} = Images.remove_source_history(actor(moderator), image.id)
+      assert {:ok, cleared} = Images.delete_image_source_history(actor(moderator), image.id)
       assert cleared.id == image.id
     end
 
@@ -775,7 +782,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.remove_source_history(actor(moderator), "2147483647") ==
+      assert Images.delete_image_source_history(actor(moderator), "2147483647") ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -785,14 +792,16 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.remove_source_history(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.delete_image_source_history(actor(admin), "2147483647") ==
+               {:error, :not_found}
+
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.remove_source_history(actor(moderator), "not-a-number") ==
+      assert Images.delete_image_source_history(actor(moderator), "not-a-number") ==
                {:error, :not_found}
     end
 
@@ -801,7 +810,7 @@ defmodule Philomena.ImagesTest do
       # the row is ever queried, ahead of any authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.remove_source_history(actor(moderator), "99999999999999999999") ==
+      assert Images.delete_image_source_history(actor(moderator), "99999999999999999999") ==
                {:error, :not_found}
     end
   end
@@ -810,7 +819,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor gets the faves without vote data on a visible image" do
       image = image_fixture()
 
-      assert {:ok, {loaded, has_votes}} = Images.image_fave_list(actor(), to_string(image.id))
+      assert {:ok, {loaded, has_votes}} = Images.list_image_faves(actor(), to_string(image.id))
       assert loaded.id == image.id
       refute has_votes
 
@@ -825,7 +834,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, {loaded, has_votes}} = Images.image_fave_list(actor(user), to_string(image.id))
+      assert {:ok, {loaded, has_votes}} =
+               Images.list_image_faves(actor(user), to_string(image.id))
+
       assert loaded.id == image.id
       refute has_votes
 
@@ -840,7 +851,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       fave!(image, faver)
 
-      assert {:ok, {loaded, _has_votes}} = Images.image_fave_list(actor(), to_string(image.id))
+      assert {:ok, {loaded, _has_votes}} = Images.list_image_faves(actor(), to_string(image.id))
 
       [fave] = loaded.faves
       assert fave.user.id == faver.id
@@ -851,7 +862,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, {loaded, has_votes}} =
-               Images.image_fave_list(actor(moderator), to_string(image.id))
+               Images.list_image_faves(actor(moderator), to_string(image.id))
 
       assert loaded.id == image.id
       assert has_votes
@@ -867,7 +878,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, {loaded, has_votes}} =
-               Images.image_fave_list(actor(admin), to_string(image.id))
+               Images.list_image_faves(actor(admin), to_string(image.id))
 
       assert loaded.id == image.id
       assert has_votes
@@ -884,7 +895,8 @@ defmodule Philomena.ImagesTest do
       vote!(image, downvoter, false)
       hide!(image, hider)
 
-      assert {:ok, {loaded, true}} = Images.image_fave_list(actor(moderator), to_string(image.id))
+      assert {:ok, {loaded, true}} =
+               Images.list_image_faves(actor(moderator), to_string(image.id))
 
       assert [%{user: %{id: up_id}}] = loaded.upvotes
       assert up_id == upvoter.id
@@ -898,59 +910,61 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.image_fave_list(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.list_image_faves(actor(user), to_string(image.id)) == {:error, :unauthorized}
     end
 
     test "a hidden image is unauthorized for an anonymous actor" do
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.image_fave_list(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.list_image_faves(actor(), to_string(image.id)) == {:error, :unauthorized}
     end
 
     test "a hidden image is listable by a moderator with has_votes true" do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, {loaded, true}} = Images.image_fave_list(actor(moderator), to_string(image.id))
+      assert {:ok, {loaded, true}} =
+               Images.list_image_faves(actor(moderator), to_string(image.id))
+
       assert loaded.id == image.id
     end
 
     test "accepts an integer id" do
       image = image_fixture()
 
-      assert {:ok, {loaded, false}} = Images.image_fave_list(actor(), image.id)
+      assert {:ok, {loaded, false}} = Images.list_image_faves(actor(), image.id)
       assert loaded.id == image.id
     end
 
     test "an unknown well-formed id is not found for an anonymous actor" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.image_fave_list(actor(), "2147483647") == {:error, :not_found}
+      assert Images.list_image_faves(actor(), "2147483647") == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a regular user" do
-      assert Images.image_fave_list(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Images.list_image_faves(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a moderator" do
-      assert Images.image_fave_list(actor(moderator_user_fixture()), "2147483647") ==
+      assert Images.list_image_faves(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.image_fave_list(actor(admin_user_fixture()), "2147483647") ==
+      assert Images.list_image_faves(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.image_fave_list(actor(), "not-a-number") == {:error, :not_found}
+      assert Images.list_image_faves(actor(), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       # IntegerId.parse rejects a value the integer column could not hold before
       # the row is ever queried, ahead of any authorization.
-      assert Images.image_fave_list(actor(), "99999999999999999999") == {:error, :not_found}
+      assert Images.list_image_faves(actor(), "99999999999999999999") == {:error, :not_found}
     end
   end
 
@@ -1029,7 +1043,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_scratchpad(actor(moderator), to_string(image.id), %{
+               Images.update_image_scratchpad(actor(moderator), to_string(image.id), %{
                  "scratchpad" => "watch closely"
                })
 
@@ -1043,7 +1057,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _updated} =
-               Images.update_scratchpad(actor(admin), to_string(image.id), %{
+               Images.update_image_scratchpad(actor(admin), to_string(image.id), %{
                  "scratchpad" => "noted"
                })
 
@@ -1055,7 +1069,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(scratchpad: "existing note")
 
       assert {:ok, updated} =
-               Images.update_scratchpad(actor(moderator), to_string(image.id), %{
+               Images.update_image_scratchpad(actor(moderator), to_string(image.id), %{
                  "scratchpad" => ""
                })
 
@@ -1068,7 +1082,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_scratchpad(actor(moderator), to_string(image.id), %{
+               Images.update_image_scratchpad(actor(moderator), to_string(image.id), %{
                  "scratchpad" => "watch closely"
                })
 
@@ -1084,7 +1098,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(scratchpad: "existing note")
 
       assert {:ok, _} =
-               Images.update_scratchpad(actor(moderator), to_string(image.id), %{
+               Images.update_image_scratchpad(actor(moderator), to_string(image.id), %{
                  "scratchpad" => ""
                })
 
@@ -1097,7 +1111,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_scratchpad(actor(moderator), image.id, %{"scratchpad" => "noted"})
+               Images.update_image_scratchpad(actor(moderator), image.id, %{
+                 "scratchpad" => "noted"
+               })
 
       assert updated.scratchpad == "noted"
     end
@@ -1106,7 +1122,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(scratchpad: "existing note")
 
-      assert Images.update_scratchpad(actor(user), to_string(image.id), %{"scratchpad" => "new"}) ==
+      assert Images.update_image_scratchpad(actor(user), to_string(image.id), %{
+               "scratchpad" => "new"
+             }) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).scratchpad == "existing note"
@@ -1116,7 +1134,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot update and the scratchpad and log stay untouched" do
       image = image_fixture(scratchpad: "existing note")
 
-      assert Images.update_scratchpad(actor(), to_string(image.id), %{"scratchpad" => "new"}) ==
+      assert Images.update_image_scratchpad(actor(), to_string(image.id), %{"scratchpad" => "new"}) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).scratchpad == "existing note"
@@ -1126,7 +1144,9 @@ defmodule Philomena.ImagesTest do
     test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_scratchpad(actor(moderator), "2147483647", %{"scratchpad" => "new"}) ==
+      assert Images.update_image_scratchpad(actor(moderator), "2147483647", %{
+               "scratchpad" => "new"
+             }) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1135,7 +1155,7 @@ defmodule Philomena.ImagesTest do
     test "an admin with an unknown well-formed id is not found and writes no log" do
       admin = admin_user_fixture()
 
-      assert Images.update_scratchpad(actor(admin), "2147483647", %{"scratchpad" => "new"}) ==
+      assert Images.update_image_scratchpad(actor(admin), "2147483647", %{"scratchpad" => "new"}) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1144,14 +1164,16 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_scratchpad(actor(moderator), "not-a-number", %{"scratchpad" => "new"}) ==
+      assert Images.update_image_scratchpad(actor(moderator), "not-a-number", %{
+               "scratchpad" => "new"
+             }) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_scratchpad(actor(moderator), "99999999999999999999", %{
+      assert Images.update_image_scratchpad(actor(moderator), "99999999999999999999", %{
                "scratchpad" => "new"
              }) ==
                {:error, :not_found}
@@ -1165,7 +1187,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, subscribed} = Images.subscribe_image(actor(user), to_string(image.id))
+      assert {:ok, subscribed} =
+               Images.create_image_subscription(actor(user), to_string(image.id))
+
       assert subscribed.id == image.id
       assert Images.subscribed?(image, user)
     end
@@ -1174,7 +1198,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.subscribe_image(actor(moderator), to_string(image.id))
+      assert {:ok, _} = Images.create_image_subscription(actor(moderator), to_string(image.id))
       assert Images.subscribed?(image, moderator)
     end
 
@@ -1184,8 +1208,8 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.subscribe_image(actor(user), to_string(image.id))
-      assert {:ok, _} = Images.subscribe_image(actor(user), to_string(image.id))
+      assert {:ok, _} = Images.create_image_subscription(actor(user), to_string(image.id))
+      assert {:ok, _} = Images.create_image_subscription(actor(user), to_string(image.id))
       assert Images.subscribed?(image, user)
     end
 
@@ -1193,7 +1217,8 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.subscribe_image(actor(user, ban: @ban), to_string(image.id))
+      assert {:ok, _} =
+               Images.create_image_subscription(actor(user, ban: @ban), to_string(image.id))
 
       assert Images.subscribed?(image, user)
     end
@@ -1202,40 +1227,43 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, subscribed} = Images.subscribe_image(actor(user), image.id)
+      assert {:ok, subscribed} = Images.create_image_subscription(actor(user), image.id)
       assert subscribed.id == image.id
     end
 
     test "an unknown well-formed id is not found for an anonymous actor" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.subscribe_image(actor(), "2147483647") == {:error, :not_found}
+      assert Images.create_image_subscription(actor(), "2147483647") == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a regular user" do
-      assert Images.subscribe_image(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Images.create_image_subscription(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a moderator" do
-      assert Images.subscribe_image(actor(moderator_user_fixture()), "2147483647") ==
+      assert Images.create_image_subscription(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.subscribe_image(actor(admin_user_fixture()), "2147483647") ==
+      assert Images.create_image_subscription(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.subscribe_image(actor(confirmed_user_fixture()), "not-a-number") ==
+      assert Images.create_image_subscription(actor(confirmed_user_fixture()), "not-a-number") ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       # IntegerId.parse rejects a value the integer column could not hold before
       # the row is ever queried, ahead of any authorization.
-      assert Images.subscribe_image(actor(confirmed_user_fixture()), "99999999999999999999") ==
+      assert Images.create_image_subscription(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -1247,7 +1275,9 @@ defmodule Philomena.ImagesTest do
       {:ok, _} = Images.create_subscription(image, user)
       assert Images.subscribed?(image, user)
 
-      assert {:ok, unsubscribed} = Images.unsubscribe_image(actor(user), to_string(image.id))
+      assert {:ok, unsubscribed} =
+               Images.delete_image_subscription(actor(user), to_string(image.id))
+
       assert unsubscribed.id == image.id
       refute Images.subscribed?(image, user)
     end
@@ -1259,7 +1289,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       refute Images.subscribed?(image, user)
 
-      assert {:ok, unsubscribed} = Images.unsubscribe_image(actor(user), to_string(image.id))
+      assert {:ok, unsubscribed} =
+               Images.delete_image_subscription(actor(user), to_string(image.id))
+
       assert unsubscribed.id == image.id
       refute Images.subscribed?(image, user)
     end
@@ -1269,7 +1301,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       {:ok, _} = Images.create_subscription(image, user)
 
-      assert {:ok, _} = Images.unsubscribe_image(actor(user, ban: @ban), to_string(image.id))
+      assert {:ok, _} =
+               Images.delete_image_subscription(actor(user, ban: @ban), to_string(image.id))
 
       refute Images.subscribed?(image, user)
     end
@@ -1279,37 +1312,40 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       {:ok, _} = Images.create_subscription(image, user)
 
-      assert {:ok, unsubscribed} = Images.unsubscribe_image(actor(user), image.id)
+      assert {:ok, unsubscribed} = Images.delete_image_subscription(actor(user), image.id)
       assert unsubscribed.id == image.id
       refute Images.subscribed?(image, user)
     end
 
     test "an unknown well-formed id is not found for an anonymous actor" do
-      assert Images.unsubscribe_image(actor(), "2147483647") == {:error, :not_found}
+      assert Images.delete_image_subscription(actor(), "2147483647") == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a regular user" do
-      assert Images.unsubscribe_image(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Images.delete_image_subscription(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a moderator" do
-      assert Images.unsubscribe_image(actor(moderator_user_fixture()), "2147483647") ==
+      assert Images.delete_image_subscription(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      assert Images.unsubscribe_image(actor(admin_user_fixture()), "2147483647") ==
+      assert Images.delete_image_subscription(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.unsubscribe_image(actor(confirmed_user_fixture()), "not-a-number") ==
+      assert Images.delete_image_subscription(actor(confirmed_user_fixture()), "not-a-number") ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
-      assert Images.unsubscribe_image(actor(confirmed_user_fixture()), "99999999999999999999") ==
+      assert Images.delete_image_subscription(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -1319,7 +1355,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, approved} = Images.approve_image(actor(moderator), to_string(image.id))
+      assert {:ok, approved} = Images.create_image_approve(actor(moderator), to_string(image.id))
       assert approved.id == image.id
       assert approved.approved
       assert Repo.reload!(image).approved
@@ -1329,7 +1365,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, _} = Images.approve_image(actor(admin), to_string(image.id))
+      assert {:ok, _} = Images.create_image_approve(actor(admin), to_string(image.id))
       assert Repo.reload!(image).approved
     end
 
@@ -1339,7 +1375,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(approved: false, user_id: uploader.id)
       assert Repo.reload!(uploader).images_count == 0
 
-      assert {:ok, _} = Images.approve_image(actor(moderator), to_string(image.id))
+      assert {:ok, _} = Images.create_image_approve(actor(moderator), to_string(image.id))
       assert Repo.reload!(uploader).images_count == 1
     end
 
@@ -1347,7 +1383,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, _} = Images.approve_image(actor(moderator), to_string(image.id))
+      assert {:ok, _} = Images.create_image_approve(actor(moderator), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1360,7 +1396,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, approved} = Images.approve_image(actor(moderator), image.id)
+      assert {:ok, approved} = Images.create_image_approve(actor(moderator), image.id)
       assert approved.id == image.id
     end
 
@@ -1375,7 +1411,7 @@ defmodule Philomena.ImagesTest do
 
       image = image_fixture(approved: false, user_id: uploader.id)
 
-      assert {:ok, approved} = Images.approve_image(actor(moderator), image.id)
+      assert {:ok, approved} = Images.create_image_approve(actor(moderator), image.id)
       assert approved.approved
       assert Repo.reload!(uploader).images_count == 5
 
@@ -1393,7 +1429,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(approved: true)
 
       assert {:error, %{errors: [approved: {"must be false", []}]}} =
-               Images.approve_image(actor(moderator), to_string(image.id))
+               Images.create_image_approve(actor(moderator), to_string(image.id))
 
       assert Repo.reload!(image).approved
       assert moderation_log_count() == 0
@@ -1405,7 +1441,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(approved: true)
 
-      assert Images.approve_image(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_approve(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
+
       assert moderation_log_count() == 0
     end
 
@@ -1413,7 +1451,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(approved: false)
 
-      assert Images.approve_image(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_approve(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
+
       refute Repo.reload!(image).approved
       assert moderation_log_count() == 0
     end
@@ -1421,7 +1461,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot approve an unapproved image" do
       image = image_fixture(approved: false)
 
-      assert Images.approve_image(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_approve(actor(), to_string(image.id)) == {:error, :unauthorized}
       refute Repo.reload!(image).approved
       assert moderation_log_count() == 0
     end
@@ -1430,7 +1470,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.approve_image(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.create_image_approve(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
@@ -1438,20 +1478,20 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.approve_image(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.create_image_approve(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.approve_image(actor(moderator), "not-a-number") == {:error, :not_found}
+      assert Images.create_image_approve(actor(moderator), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.approve_image(actor(moderator), "99999999999999999999") ==
+      assert Images.create_image_approve(actor(moderator), "99999999999999999999") ==
                {:error, :not_found}
     end
   end
@@ -1462,7 +1502,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: true)
 
       assert {:ok, locked} =
-               Images.set_comment_locked(actor(moderator), to_string(image.id), true)
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), true)
 
       assert locked.id == image.id
       refute locked.commenting_allowed
@@ -1473,7 +1513,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, _} = Images.set_comment_locked(actor(admin), to_string(image.id), true)
+      assert {:ok, _} = Images.update_image_comment_lock(actor(admin), to_string(image.id), true)
       refute Repo.reload!(image).commenting_allowed
     end
 
@@ -1482,7 +1522,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: false)
 
       assert {:ok, unlocked} =
-               Images.set_comment_locked(actor(moderator), to_string(image.id), false)
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), false)
 
       assert unlocked.id == image.id
       assert unlocked.commenting_allowed
@@ -1493,7 +1533,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, _} = Images.set_comment_locked(actor(moderator), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), true)
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1506,7 +1547,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: false)
 
-      assert {:ok, _} = Images.set_comment_locked(actor(moderator), to_string(image.id), false)
+      assert {:ok, _} =
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), false)
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1519,7 +1561,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, locked} = Images.set_comment_locked(actor(moderator), image.id, true)
+      assert {:ok, locked} = Images.update_image_comment_lock(actor(moderator), image.id, true)
       assert locked.id == image.id
     end
 
@@ -1527,7 +1569,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert Images.set_comment_locked(actor(user), to_string(image.id), true) ==
+      assert Images.update_image_comment_lock(actor(user), to_string(image.id), true) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).commenting_allowed
@@ -1537,7 +1579,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot lock comments and the flag stays set" do
       image = image_fixture(commenting_allowed: true)
 
-      assert Images.set_comment_locked(actor(), to_string(image.id), true) ==
+      assert Images.update_image_comment_lock(actor(), to_string(image.id), true) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).commenting_allowed
@@ -1548,7 +1590,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.set_comment_locked(actor(moderator), "2147483647", true) ==
+      assert Images.update_image_comment_lock(actor(moderator), "2147483647", true) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1558,21 +1600,23 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.set_comment_locked(actor(admin), "2147483647", true) == {:error, :not_found}
+      assert Images.update_image_comment_lock(actor(admin), "2147483647", true) ==
+               {:error, :not_found}
+
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.set_comment_locked(actor(moderator), "not-a-number", true) ==
+      assert Images.update_image_comment_lock(actor(moderator), "not-a-number", true) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.set_comment_locked(actor(moderator), "99999999999999999999", true) ==
+      assert Images.update_image_comment_lock(actor(moderator), "99999999999999999999", true) ==
                {:error, :not_found}
     end
   end
@@ -1583,7 +1627,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(description_editing_allowed: true)
 
       assert {:ok, locked} =
-               Images.set_description_locked(actor(moderator), to_string(image.id), true)
+               Images.update_image_description_lock(actor(moderator), to_string(image.id), true)
 
       assert locked.id == image.id
       refute locked.description_editing_allowed
@@ -1594,7 +1638,9 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(description_editing_allowed: true)
 
-      assert {:ok, _} = Images.set_description_locked(actor(admin), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_image_description_lock(actor(admin), to_string(image.id), true)
+
       refute Repo.reload!(image).description_editing_allowed
     end
 
@@ -1603,7 +1649,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(description_editing_allowed: false)
 
       assert {:ok, unlocked} =
-               Images.set_description_locked(actor(moderator), to_string(image.id), false)
+               Images.update_image_description_lock(actor(moderator), to_string(image.id), false)
 
       assert unlocked.id == image.id
       assert unlocked.description_editing_allowed
@@ -1614,7 +1660,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(description_editing_allowed: true)
 
-      assert {:ok, _} = Images.set_description_locked(actor(moderator), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_image_description_lock(actor(moderator), to_string(image.id), true)
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1628,7 +1675,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(description_editing_allowed: false)
 
       assert {:ok, _} =
-               Images.set_description_locked(actor(moderator), to_string(image.id), false)
+               Images.update_image_description_lock(actor(moderator), to_string(image.id), false)
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1641,7 +1688,9 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(description_editing_allowed: true)
 
-      assert {:ok, locked} = Images.set_description_locked(actor(moderator), image.id, true)
+      assert {:ok, locked} =
+               Images.update_image_description_lock(actor(moderator), image.id, true)
+
       assert locked.id == image.id
     end
 
@@ -1649,7 +1698,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(description_editing_allowed: true)
 
-      assert Images.set_description_locked(actor(user), to_string(image.id), true) ==
+      assert Images.update_image_description_lock(actor(user), to_string(image.id), true) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).description_editing_allowed
@@ -1659,7 +1708,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot lock description editing and the flag stays set" do
       image = image_fixture(description_editing_allowed: true)
 
-      assert Images.set_description_locked(actor(), to_string(image.id), true) ==
+      assert Images.update_image_description_lock(actor(), to_string(image.id), true) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).description_editing_allowed
@@ -1670,7 +1719,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.set_description_locked(actor(moderator), "2147483647", true) ==
+      assert Images.update_image_description_lock(actor(moderator), "2147483647", true) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1680,7 +1729,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.set_description_locked(actor(admin), "2147483647", true) ==
+      assert Images.update_image_description_lock(actor(admin), "2147483647", true) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1689,14 +1738,14 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.set_description_locked(actor(moderator), "not-a-number", true) ==
+      assert Images.update_image_description_lock(actor(moderator), "not-a-number", true) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.set_description_locked(actor(moderator), "99999999999999999999", true) ==
+      assert Images.update_image_description_lock(actor(moderator), "99999999999999999999", true) ==
                {:error, :not_found}
     end
   end
@@ -1706,7 +1755,9 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, locked} = Images.set_tag_locked(actor(moderator), to_string(image.id), true)
+      assert {:ok, locked} =
+               Images.update_image_tag_lock(actor(moderator), to_string(image.id), true)
+
       assert locked.id == image.id
       refute locked.tag_editing_allowed
       refute Repo.reload!(image).tag_editing_allowed
@@ -1716,7 +1767,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, _} = Images.set_tag_locked(actor(admin), to_string(image.id), true)
+      assert {:ok, _} = Images.update_image_tag_lock(actor(admin), to_string(image.id), true)
       refute Repo.reload!(image).tag_editing_allowed
     end
 
@@ -1724,7 +1775,9 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: false)
 
-      assert {:ok, unlocked} = Images.set_tag_locked(actor(moderator), to_string(image.id), false)
+      assert {:ok, unlocked} =
+               Images.update_image_tag_lock(actor(moderator), to_string(image.id), false)
+
       assert unlocked.id == image.id
       assert unlocked.tag_editing_allowed
       assert Repo.reload!(image).tag_editing_allowed
@@ -1734,7 +1787,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, _} = Images.set_tag_locked(actor(moderator), to_string(image.id), true)
+      assert {:ok, _} = Images.update_image_tag_lock(actor(moderator), to_string(image.id), true)
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1747,7 +1800,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: false)
 
-      assert {:ok, _} = Images.set_tag_locked(actor(moderator), to_string(image.id), false)
+      assert {:ok, _} = Images.update_image_tag_lock(actor(moderator), to_string(image.id), false)
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1760,7 +1813,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, locked} = Images.set_tag_locked(actor(moderator), image.id, true)
+      assert {:ok, locked} = Images.update_image_tag_lock(actor(moderator), image.id, true)
       assert locked.id == image.id
     end
 
@@ -1768,7 +1821,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert Images.set_tag_locked(actor(user), to_string(image.id), true) ==
+      assert Images.update_image_tag_lock(actor(user), to_string(image.id), true) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).tag_editing_allowed
@@ -1778,7 +1831,9 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot lock tags and the flag stays set" do
       image = image_fixture(tag_editing_allowed: true)
 
-      assert Images.set_tag_locked(actor(), to_string(image.id), true) == {:error, :unauthorized}
+      assert Images.update_image_tag_lock(actor(), to_string(image.id), true) ==
+               {:error, :unauthorized}
+
       assert Repo.reload!(image).tag_editing_allowed
       assert moderation_log_count() == 0
     end
@@ -1787,7 +1842,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.set_tag_locked(actor(moderator), "2147483647", true) ==
+      assert Images.update_image_tag_lock(actor(moderator), "2147483647", true) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1797,20 +1852,23 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.set_tag_locked(actor(admin), "2147483647", true) == {:error, :not_found}
+      assert Images.update_image_tag_lock(actor(admin), "2147483647", true) ==
+               {:error, :not_found}
+
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.set_tag_locked(actor(moderator), "not-a-number", true) == {:error, :not_found}
+      assert Images.update_image_tag_lock(actor(moderator), "not-a-number", true) ==
+               {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.set_tag_locked(actor(moderator), "99999999999999999999", true) ==
+      assert Images.update_image_tag_lock(actor(moderator), "99999999999999999999", true) ==
                {:error, :not_found}
     end
   end
@@ -1847,12 +1905,12 @@ defmodule Philomena.ImagesTest do
 
       # Seed a starting locked tag, then replace it wholesale.
       {:ok, _} =
-        Images.update_locked_tags(actor(moderator), image.id, %{"tag_input" => "old lock"})
+        Images.update_image_locked_tags(actor(moderator), image.id, %{"tag_input" => "old lock"})
 
       assert locked_tag_names(image) == ["old lock"]
 
       assert {:ok, updated} =
-               Images.update_locked_tags(actor(moderator), to_string(image.id), %{
+               Images.update_image_locked_tags(actor(moderator), to_string(image.id), %{
                  "tag_input" => "safe, cute"
                })
 
@@ -1866,12 +1924,12 @@ defmodule Philomena.ImagesTest do
       tag_fixture(name: "cute")
 
       {:ok, _} =
-        Images.update_locked_tags(actor(moderator), image.id, %{"tag_input" => "safe, cute"})
+        Images.update_image_locked_tags(actor(moderator), image.id, %{"tag_input" => "safe, cute"})
 
       assert locked_tag_names(image) == ["cute", "safe"]
 
       assert {:ok, _} =
-               Images.update_locked_tags(actor(moderator), to_string(image.id), %{
+               Images.update_image_locked_tags(actor(moderator), to_string(image.id), %{
                  "tag_input" => ""
                })
 
@@ -1883,7 +1941,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_locked_tags(actor(admin), to_string(image.id), %{
+               Images.update_image_locked_tags(actor(admin), to_string(image.id), %{
                  "tag_input" => "safe"
                })
 
@@ -1906,7 +1964,7 @@ defmodule Philomena.ImagesTest do
       missing = unique_tag_name()
 
       assert {:ok, _} =
-               Images.update_locked_tags(actor(moderator), image.id, %{
+               Images.update_image_locked_tags(actor(moderator), image.id, %{
                  "tag_input" => "#{selected.name}, #{missing}"
                })
 
@@ -1919,7 +1977,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_locked_tags(actor(moderator), to_string(image.id), %{
+               Images.update_image_locked_tags(actor(moderator), to_string(image.id), %{
                  "tag_input" => "safe, cute"
                })
 
@@ -1935,7 +1993,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_locked_tags(actor(moderator), image.id, %{"tag_input" => "safe"})
+               Images.update_image_locked_tags(actor(moderator), image.id, %{
+                 "tag_input" => "safe"
+               })
 
       assert updated.id == image.id
       assert locked_tag_names(image) == ["safe"]
@@ -1946,13 +2006,15 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       {:ok, _} =
-        Images.update_locked_tags(actor(moderator_user_fixture()), image.id, %{
+        Images.update_image_locked_tags(actor(moderator_user_fixture()), image.id, %{
           "tag_input" => "safe"
         })
 
       Repo.delete_all(ModerationLog)
 
-      assert Images.update_locked_tags(actor(user), to_string(image.id), %{"tag_input" => "cute"}) ==
+      assert Images.update_image_locked_tags(actor(user), to_string(image.id), %{
+               "tag_input" => "cute"
+             }) ==
                {:error, :unauthorized}
 
       assert locked_tag_names(image) == ["safe"]
@@ -1963,13 +2025,15 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       {:ok, _} =
-        Images.update_locked_tags(actor(moderator_user_fixture()), image.id, %{
+        Images.update_image_locked_tags(actor(moderator_user_fixture()), image.id, %{
           "tag_input" => "safe"
         })
 
       Repo.delete_all(ModerationLog)
 
-      assert Images.update_locked_tags(actor(), to_string(image.id), %{"tag_input" => "cute"}) ==
+      assert Images.update_image_locked_tags(actor(), to_string(image.id), %{
+               "tag_input" => "cute"
+             }) ==
                {:error, :unauthorized}
 
       assert locked_tag_names(image) == ["safe"]
@@ -1979,7 +2043,9 @@ defmodule Philomena.ImagesTest do
     test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_locked_tags(actor(moderator), "2147483647", %{"tag_input" => "safe"}) ==
+      assert Images.update_image_locked_tags(actor(moderator), "2147483647", %{
+               "tag_input" => "safe"
+             }) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1988,7 +2054,7 @@ defmodule Philomena.ImagesTest do
     test "an admin with an unknown well-formed id is not found and writes no log" do
       admin = admin_user_fixture()
 
-      assert Images.update_locked_tags(actor(admin), "2147483647", %{"tag_input" => "safe"}) ==
+      assert Images.update_image_locked_tags(actor(admin), "2147483647", %{"tag_input" => "safe"}) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1997,14 +2063,16 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_locked_tags(actor(moderator), "not-a-number", %{"tag_input" => "safe"}) ==
+      assert Images.update_image_locked_tags(actor(moderator), "not-a-number", %{
+               "tag_input" => "safe"
+             }) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_locked_tags(actor(moderator), "99999999999999999999", %{
+      assert Images.update_image_locked_tags(actor(moderator), "99999999999999999999", %{
                "tag_input" => "safe"
              }) ==
                {:error, :not_found}
@@ -2017,7 +2085,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, %ImageFeature{} = feature} =
-               Images.feature_image(actor(moderator), to_string(image.id))
+               Images.create_image_feature(actor(moderator), to_string(image.id))
 
       assert feature.image_id == image.id
       assert feature.user_id == moderator.id
@@ -2028,7 +2096,9 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture()
 
-      assert {:ok, %ImageFeature{}} = Images.feature_image(actor(admin), to_string(image.id))
+      assert {:ok, %ImageFeature{}} =
+               Images.create_image_feature(actor(admin), to_string(image.id))
+
       assert feature_row_count(image) == 1
     end
 
@@ -2036,7 +2106,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _} = Images.feature_image(actor(moderator), to_string(image.id))
+      assert {:ok, _} = Images.create_image_feature(actor(moderator), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -2049,7 +2119,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, %ImageFeature{}} = Images.feature_image(actor(moderator), image.id)
+      assert {:ok, %ImageFeature{}} = Images.create_image_feature(actor(moderator), image.id)
       assert feature_row_count(image) == 1
     end
 
@@ -2057,7 +2127,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, %ImageFeature{}} = Images.feature_image(actor(moderator), image.id)
+      assert {:ok, %ImageFeature{}} = Images.create_image_feature(actor(moderator), image.id)
       assert feature_row_count(image) == 1
       assert moderation_log_count() == 1
     end
@@ -2068,7 +2138,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.feature_image(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_feature(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
+
       assert feature_row_count(image) == 0
       assert moderation_log_count() == 0
     end
@@ -2077,7 +2149,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.feature_image(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_feature(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
+
       assert feature_row_count(image) == 0
       assert moderation_log_count() == 0
     end
@@ -2085,7 +2159,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot feature a visible image" do
       image = image_fixture()
 
-      assert Images.feature_image(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_feature(actor(), to_string(image.id)) == {:error, :unauthorized}
       assert feature_row_count(image) == 0
       assert moderation_log_count() == 0
     end
@@ -2094,7 +2168,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.feature_image(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.create_image_feature(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
@@ -2102,20 +2176,20 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.feature_image(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.create_image_feature(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.feature_image(actor(moderator), "not-a-number") == {:error, :not_found}
+      assert Images.create_image_feature(actor(moderator), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.feature_image(actor(moderator), "99999999999999999999") ==
+      assert Images.create_image_feature(actor(moderator), "99999999999999999999") ==
                {:error, :not_found}
     end
   end
@@ -2126,7 +2200,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
+               Images.update_image_file(actor(moderator), to_string(image.id), media_png_upload())
 
       assert updated.id == image.id
       assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
@@ -2137,7 +2211,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_file(actor(admin), to_string(image.id), media_png_upload())
+               Images.update_image_file(actor(admin), to_string(image.id), media_png_upload())
 
       assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
     end
@@ -2147,7 +2221,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
+               Images.update_image_file(actor(moderator), to_string(image.id), media_png_upload())
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -2161,7 +2235,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), image.id, media_png_upload())
+               Images.update_image_file(actor(moderator), image.id, media_png_upload())
 
       assert updated.id == image.id
     end
@@ -2173,7 +2247,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
+               Images.update_image_file(actor(moderator), to_string(image.id), media_png_upload())
 
       assert moderation_log_count() == 0
     end
@@ -2186,7 +2260,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_file(actor(moderator), to_string(image.id), nil)
+               Images.update_image_file(actor(moderator), to_string(image.id), nil)
 
       assert moderation_log_count() == 0
     end
@@ -2196,7 +2270,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(hidden_from_users: true, hidden_image_key: "hidden-key")
 
       assert {:ok, updated} =
-               Images.update_file(actor(moderator), to_string(image.id), media_png_upload())
+               Images.update_image_file(actor(moderator), to_string(image.id), media_png_upload())
 
       assert updated.id == image.id
       assert updated.hidden_from_users
@@ -2210,7 +2284,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.update_file(actor(user), to_string(image.id), media_png_upload()) ==
+      assert Images.update_image_file(actor(user), to_string(image.id), media_png_upload()) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2220,7 +2294,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.update_file(actor(user), to_string(image.id), media_png_upload()) ==
+      assert Images.update_image_file(actor(user), to_string(image.id), media_png_upload()) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2229,7 +2303,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot replace the file" do
       image = image_fixture()
 
-      assert Images.update_file(actor(), to_string(image.id), media_png_upload()) ==
+      assert Images.update_image_file(actor(), to_string(image.id), media_png_upload()) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2239,7 +2313,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.update_file(actor(moderator), "2147483647", media_png_upload()) ==
+      assert Images.update_image_file(actor(moderator), "2147483647", media_png_upload()) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -2249,7 +2323,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.update_file(actor(admin), "2147483647", media_png_upload()) ==
+      assert Images.update_image_file(actor(admin), "2147483647", media_png_upload()) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -2258,14 +2332,18 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_file(actor(moderator), "not-a-number", media_png_upload()) ==
+      assert Images.update_image_file(actor(moderator), "not-a-number", media_png_upload()) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_file(actor(moderator), "99999999999999999999", media_png_upload()) ==
+      assert Images.update_image_file(
+               actor(moderator),
+               "99999999999999999999",
+               media_png_upload()
+             ) ==
                {:error, :not_found}
     end
   end
@@ -2402,7 +2480,7 @@ defmodule Philomena.ImagesTest do
       moderator = role_moderator_fixture("Image")
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, destroyed} = Images.destroy_image(actor(moderator), to_string(image.id))
+      assert {:ok, destroyed} = Images.create_image_destroy(actor(moderator), to_string(image.id))
       assert destroyed.id == image.id
       assert Repo.reload!(image).image == nil
     end
@@ -2411,7 +2489,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, _} = Images.destroy_image(actor(admin), to_string(image.id))
+      assert {:ok, _} = Images.create_image_destroy(actor(admin), to_string(image.id))
       assert Repo.reload!(image).image == nil
     end
 
@@ -2419,7 +2497,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, _} = Images.destroy_image(actor(admin), to_string(image.id))
+      assert {:ok, _} = Images.create_image_destroy(actor(admin), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == admin.id
@@ -2432,7 +2510,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, destroyed} = Images.destroy_image(actor(admin), image.id)
+      assert {:ok, destroyed} = Images.create_image_destroy(actor(admin), image.id)
       assert destroyed.id == image.id
       assert Repo.reload!(image).image == nil
     end
@@ -2443,7 +2521,9 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: false)
 
-      assert {:error, %Ecto.Changeset{}} = Images.destroy_image(actor(admin), to_string(image.id))
+      assert {:error, %Ecto.Changeset{}} =
+               Images.create_image_destroy(actor(admin), to_string(image.id))
+
       assert Repo.reload!(image).image == image.image
       assert moderation_log_count() == 0
     end
@@ -2454,7 +2534,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.destroy_image(actor(moderator), to_string(image.id)) ==
+      assert Images.create_image_destroy(actor(moderator), to_string(image.id)) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).image == image.image
@@ -2467,7 +2547,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: false)
 
-      assert Images.destroy_image(actor(moderator), to_string(image.id)) ==
+      assert Images.create_image_destroy(actor(moderator), to_string(image.id)) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2477,7 +2557,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.destroy_image(actor(user), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_destroy(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
+
       assert Repo.reload!(image).image == image.image
       assert moderation_log_count() == 0
     end
@@ -2485,7 +2567,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot destroy a hidden image" do
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.destroy_image(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_destroy(actor(), to_string(image.id)) == {:error, :unauthorized}
       assert Repo.reload!(image).image == image.image
       assert moderation_log_count() == 0
     end
@@ -2494,7 +2576,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = role_moderator_fixture("Image")
 
-      assert Images.destroy_image(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.create_image_destroy(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
@@ -2502,20 +2584,21 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.destroy_image(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.create_image_destroy(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       admin = admin_user_fixture()
 
-      assert Images.destroy_image(actor(admin), "not-a-number") == {:error, :not_found}
+      assert Images.create_image_destroy(actor(admin), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       admin = admin_user_fixture()
 
-      assert Images.destroy_image(actor(admin), "99999999999999999999") == {:error, :not_found}
+      assert Images.create_image_destroy(actor(admin), "99999999999999999999") ==
+               {:error, :not_found}
     end
   end
 
@@ -2526,7 +2609,9 @@ defmodule Philomena.ImagesTest do
       :ok = Endpoint.subscribe("firehose")
 
       assert {:ok, {_image, "Old"}} =
-               Images.update_description(actor(uploader), image.id, %{"description" => "New"})
+               Images.update_image_description(actor(uploader), image.id, %{
+                 "description" => "New"
+               })
 
       assert_receive %Broadcast{
         event: "image:description_update",
@@ -2542,7 +2627,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: uploader.id)
 
       assert {:ok, {updated, old_description}} =
-               Images.update_description(actor(uploader), to_string(image.id), %{
+               Images.update_image_description(actor(uploader), to_string(image.id), %{
                  "description" => "A fresh description"
                })
 
@@ -2560,7 +2645,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: uploader.id, description: "Original text")
 
       assert {:ok, {_updated, old_description}} =
-               Images.update_description(actor(uploader), to_string(image.id), %{
+               Images.update_image_description(actor(uploader), to_string(image.id), %{
                  "description" => "Replacement text"
                })
 
@@ -2574,7 +2659,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: uploader.id)
 
       assert {:ok, {updated, _old}} =
-               Images.update_description(actor(moderator), to_string(image.id), %{
+               Images.update_image_description(actor(moderator), to_string(image.id), %{
                  "description" => "Moderator edit"
                })
 
@@ -2587,7 +2672,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: uploader.id)
 
       assert {:ok, {updated, _old}} =
-               Images.update_description(actor(uploader), image.id, %{"description" => "Via int"})
+               Images.update_image_description(actor(uploader), image.id, %{
+                 "description" => "Via int"
+               })
 
       assert updated.description == "Via int"
     end
@@ -2597,14 +2684,14 @@ defmodule Philomena.ImagesTest do
       # against an id that could never parse.
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Images.update_description(actor, "not-a-number", %{"description" => "x"}) ==
+      assert Images.update_image_description(actor, "not-a-number", %{"description" => "x"}) ==
                {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized before any loading" do
       actor = actor(confirmed_user_fixture(), fingerprint: nil)
 
-      assert Images.update_description(actor, "not-a-number", %{"description" => "x"}) ==
+      assert Images.update_image_description(actor, "not-a-number", %{"description" => "x"}) ==
                {:error, :unauthorized}
     end
 
@@ -2612,7 +2699,7 @@ defmodule Philomena.ImagesTest do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id, description_editing_allowed: false)
 
-      assert Images.update_description(actor(uploader), to_string(image.id), %{
+      assert Images.update_image_description(actor(uploader), to_string(image.id), %{
                "description" => "blocked"
              }) == {:error, :unauthorized}
 
@@ -2624,7 +2711,7 @@ defmodule Philomena.ImagesTest do
       other = confirmed_user_fixture()
       image = image_fixture(user_id: owner.id)
 
-      assert Images.update_description(actor(other), to_string(image.id), %{
+      assert Images.update_image_description(actor(other), to_string(image.id), %{
                "description" => "not mine"
              }) == {:error, :unauthorized}
 
@@ -2637,7 +2724,7 @@ defmodule Philomena.ImagesTest do
       owner = confirmed_user_fixture()
       image = image_fixture(user_id: owner.id)
 
-      assert Images.update_description(actor(), to_string(image.id), %{
+      assert Images.update_image_description(actor(), to_string(image.id), %{
                "description" => "anon"
              }) == {:error, :unauthorized}
 
@@ -2650,7 +2737,7 @@ defmodule Philomena.ImagesTest do
       too_long = String.duplicate("a", 50_001)
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_description(actor(uploader), to_string(image.id), %{
+               Images.update_image_description(actor(uploader), to_string(image.id), %{
                  "description" => too_long
                })
 
@@ -2660,7 +2747,7 @@ defmodule Philomena.ImagesTest do
     test "an unknown well-formed id is not found for a non-admin actor" do
       # The image loads as nil and a regular user fails :edit_description on the
       # Missing image locators resolve to not-found before authorization.
-      assert Images.update_description(actor(confirmed_user_fixture()), "2147483647", %{
+      assert Images.update_image_description(actor(confirmed_user_fixture()), "2147483647", %{
                "description" => "x"
              }) == {:error, :not_found}
     end
@@ -2668,21 +2755,25 @@ defmodule Philomena.ImagesTest do
     test "an unknown well-formed id is not found for an admin" do
       # Missing image locators resolve to not-found before authorization.
       # found.
-      assert Images.update_description(actor(admin_user_fixture()), "2147483647", %{
+      assert Images.update_image_description(actor(admin_user_fixture()), "2147483647", %{
                "description" => "x"
              }) == {:error, :not_found}
     end
 
     test "a non-castable id is not found for a valid actor" do
-      assert Images.update_description(actor(confirmed_user_fixture()), "not-a-number", %{
+      assert Images.update_image_description(actor(confirmed_user_fixture()), "not-a-number", %{
                "description" => "x"
              }) == {:error, :not_found}
     end
 
     test "an out-of-range id is not found for a valid actor" do
-      assert Images.update_description(actor(confirmed_user_fixture()), "99999999999999999999", %{
-               "description" => "x"
-             }) == {:error, :not_found}
+      assert Images.update_image_description(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999",
+               %{
+                 "description" => "x"
+               }
+             ) == {:error, :not_found}
     end
   end
 
@@ -2871,7 +2962,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: owner.id)
 
       assert {:ok, updated} =
-               Images.update_uploader(actor(moderator), to_string(image.id), %{
+               Images.update_image_uploader(actor(moderator), to_string(image.id), %{
                  "username" => new_owner.name
                })
 
@@ -2890,7 +2981,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: owner.id)
 
       assert {:ok, _} =
-               Images.update_uploader(actor(admin), to_string(image.id), %{
+               Images.update_image_uploader(actor(admin), to_string(image.id), %{
                  "username" => new_owner.name
                })
 
@@ -2903,7 +2994,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: owner.id)
 
       assert {:ok, updated} =
-               Images.update_uploader(actor(moderator), to_string(image.id), %{"username" => ""})
+               Images.update_image_uploader(actor(moderator), to_string(image.id), %{
+                 "username" => ""
+               })
 
       assert updated.id == image.id
       assert Repo.reload!(image).user_id == nil
@@ -2915,7 +3008,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.update_uploader(actor(moderator), to_string(image.id), %{
+               Images.update_image_uploader(actor(moderator), to_string(image.id), %{
                  "username" => new_owner.name
                })
 
@@ -2932,7 +3025,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: owner.id)
 
       assert {:ok, _} =
-               Images.update_uploader(actor(moderator), to_string(image.id), %{"username" => ""})
+               Images.update_image_uploader(actor(moderator), to_string(image.id), %{
+                 "username" => ""
+               })
 
       log = only_moderation_log!()
       assert log.type == "Image.Uploader:update"
@@ -2946,7 +3041,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, updated} =
-               Images.update_uploader(actor(moderator), image.id, %{"username" => new_owner.name})
+               Images.update_image_uploader(actor(moderator), image.id, %{
+                 "username" => new_owner.name
+               })
 
       assert updated.id == image.id
       assert Repo.reload!(image).user_id == new_owner.id
@@ -2958,7 +3055,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: owner.id)
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_uploader(actor(moderator), to_string(image.id), %{
+               Images.update_image_uploader(actor(moderator), to_string(image.id), %{
                  "username" => "no-such-user"
                })
 
@@ -2973,7 +3070,7 @@ defmodule Philomena.ImagesTest do
       new_owner = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.update_uploader(actor(user), to_string(image.id), %{
+      assert Images.update_image_uploader(actor(user), to_string(image.id), %{
                "username" => new_owner.name
              }) ==
                {:error, :unauthorized}
@@ -2986,12 +3083,14 @@ defmodule Philomena.ImagesTest do
       # so neither the not-found nor the invalid_params path is reached.
       user = confirmed_user_fixture()
 
-      assert Images.update_uploader(actor(user), "not-a-number", nil) == {:error, :unauthorized}
+      assert Images.update_image_uploader(actor(user), "not-a-number", nil) ==
+               {:error, :unauthorized}
+
       assert moderation_log_count() == 0
     end
 
     test "an anonymous actor with a garbage id and nil params is unauthorized" do
-      assert Images.update_uploader(actor(), "not-a-number", nil) == {:error, :unauthorized}
+      assert Images.update_image_uploader(actor(), "not-a-number", nil) == {:error, :unauthorized}
       assert moderation_log_count() == 0
     end
 
@@ -3001,7 +3100,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       new_owner = confirmed_user_fixture()
 
-      assert Images.update_uploader(actor(moderator), "2147483647", %{
+      assert Images.update_image_uploader(actor(moderator), "2147483647", %{
                "username" => new_owner.name
              }) ==
                {:error, :not_found}
@@ -3013,7 +3112,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       new_owner = confirmed_user_fixture()
 
-      assert Images.update_uploader(actor(moderator), "not-a-number", %{
+      assert Images.update_image_uploader(actor(moderator), "not-a-number", %{
                "username" => new_owner.name
              }) ==
                {:error, :not_found}
@@ -3023,7 +3122,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       new_owner = confirmed_user_fixture()
 
-      assert Images.update_uploader(actor(moderator), "99999999999999999999", %{
+      assert Images.update_image_uploader(actor(moderator), "99999999999999999999", %{
                "username" => new_owner.name
              }) == {:error, :not_found}
     end
@@ -3035,7 +3134,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       baseline = Repo.reload!(image).hides_count
 
-      assert {:ok, hidden} = Images.create_image_hide(actor(user), to_string(image.id))
+      assert {:ok, hidden} = Images.create_image_user_hide(actor(user), to_string(image.id))
       assert hidden.id == image.id
       assert hidden.hides_count == baseline + 1
       assert image_hide_count(image, user) == 1
@@ -3048,8 +3147,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       baseline = Repo.reload!(image).hides_count
 
-      assert {:ok, _} = Images.create_image_hide(actor(user), to_string(image.id))
-      assert {:ok, again} = Images.create_image_hide(actor(user), to_string(image.id))
+      assert {:ok, _} = Images.create_image_user_hide(actor(user), to_string(image.id))
+      assert {:ok, again} = Images.create_image_user_hide(actor(user), to_string(image.id))
 
       assert again.hides_count == baseline + 1
       assert image_hide_count(image, user) == 1
@@ -3059,7 +3158,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, hidden} = Images.create_image_hide(actor(user), image.id)
+      assert {:ok, hidden} = Images.create_image_user_hide(actor(user), image.id)
       assert hidden.id == image.id
       assert image_hide_count(image, user) == 1
     end
@@ -3067,39 +3166,42 @@ defmodule Philomena.ImagesTest do
     test "a banned actor is rejected before any loading, even with a garbage id" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Images.create_image_hide(actor, "not-a-number") == {:error, :ban}
+      assert Images.create_image_user_hide(actor, "not-a-number") == {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized before any loading" do
       actor = actor(confirmed_user_fixture(), fingerprint: nil)
 
-      assert Images.create_image_hide(actor, "not-a-number") == {:error, :unauthorized}
+      assert Images.create_image_user_hide(actor, "not-a-number") == {:error, :unauthorized}
     end
 
     test "a non-castable id is not found" do
-      assert Images.create_image_hide(actor(confirmed_user_fixture()), "not-a-number") ==
+      assert Images.create_image_user_hide(actor(confirmed_user_fixture()), "not-a-number") ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
-      assert Images.create_image_hide(actor(confirmed_user_fixture()), "99999999999999999999") ==
+      assert Images.create_image_user_hide(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999"
+             ) ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a regular actor" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.create_image_hide(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Images.create_image_user_hide(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a moderator" do
-      assert Images.create_image_hide(actor(moderator_user_fixture()), "2147483647") ==
+      assert Images.create_image_user_hide(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.create_image_hide(actor(admin_user_fixture()), "2147483647") ==
+      assert Images.create_image_user_hide(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -3109,10 +3211,10 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
       baseline = Repo.reload!(image).hides_count
-      {:ok, _} = Images.create_image_hide(actor(user), to_string(image.id))
+      {:ok, _} = Images.create_image_user_hide(actor(user), to_string(image.id))
       assert image_hide_count(image, user) == 1
 
-      assert {:ok, unhidden} = Images.delete_image_hide(actor(user), to_string(image.id))
+      assert {:ok, unhidden} = Images.delete_image_user_hide(actor(user), to_string(image.id))
       assert unhidden.id == image.id
       assert unhidden.hides_count == baseline
       assert image_hide_count(image, user) == 0
@@ -3124,7 +3226,7 @@ defmodule Philomena.ImagesTest do
       baseline = Repo.reload!(image).hides_count
       assert image_hide_count(image, user) == 0
 
-      assert {:ok, unhidden} = Images.delete_image_hide(actor(user), to_string(image.id))
+      assert {:ok, unhidden} = Images.delete_image_user_hide(actor(user), to_string(image.id))
       assert unhidden.id == image.id
       assert unhidden.hides_count == baseline
       assert image_hide_count(image, user) == 0
@@ -3133,9 +3235,9 @@ defmodule Philomena.ImagesTest do
     test "accepts an integer id" do
       user = confirmed_user_fixture()
       image = image_fixture()
-      {:ok, _} = Images.create_image_hide(actor(user), image.id)
+      {:ok, _} = Images.create_image_user_hide(actor(user), image.id)
 
-      assert {:ok, unhidden} = Images.delete_image_hide(actor(user), image.id)
+      assert {:ok, unhidden} = Images.delete_image_user_hide(actor(user), image.id)
       assert unhidden.id == image.id
       assert image_hide_count(image, user) == 0
     end
@@ -3143,55 +3245,58 @@ defmodule Philomena.ImagesTest do
     test "a banned actor is rejected before any loading, even with a garbage id" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Images.delete_image_hide(actor, "not-a-number") == {:error, :ban}
+      assert Images.delete_image_user_hide(actor, "not-a-number") == {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized before any loading" do
       actor = actor(confirmed_user_fixture(), fingerprint: nil)
 
-      assert Images.delete_image_hide(actor, "not-a-number") == {:error, :unauthorized}
+      assert Images.delete_image_user_hide(actor, "not-a-number") == {:error, :unauthorized}
     end
 
     test "a non-castable id is not found" do
-      assert Images.delete_image_hide(actor(confirmed_user_fixture()), "not-a-number") ==
+      assert Images.delete_image_user_hide(actor(confirmed_user_fixture()), "not-a-number") ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
-      assert Images.delete_image_hide(actor(confirmed_user_fixture()), "99999999999999999999") ==
+      assert Images.delete_image_user_hide(
+               actor(confirmed_user_fixture()),
+               "99999999999999999999"
+             ) ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for a regular actor" do
-      assert Images.delete_image_hide(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Images.delete_image_user_hide(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      assert Images.delete_image_hide(actor(admin_user_fixture()), "2147483647") ==
+      assert Images.delete_image_user_hide(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
 
   describe "image interaction prerequisites" do
     test "normalizes write-access and image-loading failures in the owning actions" do
-      assert Images.create_fave(
+      assert Images.create_image_fave(
                actor(confirmed_user_fixture(), ban: @ban),
                "not-a-number"
              ) == {:error, :ban}
 
-      assert Images.create_fave(
+      assert Images.create_image_fave(
                actor(confirmed_user_fixture(), fingerprint: nil),
                "not-a-number"
              ) == {:error, :unauthorized}
 
-      assert Images.create_fave(actor(confirmed_user_fixture()), "not-a-number") ==
+      assert Images.create_image_fave(actor(confirmed_user_fixture()), "not-a-number") ==
                {:error, :not_found}
 
-      assert Images.create_fave(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Images.create_image_fave(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Images.create_fave(actor(admin_user_fixture()), "2147483647") ==
+      assert Images.create_image_fave(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
@@ -3218,10 +3323,10 @@ defmodule Philomena.ImagesTest do
       {user, _filter} = force_filter(user, hidden_tag_ids: [tag.id])
       actor = actor(user)
 
-      assert Images.create_fave(actor, image.id) == {:error, :forced_filter}
-      assert Images.delete_fave(actor, image.id) == {:error, :forced_filter}
-      assert Images.create_vote(actor, image.id, %{up: false}) == {:error, :forced_filter}
-      assert Images.delete_vote(actor, image.id) == {:error, :forced_filter}
+      assert Images.create_image_fave(actor, image.id) == {:error, :forced_filter}
+      assert Images.delete_image_fave(actor, image.id) == {:error, :forced_filter}
+      assert Images.create_image_vote(actor, image.id, %{up: false}) == {:error, :forced_filter}
+      assert Images.delete_image_vote(actor, image.id) == {:error, :forced_filter}
 
       assert fave_count(image, user) == 1
       assert %ImageVote{up: true} = vote_row(image, user)
@@ -3235,7 +3340,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_faves = Repo.reload!(image).faves_count
 
-      assert {:ok, faved} = Images.create_fave(actor(user), image.id)
+      assert {:ok, faved} = Images.create_image_fave(actor(user), image.id)
       assert faved.id == image.id
       assert faved.faves_count == base_faves + 1
       assert faved.score == base_score + 1
@@ -3252,7 +3357,7 @@ defmodule Philomena.ImagesTest do
       vote!(image, user, false)
       assert %ImageVote{up: false} = vote_row(image, user)
 
-      assert {:ok, faved} = Images.create_fave(actor(user), image.id)
+      assert {:ok, faved} = Images.create_image_fave(actor(user), image.id)
       assert %ImageVote{up: true} = vote_row(image, user)
       assert faved.score == base_score + 1
     end
@@ -3262,8 +3367,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       base_faves = Repo.reload!(image).faves_count
 
-      assert {:ok, _} = Images.create_fave(actor(user), image.id)
-      assert {:ok, again} = Images.create_fave(actor(user), image.id)
+      assert {:ok, _} = Images.create_image_fave(actor(user), image.id)
+      assert {:ok, again} = Images.create_image_fave(actor(user), image.id)
 
       assert fave_count(image, user) == 1
       assert again.faves_count == base_faves + 1
@@ -3277,10 +3382,10 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_faves = Repo.reload!(image).faves_count
 
-      {:ok, faved} = Images.create_fave(actor(user), image.id)
+      {:ok, faved} = Images.create_image_fave(actor(user), image.id)
       assert fave_count(image, user) == 1
 
-      assert {:ok, unfaved} = Images.delete_fave(actor(user), image.id)
+      assert {:ok, unfaved} = Images.delete_image_fave(actor(user), image.id)
       assert unfaved.id == image.id
       assert fave_count(image, user) == 0
       assert unfaved.faves_count == base_faves
@@ -3296,7 +3401,7 @@ defmodule Philomena.ImagesTest do
       base_faves = Repo.reload!(image).faves_count
       assert fave_count(image, user) == 0
 
-      assert {:ok, unfaved} = Images.delete_fave(actor(user), image.id)
+      assert {:ok, unfaved} = Images.delete_image_fave(actor(user), image.id)
       assert unfaved.id == image.id
       assert fave_count(image, user) == 0
       assert unfaved.faves_count == base_faves
@@ -3310,7 +3415,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_upvotes = Repo.reload!(image).upvotes_count
 
-      assert {:ok, voted} = Images.create_vote(actor(user), image.id, %{up: true})
+      assert {:ok, voted} = Images.create_image_vote(actor(user), image.id, %{up: true})
       assert voted.id == image.id
       assert voted.score == base_score + 1
       assert voted.upvotes_count == base_upvotes + 1
@@ -3323,7 +3428,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       base_downvotes = Repo.reload!(image).downvotes_count
 
-      assert {:ok, voted} = Images.create_vote(actor(user), image.id, %{up: false})
+      assert {:ok, voted} = Images.create_image_vote(actor(user), image.id, %{up: false})
       assert voted.score == base_score - 1
       assert voted.downvotes_count == base_downvotes + 1
       assert %ImageVote{up: false} = vote_row(image, user)
@@ -3340,7 +3445,7 @@ defmodule Philomena.ImagesTest do
       assert %ImageVote{up: false} = vote_row(image, user)
       assert Repo.reload!(image).score == base_score - 1
 
-      assert {:ok, voted} = Images.create_vote(actor(user), image.id, %{up: true})
+      assert {:ok, voted} = Images.create_image_vote(actor(user), image.id, %{up: true})
       # get_by raises on more than one row, so a returned struct confirms a
       # single vote row survived the flip.
       assert %ImageVote{up: true} = vote_row(image, user)
@@ -3353,9 +3458,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
       base_score = Repo.reload!(image).score
-      {:ok, _} = Images.create_vote(actor(user), image.id, %{up: true})
+      {:ok, _} = Images.create_image_vote(actor(user), image.id, %{up: true})
 
-      assert {:ok, unvoted} = Images.delete_vote(actor(user), image.id)
+      assert {:ok, unvoted} = Images.delete_image_vote(actor(user), image.id)
       assert unvoted.id == image.id
       assert vote_row(image, user) == nil
       assert unvoted.score == base_score
@@ -3367,7 +3472,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       vote!(image, user, false)
 
-      assert {:ok, unvoted} = Images.delete_vote(actor(user), image.id)
+      assert {:ok, unvoted} = Images.delete_image_vote(actor(user), image.id)
       assert vote_row(image, user) == nil
       assert unvoted.score == base_score
     end
@@ -3378,7 +3483,7 @@ defmodule Philomena.ImagesTest do
       base_score = Repo.reload!(image).score
       refute has_vote?(image, user)
 
-      assert {:ok, unvoted} = Images.delete_vote(actor(user), image.id)
+      assert {:ok, unvoted} = Images.delete_image_vote(actor(user), image.id)
       assert unvoted.id == image.id
       assert unvoted.score == base_score
       refute has_vote?(image, user)
@@ -3391,7 +3496,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, hidden} =
-               Images.hide_image(actor(moderator), to_string(image.id), %{
+               Images.create_image_hide(actor(moderator), to_string(image.id), %{
                  "deletion_reason" => "Rule #0"
                })
 
@@ -3408,7 +3513,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.hide_image(actor(admin), to_string(image.id), %{
+               Images.create_image_hide(actor(admin), to_string(image.id), %{
                  "deletion_reason" => "Rule #0"
                })
 
@@ -3420,7 +3525,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _} =
-               Images.hide_image(actor(moderator), to_string(image.id), %{
+               Images.create_image_hide(actor(moderator), to_string(image.id), %{
                  "deletion_reason" => "Rule #0"
                })
 
@@ -3436,7 +3541,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, hidden} =
-               Images.hide_image(actor(moderator), image.id, %{"deletion_reason" => "Rule #0"})
+               Images.create_image_hide(actor(moderator), image.id, %{
+                 "deletion_reason" => "Rule #0"
+               })
 
       assert hidden.id == image.id
     end
@@ -3446,7 +3553,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.hide_image(actor(moderator), to_string(image.id), %{"deletion_reason" => ""})
+               Images.create_image_hide(actor(moderator), to_string(image.id), %{
+                 "deletion_reason" => ""
+               })
 
       refute Repo.reload!(image).hidden_from_users
       assert moderation_log_count() == 0
@@ -3456,7 +3565,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.hide_image(actor(user), to_string(image.id), %{"deletion_reason" => "Rule #0"}) ==
+      assert Images.create_image_hide(actor(user), to_string(image.id), %{
+               "deletion_reason" => "Rule #0"
+             }) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(image).hidden_from_users
@@ -3466,7 +3577,9 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot hide the image" do
       image = image_fixture()
 
-      assert Images.hide_image(actor(), to_string(image.id), %{"deletion_reason" => "Rule #0"}) ==
+      assert Images.create_image_hide(actor(), to_string(image.id), %{
+               "deletion_reason" => "Rule #0"
+             }) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(image).hidden_from_users
@@ -3476,7 +3589,9 @@ defmodule Philomena.ImagesTest do
     test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
-      assert Images.hide_image(actor(moderator), "2147483647", %{"deletion_reason" => "Rule #0"}) ==
+      assert Images.create_image_hide(actor(moderator), "2147483647", %{
+               "deletion_reason" => "Rule #0"
+             }) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -3485,7 +3600,9 @@ defmodule Philomena.ImagesTest do
     test "an admin with an unknown well-formed id is not found and writes no log" do
       admin = admin_user_fixture()
 
-      assert Images.hide_image(actor(admin), "2147483647", %{"deletion_reason" => "Rule #0"}) ==
+      assert Images.create_image_hide(actor(admin), "2147483647", %{
+               "deletion_reason" => "Rule #0"
+             }) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -3494,14 +3611,16 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.hide_image(actor(moderator), "not-a-number", %{"deletion_reason" => "Rule #0"}) ==
+      assert Images.create_image_hide(actor(moderator), "not-a-number", %{
+               "deletion_reason" => "Rule #0"
+             }) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.hide_image(actor(moderator), "99999999999999999999", %{
+      assert Images.create_image_hide(actor(moderator), "99999999999999999999", %{
                "deletion_reason" => "Rule #0"
              }) == {:error, :not_found}
     end
@@ -3513,7 +3632,7 @@ defmodule Philomena.ImagesTest do
       hidden = hidden_image_fixture("Original reason")
 
       assert {:ok, updated} =
-               Images.update_hide_reason(actor(moderator), to_string(hidden.id), %{
+               Images.update_image_hide(actor(moderator), to_string(hidden.id), %{
                  "deletion_reason" => "Better reason"
                })
 
@@ -3526,7 +3645,7 @@ defmodule Philomena.ImagesTest do
       hidden = hidden_image_fixture("Original reason")
 
       assert {:ok, _} =
-               Images.update_hide_reason(actor(moderator), to_string(hidden.id), %{
+               Images.update_image_hide(actor(moderator), to_string(hidden.id), %{
                  "deletion_reason" => "Better reason"
                })
 
@@ -3542,7 +3661,7 @@ defmodule Philomena.ImagesTest do
       hidden = hidden_image_fixture()
 
       assert {:ok, updated} =
-               Images.update_hide_reason(actor(moderator), hidden.id, %{
+               Images.update_image_hide(actor(moderator), hidden.id, %{
                  "deletion_reason" => "New"
                })
 
@@ -3554,7 +3673,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_hide_reason(actor(moderator), to_string(image.id), %{
+               Images.update_image_hide(actor(moderator), to_string(image.id), %{
                  "deletion_reason" => "New"
                })
 
@@ -3567,7 +3686,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert Images.update_hide_reason(actor(user), to_string(image.id), %{
+      assert Images.update_image_hide(actor(user), to_string(image.id), %{
                "deletion_reason" => "New"
              }) ==
                {:error, :unauthorized}
@@ -3580,7 +3699,7 @@ defmodule Philomena.ImagesTest do
       hidden = hidden_image_fixture("Keep me")
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_hide_reason(actor(moderator), to_string(hidden.id), %{
+               Images.update_image_hide(actor(moderator), to_string(hidden.id), %{
                  "deletion_reason" => ""
                })
 
@@ -3591,7 +3710,7 @@ defmodule Philomena.ImagesTest do
     test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_hide_reason(actor(moderator), "2147483647", %{
+      assert Images.update_image_hide(actor(moderator), "2147483647", %{
                "deletion_reason" => "New"
              }) ==
                {:error, :not_found}
@@ -3602,7 +3721,7 @@ defmodule Philomena.ImagesTest do
     test "an admin with an unknown well-formed id is not found and writes no log" do
       admin = admin_user_fixture()
 
-      assert Images.update_hide_reason(actor(admin), "2147483647", %{"deletion_reason" => "New"}) ==
+      assert Images.update_image_hide(actor(admin), "2147483647", %{"deletion_reason" => "New"}) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -3611,7 +3730,7 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_hide_reason(actor(moderator), "not-a-number", %{
+      assert Images.update_image_hide(actor(moderator), "not-a-number", %{
                "deletion_reason" => "New"
              }) ==
                {:error, :not_found}
@@ -3620,7 +3739,7 @@ defmodule Philomena.ImagesTest do
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_hide_reason(actor(moderator), "99999999999999999999", %{
+      assert Images.update_image_hide(actor(moderator), "99999999999999999999", %{
                "deletion_reason" => "New"
              }) == {:error, :not_found}
     end
@@ -3631,7 +3750,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       hidden = hidden_image_fixture()
 
-      assert {:ok, restored} = Images.unhide_image(actor(moderator), to_string(hidden.id))
+      assert {:ok, restored} = Images.delete_image_hide(actor(moderator), to_string(hidden.id))
       assert restored.id == hidden.id
       refute restored.hidden_from_users
       refute Repo.reload!(hidden).hidden_from_users
@@ -3641,7 +3760,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       hidden = hidden_image_fixture()
 
-      assert {:ok, _} = Images.unhide_image(actor(admin), to_string(hidden.id))
+      assert {:ok, _} = Images.delete_image_hide(actor(admin), to_string(hidden.id))
       refute Repo.reload!(hidden).hidden_from_users
     end
 
@@ -3649,7 +3768,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       hidden = hidden_image_fixture()
 
-      assert {:ok, _} = Images.unhide_image(actor(moderator), to_string(hidden.id))
+      assert {:ok, _} = Images.delete_image_hide(actor(moderator), to_string(hidden.id))
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -3663,7 +3782,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.unhide_image(actor(moderator), to_string(image.id))
+               Images.delete_image_hide(actor(moderator), to_string(image.id))
 
       refute Repo.reload!(image).hidden_from_users
       assert moderation_log_count() == 0
@@ -3673,7 +3792,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       hidden = hidden_image_fixture()
 
-      assert {:ok, restored} = Images.unhide_image(actor(moderator), hidden.id)
+      assert {:ok, restored} = Images.delete_image_hide(actor(moderator), hidden.id)
       assert restored.id == hidden.id
     end
 
@@ -3681,7 +3800,9 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       hidden = hidden_image_fixture()
 
-      assert Images.unhide_image(actor(user), to_string(hidden.id)) == {:error, :unauthorized}
+      assert Images.delete_image_hide(actor(user), to_string(hidden.id)) ==
+               {:error, :unauthorized}
+
       assert Repo.reload!(hidden).hidden_from_users
       assert moderation_log_count() == 0
     end
@@ -3689,7 +3810,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot restore a hidden image" do
       hidden = hidden_image_fixture()
 
-      assert Images.unhide_image(actor(), to_string(hidden.id)) == {:error, :unauthorized}
+      assert Images.delete_image_hide(actor(), to_string(hidden.id)) == {:error, :unauthorized}
       assert Repo.reload!(hidden).hidden_from_users
       assert moderation_log_count() == 0
     end
@@ -3697,27 +3818,28 @@ defmodule Philomena.ImagesTest do
     test "a moderator with an unknown well-formed id is not found and writes no log" do
       moderator = moderator_user_fixture()
 
-      assert Images.unhide_image(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.delete_image_hide(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "an admin with an unknown well-formed id is not found and writes no log" do
       admin = admin_user_fixture()
 
-      assert Images.unhide_image(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.delete_image_hide(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.unhide_image(actor(moderator), "not-a-number") == {:error, :not_found}
+      assert Images.delete_image_hide(actor(moderator), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.unhide_image(actor(moderator), "99999999999999999999") == {:error, :not_found}
+      assert Images.delete_image_hide(actor(moderator), "99999999999999999999") ==
+               {:error, :not_found}
     end
   end
 
@@ -3728,7 +3850,7 @@ defmodule Philomena.ImagesTest do
       :ok = Endpoint.subscribe("firehose")
 
       assert {:ok, _result} =
-               Images.update_sources(
+               Images.update_image_sources(
                  actor(user),
                  image.id,
                  add_source_attrs("https://example.test/source")
@@ -3748,7 +3870,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, result} =
-               Images.update_sources(
+               Images.update_image_sources(
                  actor(user),
                  to_string(image.id),
                  add_source_attrs("https://example.com/art")
@@ -3769,7 +3891,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _result} =
-               Images.update_sources(
+               Images.update_image_sources(
                  actor(),
                  to_string(image.id),
                  add_source_attrs("https://example.com/anon")
@@ -3785,7 +3907,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, result} =
-               Images.update_sources(
+               Images.update_image_sources(
                  actor(user),
                  image.id,
                  add_source_attrs("https://example.com/i")
@@ -3797,14 +3919,22 @@ defmodule Philomena.ImagesTest do
     test "a banned actor is rejected before any loading, even with a garbage id" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Images.update_sources(actor, "not-a-number", add_source_attrs("https://x.test")) ==
+      assert Images.update_image_sources(
+               actor,
+               "not-a-number",
+               add_source_attrs("https://x.test")
+             ) ==
                {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized before any loading" do
       actor = actor(confirmed_user_fixture(), fingerprint: nil)
 
-      assert Images.update_sources(actor, "not-a-number", add_source_attrs("https://x.test")) ==
+      assert Images.update_image_sources(
+               actor,
+               "not-a-number",
+               add_source_attrs("https://x.test")
+             ) ==
                {:error, :unauthorized}
     end
 
@@ -3814,7 +3944,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       hidden = hidden_image_fixture()
 
-      assert Images.update_sources(
+      assert Images.update_image_sources(
                actor(user),
                to_string(hidden.id),
                add_source_attrs("https://x.test")
@@ -3828,7 +3958,11 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_sources(actor(user), to_string(image.id), many_source_attrs(16))
+               Images.update_image_sources(
+                 actor(user),
+                 to_string(image.id),
+                 many_source_attrs(16)
+               )
 
       assert source_change_row_count(image) == 0
     end
@@ -3838,7 +3972,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(sources: ["https://example.com/existing"])
 
       assert {:error, %Ecto.Changeset{data: %Image{} = changeset_image} = changeset} =
-               Images.update_sources(
+               Images.update_image_sources(
                  actor(user),
                  image.id,
                  %{
@@ -3858,7 +3992,7 @@ defmodule Philomena.ImagesTest do
     test "an unknown well-formed id is not found for a regular actor" do
       # The image loads as nil and a regular actor fails :edit_metadata on the nil
       # Missing image locators resolve to not-found before authorization.
-      assert Images.update_sources(
+      assert Images.update_image_sources(
                actor(confirmed_user_fixture()),
                "2147483647",
                add_source_attrs("https://x.test")
@@ -3867,7 +4001,7 @@ defmodule Philomena.ImagesTest do
 
     test "an unknown well-formed id is not found for an admin" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.update_sources(
+      assert Images.update_image_sources(
                actor(admin_user_fixture()),
                "2147483647",
                add_source_attrs("https://x.test")
@@ -3875,7 +4009,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a non-castable id is not found" do
-      assert Images.update_sources(
+      assert Images.update_image_sources(
                actor(confirmed_user_fixture()),
                "not-a-number",
                add_source_attrs("https://x.test")
@@ -3883,7 +4017,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "an out-of-range id is not found" do
-      assert Images.update_sources(
+      assert Images.update_image_sources(
                actor(confirmed_user_fixture()),
                "99999999999999999999",
                add_source_attrs("https://x.test")
@@ -3897,7 +4031,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :source_update)
 
-      assert Images.update_sources(
+      assert Images.update_image_sources(
                actor,
                to_string(image.id),
                add_source_attrs("https://x.test")
@@ -3912,7 +4046,7 @@ defmodule Philomena.ImagesTest do
       track_rate_limit(actor, :source_update)
 
       assert {:ok, _result} =
-               Images.update_sources(
+               Images.update_image_sources(
                  actor,
                  to_string(image.id),
                  add_source_attrs("https://x.test")
@@ -3925,7 +4059,11 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :source_update)
 
-      assert Images.update_sources(actor, "not-a-number", add_source_attrs("https://x.test")) ==
+      assert Images.update_image_sources(
+               actor,
+               "not-a-number",
+               add_source_attrs("https://x.test")
+             ) ==
                {:error, :not_found}
     end
   end
@@ -3946,7 +4084,7 @@ defmodule Philomena.ImagesTest do
       :ok = Endpoint.subscribe("firehose")
 
       assert {:ok, _result} =
-               Images.update_tags(
+               Images.update_image_tags(
                  actor(user),
                  image.id,
                  tag_attrs("safe", "safe, broadcast tag, another broadcast tag")
@@ -3967,7 +4105,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, result} =
-               Images.update_tags(
+               Images.update_image_tags(
                  actor(user),
                  to_string(image.id),
                  tag_attrs("safe", "safe, added test tag, other added tag")
@@ -3989,7 +4127,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, _result} =
-               Images.update_tags(
+               Images.update_image_tags(
                  actor(),
                  to_string(image.id),
                  tag_attrs("safe", "safe, added test tag, other added tag")
@@ -4004,7 +4142,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, result} =
-               Images.update_tags(
+               Images.update_image_tags(
                  actor(user),
                  image.id,
                  tag_attrs("safe", "safe, added test tag, other added tag")
@@ -4016,14 +4154,14 @@ defmodule Philomena.ImagesTest do
     test "a banned actor is rejected before any loading, even with a garbage id" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Images.update_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
+      assert Images.update_image_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
                {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized before any loading" do
       actor = actor(confirmed_user_fixture(), fingerprint: nil)
 
-      assert Images.update_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
+      assert Images.update_image_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
                {:error, :unauthorized}
     end
 
@@ -4031,7 +4169,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(tag_editing_allowed: false)
 
-      assert Images.update_tags(
+      assert Images.update_image_tags(
                actor(user),
                to_string(image.id),
                tag_attrs("safe", "safe, added test tag, other added tag")
@@ -4045,7 +4183,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.update_tags(
+               Images.update_image_tags(
                  actor(user),
                  to_string(image.id),
                  tag_attrs("safe", "safe, one more")
@@ -4066,7 +4204,7 @@ defmodule Philomena.ImagesTest do
       :ok = Limits.record_action(user, ip, 50, 0)
       on_exit(fn -> reset_tag_change_limits(user: user, ip: ip) end)
 
-      assert Images.update_tags(
+      assert Images.update_image_tags(
                actor(user),
                to_string(image.id),
                tag_attrs("safe", "safe, added test tag, other added tag")
@@ -4079,7 +4217,7 @@ defmodule Philomena.ImagesTest do
     test "an unknown well-formed id is not found for a regular actor" do
       # The image loads as nil and a regular actor fails :edit_metadata on the nil
       # Missing image locators resolve to not-found before authorization.
-      assert Images.update_tags(
+      assert Images.update_image_tags(
                actor(confirmed_user_fixture()),
                "2147483647",
                tag_attrs("safe", "safe, a, b")
@@ -4088,7 +4226,7 @@ defmodule Philomena.ImagesTest do
 
     test "an unknown well-formed id is not found for an admin" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.update_tags(
+      assert Images.update_image_tags(
                actor(admin_user_fixture()),
                "2147483647",
                tag_attrs("safe", "safe, a, b")
@@ -4096,7 +4234,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "a non-castable id is not found" do
-      assert Images.update_tags(
+      assert Images.update_image_tags(
                actor(confirmed_user_fixture()),
                "not-a-number",
                tag_attrs("safe", "safe, a, b")
@@ -4104,7 +4242,7 @@ defmodule Philomena.ImagesTest do
     end
 
     test "an out-of-range id is not found" do
-      assert Images.update_tags(
+      assert Images.update_image_tags(
                actor(confirmed_user_fixture()),
                "99999999999999999999",
                tag_attrs("safe", "safe, a, b")
@@ -4120,7 +4258,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :tag_update)
 
-      assert Images.update_tags(
+      assert Images.update_image_tags(
                actor,
                to_string(image.id),
                tag_attrs("safe", "safe, added test tag, other added tag")
@@ -4136,7 +4274,7 @@ defmodule Philomena.ImagesTest do
       track_rate_limit(actor, :tag_update)
 
       assert {:ok, _result} =
-               Images.update_tags(
+               Images.update_image_tags(
                  actor,
                  to_string(image.id),
                  tag_attrs("safe", "safe, added test tag, other added tag")
@@ -4149,7 +4287,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :tag_update)
 
-      assert Images.update_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
+      assert Images.update_image_tags(actor, "not-a-number", tag_attrs("safe", "safe, a, b")) ==
                {:error, :not_found}
     end
   end
@@ -4161,7 +4299,11 @@ defmodule Philomena.ImagesTest do
     reset_tag_change_limits()
 
     {:ok, _} =
-      Images.update_tags(actor(user), to_string(image.id), tag_attrs("safe", "safe, alpha, beta"))
+      Images.update_image_tags(
+        actor(user),
+        to_string(image.id),
+        tag_attrs("safe", "safe, alpha, beta")
+      )
 
     image
   end
@@ -4218,7 +4360,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous viewer loads a visible image with zero change counts" do
       image = image_fixture()
 
-      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(image.id))
+      assert {:ok, loaded} = Images.show_image(actor(), to_string(image.id))
       assert loaded.id == image.id
       assert loaded.tag_change_count == 0
       assert loaded.tag_change_tag_count == 0
@@ -4231,7 +4373,7 @@ defmodule Philomena.ImagesTest do
       source_change_fixture(image)
       source_change_fixture(image)
 
-      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(image.id))
+      assert {:ok, loaded} = Images.show_image(actor(), to_string(image.id))
       assert loaded.tag_change_count == 1
       assert loaded.tag_change_tag_count == 2
       assert loaded.source_change_count == 2
@@ -4240,7 +4382,7 @@ defmodule Philomena.ImagesTest do
     test "the show preloads are populated on the loaded image" do
       image = image_fixture(sources: ["https://example.com/a"])
 
-      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(image.id))
+      assert {:ok, loaded} = Images.show_image(actor(), to_string(image.id))
       assert Ecto.assoc_loaded?(loaded.tags)
       assert Ecto.assoc_loaded?(loaded.sources)
       assert Ecto.assoc_loaded?(loaded.locked_tags)
@@ -4249,14 +4391,14 @@ defmodule Philomena.ImagesTest do
     test "accepts an integer id" do
       image = image_fixture()
 
-      assert {:ok, loaded} = Images.load_image_for_show(actor(), image.id)
+      assert {:ok, loaded} = Images.show_image(actor(), image.id)
       assert loaded.id == image.id
     end
 
     test "a hidden image is unauthorized for an anonymous viewer" do
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.load_image_for_show(actor(), to_string(image.id)) ==
+      assert Images.show_image(actor(), to_string(image.id)) ==
                {:error, :unauthorized}
     end
 
@@ -4267,7 +4409,7 @@ defmodule Philomena.ImagesTest do
       duplicate = image_fixture(duplicate_id: original.id, hidden_from_users: true)
 
       assert {:duplicate_of, loaded} =
-               Images.load_image_for_show(actor(), to_string(duplicate.id))
+               Images.show_image(actor(), to_string(duplicate.id))
 
       assert loaded.id == duplicate.id
       assert loaded.duplicate_id == original.id
@@ -4279,7 +4421,7 @@ defmodule Philomena.ImagesTest do
       original = image_fixture()
       duplicate = image_fixture(duplicate_id: original.id)
 
-      assert {:ok, loaded} = Images.load_image_for_show(actor(), to_string(duplicate.id))
+      assert {:ok, loaded} = Images.show_image(actor(), to_string(duplicate.id))
 
       assert loaded.id == duplicate.id
     end
@@ -4290,27 +4432,27 @@ defmodule Philomena.ImagesTest do
       duplicate = image_fixture(duplicate_id: original.id, hidden_from_users: true)
 
       assert {:ok, loaded} =
-               Images.load_image_for_show(actor(moderator), to_string(duplicate.id))
+               Images.show_image(actor(moderator), to_string(duplicate.id))
 
       assert loaded.id == duplicate.id
     end
 
     test "an unknown well-formed id is not found for an anonymous viewer" do
       # Missing images are resolved before the viewer's :show permission.
-      assert Images.load_image_for_show(actor(), "2147483647") == {:error, :not_found}
+      assert Images.show_image(actor(), "2147483647") == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      assert Images.load_image_for_show(actor(admin_user_fixture()), "2147483647") ==
+      assert Images.show_image(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.load_image_for_show(actor(), "not-a-number") == {:error, :not_found}
+      assert Images.show_image(actor(), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
-      assert Images.load_image_for_show(actor(), "99999999999999999999") == {:error, :not_found}
+      assert Images.show_image(actor(), "99999999999999999999") == {:error, :not_found}
     end
   end
 
@@ -4319,7 +4461,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      page = Images.load_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
       assert %ImagePage{} = page
       assert page.image.id == image.id
@@ -4342,7 +4484,7 @@ defmodule Philomena.ImagesTest do
     test "assembles the page struct for an anonymous viewer" do
       image = image_fixture()
 
-      page = Images.load_image_page(actor(), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(), image, page: 1, page_size: 25)
 
       assert %ImagePage{} = page
       refute page.watching
@@ -4355,7 +4497,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      page = Images.load_image_page(actor(user, ban: @ban), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user, ban: @ban), image, page: 1, page_size: 25)
 
       refute page.can_interact
       assert page.interactions == []
@@ -4377,7 +4519,7 @@ defmodule Philomena.ImagesTest do
       {user, _filter} =
         force_filter(confirmed_user_fixture(), hidden_complex_str: "id:#{image.id}")
 
-      page = Images.load_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
       refute page.can_interact
       assert page.interactions == []
@@ -4397,7 +4539,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      page = Images.load_image_page(actor(moderator), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(moderator), image, page: 1, page_size: 25)
 
       refute page.can_interact
       assert page.interactions == []
@@ -4417,7 +4559,7 @@ defmodule Philomena.ImagesTest do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id)
 
-      page = Images.load_image_page(actor(uploader), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(uploader), image, page: 1, page_size: 25)
 
       assert %Ecto.Changeset{} = page.description_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
@@ -4429,7 +4571,7 @@ defmodule Philomena.ImagesTest do
       staff = moderator_user_fixture()
       image = image_fixture()
 
-      page = Images.load_image_page(actor(staff), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(staff), image, page: 1, page_size: 25)
 
       assert %Ecto.Changeset{} = page.description_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
@@ -4447,7 +4589,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       {:ok, _} = Images.create_subscription(image, user)
 
-      page = Images.load_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
       assert page.watching
     end
@@ -4459,7 +4601,7 @@ defmodule Philomena.ImagesTest do
       empty = gallery_fixture(user)
       gallery_image_fixture(containing, image)
 
-      page = Images.load_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
       memberships =
         Map.new(page.user_galleries, fn {gallery, member?} -> {gallery.id, member?} end)
@@ -4474,7 +4616,7 @@ defmodule Philomena.ImagesTest do
       arrange_comment_notification(image, user)
       assert comment_notification?(image, user)
 
-      Images.load_image_page(actor(user), image, page: 1, page_size: 25)
+      Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
       refute comment_notification?(image, user)
     end
@@ -4491,7 +4633,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       for _ <- 1..3, do: comment_fixture(image, confirmed_user_fixture())
 
-      page = Images.load_image_page(actor(user), image, page: 1, page_size: 2)
+      page = Images.show_image_page(actor(user), image, page: 1, page_size: 2)
 
       # Three comments over a page size of two put the newest on the second page.
       assert page.comments.page_number == 2
@@ -4502,7 +4644,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       for _ <- 1..3, do: comment_fixture(image, confirmed_user_fixture())
 
-      page = Images.load_image_page(actor(user), image, page: 1, page_size: 2)
+      page = Images.show_image_page(actor(user), image, page: 1, page_size: 2)
 
       assert page.comments.page_number == 1
     end
@@ -4510,25 +4652,25 @@ defmodule Philomena.ImagesTest do
 
   describe "load_new_image/1" do
     test "a normal actor gets the upload form changeset" do
-      assert {:ok, %Ecto.Changeset{}} = Images.load_new_image(actor(confirmed_user_fixture()))
+      assert {:ok, %Ecto.Changeset{}} = Images.new_image(actor(confirmed_user_fixture()))
     end
 
     test "an anonymous actor gets the upload form changeset" do
-      assert {:ok, %Ecto.Changeset{}} = Images.load_new_image(actor())
+      assert {:ok, %Ecto.Changeset{}} = Images.new_image(actor())
     end
 
     test "a banned actor may not reach the form" do
-      assert Images.load_new_image(actor(confirmed_user_fixture(), ban: @ban)) == {:error, :ban}
+      assert Images.new_image(actor(confirmed_user_fixture(), ban: @ban)) == {:error, :ban}
     end
 
     test "a banned actor is rejected even with a fingerprint" do
       actor = actor(confirmed_user_fixture(), ban: @ban, fingerprint: "d015c342859dde3")
 
-      assert Images.load_new_image(actor) == {:error, :ban}
+      assert Images.new_image(actor) == {:error, :ban}
     end
 
     test "an actor without a fingerprint may not reach the form" do
-      assert Images.load_new_image(actor(nil, fingerprint: nil)) == {:error, :unauthorized}
+      assert Images.new_image(actor(nil, fingerprint: nil)) == {:error, :unauthorized}
     end
   end
 
@@ -4538,7 +4680,7 @@ defmodule Philomena.ImagesTest do
       :ok = Endpoint.subscribe("firehose")
 
       assert {:ok, %{image: %Image{} = image, upload_pid: pid}} =
-               Images.upload_image(
+               Images.create_image(
                  actor,
                  %{"tag_input" => "safe, solo, pony"},
                  media_png_upload()
@@ -4566,7 +4708,7 @@ defmodule Philomena.ImagesTest do
       sources = ["https://example.com/first", "https://example.com/second"]
 
       assert {:ok, %{image: image, upload_pid: pid}} =
-               Images.upload_image(
+               Images.create_image(
                  actor,
                  %{
                    "tag_input" => "safe, solo, pony",
@@ -4589,7 +4731,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
 
       assert {:ok, %{image: image, upload_pid: pid}} =
-               Images.upload_image(
+               Images.create_image(
                  actor,
                  %{
                    "tag_input" => "safe, solo, pony",
@@ -4611,7 +4753,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
 
       assert {:error, %Ecto.Changeset{data: %Image{} = image} = changeset} =
-               Images.upload_image(
+               Images.create_image(
                  actor,
                  %{
                    "tag_input" => "safe, solo, pony",
@@ -4634,7 +4776,7 @@ defmodule Philomena.ImagesTest do
       |> Repo.update!()
 
       assert {:ok, %{image: image, upload_pid: pid}} =
-               Images.upload_image(
+               Images.create_image(
                  actor(user),
                  %{"tag_input" => "safe, solo, pony"},
                  media_png_upload()
@@ -4655,21 +4797,21 @@ defmodule Philomena.ImagesTest do
     test "a banned actor may not upload" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
+      assert Images.create_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :ban}
     end
 
     test "an actor with no fingerprint may not upload" do
       actor = actor(confirmed_user_fixture(), fingerprint: nil)
 
-      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
+      assert Images.create_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :unauthorized}
     end
 
     test "a ban outranks a missing fingerprint" do
       actor = actor(confirmed_user_fixture(), ban: @ban, fingerprint: nil)
 
-      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
+      assert Images.create_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :ban}
     end
 
@@ -4680,7 +4822,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :image_create)
 
-      assert Images.upload_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
+      assert Images.create_image(actor, %{"tag_input" => "safe"}, media_png_upload()) ==
                {:error, :rate_limited}
 
       assert Repo.aggregate(Image, :count) == 0
@@ -4691,7 +4833,7 @@ defmodule Philomena.ImagesTest do
       track_rate_limit(actor, :image_create)
 
       assert {:ok, %{image: %Image{}, upload_pid: pid}} =
-               Images.upload_image(
+               Images.create_image(
                  actor,
                  %{"tag_input" => "safe, solo, pony"},
                  media_png_upload()
@@ -4712,7 +4854,7 @@ defmodule Philomena.ImagesTest do
       actor = actor(confirmed_user_fixture())
       exceed_rate_limit(actor, :image_create)
 
-      assert Images.upload_image(actor, %{}, nil) == {:error, :rate_limited}
+      assert Images.create_image(actor, %{}, nil) == {:error, :rate_limited}
     end
   end
 
@@ -4723,7 +4865,7 @@ defmodule Philomena.ImagesTest do
       second = image_fixture(approved: false)
 
       assert {:ok, page} =
-               Images.load_approval_queue(actor(moderator_user_fixture()), @approval_pagination)
+               Images.list_approval_queue(actor(moderator_user_fixture()), @approval_pagination)
 
       assert %Scrivener.Page{} = page
 
@@ -4743,18 +4885,18 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(approved: false)
 
       assert {:ok, page} =
-               Images.load_approval_queue(actor(admin_user_fixture()), @approval_pagination)
+               Images.list_approval_queue(actor(admin_user_fixture()), @approval_pagination)
 
       assert image.id in Enum.map(page.entries, & &1.id)
     end
 
     test "a regular user is not authorized" do
-      assert Images.load_approval_queue(actor(confirmed_user_fixture()), @approval_pagination) ==
+      assert Images.list_approval_queue(actor(confirmed_user_fixture()), @approval_pagination) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous visitor is not authorized" do
-      assert Images.load_approval_queue(actor(), @approval_pagination) == {:error, :unauthorized}
+      assert Images.list_approval_queue(actor(), @approval_pagination) == {:error, :unauthorized}
     end
   end
 
@@ -4768,7 +4910,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(tags: "safe")
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{tag_list: "batchadd", image_ids: [image.id]})
+               Images.update_batch_tags(actor, %{tag_list: "batchadd", image_ids: [image.id]})
 
       assert result == %{succeeded: 1, failed: 0}
       assert "batchadd" in image_tag_names(image)
@@ -4776,7 +4918,7 @@ defmodule Philomena.ImagesTest do
       :ok = Endpoint.subscribe("firehose")
 
       assert {:ok, _result} =
-               Images.batch_update_tags(actor, %{tag_list: "-batchadd", image_ids: [image.id]})
+               Images.update_batch_tags(actor, %{tag_list: "-batchadd", image_ids: [image.id]})
 
       assert_receive %Broadcast{
         event: "image:batch_tag_update",
@@ -4797,7 +4939,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(tags: "safe, removeme")
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{tag_list: "-removeme", image_ids: [image.id]})
+               Images.update_batch_tags(actor, %{tag_list: "-removeme", image_ids: [image.id]})
 
       assert result == %{succeeded: 1, failed: 0}
       refute "removeme" in image_tag_names(image)
@@ -4815,14 +4957,14 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{tag_list: alias_tag.name, image_ids: [image.id]})
+               Images.update_batch_tags(actor, %{tag_list: alias_tag.name, image_ids: [image.id]})
 
       assert result == %{succeeded: 1, failed: 0}
       assert canonical.name in image_tag_names(image)
       refute alias_tag.name in image_tag_names(image)
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{
+               Images.update_batch_tags(actor, %{
                  tag_list: "-#{alias_tag.name}",
                  image_ids: [image.id]
                })
@@ -4837,7 +4979,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(tags: "safe")
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor(user), %{
+               Images.update_batch_tags(actor(user), %{
                  tag_list: "batchadd",
                  image_ids: [image.id]
                })
@@ -4848,7 +4990,7 @@ defmodule Philomena.ImagesTest do
     test "a plain moderator is not authorized" do
       image = image_fixture(tags: "safe")
 
-      assert Images.batch_update_tags(
+      assert Images.update_batch_tags(
                actor(moderator_user_fixture()),
                %{tag_list: "batchadd", image_ids: [image.id]}
              ) ==
@@ -4858,7 +5000,7 @@ defmodule Philomena.ImagesTest do
     test "a regular user is not authorized" do
       image = image_fixture(tags: "safe")
 
-      assert Images.batch_update_tags(
+      assert Images.update_batch_tags(
                actor(confirmed_user_fixture()),
                %{tag_list: "batchadd", image_ids: [image.id]}
              ) ==
@@ -4868,7 +5010,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor is not authorized" do
       image = image_fixture(tags: "safe")
 
-      assert Images.batch_update_tags(actor(), %{tag_list: "batchadd", image_ids: [image.id]}) ==
+      assert Images.update_batch_tags(actor(), %{tag_list: "batchadd", image_ids: [image.id]}) ==
                {:error, :unauthorized}
     end
 
@@ -4878,7 +5020,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(tags: "safe")
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{
+               Images.update_batch_tags(actor, %{
                  tag_list: "batchadd",
                  image_ids: [image.id, 2_147_483_647]
                })
@@ -4894,7 +5036,7 @@ defmodule Philomena.ImagesTest do
       image_ids = Enum.to_list(2_000_000_000..2_000_001_000)
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{tag_list: "batchadd", image_ids: image_ids})
+               Images.update_batch_tags(actor, %{tag_list: "batchadd", image_ids: image_ids})
 
       assert result == %{succeeded: 0, failed: 1_001}
       assert moderation_log_count() == 2
@@ -4908,7 +5050,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(tags: "safe")
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Images.batch_update_tags(actor, %{
+               Images.update_batch_tags(actor, %{
                  tag_list: "batchadd",
                  image_ids: [image.id, "abc"]
                })
@@ -4922,7 +5064,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(tags: "safe")
 
       assert {:ok, %{succeeded: 1, failed: 1}} =
-               Images.batch_update_tags(actor, %{
+               Images.update_batch_tags(actor, %{
                  tag_list: "batchadd",
                  image_ids: [image.id, 2_147_483_647]
                })
@@ -4938,7 +5080,7 @@ defmodule Philomena.ImagesTest do
       tag_fixture(%{name: "batchhiddentag"})
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{
+               Images.update_batch_tags(actor, %{
                  tag_list: "batchhiddentag",
                  image_ids: [hidden.id, visible.id]
                })
@@ -4949,7 +5091,7 @@ defmodule Philomena.ImagesTest do
       assert Repo.get_by!(Tag, name: "batchhiddentag").images_count == 1
 
       assert {:ok, result} =
-               Images.batch_update_tags(actor, %{
+               Images.update_batch_tags(actor, %{
                  tag_list: "-batchhiddentag",
                  image_ids: [hidden.id]
                })
@@ -4973,7 +5115,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(created_at: minutes_ago(4))
       SearchHelpers.reindex_all!(Image)
 
-      page = Images.load_image_index(actor(), index_scope())
+      page = Images.list_images(actor(), index_scope())
 
       assert %Scrivener.Page{} = page
       ids = Enum.map(page.entries, & &1.id)
@@ -4987,7 +5129,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(created_at: minutes_ago(1))
       SearchHelpers.reindex_all!(Image)
 
-      page = Images.load_image_index(actor(), index_scope())
+      page = Images.list_images(actor(), index_scope())
 
       refute image.id in Enum.map(page.entries, & &1.id)
     end
@@ -5006,7 +5148,7 @@ defmodule Philomena.ImagesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %{images: page, tags: []}} =
-               Images.search_images(actor(), search_scope(%{"q" => "*"}))
+               Images.query_images(actor(), search_scope(%{"q" => "*"}))
 
       assert %Scrivener.Page{} = page
       assert image.id in Enum.map(page.entries, & &1.id)
@@ -5016,7 +5158,7 @@ defmodule Philomena.ImagesTest do
       _image = image_fixture(tags: "safe")
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, %{tags: tags}} = Images.search_images(actor(), search_scope(%{"q" => "safe"}))
+      assert {:ok, %{tags: tags}} = Images.query_images(actor(), search_scope(%{"q" => "safe"}))
 
       assert [%Tag{} = tag] = tags
       assert tag.name == "safe"
@@ -5025,7 +5167,7 @@ defmodule Philomena.ImagesTest do
 
     test "a malformed query returns the compiler error tuple" do
       assert {:error, msg} =
-               Images.search_images(actor(), search_scope(%{"q" => "width.gte:abc"}))
+               Images.query_images(actor(), search_scope(%{"q" => "width.gte:abc"}))
 
       assert is_binary(msg)
     end
@@ -5038,7 +5180,7 @@ defmodule Philomena.ImagesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %{images: page}} =
-               Images.search_images(actor(), search_scope(%{"q" => "*", "sf" => "score"}))
+               Images.query_images(actor(), search_scope(%{"q" => "*", "sf" => "score"}))
 
       assert Enum.all?(page.entries, &match?({%Image{}, hit} when is_map(hit), &1))
       assert {%Image{id: id}, _hit} = Enum.find(page.entries, &(elem(&1, 0).id == image.id))
@@ -5049,7 +5191,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, %{images: page}} = Images.search_images(actor(), search_scope(%{"q" => "*"}))
+      assert {:ok, %{images: page}} = Images.query_images(actor(), search_scope(%{"q" => "*"}))
 
       assert Enum.all?(page.entries, &match?(%Image{}, &1))
       assert image.id in Enum.map(page.entries, & &1.id)
@@ -5060,7 +5202,7 @@ defmodule Philomena.ImagesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %{images: page}} =
-               Images.search_images(actor(), search_scope(%{"q" => "*", "sf" => "id"}))
+               Images.query_images(actor(), search_scope(%{"q" => "*", "sf" => "id"}))
 
       assert Enum.all?(page.entries, &match?(%Image{}, &1))
       assert image.id in Enum.map(page.entries, & &1.id)
@@ -5071,7 +5213,7 @@ defmodule Philomena.ImagesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %{images: page}} =
-               Images.search_images(actor(), search_scope(%{"q" => "*", "sf" => "first_seen_at"}))
+               Images.query_images(actor(), search_scope(%{"q" => "*", "sf" => "first_seen_at"}))
 
       assert Enum.all?(page.entries, &match?(%Image{}, &1))
       assert image.id in Enum.map(page.entries, & &1.id)

@@ -26,9 +26,9 @@ defmodule Philomena.Donations do
       {:error, :unauthorized}
 
   """
-  @spec load_donations(Actor.t(), Repo.pagination_params()) ::
+  @spec list_donations(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_donations(%Actor{} = actor, pagination) do
+  def list_donations(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, Donation) do
       donations =
         Donation
@@ -60,10 +60,10 @@ defmodule Philomena.Donations do
       {:error, :unauthorized}
 
   """
-  @spec load_user_donations(Actor.t(), String.t()) ::
+  @spec show_user_donations(Actor.t(), String.t()) ::
           {:ok, {User.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_user_donations(%Actor{} = actor, slug) do
+  def show_user_donations(%Actor{} = actor, slug) do
     user_query =
       User
       |> where(slug: ^slug)

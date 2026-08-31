@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Topic.LockController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Topics.lock_topic(
+    case Topics.create_topic_lock(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],
@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Topic.LockController do
   end
 
   def delete(conn, params) do
-    case Topics.unlock_topic(
+    case Topics.delete_topic_lock(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]

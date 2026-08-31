@@ -4,7 +4,7 @@ defmodule PhilomenaWeb.Api.Json.Search.TagController do
   alias Philomena.Tags
 
   def index(conn, params) do
-    case Tags.search_tags(
+    case Tags.query_tags(
            conn.assigns.actor,
            %{"query" => params["q"]},
            conn.assigns.pagination

@@ -42,7 +42,10 @@ defmodule Philomena.ArtistLinksFixtures do
     moderator = UsersFixtures.moderator_user_fixture()
 
     {:ok, artist_link} =
-      ArtistLinks.verify_artist_link(AttributionFixtures.actor(moderator), artist_link.id)
+      ArtistLinks.create_artist_link_verification(
+        AttributionFixtures.actor(moderator),
+        artist_link.id
+      )
 
     subject_path = Paths.artist_link_path(user, artist_link)
 

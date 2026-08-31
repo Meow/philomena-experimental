@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.PollController do
 
   def edit(conn, %{"forum_id" => forum_slug, "topic_id" => topic_slug}) do
     with {:ok, %Ecto.Changeset{data: poll} = changeset} <-
-           Polls.load_poll_for_edit(conn.assigns.actor, forum_slug, topic_slug) do
+           Polls.edit_poll(conn.assigns.actor, forum_slug, topic_slug) do
       render(conn, "edit.html",
         title: "Editing Poll",
         forum: poll.topic.forum,

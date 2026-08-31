@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.Report.ClaimController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"report_id" => report_id}) do
-    case Reports.claim_report(conn.assigns.actor, report_id) do
+    case Reports.create_report_claim(conn.assigns.actor, report_id) do
       {:ok, _report} ->
         conn
         |> put_flash(:info, "Successfully marked report as in progress")
@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.Admin.Report.ClaimController do
   end
 
   def delete(conn, %{"report_id" => report_id}) do
-    case Reports.unclaim_report(conn.assigns.actor, report_id) do
+    case Reports.delete_report_claim(conn.assigns.actor, report_id) do
       {:ok, report} ->
         conn
         |> put_flash(:info, "Successfully released report.")

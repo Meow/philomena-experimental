@@ -9,7 +9,7 @@ defmodule PhilomenaWeb.Image.RelatedController do
 
   def index(conn, params) do
     with {:ok, {image, images}} <-
-           Images.related_images(
+           Images.list_related_images(
              conn.assigns.actor,
              ImageScope.search_scope(conn),
              params["image_id"]

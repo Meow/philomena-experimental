@@ -61,7 +61,7 @@ defmodule Philomena.ConversationsTest do
       unrelated = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
 
       assert {:ok, %ConversationIndex{} = index} =
-               Conversations.load_conversation_index(actor(user), %{}, @pagination)
+               Conversations.list_conversations(actor(user), %{}, @pagination)
 
       ids = Enum.map(index.conversations.entries, & &1.id)
       assert received.id in ids
@@ -72,10 +72,10 @@ defmodule Philomena.ConversationsTest do
     test "does not list conversations the user has hidden" do
       user = confirmed_user_fixture()
       hidden = conversation_fixture(confirmed_user_fixture(), user)
-      {:ok, _} = Conversations.set_conversation_hidden(actor(user), hidden.slug)
+      {:ok, _} = Conversations.update_conversation_hide(actor(user), hidden.slug)
 
       assert {:ok, %ConversationIndex{} = index} =
-               Conversations.load_conversation_index(actor(user), %{}, @pagination)
+               Conversations.list_conversations(actor(user), %{}, @pagination)
 
       refute hidden.id in Enum.map(index.conversations.entries, & &1.id)
     end
@@ -87,7 +87,7 @@ defmodule Philomena.ConversationsTest do
       other = conversation_fixture(confirmed_user_fixture(), user)
 
       assert {:ok, %ConversationIndex{} = index} =
-               Conversations.load_conversation_index(
+               Conversations.list_conversations(
                  actor(user),
                  %{"with" => "#{partner.id}"},
                  @pagination
@@ -103,7 +103,7 @@ defmodule Philomena.ConversationsTest do
 
       for filter <- ["not-a-number", "99999999999999999999"] do
         assert {:ok, %ConversationIndex{} = index} =
-                 Conversations.load_conversation_index(
+                 Conversations.list_conversations(
                    actor(user),
                    %{"with" => filter},
                    @pagination
@@ -115,7 +115,7 @@ defmodule Philomena.ConversationsTest do
     end
 
     test "anonymous actors are unauthorized" do
-      assert Conversations.load_conversation_index(actor(), %{}, @pagination) ==
+      assert Conversations.list_conversations(actor(), %{}, @pagination) ==
                {:error, :unauthorized}
     end
   end
@@ -125,7 +125,7 @@ defmodule Philomena.ConversationsTest do
       user = confirmed_user_fixture()
       unread = conversation_fixture(confirmed_user_fixture(), user)
       hidden = conversation_fixture(confirmed_user_fixture(), user)
-      {:ok, _} = Conversations.set_conversation_hidden(actor(user), hidden.slug)
+      {:ok, _} = Conversations.update_conversation_hide(actor(user), hidden.slug)
 
       assert {:ok, 1} = Conversations.unread_conversation_count(actor(user))
       assert unread.id != hidden.id
@@ -144,7 +144,7 @@ defmodule Philomena.ConversationsTest do
       refute conversation.to_read
 
       assert {:ok, %ConversationPage{} = page} =
-               Conversations.load_conversation_page(
+               Conversations.show_conversation(
                  actor(recipient),
                  conversation.slug,
                  @pagination
@@ -162,7 +162,7 @@ defmodule Philomena.ConversationsTest do
       conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
 
       assert {:ok, %ConversationPage{}} =
-               Conversations.load_conversation_page(
+               Conversations.show_conversation(
                  actor(moderator_user_fixture()),
                  conversation.slug,
                  @pagination
@@ -172,7 +172,7 @@ defmodule Philomena.ConversationsTest do
     test "a non-participant regular user is unauthorized" do
       conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
 
-      assert Conversations.load_conversation_page(
+      assert Conversations.show_conversation(
                actor(confirmed_user_fixture()),
                conversation.slug,
                @pagination
@@ -185,7 +185,7 @@ defmodule Philomena.ConversationsTest do
             moderator_user_fixture(),
             admin_user_fixture()
           ] do
-        assert Conversations.load_conversation_page(
+        assert Conversations.show_conversation(
                  actor(viewer),
                  "no-such-slug",
                  @pagination
@@ -355,12 +355,12 @@ defmodule Philomena.ConversationsTest do
       conversation = conversation_fixture(sender, recipient)
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_read(actor(recipient), conversation.slug)
+               Conversations.update_conversation_read(actor(recipient), conversation.slug)
 
       assert Repo.reload!(conversation).to_read
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_read(actor(recipient), conversation.slug, false)
+               Conversations.update_conversation_read(actor(recipient), conversation.slug, false)
 
       refute Repo.reload!(conversation).to_read
     end
@@ -373,7 +373,7 @@ defmodule Philomena.ConversationsTest do
       conversation = conversation_fixture(sender, recipient)
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_read(
+               Conversations.update_conversation_read(
                  actor(moderator_user_fixture()),
                  conversation.slug
                )
@@ -386,7 +386,7 @@ defmodule Philomena.ConversationsTest do
     test "a non-participant regular user is unauthorized" do
       conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
 
-      assert Conversations.set_conversation_read(
+      assert Conversations.update_conversation_read(
                actor(confirmed_user_fixture()),
                conversation.slug
              ) ==
@@ -398,17 +398,17 @@ defmodule Philomena.ConversationsTest do
       conversation = conversation_fixture(confirmed_user_fixture(), recipient)
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_read(actor(recipient), conversation.slug)
+               Conversations.update_conversation_read(actor(recipient), conversation.slug)
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_read(actor(recipient), conversation.slug)
+               Conversations.update_conversation_read(actor(recipient), conversation.slug)
 
       assert Repo.reload!(conversation).to_read
     end
 
     test "an unknown slug is always not found" do
       for viewer <- [confirmed_user_fixture(), admin_user_fixture()] do
-        assert Conversations.set_conversation_read(actor(viewer), "no-such-slug") ==
+        assert Conversations.update_conversation_read(actor(viewer), "no-such-slug") ==
                  {:error, :not_found}
       end
     end
@@ -421,12 +421,12 @@ defmodule Philomena.ConversationsTest do
       conversation = conversation_fixture(sender, recipient)
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_hidden(actor(recipient), conversation.slug)
+               Conversations.update_conversation_hide(actor(recipient), conversation.slug)
 
       assert Repo.reload!(conversation).to_hidden
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_hidden(actor(recipient), conversation.slug, false)
+               Conversations.update_conversation_hide(actor(recipient), conversation.slug, false)
 
       refute Repo.reload!(conversation).to_hidden
     end
@@ -434,7 +434,7 @@ defmodule Philomena.ConversationsTest do
     test "a non-participant regular user is unauthorized" do
       conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
 
-      assert Conversations.set_conversation_hidden(
+      assert Conversations.update_conversation_hide(
                actor(confirmed_user_fixture()),
                conversation.slug
              ) ==
@@ -446,17 +446,17 @@ defmodule Philomena.ConversationsTest do
       conversation = conversation_fixture(confirmed_user_fixture(), recipient)
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_hidden(actor(recipient), conversation.slug)
+               Conversations.update_conversation_hide(actor(recipient), conversation.slug)
 
       assert {:ok, %Conversation{}} =
-               Conversations.set_conversation_hidden(actor(recipient), conversation.slug)
+               Conversations.update_conversation_hide(actor(recipient), conversation.slug)
 
       assert Repo.reload!(conversation).to_hidden
     end
 
     test "an unknown slug is always not found" do
       for viewer <- [confirmed_user_fixture(), admin_user_fixture()] do
-        assert Conversations.set_conversation_hidden(actor(viewer), "no-such-slug") ==
+        assert Conversations.update_conversation_hide(actor(viewer), "no-such-slug") ==
                  {:error, :not_found}
       end
     end
@@ -468,7 +468,7 @@ defmodule Philomena.ConversationsTest do
       recipient = confirmed_user_fixture()
       conversation = conversation_fixture(sender, recipient)
       # The recipient reads the conversation, clearing their unread flag.
-      {:ok, _} = Conversations.set_conversation_read(actor(recipient), conversation.slug)
+      {:ok, _} = Conversations.update_conversation_read(actor(recipient), conversation.slug)
 
       assert {:ok, %Message{} = message} =
                Conversations.create_message(actor(recipient), conversation.slug, %{
@@ -535,7 +535,7 @@ defmodule Philomena.ConversationsTest do
 
   describe "approve_message/3" do
     test "a missing route conversation is not found before the message lookup" do
-      assert Conversations.approve_message(
+      assert Conversations.create_message_approve(
                actor(moderator_user_fixture()),
                "missing-conversation",
                "1"
@@ -551,7 +551,11 @@ defmodule Philomena.ConversationsTest do
       assert report.open
 
       assert {:ok, %Message{} = approved} =
-               Conversations.approve_message(actor(moderator), conversation.slug, "#{message.id}")
+               Conversations.create_message_approve(
+                 actor(moderator),
+                 conversation.slug,
+                 "#{message.id}"
+               )
 
       assert approved.id == message.id
       assert Repo.reload!(message).approved
@@ -570,7 +574,7 @@ defmodule Philomena.ConversationsTest do
       {conversation, message} = unapproved_message(sender, recipient)
 
       assert {:ok, %Message{}} =
-               Conversations.approve_message(
+               Conversations.create_message_approve(
                  actor(admin_user_fixture()),
                  conversation.slug,
                  "#{message.id}"
@@ -582,7 +586,7 @@ defmodule Philomena.ConversationsTest do
     test "a non-integer message id is not-found" do
       conversation = conversation_fixture(confirmed_user_fixture(), confirmed_user_fixture())
 
-      assert Conversations.approve_message(
+      assert Conversations.create_message_approve(
                actor(moderator_user_fixture()),
                conversation.slug,
                "not-a-number"
@@ -597,7 +601,7 @@ defmodule Philomena.ConversationsTest do
 
       for staff <- [moderator_user_fixture(), admin_user_fixture()],
           id <- ["999999999", "#{other_message.id}"] do
-        assert Conversations.approve_message(actor(staff), conversation.slug, id) ==
+        assert Conversations.create_message_approve(actor(staff), conversation.slug, id) ==
                  {:error, :not_found}
       end
     end

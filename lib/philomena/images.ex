@@ -724,8 +724,8 @@ defmodule Philomena.Images do
       {:error, :not_found}
 
   """
-  @spec featured_image(Actor.t(), boolean()) :: {:ok, Image.t()} | {:error, :not_found}
-  def featured_image(%Actor{} = actor, include_hidden?) when is_boolean(include_hidden?) do
+  @spec show_featured_image(Actor.t(), boolean()) :: {:ok, Image.t()} | {:error, :not_found}
+  def show_featured_image(%Actor{} = actor, include_hidden?) when is_boolean(include_hidden?) do
     with :ok <- authorize(actor, :index, Image) do
       Image
       |> maybe_exclude_viewer_hides(actor, include_hidden?)
@@ -759,8 +759,8 @@ defmodule Philomena.Images do
       %Scrivener.Page{}
 
   """
-  @spec load_image_index(Actor.t(), Scope.t()) :: Scrivener.Page.t()
-  def load_image_index(%Actor{} = actor, scope) do
+  @spec list_images(Actor.t(), Scope.t()) :: Scrivener.Page.t()
+  def list_images(%Actor{} = actor, scope) do
     :ok = authorize(actor, :index, Image)
     {definition, _tags} = ImageSearch.default_query(actor, scope)
 
@@ -795,9 +795,9 @@ defmodule Philomena.Images do
       {:error, "There was an error parsing your query."}
 
   """
-  @spec search_images(Actor.t(), Scope.t(), Keyword.t()) ::
+  @spec query_images(Actor.t(), Scope.t(), Keyword.t()) ::
           {:ok, %{images: Scrivener.Page.t(), tags: [Tag.t()]}} | {:error, String.t()}
-  def search_images(%Actor{} = actor, scope, opts \\ []) do
+  def query_images(%Actor{} = actor, scope, opts \\ []) do
     with :ok <- authorize(actor, :index, Image),
          {:ok, {definition, tags}} <-
            ImageSearch.search_string(actor, scope, scope.q) do
@@ -827,9 +827,9 @@ defmodule Philomena.Images do
       {:error, :not_found}
 
   """
-  @spec load_api_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec show_api_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def load_api_image(%Actor{} = actor, image_id) do
+  def show_api_image(%Actor{} = actor, image_id) do
     load_image_member(actor, :show, image_id, [:user, :intensity, :sources, tags: :aliases])
   end
 
@@ -844,9 +844,9 @@ defmodule Philomena.Images do
       {:ok, %Scrivener.Page{}}
 
   """
-  @spec watched_images(Actor.t(), Scope.t()) ::
+  @spec list_watched_images(Actor.t(), Scope.t()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized | String.t()}
-  def watched_images(%Actor{} = actor, scope) do
+  def list_watched_images(%Actor{} = actor, scope) do
     with :ok <- authorize(actor, :index, Image),
          {:ok, {definition, _tags}} <- ImageSearch.search_string(actor, scope, "my:watched") do
       {:ok, ImageSearch.execute(definition)}
@@ -877,11 +877,11 @@ defmodule Philomena.Images do
       {:error, :not_found}
 
   """
-  @spec load_image_for_show(Actor.t(), IntegerId.integer_id()) ::
+  @spec show_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
           | {:duplicate_of, Image.t()}
           | {:error, :unauthorized | :not_found}
-  def load_image_for_show(%Actor{} = actor, id) do
+  def show_image(%Actor{} = actor, id) do
     with {:ok, image} <-
            Image
            |> from(as: :image)
@@ -932,8 +932,8 @@ defmodule Philomena.Images do
       %ImagePage{}
 
   """
-  @spec load_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: ImagePage.t()
-  def load_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
+  @spec show_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: ImagePage.t()
+  def show_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
     clear_image_notification(image, user)
 
     comment_pagination = maybe_jump_to_last_page(actor, image, comment_pagination)
@@ -943,7 +943,7 @@ defmodule Philomena.Images do
 
     %ImagePage{
       image: image,
-      comments: Comments.paginate_image_comments(actor, image, comment_pagination),
+      comments: Comments.list_image_comments(actor, image, comment_pagination),
       watching: subscribed?(image, user),
       can_interact: can_interact,
       user_galleries: gallery_choices,
@@ -981,10 +981,10 @@ defmodule Philomena.Images do
       {:ok, {%Image{}, {%Image{}, %{"sort" => [...]}}}}
 
   """
-  @spec find_consecutive_image(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
+  @spec list_image_navigation(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), {Image.t(), map()} | nil}}
           | {:error, :unauthorized | :not_found}
-  def find_consecutive_image(%Actor{user: user} = actor, scope, image_id) do
+  def list_image_navigation(%Actor{user: user} = actor, scope, image_id) do
     with {:ok, image} <- load_image_member(actor, :show, image_id),
          {:ok, query} <- ImageQuery.compile(scope.q || "*", user: user) do
       {:ok, {image, ImageSearch.find_consecutive(actor, scope, image, query)}}
@@ -1005,9 +1005,9 @@ defmodule Philomena.Images do
       {:ok, 3}
 
   """
-  @spec find_image_index_page(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
+  @spec list_image_index_page(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, pos_integer()} | {:error, :unauthorized | :not_found}
-  def find_image_index_page(%Actor{} = actor, scope, image_id) do
+  def list_image_index_page(%Actor{} = actor, scope, image_id) do
     with {:ok, image} <- load_image_member(actor, :show, image_id) do
       pagination = %{scope.pagination | page_number: 1}
 
@@ -1037,9 +1037,9 @@ defmodule Philomena.Images do
       {:ok, {%Image{}, %Scrivener.Page{}}}
 
   """
-  @spec related_images(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
+  @spec list_related_images(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
-  def related_images(%Actor{} = actor, scope, image_id) do
+  def list_related_images(%Actor{} = actor, scope, image_id) do
     with {:ok, image} <-
            load_image_member(actor, :show, image_id, [:faves, :sources, tags: :aliases]) do
       tags_to_match =
@@ -1103,9 +1103,9 @@ defmodule Philomena.Images do
       {:ok, 42}
 
   """
-  @spec random_image_id(Actor.t(), Scope.t()) ::
+  @spec list_random_images(Actor.t(), Scope.t()) ::
           {:ok, integer() | nil} | {:error, :unauthorized | String.t()}
-  def random_image_id(%Actor{} = actor, scope) do
+  def list_random_images(%Actor{} = actor, scope) do
     with :ok <- authorize(actor, :index, Image),
          {:ok, {definition, _tags}} <-
            ImageSearch.search_string(
@@ -1475,9 +1475,9 @@ defmodule Philomena.Images do
       {:error, :ban}
 
   """
-  @spec load_new_image(Actor.t()) ::
+  @spec new_image(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
-  def load_new_image(%Actor{} = actor) do
+  def new_image(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Image) do
       {:ok, change_image(%Image{sources: [%Source{}]})}
@@ -1506,10 +1506,10 @@ defmodule Philomena.Images do
       {:error, :ban}
 
   """
-  @spec upload_image(Actor.t(), map() | nil, PhilomenaMedia.Upload.t() | nil) ::
+  @spec create_image(Actor.t(), map() | nil, PhilomenaMedia.Upload.t() | nil) ::
           {:ok, image_upload()}
           | {:error, :ban | :unauthorized | :rate_limited | Ecto.Changeset.t()}
-  def upload_image(%Actor{user: user} = actor, params, upload) do
+  def create_image(%Actor{user: user} = actor, params, upload) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :create, Image),
          {:ok, tag_input_form} <-
@@ -1609,9 +1609,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec load_approval_queue(Actor.t(), Repo.pagination_params()) ::
+  @spec list_approval_queue(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_approval_queue(%Actor{} = actor, pagination) do
+  def list_approval_queue(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :approve, %Image{}) do
       images =
         Image
@@ -1646,11 +1646,11 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec approve_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_approve(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def approve_image(%Actor{} = actor, image_id) do
+  def create_image_approve(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :approve, image_id) do
       Multi.new()
@@ -1718,9 +1718,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec feature_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_feature(Actor.t(), IntegerId.integer_id()) ::
           {:ok, ImageFeature.t()} | {:error, :ban | :unauthorized | :not_found}
-  def feature_image(%Actor{} = actor, image_id) do
+  def create_image_feature(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :feature, image_id) do
       feature_changeset =
@@ -1763,10 +1763,10 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec destroy_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_destroy(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def destroy_image(%Actor{} = actor, image_id) do
+  def create_image_destroy(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :destroy, image_id) do
       Multi.new()
@@ -1812,9 +1812,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec set_comment_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
+  @spec update_image_comment_lock(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def set_comment_locked(%Actor{} = actor, image_id, locked?) do
+  def update_image_comment_lock(%Actor{} = actor, image_id, locked?) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_comments, image_id) do
       {log_type, log_body} =
@@ -1861,9 +1861,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec set_description_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
+  @spec update_image_description_lock(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def set_description_locked(%Actor{} = actor, image_id, locked?) do
+  def update_image_description_lock(%Actor{} = actor, image_id, locked?) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_description, image_id) do
       {log_type, log_body} =
@@ -1910,9 +1910,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec set_tag_locked(Actor.t(), IntegerId.integer_id(), boolean()) ::
+  @spec update_image_tag_lock(Actor.t(), IntegerId.integer_id(), boolean()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def set_tag_locked(%Actor{} = actor, image_id, locked?) do
+  def update_image_tag_lock(%Actor{} = actor, image_id, locked?) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_tags, image_id) do
       {log_type, log_body} =
@@ -1986,9 +1986,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec repair_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_repair(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def repair_image(%Actor{} = actor, image_id) do
+  def create_image_repair(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :repair, image_id) do
       query = where(Image, id: ^image.id)
@@ -2039,9 +2039,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec hide_image(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec create_image_hide(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def hide_image(%Actor{user: user} = actor, image_id, attrs) do
+  def create_image_hide(%Actor{user: user} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :hide, image_id) do
       changeset_fun = fn %{locked_image: image} -> Image.hide_changeset(image, attrs, user) end
@@ -2090,9 +2090,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec unhide_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec delete_image_hide(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def unhide_image(%Actor{} = actor, image_id) do
+  def delete_image_hide(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :unhide, image_id) do
       Multi.new()
@@ -2233,9 +2233,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec remove_image_hash(Actor.t(), IntegerId.integer_id()) ::
+  @spec delete_image_hash(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def remove_image_hash(%Actor{} = actor, image_id) do
+  def delete_image_hash(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :remove_hash, image_id) do
       Multi.new()
@@ -2273,9 +2273,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec update_scratchpad(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec update_image_scratchpad(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_scratchpad(%Actor{} = actor, image_id, attrs) do
+  def update_image_scratchpad(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_scratchpad, image_id) do
       Multi.new()
@@ -2322,9 +2322,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec remove_source_history(Actor.t(), IntegerId.integer_id()) ::
+  @spec delete_image_source_history(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def remove_source_history(%Actor{} = actor, image_id) do
+  def delete_image_source_history(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
            load_image_member(actor, :remove_source_history, image_id, [:source_changes]) do
@@ -2374,10 +2374,10 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec update_file(Actor.t(), IntegerId.integer_id(), PhilomenaMedia.Upload.t() | nil) ::
+  @spec update_image_file(Actor.t(), IntegerId.integer_id(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_file(%Actor{} = actor, image_id, upload) do
+  def update_image_file(%Actor{} = actor, image_id, upload) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :replace_file, image_id) do
       Multi.new()
@@ -2431,10 +2431,10 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec update_description(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec update_image_description(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, {Image.t(), String.t() | nil}}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_description(%Actor{} = actor, image_id, attrs) do
+  def update_image_description(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image_id} <- Loader.parse_id(image_id) do
       Multi.new()
@@ -2487,14 +2487,14 @@ defmodule Philomena.Images do
       {:ok, %{image: %Image{}, source_change_count: 1}}
 
   """
-  @spec update_sources(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec update_image_sources(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok,
            %{
              image: Image.t(),
              source_change_count: non_neg_integer()
            }}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited | Ecto.Changeset.t()}
-  def update_sources(%Actor{} = actor, image_id, attrs) do
+  def update_image_sources(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_metadata, image_id, [:sources]),
          {:ok, source_input_form} <-
@@ -2547,9 +2547,9 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec update_locked_tags(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec update_image_locked_tags(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_locked_tags(%Actor{} = actor, image_id, attrs) do
+  def update_image_locked_tags(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]),
          {:ok, tag_input_form} <-
@@ -2628,7 +2628,7 @@ defmodule Philomena.Images do
       {:ok, %{image: %Image{}, tag_change_count: 1, tag_change_tag_count: 1}}
 
   """
-  @spec update_tags(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec update_image_tags(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok,
            %{
              image: Image.t(),
@@ -2641,7 +2641,7 @@ defmodule Philomena.Images do
              | :not_found
              | :rate_limited
              | Ecto.Changeset.t()}
-  def update_tags(%Actor{} = actor, image_id, attrs) do
+  def update_image_tags(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_metadata, image_id),
          {:ok, tag_input_form} <-
@@ -2709,10 +2709,10 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec update_uploader(Actor.t(), IntegerId.integer_id(), any()) ::
+  @spec update_image_uploader(Actor.t(), IntegerId.integer_id(), any()) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_uploader(%Actor{} = actor, image_id, image_params) do
+  def update_image_uploader(%Actor{} = actor, image_id, image_params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_uploader, image_id),
@@ -2823,10 +2823,10 @@ defmodule Philomena.Images do
       {:error, :unauthorized}
 
   """
-  @spec update_hide_reason(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec update_image_hide(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_hide_reason(%Actor{} = actor, image_id, attrs) do
+  def update_image_hide(%Actor{} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_hide_reason, image_id) do
       Multi.new()
@@ -2871,10 +2871,10 @@ defmodule Philomena.Images do
   Returns `{:error, :unauthorized}` when `actor` may not batch-tag, or an
   invalid `BatchTagForm` changeset when the parameters cannot be cast.
   """
-  @spec batch_update_tags(Actor.t(), map()) ::
+  @spec update_batch_tags(Actor.t(), map()) ::
           {:ok, %{succeeded: non_neg_integer(), failed: non_neg_integer()}}
           | {:error, :unauthorized | Ecto.Changeset.t()}
-  def batch_update_tags(%Actor{} = actor, params) do
+  def update_batch_tags(%Actor{} = actor, params) do
     with :ok <- authorize(actor, :batch_update, Tag),
          {:ok, form} <-
            %BatchTagForm{}
@@ -3054,9 +3054,9 @@ defmodule Philomena.Images do
       {:error, :not_found}
 
   """
-  @spec subscribe_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_subscription(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def subscribe_image(%Actor{} = actor, image_id) do
+  def create_image_subscription(%Actor{} = actor, image_id) do
     with {:ok, image} <- load_image_member(actor, :subscribe, image_id),
          {:ok, _subscription} <- create_subscription(image, actor.user) do
       {:ok, image}
@@ -3080,9 +3080,9 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
   """
-  @spec unsubscribe_image(Actor.t(), IntegerId.integer_id()) ::
+  @spec delete_image_subscription(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def unsubscribe_image(%Actor{} = actor, image_id) do
+  def delete_image_subscription(%Actor{} = actor, image_id) do
     with {:ok, image} <- load_image_member(actor, :unsubscribe, image_id) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(image, actor.user)
@@ -3110,9 +3110,9 @@ defmodule Philomena.Images do
       {:error, :not_found}
 
   """
-  @spec mark_image_read(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_read(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def mark_image_read(%Actor{} = actor, image_id) do
+  def create_image_read(%Actor{} = actor, image_id) do
     with {:ok, image} <- load_image_member(actor, :mark_read, image_id) do
       clear_image_notification(image, actor.user)
       {:ok, image}
@@ -3138,9 +3138,9 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
   """
-  @spec create_image_hide(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_user_hide(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def create_image_hide(actor, image_id) do
+  def create_image_user_hide(actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :vote, image_id) do
       Multi.new()
@@ -3169,9 +3169,9 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
   """
-  @spec delete_image_hide(Actor.t(), IntegerId.integer_id()) ::
+  @spec delete_image_user_hide(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def delete_image_hide(actor, image_id) do
+  def delete_image_user_hide(actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :vote, image_id) do
       Multi.new()
@@ -3198,10 +3198,10 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
   """
-  @spec create_fave(Actor.t(), IntegerId.integer_id()) ::
+  @spec create_image_fave(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :forced_filter}
-  def create_fave(%Actor{user: user} = actor, image_id) do
+  def create_image_fave(%Actor{user: user} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
            load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
@@ -3230,10 +3230,10 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
   """
-  @spec delete_fave(Actor.t(), IntegerId.integer_id()) ::
+  @spec delete_image_fave(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :forced_filter}
-  def delete_fave(%Actor{user: user} = actor, image_id) do
+  def delete_image_fave(%Actor{user: user} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
            load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
@@ -3264,7 +3264,7 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
   """
-  @spec create_vote(Actor.t(), IntegerId.integer_id(), map()) ::
+  @spec create_image_vote(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()}
           | {:error,
              :ban
@@ -3272,7 +3272,7 @@ defmodule Philomena.Images do
              | :not_found
              | :forced_filter
              | Ecto.Changeset.t()}
-  def create_vote(%Actor{user: user} = actor, image_id, attrs) do
+  def create_image_vote(%Actor{user: user} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
            load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
@@ -3304,10 +3304,10 @@ defmodule Philomena.Images do
       {:ok, %Image{}}
 
   """
-  @spec delete_vote(Actor.t(), IntegerId.integer_id()) ::
+  @spec delete_image_vote(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
           | {:error, :ban | :unauthorized | :not_found | :forced_filter}
-  def delete_vote(%Actor{user: user} = actor, image_id) do
+  def delete_image_vote(%Actor{user: user} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
            load_image_member(actor, :vote, image_id, [:sources, tags: :aliases]),
@@ -3345,9 +3345,9 @@ defmodule Philomena.Images do
       {:ok, {%Image{}, false}}
 
   """
-  @spec image_fave_list(Actor.t(), IntegerId.integer_id()) ::
+  @spec list_image_faves(Actor.t(), IntegerId.integer_id()) ::
           {:ok, {Image.t(), boolean()}} | {:error, :unauthorized | :not_found}
-  def image_fave_list(%Actor{} = actor, image_id) do
+  def list_image_faves(%Actor{} = actor, image_id) do
     with {:ok, image} <- load_image_member(actor, :index, image_id, faves: :user) do
       case authorize(actor, :tamper, image) do
         :ok ->

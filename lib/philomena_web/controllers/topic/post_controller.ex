@@ -34,7 +34,7 @@ defmodule PhilomenaWeb.Topic.PostController do
 
   def edit(conn, %{"forum_id" => forum_id, "topic_id" => topic_id, "id" => id}) do
     with {:ok, changeset} <-
-           Posts.load_post_for_edit(conn.assigns.actor, forum_id, topic_id, id) do
+           Posts.edit_post(conn.assigns.actor, forum_id, topic_id, id) do
       render(conn, "edit.html", title: "Editing Post", post: changeset.data, changeset: changeset)
     end
   end

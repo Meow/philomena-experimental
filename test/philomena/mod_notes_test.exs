@@ -37,18 +37,18 @@ defmodule Philomena.ModNotesTest do
 
   describe "load_mod_note_index/4" do
     test "an anonymous viewer is unauthorized" do
-      assert ModNotes.load_mod_note_index(actor(), %{}, & &1, @pagination) ==
+      assert ModNotes.list_mod_notes(actor(), %{}, & &1, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "a regular user is unauthorized" do
-      assert ModNotes.load_mod_note_index(actor(confirmed_user_fixture()), %{}, & &1, @pagination) ==
+      assert ModNotes.list_mod_notes(actor(confirmed_user_fixture()), %{}, & &1, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an assistant, a moderator, and an admin are all authorized" do
       for user <- [assistant_user_fixture(), moderator_user_fixture(), admin_user_fixture()] do
-        assert {:ok, page} = ModNotes.load_mod_note_index(actor(user), %{}, & &1, @pagination)
+        assert {:ok, page} = ModNotes.list_mod_notes(actor(user), %{}, & &1, @pagination)
         assert %Scrivener.Page{} = page
       end
     end
@@ -57,7 +57,7 @@ defmodule Philomena.ModNotesTest do
       moderator = moderator_user_fixture()
       note = mod_note_fixture(moderator)
 
-      assert {:ok, page} = ModNotes.load_mod_note_index(actor(moderator), %{}, & &1, @pagination)
+      assert {:ok, page} = ModNotes.list_mod_notes(actor(moderator), %{}, & &1, @pagination)
 
       # The identity renderer pairs each note with itself.
       assert note.id in Enum.map(page.entries, fn {loaded, _rendered} -> loaded.id end)
@@ -69,7 +69,7 @@ defmodule Philomena.ModNotesTest do
       other = mod_note_fixture(moderator)
 
       assert {:ok, page} =
-               ModNotes.load_mod_note_index(
+               ModNotes.list_mod_notes(
                  actor(moderator),
                  %{"user_id" => wanted.user_id},
                  & &1,
@@ -86,7 +86,7 @@ defmodule Philomena.ModNotesTest do
       target = confirmed_user_fixture()
 
       {:ok, index} =
-        ModNotes.load_mod_note_index(
+        ModNotes.list_mod_notes(
           moderator,
           %{"user_id" => "not-an-id"},
           & &1,
@@ -96,7 +96,7 @@ defmodule Philomena.ModNotesTest do
       assert Enum.empty?(index)
 
       {:ok, index} =
-        ModNotes.load_mod_note_index(
+        ModNotes.list_mod_notes(
           moderator,
           %{"user_id" => "not-an-id"},
           & &1,
@@ -106,7 +106,7 @@ defmodule Philomena.ModNotesTest do
       assert Enum.empty?(index)
 
       {:ok, index} =
-        ModNotes.load_mod_note_index(
+        ModNotes.list_mod_notes(
           moderator,
           %{"user_id" => "2147483647"},
           & &1,
@@ -116,7 +116,7 @@ defmodule Philomena.ModNotesTest do
       assert Enum.empty?(index)
 
       {:ok, index} =
-        ModNotes.load_mod_note_index(
+        ModNotes.list_mod_notes(
           moderator,
           %{"user_id" => target.id, "report_id" => "2147483647"},
           & &1,
@@ -300,7 +300,7 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator)
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               ModNotes.load_mod_note_for_edit(actor(moderator), to_string(note.id))
+               ModNotes.edit_mod_note(actor(moderator), to_string(note.id))
 
       assert loaded.id == note.id
     end
@@ -308,7 +308,7 @@ defmodule Philomena.ModNotesTest do
     test "a moderator may not edit another moderator's note" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.load_mod_note_for_edit(actor(moderator_user_fixture()), to_string(note.id)) ==
+      assert ModNotes.edit_mod_note(actor(moderator_user_fixture()), to_string(note.id)) ==
                {:error, :unauthorized}
     end
 
@@ -316,7 +316,7 @@ defmodule Philomena.ModNotesTest do
       note = mod_note_fixture(moderator_user_fixture())
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               ModNotes.load_mod_note_for_edit(actor(admin_user_fixture()), to_string(note.id))
+               ModNotes.edit_mod_note(actor(admin_user_fixture()), to_string(note.id))
 
       assert loaded.id == note.id
     end
@@ -324,20 +324,20 @@ defmodule Philomena.ModNotesTest do
     test "a regular user is unauthorized" do
       note = mod_note_fixture(moderator_user_fixture())
 
-      assert ModNotes.load_mod_note_for_edit(actor(confirmed_user_fixture()), to_string(note.id)) ==
+      assert ModNotes.edit_mod_note(actor(confirmed_user_fixture()), to_string(note.id)) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed id is not-found for every actor" do
-      assert ModNotes.load_mod_note_for_edit(actor(moderator_user_fixture()), "2147483647") ==
+      assert ModNotes.edit_mod_note(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert ModNotes.load_mod_note_for_edit(actor(admin_user_fixture()), "2147483647") ==
+      assert ModNotes.edit_mod_note(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-integer id is not-found" do
-      assert ModNotes.load_mod_note_for_edit(actor(admin_user_fixture()), "not-a-number") ==
+      assert ModNotes.edit_mod_note(actor(admin_user_fixture()), "not-a-number") ==
                {:error, :not_found}
     end
   end

@@ -26,11 +26,11 @@ defmodule Philomena.Users.Eraser do
     system_actor = system_actor(moderator)
 
     # Erase avatar
-    {:ok, user} = Users.admin_remove_avatar(system_actor, user.slug)
+    {:ok, user} = Users.delete_user_avatar(system_actor, user.slug)
 
     # Erase "about me" and personal title
     {:ok, user} =
-      Users.update_description(system_actor, user.slug, %{
+      Users.update_profile_description(system_actor, user.slug, %{
         description: "",
         personal_title: ""
       })
@@ -43,7 +43,7 @@ defmodule Philomena.Users.Eraser do
     |> Enum.each(fn post ->
       if not post.destroyed_content do
         {:ok, _post} =
-          Posts.hide_post(
+          Posts.create_post_hide(
             system_actor,
             post.topic.forum.short_name,
             post.topic.slug,
@@ -52,7 +52,7 @@ defmodule Philomena.Users.Eraser do
           )
 
         {:ok, _post} =
-          Posts.destroy_post(
+          Posts.create_post_delete(
             system_actor,
             post.topic.forum.short_name,
             post.topic.slug,
@@ -68,14 +68,15 @@ defmodule Philomena.Users.Eraser do
     |> Enum.each(fn comment ->
       if not comment.destroyed_content do
         {:ok, _comment} =
-          Comments.hide_comment(
+          Comments.create_comment_hide(
             system_actor,
             comment.image_id,
             comment.id,
             %{deletion_reason: @reason}
           )
 
-        {:ok, _comment} = Comments.destroy_comment(system_actor, comment.image_id, comment.id)
+        {:ok, _comment} =
+          Comments.create_comment_delete(system_actor, comment.image_id, comment.id)
       end
     end)
 
@@ -96,7 +97,7 @@ defmodule Philomena.Users.Eraser do
     |> Enum.each(fn topic ->
       if not topic.hidden_from_users do
         {:ok, _topic} =
-          Topics.hide_topic(
+          Topics.create_topic_hide(
             system_actor,
             topic.forum.short_name,
             topic.slug,
@@ -132,7 +133,7 @@ defmodule Philomena.Users.Eraser do
     |> select([report], report.id)
     |> Repo.all()
     |> Enum.each(fn report_id ->
-      {:ok, _report} = Reports.close_report(system_actor, report_id)
+      {:ok, _report} = Reports.create_report_close(system_actor, report_id)
     end)
 
     # We succeeded

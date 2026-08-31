@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.Advert.ImageController do
 
   def edit(conn, %{"advert_id" => id}) do
     with {:ok, {advert, changeset}} <-
-           Adverts.load_advert_for_edit(conn.assigns.actor, id) do
+           Adverts.edit_advert(conn.assigns.actor, id) do
       render(conn, "edit.html", title: "Editing Advert", advert: advert, changeset: changeset)
     end
   end

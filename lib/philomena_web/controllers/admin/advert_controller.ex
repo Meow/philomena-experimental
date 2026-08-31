@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.AdvertController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with {:ok, adverts} <- Adverts.load_adverts(conn.assigns.actor, conn.assigns.scrivener) do
+    with {:ok, adverts} <- Adverts.list_adverts(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "Admin - Adverts",
         layout_class: "layout--wide",
@@ -39,7 +39,7 @@ defmodule PhilomenaWeb.Admin.AdvertController do
   end
 
   def edit(conn, %{"id" => id}) do
-    with {:ok, {advert, changeset}} <- Adverts.load_advert_for_edit(conn.assigns.actor, id) do
+    with {:ok, {advert, changeset}} <- Adverts.edit_advert(conn.assigns.actor, id) do
       render(conn, "edit.html", title: "Editing Advert", advert: advert, changeset: changeset)
     end
   end

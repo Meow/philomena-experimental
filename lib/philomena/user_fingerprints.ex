@@ -80,9 +80,9 @@ defmodule Philomena.UserFingerprints do
   Returns `{:ok, %FingerprintProfile{}}` carrying the users seen with the
   fingerprint and the fingerprint bans matching it.
   """
-  @spec load_fingerprint_profile(Actor.t(), String.t()) ::
+  @spec show_fingerprint_profile(Actor.t(), String.t()) ::
           {:ok, FingerprintProfile.t()} | {:error, :unauthorized | :not_found}
-  def load_fingerprint_profile(%Actor{} = actor, fingerprint) do
+  def show_fingerprint_profile(%Actor{} = actor, fingerprint) do
     with {:ok, fingerprint} <- cast_fingerprint(fingerprint),
          :ok <- authorize(actor, :show, :identity_metadata) do
       {:ok,

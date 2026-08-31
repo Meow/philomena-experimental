@@ -61,7 +61,7 @@ defmodule Philomena.TagChangesTest do
       end
 
     {:ok, result} =
-      Images.update_tags(
+      Images.update_image_tags(
         arrangement_actor,
         image.id,
         %{
@@ -127,19 +127,19 @@ defmodule Philomena.TagChangesTest do
       reindex_tag_changes!()
 
       assert {:ok, %TagChangePage{target: loaded_image, tag_changes: page}, _} =
-               TagChanges.image_tag_changes(actor(), image.id, %{}, @pagination)
+               TagChanges.list_image_tag_changes(actor(), image.id, %{}, @pagination)
 
       assert loaded_image.id == image.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
 
       assert {:ok, %TagChangePage{target: loaded_tag, tag_changes: page}, _} =
-               TagChanges.tag_tag_changes(actor(), tag.slug, %{}, @pagination)
+               TagChanges.list_tag_tag_changes(actor(), tag.slug, %{}, @pagination)
 
       assert loaded_tag.id == tag.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
 
       assert {:ok, %TagChangePage{target: loaded_user, tag_changes: page}, _} =
-               TagChanges.user_tag_changes(actor(), user.slug, %{}, @pagination)
+               TagChanges.list_user_tag_changes(actor(), user.slug, %{}, @pagination)
 
       assert loaded_user.id == user.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
@@ -161,7 +161,7 @@ defmodule Philomena.TagChangesTest do
                 target: loaded_tag,
                 tag_changes: page
               }, _changeset} =
-               TagChanges.tag_tag_changes(actor(), alias_tag.slug, %{}, @pagination)
+               TagChanges.list_tag_tag_changes(actor(), alias_tag.slug, %{}, @pagination)
 
       assert loaded_tag.id == canonical.id
       assert Enum.map(page.entries, & &1.id) == [tag_change.id]
@@ -173,7 +173,7 @@ defmodule Philomena.TagChangesTest do
       reindex_tag_changes!()
 
       assert {:ok, %TagChangePage{tag_changes: page}, _} =
-               TagChanges.image_tag_changes(
+               TagChanges.list_image_tag_changes(
                  actor(),
                  image.id,
                  %{"tcq" => "image_id:#{other.id}"},
@@ -184,7 +184,7 @@ defmodule Philomena.TagChangesTest do
       assert page.total_entries == 0
 
       assert {:ok, %TagChangePage{tag_changes: page}, _} =
-               TagChanges.image_tag_changes(
+               TagChanges.list_image_tag_changes(
                  actor(),
                  image.id,
                  %{"tcq" => "id:#{tag_change.id}"},
@@ -195,16 +195,16 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "missing resource targets are not found before search" do
-      assert TagChanges.image_tag_changes(actor(), "not-an-id", %{}, @pagination) ==
+      assert TagChanges.list_image_tag_changes(actor(), "not-an-id", %{}, @pagination) ==
                {:error, :not_found}
 
-      assert TagChanges.image_tag_changes(actor(), "2147483647", %{}, @pagination) ==
+      assert TagChanges.list_image_tag_changes(actor(), "2147483647", %{}, @pagination) ==
                {:error, :not_found}
 
-      assert TagChanges.tag_tag_changes(actor(), "no-such-tag", %{}, @pagination) ==
+      assert TagChanges.list_tag_tag_changes(actor(), "no-such-tag", %{}, @pagination) ==
                {:error, :not_found}
 
-      assert TagChanges.user_tag_changes(actor(), "no-such-user", %{}, @pagination) ==
+      assert TagChanges.list_user_tag_changes(actor(), "no-such-user", %{}, @pagination) ==
                {:error, :not_found}
     end
 
@@ -222,7 +222,7 @@ defmodule Philomena.TagChangesTest do
 
       assert Enum.map(global_page.entries, & &1.id) == [tag_change.id]
 
-      assert TagChanges.image_tag_changes(actor(), image.id, %{}, @pagination) ==
+      assert TagChanges.list_image_tag_changes(actor(), image.id, %{}, @pagination) ==
                {:error, :unauthorized}
 
       moderator = actor(moderator_user_fixture())
@@ -233,7 +233,7 @@ defmodule Philomena.TagChangesTest do
       assert Enum.map(global_page.entries, & &1.id) == [tag_change.id]
 
       assert {:ok, %TagChangePage{tag_changes: image_page}, _} =
-               TagChanges.image_tag_changes(moderator, image.id, %{}, @pagination)
+               TagChanges.list_image_tag_changes(moderator, image.id, %{}, @pagination)
 
       assert Enum.map(image_page.entries, & &1.id) == [tag_change.id]
     end
@@ -243,21 +243,21 @@ defmodule Philomena.TagChangesTest do
       {_image, tag_change} = tag_change!(confirmed_user_fixture())
       reindex_tag_changes!()
 
-      assert TagChanges.ip_tag_changes(actor(), "bad-ip", %{}, @pagination) ==
+      assert TagChanges.list_ip_tag_changes(actor(), "bad-ip", %{}, @pagination) ==
                {:error, :not_found}
 
-      assert TagChanges.ip_tag_changes(actor(), "203.0.113.1", %{}, @pagination) ==
+      assert TagChanges.list_ip_tag_changes(actor(), "203.0.113.1", %{}, @pagination) ==
                {:error, :unauthorized}
 
       assert {:ok, %TagChangePage{tag_changes: ip_page}, _} =
-               TagChanges.ip_tag_changes(moderator, "203.0.113.1", %{}, @pagination)
+               TagChanges.list_ip_tag_changes(moderator, "203.0.113.1", %{}, @pagination)
 
       assert Enum.map(ip_page.entries, & &1.id) == [tag_change.id]
 
-      assert TagChanges.fingerprint_tag_changes(actor(), "invalid", %{}, @pagination) ==
+      assert TagChanges.list_fingerprint_tag_changes(actor(), "invalid", %{}, @pagination) ==
                {:error, :not_found}
 
-      assert TagChanges.fingerprint_tag_changes(
+      assert TagChanges.list_fingerprint_tag_changes(
                actor(),
                "d015c342859dde3",
                %{},
@@ -269,7 +269,7 @@ defmodule Philomena.TagChangesTest do
                 target: "d015c342859dde3",
                 tag_changes: fingerprint_page
               }, _} =
-               TagChanges.fingerprint_tag_changes(
+               TagChanges.list_fingerprint_tag_changes(
                  moderator,
                  " D015C342859DDE3 ",
                  %{},
@@ -406,7 +406,7 @@ defmodule Philomena.TagChangesTest do
 
   describe "revert_tag_changes/2" do
     test "denies an anonymous actor" do
-      assert TagChanges.revert_tag_changes(actor(), ["1"]) == {:error, :unauthorized}
+      assert TagChanges.create_tag_change_revert(actor(), ["1"]) == {:error, :unauthorized}
     end
 
     test "denies a regular user before looking at the ids" do
@@ -414,8 +414,8 @@ defmodule Philomena.TagChangesTest do
       # shape from an unprivileged user is still unauthorized.
       user_actor = actor(confirmed_user_fixture())
 
-      assert TagChanges.revert_tag_changes(user_actor, ["1"]) == {:error, :unauthorized}
-      assert TagChanges.revert_tag_changes(user_actor, "42") == {:error, :unauthorized}
+      assert TagChanges.create_tag_change_revert(user_actor, ["1"]) == {:error, :unauthorized}
+      assert TagChanges.create_tag_change_revert(user_actor, "42") == {:error, :unauthorized}
     end
 
     test "a moderator reverts the listed changes and a moderation log is written" do
@@ -425,7 +425,7 @@ defmodule Philomena.TagChangesTest do
       assert "added test tag" in image_tag_names(image)
 
       assert {:ok, [%TagChange{}]} =
-               TagChanges.revert_tag_changes(actor(moderator), %{"ids" => ["#{tc.id}"]})
+               TagChanges.create_tag_change_revert(actor(moderator), %{"ids" => ["#{tc.id}"]})
 
       # Reverting the change removes the two tags it had added.
       names = image_tag_names(image)
@@ -443,7 +443,7 @@ defmodule Philomena.TagChangesTest do
 
     test "an empty list is a successful reversion of zero changes" do
       assert {:ok, []} =
-               TagChanges.revert_tag_changes(actor(moderator_user_fixture()), %{ids: []})
+               TagChanges.create_tag_change_revert(actor(moderator_user_fixture()), %{ids: []})
 
       assert only_moderation_log!().body == "Reverted 0 tag changes"
     end
@@ -453,10 +453,10 @@ defmodule Philomena.TagChangesTest do
       {image, tag_change} = tag_change!(confirmed_user_fixture())
 
       assert {:ok, [%TagChange{}]} =
-               TagChanges.revert_tag_changes(moderator, %{ids: [tag_change.id]})
+               TagChanges.create_tag_change_revert(moderator, %{ids: [tag_change.id]})
 
       assert {:ok, [%TagChange{}]} =
-               TagChanges.revert_tag_changes(moderator, %{ids: [tag_change.id]})
+               TagChanges.create_tag_change_revert(moderator, %{ids: [tag_change.id]})
 
       names = image_tag_names(image)
       refute "added test tag" in names
@@ -466,7 +466,9 @@ defmodule Philomena.TagChangesTest do
 
     test "a non-list ids value from a moderator is invalid" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               TagChanges.revert_tag_changes(actor(moderator_user_fixture()), %{"ids" => "42"})
+               TagChanges.create_tag_change_revert(actor(moderator_user_fixture()), %{
+                 "ids" => "42"
+               })
 
       assert changeset.errors[:ids]
 
@@ -475,7 +477,7 @@ defmodule Philomena.TagChangesTest do
 
     test "a list containing a malformed id is invalid before reversion" do
       assert {:error, %Ecto.Changeset{} = changeset} =
-               TagChanges.revert_tag_changes(actor(moderator_user_fixture()), %{
+               TagChanges.create_tag_change_revert(actor(moderator_user_fixture()), %{
                  "ids" => ["not-an-id"]
                })
 
@@ -487,25 +489,25 @@ defmodule Philomena.TagChangesTest do
 
   describe "full_revert_*_tag_changes/2" do
     test "denies an anonymous actor" do
-      assert TagChanges.full_revert_user_tag_changes(actor(), "user") == {:error, :unauthorized}
+      assert TagChanges.create_user_tag_change_revert(actor(), "user") == {:error, :unauthorized}
 
-      assert TagChanges.full_revert_ip_tag_changes(actor(), "203.0.113.1") ==
+      assert TagChanges.create_ip_tag_change_revert(actor(), "203.0.113.1") ==
                {:error, :unauthorized}
 
-      assert TagChanges.full_revert_fingerprint_tag_changes(actor(), "c1774") ==
+      assert TagChanges.create_fingerprint_tag_change_revert(actor(), "c1774") ==
                {:error, :unauthorized}
     end
 
     test "denies a regular user before looking at the target" do
       user_actor = actor(confirmed_user_fixture())
 
-      assert TagChanges.full_revert_user_tag_changes(user_actor, "user") ==
+      assert TagChanges.create_user_tag_change_revert(user_actor, "user") ==
                {:error, :unauthorized}
 
-      assert TagChanges.full_revert_ip_tag_changes(user_actor, "203.0.113.1") ==
+      assert TagChanges.create_ip_tag_change_revert(user_actor, "203.0.113.1") ==
                {:error, :unauthorized}
 
-      assert TagChanges.full_revert_fingerprint_tag_changes(user_actor, "c1774") ==
+      assert TagChanges.create_fingerprint_tag_change_revert(user_actor, "c1774") ==
                {:error, :unauthorized}
     end
 
@@ -514,7 +516,7 @@ defmodule Philomena.TagChangesTest do
       target = confirmed_user_fixture()
 
       assert {:ok, result} =
-               TagChanges.full_revert_user_tag_changes(actor(moderator), target.slug)
+               TagChanges.create_user_tag_change_revert(actor(moderator), target.slug)
 
       assert result.id == target.id
 
@@ -526,7 +528,7 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "a missing user profile is not found" do
-      assert TagChanges.full_revert_user_tag_changes(
+      assert TagChanges.create_user_tag_change_revert(
                actor(moderator_user_fixture()),
                "missing"
              ) == {:error, :not_found}
@@ -534,7 +536,7 @@ defmodule Philomena.TagChangesTest do
 
     test "a moderator enqueues a reversion for an ip" do
       assert {:ok, "203.0.113.9"} =
-               TagChanges.full_revert_ip_tag_changes(
+               TagChanges.create_ip_tag_change_revert(
                  actor(moderator_user_fixture()),
                  "203.0.113.9"
                )
@@ -547,7 +549,7 @@ defmodule Philomena.TagChangesTest do
 
     test "a moderator enqueues a reversion for a fingerprint" do
       assert {:ok, "c1774"} =
-               TagChanges.full_revert_fingerprint_tag_changes(
+               TagChanges.create_fingerprint_tag_change_revert(
                  actor(moderator_user_fixture()),
                  "c1774"
                )
@@ -558,16 +560,16 @@ defmodule Philomena.TagChangesTest do
     end
 
     test "invalid targets are not found" do
-      assert TagChanges.full_revert_user_tag_changes(
+      assert TagChanges.create_user_tag_change_revert(
                actor(moderator_user_fixture()),
                "not-a-user"
              ) ==
                {:error, :not_found}
 
-      assert TagChanges.full_revert_ip_tag_changes(actor(moderator_user_fixture()), "not-an-ip") ==
+      assert TagChanges.create_ip_tag_change_revert(actor(moderator_user_fixture()), "not-an-ip") ==
                {:error, :not_found}
 
-      assert TagChanges.full_revert_fingerprint_tag_changes(
+      assert TagChanges.create_fingerprint_tag_change_revert(
                actor(moderator_user_fixture()),
                "invalid"
              ) == {:error, :not_found}

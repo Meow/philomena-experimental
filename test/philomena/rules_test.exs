@@ -68,21 +68,21 @@ defmodule Philomena.RulesTest do
     test "loads a visible rule by position for an anonymous viewer" do
       rule = rule_fixture()
 
-      assert {:ok, loaded} = Rules.load_rule_for_show(actor(), to_string(rule.position))
+      assert {:ok, loaded} = Rules.show_rule(actor(), to_string(rule.position))
       assert loaded.id == rule.id
     end
 
     test "a hidden rule is unauthorized for a viewer who may not edit it" do
       rule = rule_fixture(%{hidden: true})
 
-      assert Rules.load_rule_for_show(actor(confirmed_user_fixture()), to_string(rule.position)) ==
+      assert Rules.show_rule(actor(confirmed_user_fixture()), to_string(rule.position)) ==
                {:error, :unauthorized}
     end
 
     test "an internal rule is unauthorized for a viewer who may not edit it" do
       rule = rule_fixture(%{internal: true})
 
-      assert Rules.load_rule_for_show(actor(), to_string(rule.position)) ==
+      assert Rules.show_rule(actor(), to_string(rule.position)) ==
                {:error, :unauthorized}
     end
 
@@ -90,20 +90,20 @@ defmodule Philomena.RulesTest do
       rule = rule_fixture(%{hidden: true})
 
       assert {:ok, loaded} =
-               Rules.load_rule_for_show(actor(admin_user_fixture()), to_string(rule.position))
+               Rules.show_rule(actor(admin_user_fixture()), to_string(rule.position))
 
       assert loaded.id == rule.id
     end
 
     test "a non-integer position is not-found" do
-      assert Rules.load_rule_for_show(actor(), "not-a-number") == {:error, :not_found}
+      assert Rules.show_rule(actor(), "not-a-number") == {:error, :not_found}
     end
 
     test "an unknown well-formed position is not found for every actor" do
-      assert Rules.load_rule_for_show(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Rules.show_rule(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Rules.load_rule_for_show(actor(admin_user_fixture()), "2147483647") ==
+      assert Rules.show_rule(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -111,15 +111,15 @@ defmodule Philomena.RulesTest do
   describe "load_new_rule/1" do
     test "an admin gets a blank changeset" do
       assert {:ok, %Ecto.Changeset{data: %Rule{}}} =
-               Rules.load_new_rule(actor(admin_user_fixture()))
+               Rules.new_rule(actor(admin_user_fixture()))
     end
 
     test "a regular user is unauthorized" do
-      assert Rules.load_new_rule(actor(confirmed_user_fixture())) == {:error, :unauthorized}
+      assert Rules.new_rule(actor(confirmed_user_fixture())) == {:error, :unauthorized}
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert Rules.load_new_rule(actor()) == {:error, :unauthorized}
+      assert Rules.new_rule(actor()) == {:error, :unauthorized}
     end
   end
 
@@ -154,7 +154,7 @@ defmodule Philomena.RulesTest do
       rule = rule_fixture()
 
       assert {:ok, {%Rule{} = loaded, %Ecto.Changeset{}}} =
-               Rules.load_rule_for_edit(actor(admin_user_fixture()), to_string(rule.position))
+               Rules.edit_rule(actor(admin_user_fixture()), to_string(rule.position))
 
       assert loaded.id == rule.id
     end
@@ -162,15 +162,15 @@ defmodule Philomena.RulesTest do
     test "a regular user is unauthorized" do
       rule = rule_fixture()
 
-      assert Rules.load_rule_for_edit(actor(confirmed_user_fixture()), to_string(rule.position)) ==
+      assert Rules.edit_rule(actor(confirmed_user_fixture()), to_string(rule.position)) ==
                {:error, :unauthorized}
     end
 
     test "an unknown well-formed position is not found for every actor" do
-      assert Rules.load_rule_for_edit(actor(confirmed_user_fixture()), "2147483647") ==
+      assert Rules.edit_rule(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Rules.load_rule_for_edit(actor(admin_user_fixture()), "2147483647") ==
+      assert Rules.edit_rule(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -220,9 +220,9 @@ defmodule Philomena.RulesTest do
       rule = rule_fixture()
 
       operations = [
-        &Rules.load_new_rule/1,
+        &Rules.new_rule/1,
         &Rules.create_rule(&1, %{name: "Blocked", position: -1}),
-        &Rules.load_rule_for_edit(&1, rule.position),
+        &Rules.edit_rule(&1, rule.position),
         &Rules.update_rule(&1, rule.position, %{title: "Blocked"})
       ]
 

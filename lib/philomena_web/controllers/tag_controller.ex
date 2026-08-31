@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.TagController do
   def index(conn, params) do
     pagination = Map.put(conn.assigns.pagination, :page_size, 250)
 
-    case Tags.search_tags(conn.assigns.actor, %{"query" => params["tq"] || "*"}, pagination) do
+    case Tags.query_tags(conn.assigns.actor, %{"query" => params["tq"] || "*"}, pagination) do
       {:ok, tags, _changeset} ->
         render(conn, "index.html", title: "Tags", tags: tags)
 
@@ -24,7 +24,7 @@ defmodule PhilomenaWeb.TagController do
   end
 
   def show(conn, params) do
-    case Tags.load_tag_page(conn.assigns.actor, ImageScope.search_scope(conn), params["id"]) do
+    case Tags.show_tag_page(conn.assigns.actor, ImageScope.search_scope(conn), params["id"]) do
       {:ok, page} ->
         tag = page.tag
         body = MarkdownRenderer.render_one(%{body: tag.description || ""}, conn)
@@ -67,7 +67,7 @@ defmodule PhilomenaWeb.TagController do
 
   def edit(conn, params) do
     with {:ok, {tag, changeset}} <-
-           Tags.load_tag_for_edit(conn.assigns.actor, params["id"]) do
+           Tags.edit_tag(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Tag", tag: tag, changeset: changeset)
     end
   end

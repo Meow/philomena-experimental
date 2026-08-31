@@ -46,7 +46,7 @@ defmodule PhilomenaWeb.Api.Json.Search.CommentControllerTest do
       hidden = comment_fixture(image, moderator, %{"body" => "chartreuse guanaco"})
 
       {:ok, _} =
-        Comments.hide_comment(actor(moderator), image.id, hidden.id, %{
+        Comments.create_comment_hide(actor(moderator), image.id, hidden.id, %{
           "deletion_reason" => "spam"
         })
 

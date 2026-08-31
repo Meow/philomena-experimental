@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Image.Comment.DeleteControllerTest do
     comment = comment_fixture(image, user, attrs)
 
     {:ok, comment} =
-      Comments.hide_comment(
+      Comments.create_comment_hide(
         actor(moderator_user_fixture()),
         image.id,
         comment.id,

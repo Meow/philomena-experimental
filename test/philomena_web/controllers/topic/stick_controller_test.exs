@@ -43,7 +43,7 @@ defmodule PhilomenaWeb.Topic.StickControllerTest do
     end
 
     # Failure path: stick_changeset never fails, so the only reachable failure
-    # surface is an unknown topic - the context's load_forum_topic returns
+    # surface is an unknown topic - the context's show_forum_topic returns
     # not_found and redirects to /.
     test "redirects to / with the not-found flash for an unknown topic",
          %{conn: conn, forum: forum} do
@@ -63,7 +63,7 @@ defmodule PhilomenaWeb.Topic.StickControllerTest do
       moderator = Philomena.UsersFixtures.moderator_user_fixture()
 
       {:ok, {_forum, topic}} =
-        Philomena.Topics.stick_topic(
+        Philomena.Topics.create_topic_stick(
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug

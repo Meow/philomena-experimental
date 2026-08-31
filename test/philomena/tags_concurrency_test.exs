@@ -77,7 +77,7 @@ defmodule Philomena.TagsConcurrencyTest do
       concurrently(
         Enum.zip(actors, targets)
         |> Enum.map(fn {actor, target} ->
-          fn -> Tags.alias_tag(actor, source.slug, %{"target_tag" => target.name}) end
+          fn -> Tags.update_tag_alias(actor, source.slug, %{"target_tag" => target.name}) end
         end)
       )
 
@@ -130,7 +130,9 @@ defmodule Philomena.TagsConcurrencyTest do
     results =
       concurrently([
         fn ->
-          Tags.alias_tag(actor(admin_user_fixture()), source.slug, %{"target_tag" => target.name})
+          Tags.update_tag_alias(actor(admin_user_fixture()), source.slug, %{
+            "target_tag" => target.name
+          })
         end,
         fn ->
           Filters.update_filter(actor(user), filter.id, %{
@@ -153,7 +155,9 @@ defmodule Philomena.TagsConcurrencyTest do
     results =
       concurrently([
         fn ->
-          Tags.alias_tag(actor(admin_user_fixture()), source.slug, %{"target_tag" => target.name})
+          Tags.update_tag_alias(actor(admin_user_fixture()), source.slug, %{
+            "target_tag" => target.name
+          })
         end,
         fn ->
           DnpEntries.update_dnp_entry(
@@ -187,7 +191,7 @@ defmodule Philomena.TagsConcurrencyTest do
       concurrently([
         fn -> Tags.perform_alias(source.id, target.id) end,
         fn ->
-          Images.update_tags(
+          Images.update_image_tags(
             actor(admin_user_fixture()),
             image.id,
             %{
@@ -228,7 +232,7 @@ defmodule Philomena.TagsConcurrencyTest do
       concurrently([
         fn -> Tags.perform_alias(source.id, target.id) end,
         fn ->
-          Images.batch_update_tags(actor(admin_user_fixture()), %{
+          Images.update_batch_tags(actor(admin_user_fixture()), %{
             tag_list: source.name,
             image_ids: [image.id]
           })
@@ -274,7 +278,7 @@ defmodule Philomena.TagsConcurrencyTest do
           concurrently([
             fn -> Tags.perform_reindex_images(tag.id) end,
             fn ->
-              Images.update_tags(
+              Images.update_image_tags(
                 actor(admin),
                 other_image.id,
                 %{

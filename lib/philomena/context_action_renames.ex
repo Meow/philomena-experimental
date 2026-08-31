@@ -283,7 +283,7 @@ defmodule Philomena.ContextActionRenames do
 
   defp function_head(_), do: nil
 
-  defp default_argument?({:\\, _, [_expression]}), do: true
+  defp default_argument?({:\\, _, [_expression, _default]}), do: true
   defp default_argument?(_), do: false
 
   defp collect_alias(state, module, {:alias, _meta, [module_ast | opts]}) do
@@ -427,6 +427,7 @@ defmodule Philomena.ContextActionRenames do
   end
 
   defp rewrite_parsed(source, ast, mappings, data, opts) do
+    mappings = Enum.filter(mappings, &mapping_active?(&1, mappings, data))
     mapping_index = Map.new(mappings, &{{&1.module, &1.old, &1.arity}, &1.new})
     comments? = Keyword.get(opts, :comments, true)
     comments_only? = Keyword.get(opts, :comments_only, false)
@@ -448,6 +449,15 @@ defmodule Philomena.ContextActionRenames do
 
     patches = if comments?, do: patches ++ comment_patches(ast, mappings), else: patches
     {Sourceror.patch_string(source, patches), length(patches)}
+  end
+
+  defp mapping_active?(%{module: module, old: old, arity: arity}, mappings, data) do
+    predecessors =
+      mappings
+      |> Enum.filter(&(&1.module == module and &1.new == old and &1.arity == arity))
+      |> Enum.map(& &1.old)
+
+    predecessors == [] or Enum.any?(predecessors, &public?(data, module, &1, arity))
   end
 
   defp rewrite_pre({:defmodule, _meta, [module_ast | _]} = node, state) do
@@ -476,9 +486,12 @@ defmodule Philomena.ContextActionRenames do
     {node, state}
   end
 
-  defp rewrite_pre({:&, _meta, [{:/, _slash_meta, [reference, arity]}]} = node, state)
-       when is_integer(arity) do
-    {node, add_reference_patch(state, reference, arity)}
+  defp rewrite_pre({:&, _meta, [{:/, _slash_meta, [reference, arity]}]} = node, state) do
+    {node, add_reference_patch(state, reference, unwrap_literal(arity))}
+  end
+
+  defp rewrite_pre({:|>, _meta, [_value, call]} = node, state) do
+    {node, add_piped_call_patch(state, call)}
   end
 
   defp rewrite_pre({{:., _dot_meta, [receiver, name]}, _meta, args} = node, state)
@@ -504,9 +517,8 @@ defmodule Philomena.ContextActionRenames do
          {name, meta, arities} <- function_head(head),
          module_data when not is_nil(module_data) <- state.data.modules[module],
          %{public?: true} <- Map.get(module_data.definitions, {name, meta[:line], meta[:column]}),
-         targets when targets != [] <- Enum.map(arities, &state.mappings[{module, name, &1}]),
-         true <- Enum.all?(targets, &(is_atom(&1) and not is_nil(&1))),
-         [new_name] <- Enum.uniq(targets),
+         targets <- Enum.map(arities, &state.mappings[{module, name, &1}]),
+         [new_name] <- targets |> Enum.reject(&is_nil/1) |> Enum.uniq(),
          true <- new_name != name do
       add_patch(state, rename_name_patch({name, meta, arities}, new_name))
     else
@@ -528,11 +540,26 @@ defmodule Philomena.ContextActionRenames do
     end
   end
 
+  defp add_piped_call_patch(
+         state,
+         {{:., _dot_meta, [receiver, name]}, _meta, args} = node
+       )
+       when is_atom(name) and is_list(args) do
+    add_remote_call_patch(state, node, receiver, name, length(args) + 1)
+  end
+
+  defp add_piped_call_patch(state, {name, meta, args})
+       when is_atom(name) and is_list(args) do
+    add_local_call_patch(state, name, meta, length(args) + 1)
+  end
+
+  defp add_piped_call_patch(state, _call), do: state
+
   defp add_remote_call_patch(state, node, receiver, name, arity) do
     with module when not is_nil(module) <-
            resolve_module(receiver, current_module(state), state.data),
          new_name when is_atom(new_name) and not is_nil(new_name) <-
-           state.mappings[{module, name, arity}],
+           mapping_for_call(state, module, name, arity),
          true <- new_name != name do
       add_patch(state, Patch.rename_call(node, new_name))
     else
@@ -544,17 +571,33 @@ defmodule Philomena.ContextActionRenames do
     module = current_module(state)
 
     own_target =
-      if public?(state.data, module, name, arity), do: state.mappings[{module, name, arity}]
+      cond do
+        public?(state.data, module, name, arity) ->
+          mapping_for_call(state, module, name, arity)
+
+        mapped_function?(state, module, name, arity) and
+            not private_function?(state.data, module, name, arity) ->
+          mapping_for_call(state, module, name, arity)
+
+        true ->
+          nil
+      end
 
     imported_targets =
       imports(state.data, module)
       |> Enum.filter(&imported_function?(&1, name, arity))
-      |> Enum.map(&state.mappings[{&1.module, name, arity}])
+      |> Enum.map(&mapping_for_call(state, &1.module, name, arity))
       |> Enum.filter(&is_atom/1)
 
-    case Enum.uniq(List.wrap(own_target) ++ imported_targets) do
-      [target] -> target
-      _ -> nil
+    case own_target do
+      target when is_atom(target) and not is_nil(target) ->
+        target
+
+      _ ->
+        case Enum.uniq(imported_targets) do
+          [target] -> target
+          _ -> nil
+        end
     end
   end
 
@@ -563,6 +606,43 @@ defmodule Philomena.ContextActionRenames do
     |> Map.get(module, %{})
     |> Map.get(:public, MapSet.new())
     |> MapSet.member?({name, arity})
+  end
+
+  defp mapped_function?(state, module, name, arity),
+    do: not is_nil(mapping_for_call(state, module, name, arity))
+
+  defp mapping_for_call(state, module, name, arity) do
+    case state.mappings[{module, name, arity}] do
+      target when is_atom(target) and not is_nil(target) ->
+        target
+
+      _ ->
+        state.mappings
+        |> Enum.filter(fn {{mapping_module, mapping_name, mapping_arity}, target} ->
+          mapping_module == module and mapping_name == name and mapping_arity > arity and
+            available_definition?(state.data, module, name, arity, target) and
+            available_definition?(state.data, module, name, mapping_arity, target)
+        end)
+        |> Enum.map(fn {_key, target} -> target end)
+        |> Enum.uniq()
+        |> case do
+          [target] -> target
+          _ -> nil
+        end
+    end
+  end
+
+  defp available_definition?(data, module, name, arity, target) do
+    public?(data, module, name, arity) or public?(data, module, target, arity)
+  end
+
+  defp private_function?(data, module, name, arity) do
+    data.modules
+    |> Map.get(module, %{})
+    |> Map.get(:definitions, %{})
+    |> Enum.any?(fn {{definition_name, _line, _column}, definition} ->
+      definition_name == name and not definition.public? and arity in definition.arities
+    end)
   end
 
   defp imports(data, module), do: Map.get(data.modules, module, %{}) |> Map.get(:imports, [])
@@ -599,8 +679,8 @@ defmodule Philomena.ContextActionRenames do
   defp add_spec_patches(state, spec) do
     {_spec, state} =
       Macro.prewalk(spec, state, fn
-        {:/, _meta, [reference, arity]} = node, state when is_integer(arity) ->
-          {node, add_reference_patch(state, reference, arity)}
+        {:"::", _meta, [reference | _]} = node, state ->
+          {node, add_spec_reference_patch(state, reference)}
 
         node, state ->
           {node, state}
@@ -608,6 +688,35 @@ defmodule Philomena.ContextActionRenames do
 
     state
   end
+
+  defp add_spec_reference_patch(
+         state,
+         {{:., _dot_meta, [receiver, name]}, _meta, args} = reference
+       )
+       when is_atom(name) and is_list(args) do
+    with module when not is_nil(module) <-
+           resolve_module(receiver, current_module(state), state.data),
+         new_name when is_atom(new_name) and not is_nil(new_name) <-
+           state.mappings[{module, name, length(args)}],
+         true <- new_name != name do
+      add_patch(state, Patch.rename_call(reference, new_name))
+    else
+      _ -> state
+    end
+  end
+
+  defp add_spec_reference_patch(state, {name, _meta, args} = reference)
+       when is_atom(name) and is_list(args) do
+    with new_name when is_atom(new_name) and not is_nil(new_name) <-
+           state.mappings[{current_module(state), name, length(args)}],
+         true <- new_name != name do
+      add_patch(state, Patch.rename_call(reference, new_name))
+    else
+      _ -> state
+    end
+  end
+
+  defp add_spec_reference_patch(state, _reference), do: state
 
   defp add_reference_patch(
          state,
@@ -628,7 +737,7 @@ defmodule Philomena.ContextActionRenames do
 
   defp add_reference_patch(state, {name, meta, _args}, arity)
        when is_atom(name) and is_integer(arity) do
-    case local_target(state, name, arity) do
+    case state.mappings[{current_module(state), name, arity}] do
       new_name when is_atom(new_name) and not is_nil(new_name) and new_name != name ->
         add_patch(state, rename_name_patch({name, meta, []}, new_name))
 

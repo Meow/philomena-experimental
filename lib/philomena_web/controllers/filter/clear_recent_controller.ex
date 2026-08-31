@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Filter.ClearRecentController do
   plug PhilomenaWeb.RequireUserPlug
 
   def delete(conn, _params) do
-    {:ok, _user} = Users.clear_recent_filters(conn.assigns.actor)
+    {:ok, _user} = Users.delete_recent_filters(conn.assigns.actor)
 
     conn
     |> put_flash(:info, "Cleared recent filters.")

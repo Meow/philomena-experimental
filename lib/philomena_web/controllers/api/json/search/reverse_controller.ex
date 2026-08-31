@@ -15,7 +15,7 @@ defmodule PhilomenaWeb.Api.Json.Search.ReverseController do
       image_params
       |> Map.put("distance", conn.params["distance"])
       |> Map.put("limit", conn.params["limit"])
-      |> then(&DuplicateReports.search_duplicates(conn.assigns.actor, &1, upload))
+      |> then(&DuplicateReports.create_reverse_search(conn.assigns.actor, &1, upload))
       |> case do
         {:ok, %SearchResult{images: images}} ->
           {images, images.total_entries}

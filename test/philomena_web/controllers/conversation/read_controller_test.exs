@@ -44,7 +44,7 @@ defmodule PhilomenaWeb.Conversation.ReadControllerTest do
     conversation = conversation_fixture(confirmed_user_fixture(), user)
 
     {:ok, _} =
-      Conversations.set_conversation_read(
+      Conversations.update_conversation_read(
         Philomena.AttributionFixtures.actor(user),
         conversation.slug
       )

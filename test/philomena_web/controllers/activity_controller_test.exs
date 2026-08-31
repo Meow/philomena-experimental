@@ -85,7 +85,7 @@ defmodule PhilomenaWeb.ActivityControllerTest do
       image = image_fixture(created_at: hours_ago(1))
       [tag | _rest] = image.tags
       filter = filter_fixture(user)
-      {:ok, filter} = Filters.hide_tag(actor(user), filter, tag.slug)
+      {:ok, filter} = Filters.create_filter_hide(actor(user), filter, tag.slug)
       {:ok, _user} = Users.set_current_filter(user, filter)
       SearchHelpers.reindex_all!(Image)
 

@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Bans.admin_subnet_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
+    case Bans.list_subnet_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
       {:ok, subnet_bans, changeset} ->
         render(conn, "index.html",
           title: "Admin - Subnet Bans",
@@ -59,7 +59,7 @@ defmodule PhilomenaWeb.Admin.SubnetBanController do
 
   def edit(conn, params) do
     with {:ok, {subnet, changeset}} <-
-           Bans.load_subnet_ban_for_edit(conn.assigns.actor, params["id"]) do
+           Bans.edit_subnet_ban(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Subnet Ban", subnet: subnet, changeset: changeset)
     end
   end

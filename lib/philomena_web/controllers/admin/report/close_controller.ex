@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.Report.CloseController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"report_id" => report_id}) do
-    case Reports.close_report(conn.assigns.actor, report_id) do
+    case Reports.create_report_close(conn.assigns.actor, report_id) do
       {:ok, _report} ->
         conn
         |> put_flash(:info, "Successfully closed report")

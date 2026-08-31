@@ -9,7 +9,7 @@ defmodule PhilomenaWeb.ProfileController do
 
   def show(conn, %{"id" => slug}) do
     with {:ok, page} <-
-           Profiles.load_profile_page(
+           Profiles.show_profile(
              conn.assigns.actor,
              ImageScope.search_scope(conn),
              conn.assigns.current_filter,

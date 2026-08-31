@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Api.Json.Search.ImageController do
   def index(conn, _params) do
     scope = PhilomenaWeb.ImageScope.search_scope(conn)
 
-    case Images.search_images(conn.assigns.actor, scope,
+    case Images.query_images(conn.assigns.actor, scope,
            preload: [:user, :intensity, :sources, tags: :aliases],
            hits: false
          ) do

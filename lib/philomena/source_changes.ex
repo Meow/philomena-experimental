@@ -109,7 +109,7 @@ defmodule Philomena.SourceChanges do
       {:error, :not_found}
 
   """
-  @spec image_source_changes(
+  @spec list_image_source_changes(
           Actor.t(),
           Philomena.IntegerId.integer_id(),
           map(),
@@ -117,7 +117,7 @@ defmodule Philomena.SourceChanges do
         ) ::
           {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def image_source_changes(%Actor{} = actor, image_id, params, pagination) do
+  def list_image_source_changes(%Actor{} = actor, image_id, params, pagination) do
     with {:ok, image} <- Images.load_visible_image(actor, image_id),
          {:ok, query, query_form} <- QueryBuilder.build_query(params) do
       source_changes =
@@ -151,10 +151,10 @@ defmodule Philomena.SourceChanges do
       {:error, :not_found}
 
   """
-  @spec user_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
+  @spec list_user_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def user_source_changes(%Actor{} = actor, slug, params, pagination) do
+  def list_user_source_changes(%Actor{} = actor, slug, params, pagination) do
     with {:ok, user} <- Users.load_profile(actor, slug),
          :ok <- authorize(actor, :show, user),
          {:ok, query, query_form} <- QueryBuilder.build_query(params) do
@@ -209,10 +209,10 @@ defmodule Philomena.SourceChanges do
       {:error, :not_found}
 
   """
-  @spec ip_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
+  @spec list_ip_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def ip_source_changes(%Actor{} = actor, ip, params, pagination) do
+  def list_ip_source_changes(%Actor{} = actor, ip, params, pagination) do
     with {:ok, ip} <- cast_ip(ip),
          :ok <- authorize(actor, :show, :identity_metadata),
          {:ok, query, query_form} <- QueryBuilder.build_query(params) do
@@ -250,10 +250,10 @@ defmodule Philomena.SourceChanges do
       {:error, :not_found}
 
   """
-  @spec fingerprint_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
+  @spec list_fingerprint_source_changes(Actor.t(), String.t(), map(), Repo.pagination_params()) ::
           {:ok, SourceChangePage.t(), Ecto.Changeset.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def fingerprint_source_changes(%Actor{} = actor, fingerprint, params, pagination) do
+  def list_fingerprint_source_changes(%Actor{} = actor, fingerprint, params, pagination) do
     with {:ok, fingerprint} <- cast_fingerprint(fingerprint),
          :ok <- authorize(actor, :show, :identity_metadata),
          {:ok, query, query_form} <- QueryBuilder.build_query(params) do

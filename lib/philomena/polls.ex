@@ -49,12 +49,12 @@ defmodule Philomena.Polls do
       {:ok, %Ecto.Changeset{}}
 
   """
-  @spec load_poll_for_edit(Actor.t(), String.t(), String.t()) ::
+  @spec edit_poll(Actor.t(), String.t(), String.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :not_found | :unauthorized}
-  def load_poll_for_edit(%Actor{} = actor, forum_slug, topic_slug) do
+  def edit_poll(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :edit_poll),
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :edit_poll),
          {:ok, poll} <- load_topic_poll(topic) do
       {:ok, Poll.changeset(poll)}
     end
@@ -84,8 +84,8 @@ defmodule Philomena.Polls do
           | {:error, :ban | :not_found | :unauthorized}
   def update_poll(%Actor{} = actor, forum_slug, topic_slug, attrs) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :update_poll),
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :update_poll),
          {:ok, poll} <- load_topic_poll(topic) do
       poll_query =
         Poll

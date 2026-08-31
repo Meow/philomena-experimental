@@ -194,9 +194,9 @@ defmodule Philomena.Rules do
       iex> load_rule_for_show(actor, "not-a-position")
       {:error, :not_found}
   """
-  @spec load_rule_for_show(Actor.t(), IntegerId.integer_id()) ::
+  @spec show_rule(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Rule.t()} | {:error, :not_found | :unauthorized}
-  def load_rule_for_show(%Actor{} = actor, position) do
+  def show_rule(%Actor{} = actor, position) do
     load_authorized_rule(actor, position, :show)
   end
 
@@ -213,9 +213,9 @@ defmodule Philomena.Rules do
       iex> load_new_rule(user_actor)
       {:error, :unauthorized}
   """
-  @spec load_new_rule(Actor.t()) ::
+  @spec new_rule(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | Authorization.write_error()
-  def load_new_rule(%Actor{} = actor) do
+  def new_rule(%Actor{} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :new, Rule) do
       {:ok, change_rule(%Rule{})}
@@ -263,10 +263,10 @@ defmodule Philomena.Rules do
       {:error, :not_found}
 
   """
-  @spec load_rule_for_edit(Actor.t(), IntegerId.integer_id()) ::
+  @spec edit_rule(Actor.t(), IntegerId.integer_id()) ::
           {:ok, {Rule.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_rule_for_edit(%Actor{} = actor, position) do
+  def edit_rule(%Actor{} = actor, position) do
     with :ok <- verify_write_access(actor),
          {:ok, rule} <- load_authorized_rule(actor, position, :edit) do
       {:ok, {rule, change_rule(rule)}}

@@ -72,7 +72,7 @@ defmodule Philomena.Images.NavigationTest do
       {older, newer} = two_images()
 
       assert {:ok, {image, {adjacent, hit}}} =
-               Images.find_consecutive_image(
+               Images.list_image_navigation(
                  actor(),
                  scope(params: %{"rel" => "next"}),
                  to_string(newer.id)
@@ -87,7 +87,7 @@ defmodule Philomena.Images.NavigationTest do
       {older, newer} = two_images()
 
       assert {:ok, {image, {adjacent, _hit}}} =
-               Images.find_consecutive_image(
+               Images.list_image_navigation(
                  actor(),
                  scope(params: %{"rel" => "prev"}),
                  to_string(older.id)
@@ -101,7 +101,7 @@ defmodule Philomena.Images.NavigationTest do
       {older, _newer} = two_images()
 
       assert {:ok, {image, nil}} =
-               Images.find_consecutive_image(
+               Images.list_image_navigation(
                  actor(),
                  scope(params: %{"rel" => "next"}),
                  to_string(older.id)
@@ -114,7 +114,7 @@ defmodule Philomena.Images.NavigationTest do
       {older, newer} = two_images()
 
       assert {:ok, {image, {adjacent, _hit}}} =
-               Images.find_consecutive_image(actor(), scope(params: %{"rel" => "next"}), newer.id)
+               Images.list_image_navigation(actor(), scope(params: %{"rel" => "next"}), newer.id)
 
       assert image.id == newer.id
       assert adjacent.id == older.id
@@ -122,7 +122,7 @@ defmodule Philomena.Images.NavigationTest do
 
     test "an unknown well-formed id is not found for an anonymous viewer" do
       # Missing image locators resolve to not-found before authorization.
-      assert Images.find_consecutive_image(
+      assert Images.list_image_navigation(
                actor(),
                scope(params: %{"rel" => "next"}),
                "2147483647"
@@ -135,12 +135,12 @@ defmodule Philomena.Images.NavigationTest do
       admin = admin_user_fixture()
       scope = scope(params: %{"rel" => "next"})
 
-      assert Images.find_consecutive_image(actor(admin), scope, "2147483647") ==
+      assert Images.list_image_navigation(actor(admin), scope, "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.find_consecutive_image(
+      assert Images.list_image_navigation(
                actor(),
                scope(params: %{"rel" => "next"}),
                "not-a-number"
@@ -156,8 +156,8 @@ defmodule Philomena.Images.NavigationTest do
       # Listed by descending id, the newer image has no images ahead of it, so
       # it sits on page one; the older image trails it but still on page one at
       # the default page size.
-      assert Images.find_image_index_page(actor(), scope(), to_string(newer.id)) == {:ok, 1}
-      assert Images.find_image_index_page(actor(), scope(), to_string(older.id)) == {:ok, 1}
+      assert Images.list_image_index_page(actor(), scope(), to_string(newer.id)) == {:ok, 1}
+      assert Images.list_image_index_page(actor(), scope(), to_string(older.id)) == {:ok, 1}
     end
 
     test "the scope's page size drives the page number" do
@@ -166,22 +166,22 @@ defmodule Philomena.Images.NavigationTest do
       # One image precedes the older one; a page size of one puts it on page two.
       scope = scope(pagination: %{page_number: 1, page_size: 1})
 
-      assert Images.find_image_index_page(actor(), scope, to_string(older.id)) == {:ok, 2}
+      assert Images.list_image_index_page(actor(), scope, to_string(older.id)) == {:ok, 2}
     end
 
     test "accepts an integer id" do
       {_older, newer} = two_images()
 
-      assert Images.find_image_index_page(actor(), scope(), newer.id) == {:ok, 1}
+      assert Images.list_image_index_page(actor(), scope(), newer.id) == {:ok, 1}
     end
 
     test "an unknown well-formed id is not found for an anonymous viewer" do
-      assert Images.find_image_index_page(actor(), scope(), "2147483647") ==
+      assert Images.list_image_index_page(actor(), scope(), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.find_image_index_page(actor(), scope(), "not-a-number") ==
+      assert Images.list_image_index_page(actor(), scope(), "not-a-number") ==
                {:error, :not_found}
     end
   end
@@ -192,7 +192,9 @@ defmodule Philomena.Images.NavigationTest do
       related = image_fixture(tags: "safe, test related subject")
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, {loaded, page}} = Images.related_images(actor(), scope(), to_string(image.id))
+      assert {:ok, {loaded, page}} =
+               Images.list_related_images(actor(), scope(), to_string(image.id))
+
       assert loaded.id == image.id
       assert related.id in Enum.map(page.entries, & &1.id)
       # The subject image never appears among its own related results.
@@ -205,7 +207,9 @@ defmodule Philomena.Images.NavigationTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, {loaded, page}} = Images.related_images(actor(), scope(), to_string(image.id))
+      assert {:ok, {loaded, page}} =
+               Images.list_related_images(actor(), scope(), to_string(image.id))
+
       assert loaded.id == image.id
       assert page.entries == []
     end
@@ -214,21 +218,21 @@ defmodule Philomena.Images.NavigationTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, {loaded, _page}} = Images.related_images(actor(), scope(), image.id)
+      assert {:ok, {loaded, _page}} = Images.list_related_images(actor(), scope(), image.id)
       assert loaded.id == image.id
     end
 
     test "an unknown well-formed id is not found for an anonymous viewer" do
-      assert Images.related_images(actor(), scope(), "2147483647") == {:error, :not_found}
+      assert Images.list_related_images(actor(), scope(), "2147483647") == {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      assert Images.related_images(actor(admin_user_fixture()), scope(), "2147483647") ==
+      assert Images.list_related_images(actor(admin_user_fixture()), scope(), "2147483647") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.related_images(actor(), scope(), "not-a-number") == {:error, :not_found}
+      assert Images.list_related_images(actor(), scope(), "not-a-number") == {:error, :not_found}
     end
   end
 
@@ -237,11 +241,11 @@ defmodule Philomena.Images.NavigationTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert Images.random_image_id(actor(), scope()) == {:ok, image.id}
+      assert Images.list_random_images(actor(), scope()) == {:ok, image.id}
     end
 
     test "returns nil when the index is empty" do
-      assert Images.random_image_id(actor(), scope()) == {:ok, nil}
+      assert Images.list_random_images(actor(), scope()) == {:ok, nil}
     end
 
     test "restricts the pool to the q parameter" do
@@ -249,7 +253,7 @@ defmodule Philomena.Images.NavigationTest do
       wanted = image_fixture(tags: "safe, test wanted tag")
       SearchHelpers.reindex_all!(Image)
 
-      assert Images.random_image_id(actor(), scope(params: %{"q" => "test wanted tag"})) ==
+      assert Images.list_random_images(actor(), scope(params: %{"q" => "test wanted tag"})) ==
                {:ok, wanted.id}
     end
 
@@ -259,7 +263,8 @@ defmodule Philomena.Images.NavigationTest do
       _image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert {:error, _message} = Images.random_image_id(actor(), scope(params: %{"q" => "((("}))
+      assert {:error, _message} =
+               Images.list_random_images(actor(), scope(params: %{"q" => "((("}))
     end
   end
 end

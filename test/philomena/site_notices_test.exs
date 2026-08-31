@@ -73,7 +73,7 @@ defmodule Philomena.SiteNoticesTest do
       admin = admin_user_fixture()
       notice = site_notice_fixture()
 
-      assert {:ok, page} = SiteNotices.load_site_notices(actor(admin), @pagination)
+      assert {:ok, page} = SiteNotices.list_site_notices(actor(admin), @pagination)
       assert %Scrivener.Page{} = page
       assert notice.id in Enum.map(page.entries, & &1.id)
     end
@@ -81,22 +81,22 @@ defmodule Philomena.SiteNoticesTest do
     test "a moderator with the site-notice grant is authorized" do
       notice = site_notice_fixture()
 
-      assert {:ok, page} = SiteNotices.load_site_notices(actor(notice_moderator()), @pagination)
+      assert {:ok, page} = SiteNotices.list_site_notices(actor(notice_moderator()), @pagination)
       assert notice.id in Enum.map(page.entries, & &1.id)
     end
 
     test "a plain moderator is not authorized" do
-      assert SiteNotices.load_site_notices(actor(moderator_user_fixture()), @pagination) ==
+      assert SiteNotices.list_site_notices(actor(moderator_user_fixture()), @pagination) ==
                {:error, :unauthorized}
     end
 
     test "a regular user is not authorized" do
-      assert SiteNotices.load_site_notices(actor(confirmed_user_fixture()), @pagination) ==
+      assert SiteNotices.list_site_notices(actor(confirmed_user_fixture()), @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous visitor is not authorized" do
-      assert SiteNotices.load_site_notices(actor(), @pagination) == {:error, :unauthorized}
+      assert SiteNotices.list_site_notices(actor(), @pagination) == {:error, :unauthorized}
     end
   end
 
@@ -172,7 +172,7 @@ defmodule Philomena.SiteNoticesTest do
       notice = site_notice_fixture()
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               SiteNotices.load_site_notice_for_edit(actor(admin), notice.id)
+               SiteNotices.edit_site_notice(actor(admin), notice.id)
 
       assert loaded.id == notice.id
     end
@@ -181,49 +181,49 @@ defmodule Philomena.SiteNoticesTest do
       notice = site_notice_fixture()
 
       assert {:ok, {loaded, _}} =
-               SiteNotices.load_site_notice_for_edit(actor(notice_moderator()), notice.id)
+               SiteNotices.edit_site_notice(actor(notice_moderator()), notice.id)
 
       assert loaded.id == notice.id
     end
 
     test "a well-formed unknown id is not found for an admin" do
-      assert SiteNotices.load_site_notice_for_edit(actor(admin_user_fixture()), 2_147_483_647) ==
+      assert SiteNotices.edit_site_notice(actor(admin_user_fixture()), 2_147_483_647) ==
                {:error, :not_found}
     end
 
     test "a well-formed unknown id is not found for a plain moderator" do
-      assert SiteNotices.load_site_notice_for_edit(actor(moderator_user_fixture()), 2_147_483_647) ==
+      assert SiteNotices.edit_site_notice(actor(moderator_user_fixture()), 2_147_483_647) ==
                {:error, :not_found}
     end
 
     test "a well-formed unknown id is not found for a regular user" do
-      assert SiteNotices.load_site_notice_for_edit(actor(confirmed_user_fixture()), 2_147_483_647) ==
+      assert SiteNotices.edit_site_notice(actor(confirmed_user_fixture()), 2_147_483_647) ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found for an admin" do
-      assert SiteNotices.load_site_notice_for_edit(actor(admin_user_fixture()), "abc") ==
+      assert SiteNotices.edit_site_notice(actor(admin_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found for a plain moderator" do
       # The id parse fails before authorization runs, so a non-castable id is
       # not_found even for an actor who could never see the record.
-      assert SiteNotices.load_site_notice_for_edit(actor(moderator_user_fixture()), "abc") ==
+      assert SiteNotices.edit_site_notice(actor(moderator_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "a real notice is unauthorized for a plain moderator" do
       notice = site_notice_fixture()
 
-      assert SiteNotices.load_site_notice_for_edit(actor(moderator_user_fixture()), notice.id) ==
+      assert SiteNotices.edit_site_notice(actor(moderator_user_fixture()), notice.id) ==
                {:error, :unauthorized}
     end
 
     test "a real notice is unauthorized for a regular user" do
       notice = site_notice_fixture()
 
-      assert SiteNotices.load_site_notice_for_edit(actor(confirmed_user_fixture()), notice.id) ==
+      assert SiteNotices.edit_site_notice(actor(confirmed_user_fixture()), notice.id) ==
                {:error, :unauthorized}
     end
   end
@@ -353,7 +353,7 @@ defmodule Philomena.SiteNoticesTest do
       operations = [
         &SiteNotices.new_site_notice/1,
         &SiteNotices.create_site_notice(&1, valid_attrs()),
-        &SiteNotices.load_site_notice_for_edit(&1, notice.id),
+        &SiteNotices.edit_site_notice(&1, notice.id),
         &SiteNotices.update_site_notice(&1, notice.id, %{"title" => "Changed"}),
         &SiteNotices.delete_site_notice(&1, notice.id)
       ]

@@ -21,7 +21,7 @@ defmodule PhilomenaWeb.ImageController do
   plug PhilomenaWeb.AdvertPlug when action in [:show]
 
   def index(conn, _params) do
-    images = Images.load_image_index(conn.assigns.actor, ImageScope.search_scope(conn))
+    images = Images.list_images(conn.assigns.actor, ImageScope.search_scope(conn))
 
     interactions = Interactions.user_interactions(conn.assigns.actor, images)
 
@@ -38,7 +38,7 @@ defmodule PhilomenaWeb.ImageController do
     image = conn.assigns.image
 
     page =
-      Images.load_image_page(
+      Images.show_image_page(
         conn.assigns.actor,
         image,
         conn.assigns.comment_scrivener
@@ -83,7 +83,7 @@ defmodule PhilomenaWeb.ImageController do
   end
 
   def new(conn, _params) do
-    with {:ok, changeset} <- Images.load_new_image(conn.assigns.actor) do
+    with {:ok, changeset} <- Images.new_image(conn.assigns.actor) do
       render(conn, "new.html", title: "New Image", changeset: changeset)
     end
   end
@@ -91,7 +91,7 @@ defmodule PhilomenaWeb.ImageController do
   def create(conn, params) do
     upload = PhilomenaMedia.Upload.cast(params["image"], "image")
 
-    case Images.upload_image(conn.assigns.actor, params["image"], upload) do
+    case Images.create_image(conn.assigns.actor, params["image"], upload) do
       {:ok, %{image: image}} ->
         conn
         |> put_flash(:info, "Image created successfully.")
@@ -109,7 +109,7 @@ defmodule PhilomenaWeb.ImageController do
   end
 
   defp load_image(conn, _opts) do
-    case Images.load_image_for_show(conn.assigns.actor, conn.params["id"]) do
+    case Images.show_image(conn.assigns.actor, conn.params["id"]) do
       {:ok, image} ->
         conn
         |> assign(:image, image)

@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.AvatarController do
 
   def edit(conn, _params) do
     with {:ok, %Ecto.Changeset{} = changeset} <-
-           Users.load_user_for_avatar_edit(conn.assigns.actor) do
+           Users.edit_avatar(conn.assigns.actor) do
       render(conn, "edit.html", title: "Editing Avatar", changeset: changeset)
     end
   end
@@ -33,7 +33,7 @@ defmodule PhilomenaWeb.AvatarController do
   end
 
   def delete(conn, _params) do
-    with {:ok, _user} <- Users.remove_avatar(conn.assigns.actor) do
+    with {:ok, _user} <- Users.delete_avatar(conn.assigns.actor) do
       conn
       |> put_flash(:info, "Successfully removed avatar.")
       |> redirect(to: ~p"/avatar/edit")

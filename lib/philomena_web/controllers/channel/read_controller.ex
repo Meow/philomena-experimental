@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Channel.ReadController do
 
   def create(conn, params) do
     with {:ok, _channel} <-
-           Channels.clear_notification(conn.assigns.actor, params["channel_id"]) do
+           Channels.create_channel_read(conn.assigns.actor, params["channel_id"]) do
       send_resp(conn, :ok, "")
     end
   end

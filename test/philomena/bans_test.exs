@@ -87,7 +87,7 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
       ban = user_ban_fixture()
 
-      assert {:ok, page, _changeset} = Bans.admin_user_bans(actor(moderator), %{}, @pagination)
+      assert {:ok, page, _changeset} = Bans.list_user_bans(actor(moderator), %{}, @pagination)
       assert %Scrivener.Page{} = page
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
@@ -96,17 +96,17 @@ defmodule Philomena.BansTest do
       admin = admin_user_fixture()
       ban = user_ban_fixture()
 
-      assert {:ok, page, _changeset} = Bans.admin_user_bans(actor(admin), %{}, @pagination)
+      assert {:ok, page, _changeset} = Bans.list_user_bans(actor(admin), %{}, @pagination)
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
 
     test "a regular user is not authorized" do
-      assert Bans.admin_user_bans(actor(confirmed_user_fixture()), %{}, @pagination) ==
+      assert Bans.list_user_bans(actor(confirmed_user_fixture()), %{}, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous visitor is not authorized" do
-      assert Bans.admin_user_bans(actor(), %{}, @pagination) == {:error, :unauthorized}
+      assert Bans.list_user_bans(actor(), %{}, @pagination) == {:error, :unauthorized}
     end
 
     test "the bq branch matches a ban by its generated ban id" do
@@ -115,7 +115,7 @@ defmodule Philomena.BansTest do
       _other = user_ban_fixture()
 
       assert {:ok, page, _changeset} =
-               Bans.admin_user_bans(
+               Bans.list_user_bans(
                  actor(moderator),
                  %{"bq" => ban.generated_ban_id},
                  @pagination
@@ -130,7 +130,7 @@ defmodule Philomena.BansTest do
       ban = user_ban_fixture(target)
 
       assert {:ok, page, _changeset} =
-               Bans.admin_user_bans(actor(moderator), %{"bq" => "bantargetname"}, @pagination)
+               Bans.list_user_bans(actor(moderator), %{"bq" => "bantargetname"}, @pagination)
 
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
@@ -142,7 +142,7 @@ defmodule Philomena.BansTest do
       _other = user_ban_fixture()
 
       assert {:ok, page, _changeset} =
-               Bans.admin_user_bans(actor(moderator), %{"user_id" => "#{target.id}"}, @pagination)
+               Bans.list_user_bans(actor(moderator), %{"user_id" => "#{target.id}"}, @pagination)
 
       assert Enum.map(page.entries, & &1.id) == [ban.id]
     end
@@ -151,7 +151,7 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
 
       assert {:error, changeset} =
-               Bans.admin_user_bans(actor(moderator), %{"user_id" => "abc"}, @pagination)
+               Bans.list_user_bans(actor(moderator), %{"user_id" => "abc"}, @pagination)
 
       assert {"is invalid", _opts} = changeset.errors[:user_id]
     end
@@ -290,7 +290,7 @@ defmodule Philomena.BansTest do
       ban = user_ban_fixture()
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               Bans.load_user_ban_for_edit(actor(moderator), ban.id)
+               Bans.edit_user_ban(actor(moderator), ban.id)
 
       assert loaded.id == ban.id
       refute match?(%Ecto.Association.NotLoaded{}, loaded.user)
@@ -300,40 +300,40 @@ defmodule Philomena.BansTest do
       admin = admin_user_fixture()
       ban = user_ban_fixture()
 
-      assert {:ok, {loaded, _}} = Bans.load_user_ban_for_edit(actor(admin), ban.id)
+      assert {:ok, {loaded, _}} = Bans.edit_user_ban(actor(admin), ban.id)
       assert loaded.id == ban.id
     end
 
     test "an unknown id is not found for a moderator" do
       moderator = moderator_user_fixture()
-      assert Bans.load_user_ban_for_edit(actor(moderator), 2_147_483_647) == {:error, :not_found}
+      assert Bans.edit_user_ban(actor(moderator), 2_147_483_647) == {:error, :not_found}
     end
 
     test "an unknown id is not found for an admin" do
       admin = admin_user_fixture()
-      assert Bans.load_user_ban_for_edit(actor(admin), 2_147_483_647) == {:error, :not_found}
+      assert Bans.edit_user_ban(actor(admin), 2_147_483_647) == {:error, :not_found}
     end
 
     test "a non-castable id is not found for a moderator" do
       moderator = moderator_user_fixture()
-      assert Bans.load_user_ban_for_edit(actor(moderator), "abc") == {:error, :not_found}
+      assert Bans.edit_user_ban(actor(moderator), "abc") == {:error, :not_found}
     end
 
     test "a non-castable id is not found for an admin" do
       admin = admin_user_fixture()
-      assert Bans.load_user_ban_for_edit(actor(admin), "abc") == {:error, :not_found}
+      assert Bans.edit_user_ban(actor(admin), "abc") == {:error, :not_found}
     end
 
     test "a regular user is not authorized" do
       ban = user_ban_fixture()
 
-      assert Bans.load_user_ban_for_edit(actor(confirmed_user_fixture()), ban.id) ==
+      assert Bans.edit_user_ban(actor(confirmed_user_fixture()), ban.id) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous visitor is not authorized" do
       ban = user_ban_fixture()
-      assert Bans.load_user_ban_for_edit(actor(), ban.id) == {:error, :unauthorized}
+      assert Bans.edit_user_ban(actor(), ban.id) == {:error, :unauthorized}
     end
   end
 
@@ -460,7 +460,7 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
       ban = subnet_ban_fixture()
 
-      assert {:ok, page, _changeset} = Bans.admin_subnet_bans(actor(moderator), %{}, @pagination)
+      assert {:ok, page, _changeset} = Bans.list_subnet_bans(actor(moderator), %{}, @pagination)
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
 
@@ -470,7 +470,7 @@ defmodule Philomena.BansTest do
       _other = subnet_ban_fixture()
 
       assert {:ok, page, _changeset} =
-               Bans.admin_subnet_bans(
+               Bans.list_subnet_bans(
                  actor(moderator),
                  %{"bq" => ban.generated_ban_id},
                  @pagination
@@ -484,7 +484,7 @@ defmodule Philomena.BansTest do
       ban = subnet_ban_fixture(%{"specification" => "203.0.113.0/24"})
 
       assert {:ok, page, _changeset} =
-               Bans.admin_subnet_bans(actor(moderator), %{"ip" => "203.0.113.50"}, @pagination)
+               Bans.list_subnet_bans(actor(moderator), %{"ip" => "203.0.113.50"}, @pagination)
 
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
@@ -493,18 +493,18 @@ defmodule Philomena.BansTest do
       moderator = moderator_user_fixture()
 
       assert {:error, changeset} =
-               Bans.admin_subnet_bans(actor(moderator), %{"ip" => "not-an-ip"}, @pagination)
+               Bans.list_subnet_bans(actor(moderator), %{"ip" => "not-an-ip"}, @pagination)
 
       assert {"is invalid", _opts} = changeset.errors[:ip]
     end
 
     test "a regular user is not authorized" do
-      assert Bans.admin_subnet_bans(actor(confirmed_user_fixture()), %{}, @pagination) ==
+      assert Bans.list_subnet_bans(actor(confirmed_user_fixture()), %{}, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous visitor is not authorized" do
-      assert Bans.admin_subnet_bans(actor(), %{}, @pagination) == {:error, :unauthorized}
+      assert Bans.list_subnet_bans(actor(), %{}, @pagination) == {:error, :unauthorized}
     end
   end
 
@@ -587,7 +587,7 @@ defmodule Philomena.BansTest do
       ban = subnet_ban_fixture()
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               Bans.load_subnet_ban_for_edit(actor(moderator), ban.id)
+               Bans.edit_subnet_ban(actor(moderator), ban.id)
 
       assert loaded.id == ban.id
     end
@@ -595,24 +595,24 @@ defmodule Philomena.BansTest do
     test "an unknown id is not found for a moderator" do
       moderator = moderator_user_fixture()
 
-      assert Bans.load_subnet_ban_for_edit(actor(moderator), 2_147_483_647) ==
+      assert Bans.edit_subnet_ban(actor(moderator), 2_147_483_647) ==
                {:error, :not_found}
     end
 
     test "an unknown id is not found for an admin" do
       admin = admin_user_fixture()
-      assert Bans.load_subnet_ban_for_edit(actor(admin), 2_147_483_647) == {:error, :not_found}
+      assert Bans.edit_subnet_ban(actor(admin), 2_147_483_647) == {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
-      assert Bans.load_subnet_ban_for_edit(actor(moderator), "abc") == {:error, :not_found}
+      assert Bans.edit_subnet_ban(actor(moderator), "abc") == {:error, :not_found}
     end
 
     test "a regular user is not authorized" do
       ban = subnet_ban_fixture()
 
-      assert Bans.load_subnet_ban_for_edit(actor(confirmed_user_fixture()), ban.id) ==
+      assert Bans.edit_subnet_ban(actor(confirmed_user_fixture()), ban.id) ==
                {:error, :unauthorized}
     end
   end
@@ -706,7 +706,7 @@ defmodule Philomena.BansTest do
       ban = fingerprint_ban_fixture()
 
       assert {:ok, page, _changeset} =
-               Bans.admin_fingerprint_bans(actor(moderator), %{}, @pagination)
+               Bans.list_fingerprint_bans(actor(moderator), %{}, @pagination)
 
       assert ban.id in Enum.map(page.entries, & &1.id)
     end
@@ -717,7 +717,7 @@ defmodule Philomena.BansTest do
       _other = fingerprint_ban_fixture()
 
       assert {:ok, page, _changeset} =
-               Bans.admin_fingerprint_bans(
+               Bans.list_fingerprint_bans(
                  actor(moderator),
                  %{"bq" => ban.generated_ban_id},
                  @pagination
@@ -732,7 +732,7 @@ defmodule Philomena.BansTest do
       _other = fingerprint_ban_fixture(%{"fingerprint" => "deadbeef"})
 
       assert {:ok, page, _changeset} =
-               Bans.admin_fingerprint_bans(
+               Bans.list_fingerprint_bans(
                  actor(moderator),
                  %{"fingerprint" => "c0ffee1234"},
                  @pagination
@@ -742,12 +742,12 @@ defmodule Philomena.BansTest do
     end
 
     test "a regular user is not authorized" do
-      assert Bans.admin_fingerprint_bans(actor(confirmed_user_fixture()), %{}, @pagination) ==
+      assert Bans.list_fingerprint_bans(actor(confirmed_user_fixture()), %{}, @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous visitor is not authorized" do
-      assert Bans.admin_fingerprint_bans(actor(), %{}, @pagination) == {:error, :unauthorized}
+      assert Bans.list_fingerprint_bans(actor(), %{}, @pagination) == {:error, :unauthorized}
     end
   end
 
@@ -817,7 +817,7 @@ defmodule Philomena.BansTest do
       ban = fingerprint_ban_fixture()
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               Bans.load_fingerprint_ban_for_edit(actor(moderator), ban.id)
+               Bans.edit_fingerprint_ban(actor(moderator), ban.id)
 
       assert loaded.id == ban.id
     end
@@ -825,26 +825,26 @@ defmodule Philomena.BansTest do
     test "an unknown id is not found for a moderator" do
       moderator = moderator_user_fixture()
 
-      assert Bans.load_fingerprint_ban_for_edit(actor(moderator), 2_147_483_647) ==
+      assert Bans.edit_fingerprint_ban(actor(moderator), 2_147_483_647) ==
                {:error, :not_found}
     end
 
     test "an unknown id is not found for an admin" do
       admin = admin_user_fixture()
 
-      assert Bans.load_fingerprint_ban_for_edit(actor(admin), 2_147_483_647) ==
+      assert Bans.edit_fingerprint_ban(actor(admin), 2_147_483_647) ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
-      assert Bans.load_fingerprint_ban_for_edit(actor(moderator), "abc") == {:error, :not_found}
+      assert Bans.edit_fingerprint_ban(actor(moderator), "abc") == {:error, :not_found}
     end
 
     test "a regular user is not authorized" do
       ban = fingerprint_ban_fixture()
 
-      assert Bans.load_fingerprint_ban_for_edit(actor(confirmed_user_fixture()), ban.id) ==
+      assert Bans.edit_fingerprint_ban(actor(confirmed_user_fixture()), ban.id) ==
                {:error, :unauthorized}
     end
   end
@@ -972,15 +972,15 @@ defmodule Philomena.BansTest do
     test "malformed member IDs are not found before authorization for all ban kinds" do
       user_actor = actor(confirmed_user_fixture())
 
-      assert Bans.load_user_ban_for_edit(user_actor, "bad-id") == {:error, :not_found}
+      assert Bans.edit_user_ban(user_actor, "bad-id") == {:error, :not_found}
       assert Bans.update_user_ban(user_actor, "bad-id", %{}) == {:error, :not_found}
       assert Bans.delete_user_ban(user_actor, "bad-id") == {:error, :not_found}
 
-      assert Bans.load_subnet_ban_for_edit(user_actor, "bad-id") == {:error, :not_found}
+      assert Bans.edit_subnet_ban(user_actor, "bad-id") == {:error, :not_found}
       assert Bans.update_subnet_ban(user_actor, "bad-id", %{}) == {:error, :not_found}
       assert Bans.delete_subnet_ban(user_actor, "bad-id") == {:error, :not_found}
 
-      assert Bans.load_fingerprint_ban_for_edit(user_actor, "bad-id") ==
+      assert Bans.edit_fingerprint_ban(user_actor, "bad-id") ==
                {:error, :not_found}
 
       assert Bans.update_fingerprint_ban(user_actor, "bad-id", %{}) ==

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.UserController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Users.search_users(conn.assigns.actor, params["user"] || %{}, conn.assigns.pagination) do
+    case Users.query_users(conn.assigns.actor, params["user"] || %{}, conn.assigns.pagination) do
       {:ok, users, changeset} ->
         render(conn, "index.html",
           title: "Admin - Users",
@@ -31,7 +31,7 @@ defmodule PhilomenaWeb.Admin.UserController do
 
   def edit(conn, %{"id" => slug}) do
     with {:ok, %AdminUserForm{} = form} <-
-           Users.load_user_for_edit(conn.assigns.actor, slug) do
+           Users.edit_user(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing User",
         user: form.changeset.data,
@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.Admin.UserController do
   end
 
   def update(conn, %{"id" => slug, "user" => user_params}) do
-    with {:ok, user} <- Users.update_user_details(conn.assigns.actor, slug, user_params) do
+    with {:ok, user} <- Users.update_user(conn.assigns.actor, slug, user_params) do
       conn
       |> put_flash(:info, "User successfully updated.")
       |> redirect(to: ~p"/profiles/#{user}")

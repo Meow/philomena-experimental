@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Registration.NameController do
 
   def edit(conn, _params) do
     with {:ok, %Ecto.Changeset{} = changeset} <-
-           Users.load_user_for_rename(conn.assigns.actor) do
+           Users.edit_name(conn.assigns.actor) do
       render(conn, "edit.html", title: "Editing Name", changeset: changeset)
     end
   end

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.DescriptionLockController do
 
   def create(conn, params) do
     with {:ok, image} <-
-           Images.set_description_locked(conn.assigns.actor, params["image_id"], true) do
+           Images.update_image_description_lock(conn.assigns.actor, params["image_id"], true) do
       conn
       |> put_flash(:info, "Successfully locked description.")
       |> redirect(to: ~p"/images/#{image}")
@@ -16,7 +16,7 @@ defmodule PhilomenaWeb.Image.DescriptionLockController do
 
   def delete(conn, params) do
     with {:ok, image} <-
-           Images.set_description_locked(conn.assigns.actor, params["image_id"], false) do
+           Images.update_image_description_lock(conn.assigns.actor, params["image_id"], false) do
       conn
       |> put_flash(:info, "Successfully unlocked description.")
       |> redirect(to: ~p"/images/#{image}")

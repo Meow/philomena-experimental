@@ -211,9 +211,9 @@ defmodule Philomena.Reports do
       {:error, :unauthorized}
 
   """
-  @spec load_user_reports(Actor.t(), Repo.pagination_params()) ::
+  @spec list_user_reports(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Report.t())} | {:error, :unauthorized}
-  def load_user_reports(%Actor{user: user} = actor, pagination) do
+  def list_user_reports(%Actor{user: user} = actor, pagination) do
     with :ok <- authorize(actor, :index_own, Report) do
       reports =
         Report
@@ -243,11 +243,11 @@ defmodule Philomena.Reports do
       {:error, :unauthorized}
 
   """
-  @spec load_report_index(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec list_reports(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, ReportPage.t(), Ecto.Changeset.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def load_report_index(%Actor{user: user} = actor, params, pagination) do
+  def list_reports(%Actor{user: user} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Report),
          {:ok, query, query_form} <- QueryBuilder.build_query(params, user) do
       reports =
@@ -298,9 +298,9 @@ defmodule Philomena.Reports do
       {:error, :not_found}
 
   """
-  @spec load_report(Actor.t(), Loader.integer_id()) ::
+  @spec show_report(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :unauthorized | :not_found}
-  def load_report(%Actor{} = actor, id) do
+  def show_report(%Actor{} = actor, id) do
     Loader.fetch_and_authorize(report_query(@default_preloads), actor, :show, id)
   end
 
@@ -451,9 +451,9 @@ defmodule Philomena.Reports do
       {:error, :unauthorized}
 
   """
-  @spec claim_report(Actor.t(), Loader.integer_id()) ::
+  @spec create_report_claim(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def claim_report(%Actor{user: user} = actor, report_id) do
+  def create_report_claim(%Actor{user: user} = actor, report_id) do
     with {:ok, report_id} <- Loader.parse_id(report_id) do
       Multi.new()
       |> put_lock_report(actor, :claim, report_id)
@@ -497,9 +497,9 @@ defmodule Philomena.Reports do
       {:ok, %Report{state: "open"}}
 
   """
-  @spec unclaim_report(Actor.t(), Loader.integer_id()) ::
+  @spec delete_report_claim(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def unclaim_report(%Actor{user: user} = actor, report_id) do
+  def delete_report_claim(%Actor{user: user} = actor, report_id) do
     with {:ok, report_id} <- Loader.parse_id(report_id) do
       Multi.new()
       |> put_lock_report(actor, :unclaim, report_id)
@@ -543,9 +543,9 @@ defmodule Philomena.Reports do
       {:ok, %Report{state: "closed", open: false}}
 
   """
-  @spec close_report(Actor.t(), Loader.integer_id()) ::
+  @spec create_report_close(Actor.t(), Loader.integer_id()) ::
           {:ok, Report.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def close_report(%Actor{user: user} = actor, report_id) do
+  def create_report_close(%Actor{user: user} = actor, report_id) do
     with {:ok, report_id} <- Loader.parse_id(report_id) do
       Multi.new()
       |> put_lock_report(actor, :close, report_id)

@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Bans.admin_fingerprint_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
+    case Bans.list_fingerprint_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
       {:ok, fingerprint_bans, changeset} ->
         render(conn, "index.html",
           title: "Admin - Fingerprint Bans",
@@ -52,7 +52,7 @@ defmodule PhilomenaWeb.Admin.FingerprintBanController do
 
   def edit(conn, params) do
     with {:ok, {fingerprint_ban, changeset}} <-
-           Bans.load_fingerprint_ban_for_edit(conn.assigns.actor, params["id"]) do
+           Bans.edit_fingerprint_ban(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html",
         title: "Editing Fingerprint Ban",
         fingerprint_ban: fingerprint_ban,

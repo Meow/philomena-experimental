@@ -34,7 +34,7 @@ defmodule Philomena.GalleriesFixtures do
     user = Repo.get!(User, gallery.user_id)
 
     {:ok, result} =
-      Galleries.add_image_to_gallery(
+      Galleries.create_gallery_image(
         Philomena.AttributionFixtures.actor(user),
         gallery.id,
         image.id

@@ -15,7 +15,7 @@ defmodule PhilomenaWeb.CommentController do
     actor = conn.assigns.actor
     filter = conn.assigns.current_filter
 
-    case Comments.search_comments(actor, filter, cq, conn.assigns.pagination) do
+    case Comments.query_comments(actor, filter, cq, conn.assigns.pagination) do
       {:ok, comments} ->
         rendered = MarkdownRenderer.render_collection(comments.entries, conn)
         comments = %{comments | entries: Enum.zip(rendered, comments.entries)}

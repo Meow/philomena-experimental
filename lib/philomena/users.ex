@@ -279,9 +279,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_profile_by_id(Actor.t(), Loader.integer_id()) ::
+  @spec show_profile(Actor.t(), Loader.integer_id()) ::
           {:ok, User.t()} | {:error, :unauthorized | :not_found}
-  def load_profile_by_id(%Actor{} = actor, id) do
+  def show_profile(%Actor{} = actor, id) do
     User
     |> where([user], is_nil(user.deleted_at))
     |> Loader.fetch_and_authorize(actor, :show, id, public_links: :tag, awards: :badge)
@@ -578,8 +578,8 @@ defmodule Philomena.Users do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec register_user(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def register_user(params) do
+  @spec create_registration(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def create_registration(params) do
     changeset = User.registration_changeset(%User{}, &password_compromised?/1, params)
 
     Multi.new()
@@ -605,8 +605,8 @@ defmodule Philomena.Users do
       %Ecto.Changeset{data: %User{}}
 
   """
-  @spec change_user_registration(User.t(), map()) :: Ecto.Changeset.t()
-  def change_user_registration(%User{} = user, attrs \\ %{}) do
+  @spec new_registration(User.t(), map()) :: Ecto.Changeset.t()
+  def new_registration(%User{} = user, attrs \\ %{}) do
     User.registration_changeset(user, &password_compromised?/1, attrs)
   end
 
@@ -641,9 +641,9 @@ defmodule Philomena.Users do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec apply_user_email(User.t(), String.t(), map()) ::
+  @spec create_email(User.t(), String.t(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def apply_user_email(user, password, attrs) do
+  def create_email(user, password, attrs) do
     user
     |> User.email_changeset(attrs)
     |> User.validate_current_password(password)
@@ -666,8 +666,8 @@ defmodule Philomena.Users do
       :error
 
   """
-  @spec update_user_email(User.t(), String.t()) :: :ok | :error
-  def update_user_email(user, token) do
+  @spec show_email(User.t(), String.t()) :: :ok | :error
+  def show_email(user, token) do
     context = "change:#{user.email}"
 
     with {:ok, query} <- UserToken.verify_change_email_token_query(token, context),
@@ -722,8 +722,8 @@ defmodule Philomena.Users do
       :error
 
   """
-  @spec unlock_user_by_token(String.t()) :: {:ok, User.t()} | :error
-  def unlock_user_by_token(token) do
+  @spec show_unlock(String.t()) :: {:ok, User.t()} | :error
+  def show_unlock(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "unlock"),
          %User{} = user <- Repo.one(query),
          {:ok, %{user: %User{} = user}} <-
@@ -769,8 +769,8 @@ defmodule Philomena.Users do
       %Ecto.Changeset{data: %User{}}
 
   """
-  @spec change_user_password(User.t(), map()) :: Ecto.Changeset.t()
-  def change_user_password(user, attrs \\ %{}) do
+  @spec edit_password(User.t(), map()) :: Ecto.Changeset.t()
+  def edit_password(user, attrs \\ %{}) do
     User.password_changeset(user, &password_compromised?/1, attrs)
   end
 
@@ -787,9 +787,9 @@ defmodule Philomena.Users do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec update_user_password(User.t(), String.t(), map()) ::
+  @spec update_password(User.t(), String.t(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def update_user_password(user, password, attrs) do
+  def update_password(user, password, attrs) do
     changeset =
       user
       |> User.password_changeset(&password_compromised?/1, attrs)
@@ -824,8 +824,8 @@ defmodule Philomena.Users do
       {:ok, %User{}}
 
   """
-  @spec setup_totp_secret(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def setup_totp_secret(%User{} = user) do
+  @spec edit_totp(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def edit_totp(%User{} = user) do
     user
     |> User.create_totp_secret_changeset()
     |> Repo.update()
@@ -941,8 +941,8 @@ defmodule Philomena.Users do
       {:ok, %User{}}
 
   """
-  @spec consume_totp_token(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def consume_totp_token(%User{} = user, params) do
+  @spec create_session_totp(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def create_session_totp(%User{} = user, params) do
     user
     |> User.consume_totp_token_changeset(params)
     |> Repo.update()
@@ -1082,8 +1082,8 @@ defmodule Philomena.Users do
       :error
 
   """
-  @spec confirm_user(String.t()) :: {:ok, User.t()} | :error
-  def confirm_user(token) do
+  @spec update_confirmation(String.t()) :: {:ok, User.t()} | :error
+  def update_confirmation(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "confirm"),
          %User{} = user <- Repo.one(query),
          {:ok, %{user: %User{} = user}} <-
@@ -1153,9 +1153,9 @@ defmodule Philomena.Users do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec reset_user_password(User.t(), map()) ::
+  @spec update_password(User.t(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def reset_user_password(user, attrs) do
+  def update_password(user, attrs) do
     Multi.new()
     |> Multi.update(:user, User.password_changeset(user, &password_compromised?/1, attrs))
     |> Multi.delete_all(:tokens, UserToken.user_and_contexts_query(user, :all))
@@ -1204,8 +1204,8 @@ defmodule Philomena.Users do
       :error
 
   """
-  @spec reactivate_user_by_token(String.t()) :: {:ok, User.t()} | :error
-  def reactivate_user_by_token(token) do
+  @spec create_reactivation(String.t()) :: {:ok, User.t()} | :error
+  def create_reactivation(token) do
     with {:ok, query} <- UserToken.verify_email_token_query(token, "reactivate"),
          %User{} = user <- Repo.one(query),
          {:ok, %{user: %User{} = user}} <-
@@ -1236,9 +1236,9 @@ defmodule Philomena.Users do
       {:error, :ban}
 
   """
-  @spec deactivate_account(Actor.t(), (String.t() -> String.t())) ::
+  @spec delete_deactivation(Actor.t(), (String.t() -> String.t())) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
-  def deactivate_account(%Actor{user: %User{} = user} = actor, reactivation_url_fun) do
+  def delete_deactivation(%Actor{user: %User{} = user} = actor, reactivation_url_fun) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(actor, :deactivate_account, user) do
       Multi.new()
@@ -1365,9 +1365,9 @@ defmodule Philomena.Users do
       {:ok, %User{}}
 
   """
-  @spec clear_recent_filters(Actor.t()) ::
+  @spec delete_recent_filters(Actor.t()) ::
           {:ok, User.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
-  def clear_recent_filters(%Actor{user: %User{} = user}) do
+  def delete_recent_filters(%Actor{user: %User{} = user}) do
     Multi.new()
     |> Multi.lock_one(:locked_user, user_lock_query(user))
     |> Multi.update(:user, fn %{locked_user: user} ->
@@ -1448,9 +1448,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_profile_for_description_edit(Actor.t(), String.t()) ::
+  @spec edit_profile_description(Actor.t(), String.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_profile_for_description_edit(%Actor{} = actor, slug) do
+  def edit_profile_description(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_description, slug) do
       {:ok, User.changeset(user)}
@@ -1479,10 +1479,10 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec update_description(Actor.t(), String.t(), map()) ::
+  @spec update_profile_description(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_description(%Actor{} = actor, slug, attrs) do
+  def update_profile_description(%Actor{} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_description, slug) do
       changeset = User.description_changeset(user, attrs)
@@ -1596,9 +1596,9 @@ defmodule Philomena.Users do
       {:error, :ban}
 
   """
-  @spec load_user_for_avatar_edit(Actor.t()) ::
+  @spec edit_avatar(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
-  def load_user_for_avatar_edit(%Actor{user: user} = actor) do
+  def edit_avatar(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor) do
       {:ok, User.changeset(user)}
     end
@@ -1663,8 +1663,8 @@ defmodule Philomena.Users do
       {:error, :ban}
 
   """
-  @spec remove_avatar(Actor.t()) :: {:ok, User.t()} | {:error, :ban | :unauthorized}
-  def remove_avatar(%Actor{user: user} = actor) do
+  @spec delete_avatar(Actor.t()) :: {:ok, User.t()} | {:error, :ban | :unauthorized}
+  def delete_avatar(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor) do
       clear_avatar(user)
     end
@@ -1689,9 +1689,9 @@ defmodule Philomena.Users do
       {:error, :unauthorized}
 
   """
-  @spec load_user_for_rename(Actor.t()) ::
+  @spec edit_name(Actor.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
-  def load_user_for_rename(%Actor{user: user} = actor) do
+  def edit_name(%Actor{user: user} = actor) do
     with :ok <- verify_write_access(actor),
          :ok <- authorize(user, :change_username, user) do
       {:ok, User.changeset(user)}
@@ -1776,11 +1776,11 @@ defmodule Philomena.Users do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec search_users(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec query_users(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(), Ecto.Changeset.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def search_users(%Actor{} = actor, params, pagination) do
+  def query_users(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, User),
          {:ok, query, form} <- QueryBuilder.build_query(params) do
       users =
@@ -1810,9 +1810,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_user_for_edit(Actor.t(), String.t()) ::
+  @spec edit_user(Actor.t(), String.t()) ::
           {:ok, AdminUserForm.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_user_for_edit(%Actor{} = actor, slug) do
+  def edit_user(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit, slug, [:roles]) do
       {:ok, admin_user_form(User.changeset(user))}
@@ -1841,10 +1841,10 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec update_user_details(Actor.t(), String.t(), map()) ::
+  @spec update_user(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
           | {:error, :ban | :unauthorized | :not_found | AdminUserForm.t()}
-  def update_user_details(%Actor{} = actor, slug, params) do
+  def update_user(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :update, slug, [:roles]) do
       Multi.new()
@@ -1891,9 +1891,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_reactivate_user(Actor.t(), String.t()) ::
+  @spec create_user_activation(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_reactivate_user(%Actor{} = actor, slug) do
+  def create_user_activation(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :reactivate, slug) do
       Multi.new()
@@ -1942,9 +1942,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_deactivate_user(Actor.t(), String.t()) ::
+  @spec delete_user_activation(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_deactivate_user(%Actor{} = actor, slug) do
+  def delete_user_activation(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :deactivate, slug) do
       Multi.new()
@@ -1987,9 +1987,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_reset_api_key(Actor.t(), String.t()) ::
+  @spec delete_user_api_key(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_reset_api_key(%Actor{} = actor, slug) do
+  def delete_user_api_key(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :reset_api_key, slug) do
       changeset = User.api_key_changeset(user)
@@ -2031,9 +2031,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_remove_avatar(Actor.t(), String.t()) ::
+  @spec delete_user_avatar(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_remove_avatar(%Actor{} = actor, slug) do
+  def delete_user_avatar(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :remove_avatar, slug) do
       changeset = User.remove_avatar_changeset(user)
@@ -2075,9 +2075,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_wipe_downvotes(Actor.t(), String.t()) ::
+  @spec delete_user_downvotes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_wipe_downvotes(%Actor{} = actor, slug) do
+  def delete_user_downvotes(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :wipe_downvotes, slug) do
       Multi.new()
@@ -2118,11 +2118,11 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_user_for_erase(Actor.t(), String.t()) ::
+  @spec new_user_erase(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error,
              :ban | :unauthorized | :not_found | {:privileged, User.t()} | {:verified, User.t()}}
-  def load_user_for_erase(%Actor{} = actor, slug) do
+  def new_user_erase(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :erase, slug, [:roles]) do
       cond do
@@ -2153,12 +2153,12 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_erase_user(Actor.t(), String.t()) ::
+  @spec create_user_erase(Actor.t(), String.t()) ::
           {:ok, User.t()}
           | {:error,
              :ban | :unauthorized | :not_found | {:privileged, User.t()} | {:verified, User.t()}}
-  def admin_erase_user(%Actor{} = actor, slug) do
-    with {:ok, user} <- load_user_for_erase(actor, slug) do
+  def create_user_erase(%Actor{} = actor, slug) do
+    with {:ok, user} <- new_user_erase(actor, slug) do
       original_name = user.name
       random_hex = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
 
@@ -2203,9 +2203,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_user_for_force_filter(Actor.t(), String.t()) ::
+  @spec new_user_force_filter(Actor.t(), String.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_user_for_force_filter(%Actor{} = actor, slug) do
+  def new_user_force_filter(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :force_filter, slug) do
       {:ok, User.changeset(user)}
@@ -2232,10 +2232,10 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_force_filter(Actor.t(), String.t(), map()) ::
+  @spec create_user_force_filter(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def admin_force_filter(%Actor{} = actor, slug, params) do
+  def create_user_force_filter(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :force_filter, slug) do
       changeset = User.force_filter_changeset(user, params)
@@ -2278,9 +2278,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_unforce_filter(Actor.t(), String.t()) ::
+  @spec delete_user_force_filter(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_unforce_filter(%Actor{} = actor, slug) do
+  def delete_user_force_filter(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :unforce_filter, slug) do
       changeset = User.unforce_filter_changeset(user)
@@ -2322,9 +2322,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_unlock_user(Actor.t(), String.t()) ::
+  @spec create_user_unlock(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_unlock_user(%Actor{} = actor, slug) do
+  def create_user_unlock(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :unlock, slug) do
       changeset = User.unlock_changeset(user)
@@ -2365,9 +2365,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_verify_user(Actor.t(), String.t()) ::
+  @spec create_user_verification(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_verify_user(%Actor{} = actor, slug) do
+  def create_user_verification(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :verify, slug) do
       changeset = User.verify_changeset(user)
@@ -2409,9 +2409,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_unverify_user(Actor.t(), String.t()) ::
+  @spec delete_user_verification(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_unverify_user(%Actor{} = actor, slug) do
+  def delete_user_verification(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :unverify, slug) do
       changeset = User.unverify_changeset(user)
@@ -2454,9 +2454,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_wipe_votes(Actor.t(), String.t()) ::
+  @spec delete_user_votes(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_wipe_votes(%Actor{} = actor, slug) do
+  def delete_user_votes(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :wipe_votes, slug) do
       Multi.new()
@@ -2493,9 +2493,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec admin_wipe_user(Actor.t(), String.t()) ::
+  @spec create_user_wipe(Actor.t(), String.t()) ::
           {:ok, User.t()} | {:error, :ban | :unauthorized | :not_found}
-  def admin_wipe_user(%Actor{} = actor, slug) do
+  def create_user_wipe(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :wipe, slug) do
       Multi.new()
@@ -2533,9 +2533,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_alias_matches(Actor.t(), String.t()) ::
+  @spec list_profile_aliases(Actor.t(), String.t()) ::
           {:ok, AliasMatches.t()} | {:error, :unauthorized | :not_found}
-  def load_alias_matches(%Actor{} = actor, slug) do
+  def list_profile_aliases(%Actor{} = actor, slug) do
     with {:ok, user} <- load_user_by_slug(actor, :show_details, slug) do
       # Select all IPs and fingerprints known from this user
       user_ips =
@@ -2608,9 +2608,9 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec load_profile_for_scratchpad_edit(Actor.t(), String.t()) ::
+  @spec edit_profile_scratchpad(Actor.t(), String.t()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_profile_for_scratchpad_edit(%Actor{} = actor, slug) do
+  def edit_profile_scratchpad(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
       {:ok, User.changeset(user)}
@@ -2637,10 +2637,10 @@ defmodule Philomena.Users do
       {:error, :not_found}
 
   """
-  @spec update_scratchpad(Actor.t(), String.t(), map()) ::
+  @spec update_profile_scratchpad(Actor.t(), String.t(), map()) ::
           {:ok, User.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_scratchpad(%Actor{} = actor, slug, params) do
+  def update_profile_scratchpad(%Actor{} = actor, slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_user_by_slug(actor, :edit_scratchpad, slug) do
       changeset = User.scratchpad_changeset(user, params)

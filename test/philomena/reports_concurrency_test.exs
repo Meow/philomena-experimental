@@ -24,7 +24,7 @@ defmodule Philomena.ReportsConcurrencyTest do
     results =
       concurrently(
         for moderator <- [moderator_user_fixture(), moderator_user_fixture()] do
-          fn -> Reports.claim_report(actor(moderator), report.id) end
+          fn -> Reports.create_report_claim(actor(moderator), report.id) end
         end
       )
 

@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Gallery.OrderController do
   action_fallback PhilomenaWeb.FallbackController
 
   def update(conn, %{"gallery_id" => gallery_id} = params) do
-    case Galleries.reorder_gallery(conn.assigns.actor, gallery_id, params) do
+    case Galleries.update_gallery_order(conn.assigns.actor, gallery_id, params) do
       {:ok, _reorder_form} ->
         json(conn, %{})
 

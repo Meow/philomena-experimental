@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Image.HashController do
   action_fallback PhilomenaWeb.FallbackController
 
   def delete(conn, params) do
-    with {:ok, image} <- Images.remove_image_hash(conn.assigns.actor, params["image_id"]) do
+    with {:ok, image} <- Images.delete_image_hash(conn.assigns.actor, params["image_id"]) do
       conn
       |> put_flash(:info, "Successfully cleared hash.")
       |> redirect(to: ~p"/images/#{image}")

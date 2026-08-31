@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Profile.SourceChangeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"profile_id" => slug} = params) do
-    case SourceChanges.user_source_changes(
+    case SourceChanges.list_user_source_changes(
            conn.assigns.actor,
            slug,
            params,

@@ -4,7 +4,7 @@ defmodule PhilomenaWeb.Api.Json.Search.PostController do
   alias Philomena.Posts
 
   def index(conn, params) do
-    case Posts.search_posts(
+    case Posts.query_posts(
            conn.assigns.actor,
            params["q"],
            conn.assigns.pagination

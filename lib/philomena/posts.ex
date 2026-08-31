@@ -148,16 +148,16 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec load_topic_post(
+  @spec show_topic_post(
           Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
           post_id :: Loader.integer_id()
         ) ::
           {:ok, Post.t()} | {:error, :not_found | :unauthorized}
-  def load_topic_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show) do
+  def show_topic_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :show) do
       load_post_in_topic(actor, topic, post_id, :show)
     end
   end
@@ -178,9 +178,9 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec load_post(Actor.t(), Loader.integer_id()) ::
+  @spec show_post(Actor.t(), Loader.integer_id()) ::
           {:ok, Post.t()} | {:error, :not_found | :unauthorized}
-  def load_post(%Actor{} = actor, post_id) do
+  def show_post(%Actor{} = actor, post_id) do
     with {:ok, post_id} <- Loader.parse_id(post_id),
          {:ok, post} <-
            Post
@@ -216,9 +216,9 @@ defmodule Philomena.Posts do
       {:error, "Imbalanced parentheses."}
 
   """
-  @spec search_posts(Actor.t(), String.t() | nil, Search.pagination_params()) ::
+  @spec query_posts(Actor.t(), String.t() | nil, Search.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, String.t()}
-  def search_posts(%Actor{user: user} = actor, query_string, pagination) do
+  def query_posts(%Actor{user: user} = actor, query_string, pagination) do
     with {:ok, query} <- Posts.Query.compile(query_string, user: user) do
       results =
         Post
@@ -352,7 +352,7 @@ defmodule Philomena.Posts do
       {:ok, %Ecto.Changeset{}}
 
   """
-  @spec load_post_for_edit(
+  @spec edit_post(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
@@ -360,10 +360,10 @@ defmodule Philomena.Posts do
         ) ::
           {:ok, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def load_post_for_edit(actor, forum_slug, topic_slug, post_id) do
+  def edit_post(actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :create_post),
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :create_post),
          {:ok, post} <- load_post_in_topic(actor, topic, post_id, :edit) do
       {:ok, change_post(post)}
     end
@@ -465,11 +465,11 @@ defmodule Philomena.Posts do
       {:error, :unauthorized}
 
   """
-  @spec hide_post(Actor.t(), String.t(), String.t(), Loader.integer_id(), map()) ::
+  @spec create_post_hide(Actor.t(), String.t(), String.t(), Loader.integer_id(), map()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
           | {:error, Ecto.Changeset.t()}
-  def hide_post(%Actor{user: user} = actor, forum_slug, topic_slug, post_id, params) do
+  def create_post_hide(%Actor{user: user} = actor, forum_slug, topic_slug, post_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
       Multi.new()
@@ -534,11 +534,11 @@ defmodule Philomena.Posts do
       {:error, :unauthorized}
 
   """
-  @spec unhide_post(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
+  @spec delete_post_hide(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
           | {:error, Ecto.Changeset.t()}
-  def unhide_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
+  def delete_post_hide(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
       Multi.new()
@@ -606,11 +606,11 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec destroy_post(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
+  @spec create_post_delete(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
           | {:error, Ecto.Changeset.t()}
-  def destroy_post(%Actor{} = actor, forum_slug, topic_slug, post_id) do
+  def create_post_delete(%Actor{} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
       Multi.new()
@@ -683,11 +683,11 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec approve_post(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
+  @spec create_post_approve(Actor.t(), String.t(), String.t(), Loader.integer_id()) ::
           {:ok, Post.t()}
           | {:error, :ban | :unauthorized | :not_found}
           | {:error, Ecto.Changeset.t()}
-  def approve_post(%Actor{user: user} = actor, forum_slug, topic_slug, post_id) do
+  def create_post_approve(%Actor{user: user} = actor, forum_slug, topic_slug, post_id) do
     with :ok <- verify_write_access(actor),
          {:ok, post_id} <- Loader.parse_id(post_id) do
       Multi.new()
@@ -758,7 +758,7 @@ defmodule Philomena.Posts do
       {:error, :not_found}
 
   """
-  @spec post_history(
+  @spec list_post_history(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
@@ -766,9 +766,9 @@ defmodule Philomena.Posts do
         ) ::
           {:ok, {Topic.t(), Post.t(), [PostVersion.t()]}}
           | {:error, :unauthorized | :not_found}
-  def post_history(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show),
+  def list_post_history(%Actor{} = actor, forum_slug, topic_slug, post_id) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :show),
          {:ok, post} <- load_post_in_topic(actor, topic, post_id, :show) do
       {:ok, {topic, post, Versions.for_post(post)}}
     end
@@ -794,8 +794,8 @@ defmodule Philomena.Posts do
         ) ::
           {:ok, Post.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, forum_slug, topic_slug, post_id) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :show) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :show) do
       load_post_in_topic(actor, topic, post_id, :show)
     end
   end

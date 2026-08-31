@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.ReadController do
 
   def create(conn, params) do
     with {:ok, _topic} <-
-           Topics.mark_topic_read(
+           Topics.create_topic_read(
              conn.assigns.actor,
              params["forum_id"],
              params["topic_id"]

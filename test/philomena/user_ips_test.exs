@@ -25,7 +25,7 @@ defmodule Philomena.UserIpsTest do
       subnet_ban_fixture(%{"specification" => "203.0.113.0/24"})
 
       assert {:ok, %IpProfile{ip: ip, user_ips: user_ips, subnet_bans: subnet_bans}} =
-               UserIps.load_ip_profile(actor(moderator_user_fixture()), "203.0.113.50")
+               UserIps.show_ip_profile(actor(moderator_user_fixture()), "203.0.113.50")
 
       assert %Postgrex.INET{} = ip
       assert user.id in Enum.map(user_ips, & &1.user.id)
@@ -34,22 +34,22 @@ defmodule Philomena.UserIpsTest do
 
     test "an admin may load an IP profile" do
       assert {:ok, %IpProfile{}} =
-               UserIps.load_ip_profile(actor(admin_user_fixture()), "203.0.113.1")
+               UserIps.show_ip_profile(actor(admin_user_fixture()), "203.0.113.1")
     end
 
     test "a staffer submitting an unparsable address is not-found" do
-      assert UserIps.load_ip_profile(actor(moderator_user_fixture()), "not-an-ip") ==
+      assert UserIps.show_ip_profile(actor(moderator_user_fixture()), "not-an-ip") ==
                {:error, :not_found}
     end
 
     test "a valid unmatched address returns an empty typed profile" do
       assert {:ok, %IpProfile{user_ips: [], subnet_bans: []}} =
-               UserIps.load_ip_profile(actor(moderator_user_fixture()), "198.51.100.42")
+               UserIps.show_ip_profile(actor(moderator_user_fixture()), "198.51.100.42")
     end
 
     test "an equivalent IPv6 spelling is canonicalized" do
       assert {:ok, %IpProfile{ip: %Postgrex.INET{address: address}}} =
-               UserIps.load_ip_profile(
+               UserIps.show_ip_profile(
                  actor(moderator_user_fixture()),
                  "2001:0DB8:0:0:0:0:0:1"
                )
@@ -58,17 +58,17 @@ defmodule Philomena.UserIpsTest do
     end
 
     test "a regular user is unauthorized, even for a valid address" do
-      assert UserIps.load_ip_profile(actor(confirmed_user_fixture()), "203.0.113.1") ==
+      assert UserIps.show_ip_profile(actor(confirmed_user_fixture()), "203.0.113.1") ==
                {:error, :unauthorized}
     end
 
     test "an unprivileged viewer passing garbage is not-found" do
-      assert UserIps.load_ip_profile(actor(confirmed_user_fixture()), "garbage") ==
+      assert UserIps.show_ip_profile(actor(confirmed_user_fixture()), "garbage") ==
                {:error, :not_found}
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert UserIps.load_ip_profile(actor(), "203.0.113.1") == {:error, :unauthorized}
+      assert UserIps.show_ip_profile(actor(), "203.0.113.1") == {:error, :unauthorized}
     end
   end
 

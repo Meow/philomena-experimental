@@ -39,7 +39,7 @@ defmodule Mix.Tasks.Context.Action.Renames do
 
     results =
       ContextActionRenames.rewrite_files(paths, mappings,
-        comments: not opts[:no_comments],
+        comments: opts[:no_comments] != true,
         comments_only: opts[:comments_only]
       )
 

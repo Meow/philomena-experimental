@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.FingerprintProfile.TagChange.RevertController do
 
   def create(conn, %{"fingerprint_profile_id" => fingerprint}) do
     with {:ok, _target} <-
-           TagChanges.full_revert_fingerprint_tag_changes(conn.assigns.actor, fingerprint) do
+           TagChanges.create_fingerprint_tag_change_revert(conn.assigns.actor, fingerprint) do
       conn
       |> put_flash(:info, "Reversion of tag changes enqueued.")
       |> redirect(external: conn.assigns.referrer)

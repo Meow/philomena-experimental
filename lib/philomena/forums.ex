@@ -57,8 +57,8 @@ defmodule Philomena.Forums do
       %ForumIndex{forums: [%Forum{}], topic_count: 42}
 
   """
-  @spec load_forum_index(Actor.t(), Repo.pagination_params()) :: ForumIndex.t()
-  def load_forum_index(%Actor{} = actor, pagination) do
+  @spec list_forums(Actor.t(), Repo.pagination_params()) :: ForumIndex.t()
+  def list_forums(%Actor{} = actor, pagination) do
     forums = visible_forums_query(actor)
     topic_count = Repo.aggregate(forums, :sum, :topic_count)
 
@@ -79,8 +79,8 @@ defmodule Philomena.Forums do
       {:ok, [%Forum{}]}
 
   """
-  @spec load_admin_forums(Actor.t()) :: {:ok, [Forum.t()]} | {:error, :unauthorized}
-  def load_admin_forums(%Actor{} = actor) do
+  @spec list_admin_forums(Actor.t()) :: {:ok, [Forum.t()]} | {:error, :unauthorized}
+  def list_admin_forums(%Actor{} = actor) do
     with :ok <- authorize(actor, :manage, Forum) do
       {:ok, list_forums(actor)}
     end
@@ -101,9 +101,9 @@ defmodule Philomena.Forums do
       {:error, :not_found}
 
   """
-  @spec load_forum(Actor.t(), String.t()) ::
+  @spec show_forum(Actor.t(), String.t()) ::
           {:ok, Forum.t()} | {:error, :not_found | :unauthorized}
-  def load_forum(%Actor{} = actor, short_name) do
+  def show_forum(%Actor{} = actor, short_name) do
     load_authorized_forum(actor, :show, short_name)
   end
 
@@ -116,9 +116,9 @@ defmodule Philomena.Forums do
       {:ok, %ForumPage{}}
 
   """
-  @spec load_forum_show(Actor.t(), String.t(), Repo.pagination_params()) ::
+  @spec show_forum_page(Actor.t(), String.t(), Repo.pagination_params()) ::
           {:ok, ForumPage.t()} | {:error, :not_found | :unauthorized}
-  def load_forum_show(%Actor{} = actor, short_name, pagination) do
+  def show_forum_page(%Actor{} = actor, short_name, pagination) do
     with {:ok, forum} <- load_authorized_forum(actor, :show, short_name) do
       topics =
         Topic
@@ -147,9 +147,9 @@ defmodule Philomena.Forums do
       {:ok, %Forum{}}
 
   """
-  @spec subscribe(Actor.t(), String.t()) ::
+  @spec create_forum_subscription(Actor.t(), String.t()) ::
           {:ok, Forum.t()} | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def subscribe(%Actor{} = actor, short_name) do
+  def create_forum_subscription(%Actor{} = actor, short_name) do
     with {:ok, forum} <- load_authorized_forum(actor, :subscribe, short_name),
          {:ok, _subscription} <- create_subscription(forum, actor.user) do
       {:ok, forum}
@@ -166,9 +166,9 @@ defmodule Philomena.Forums do
       {:ok, %Forum{}}
 
   """
-  @spec unsubscribe(Actor.t(), String.t()) ::
+  @spec delete_forum_subscription(Actor.t(), String.t()) ::
           {:ok, Forum.t()} | {:error, :not_found | :unauthorized}
-  def unsubscribe(%Actor{} = actor, short_name) do
+  def delete_forum_subscription(%Actor{} = actor, short_name) do
     with {:ok, forum} <- load_authorized_forum(actor, :unsubscribe, short_name),
          {:ok, _subscription} <- delete_subscription(forum, actor.user) do
       {:ok, forum}
@@ -225,9 +225,9 @@ defmodule Philomena.Forums do
       {:ok, {%Forum{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_forum_for_edit(Actor.t(), String.t()) ::
+  @spec edit_forum(Actor.t(), String.t()) ::
           {:ok, {Forum.t(), Ecto.Changeset.t()}} | {:error, :ban | :not_found | :unauthorized}
-  def load_forum_for_edit(%Actor{} = actor, short_name) do
+  def edit_forum(%Actor{} = actor, short_name) do
     with :ok <- verify_write_access(actor),
          {:ok, forum} <- load_authorized_forum(actor, :edit, short_name) do
       {:ok, {forum, Forum.changeset(forum, %{})}}

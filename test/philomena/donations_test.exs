@@ -24,16 +24,16 @@ defmodule Philomena.DonationsTest do
 
   describe "load_donations/2" do
     test "an anonymous viewer is unauthorized" do
-      assert Donations.load_donations(actor(), @pagination) == {:error, :unauthorized}
+      assert Donations.list_donations(actor(), @pagination) == {:error, :unauthorized}
     end
 
     test "a regular user is unauthorized" do
-      assert Donations.load_donations(actor(confirmed_user_fixture()), @pagination) ==
+      assert Donations.list_donations(actor(confirmed_user_fixture()), @pagination) ==
                {:error, :unauthorized}
     end
 
     test "a moderator is unauthorized" do
-      assert Donations.load_donations(actor(moderator_user_fixture()), @pagination) ==
+      assert Donations.list_donations(actor(moderator_user_fixture()), @pagination) ==
                {:error, :unauthorized}
     end
 
@@ -41,7 +41,7 @@ defmodule Philomena.DonationsTest do
       user = confirmed_user_fixture()
       donation = donation_fixture(user)
 
-      assert {:ok, page} = Donations.load_donations(actor(admin_user_fixture()), @pagination)
+      assert {:ok, page} = Donations.list_donations(actor(admin_user_fixture()), @pagination)
 
       loaded = Enum.find(page.entries, &(&1.id == donation.id))
       assert loaded
@@ -54,14 +54,14 @@ defmodule Philomena.DonationsTest do
     test "a regular user is unauthorized" do
       user = confirmed_user_fixture()
 
-      assert Donations.load_user_donations(actor(confirmed_user_fixture()), user.slug) ==
+      assert Donations.show_user_donations(actor(confirmed_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
 
     test "a moderator is unauthorized" do
       user = confirmed_user_fixture()
 
-      assert Donations.load_user_donations(actor(moderator_user_fixture()), user.slug) ==
+      assert Donations.show_user_donations(actor(moderator_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
 
@@ -70,14 +70,14 @@ defmodule Philomena.DonationsTest do
       donation = donation_fixture(user)
 
       assert {:ok, {loaded, %Ecto.Changeset{data: %Donation{}}}} =
-               Donations.load_user_donations(actor(admin_user_fixture()), user.slug)
+               Donations.show_user_donations(actor(admin_user_fixture()), user.slug)
 
       assert loaded.id == user.id
       assert donation.id in Enum.map(loaded.donations, & &1.id)
     end
 
     test "an unknown slug is not-found for an admin" do
-      assert Donations.load_user_donations(actor(admin_user_fixture()), "no-such-user") ==
+      assert Donations.show_user_donations(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -131,7 +131,7 @@ defmodule Philomena.DonationsTest do
       target = confirmed_user_fixture()
 
       operations = [
-        &Donations.load_user_donations(&1, target.slug),
+        &Donations.show_user_donations(&1, target.slug),
         &Donations.create_donation(&1, %{})
       ]
 

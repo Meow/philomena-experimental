@@ -146,7 +146,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
     [move_result, post_result] =
       concurrently([
         fn ->
-          Topics.move_topic(moderator, source.short_name, topic.slug, %{
+          Topics.create_topic_move(moderator, source.short_name, topic.slug, %{
             "target_forum" => target.short_name
           })
         end,
@@ -178,12 +178,12 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
     [a_to_b_result, b_to_a_result] =
       concurrently([
         fn ->
-          Topics.move_topic(moderator, forum_a.short_name, topic_a.slug, %{
+          Topics.create_topic_move(moderator, forum_a.short_name, topic_a.slug, %{
             "target_forum" => forum_b.short_name
           })
         end,
         fn ->
-          Topics.move_topic(moderator, forum_b.short_name, topic_b.slug, %{
+          Topics.create_topic_move(moderator, forum_b.short_name, topic_b.slug, %{
             "target_forum" => forum_a.short_name
           })
         end
@@ -208,7 +208,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
     [lock_result, post_result] =
       concurrently([
         fn ->
-          Topics.lock_topic(moderator, forum.short_name, topic.slug, %{
+          Topics.create_topic_lock(moderator, forum.short_name, topic.slug, %{
             "lock_reason" => "Concurrent lock"
           })
         end,
@@ -237,7 +237,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
     assert Repo.reload!(forum).post_count == 1
 
     assert {:ok, _} =
-             Topics.hide_topic(moderator, forum.short_name, topic.slug, %{
+             Topics.create_topic_hide(moderator, forum.short_name, topic.slug, %{
                "deletion_reason" => "Hidden for moderation"
              })
 
@@ -245,7 +245,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
     assert Repo.reload!(forum).post_count == 0
 
     assert {:ok, _} =
-             Posts.hide_post(
+             Posts.create_post_hide(
                moderator,
                forum.short_name,
                topic.slug,
@@ -253,12 +253,12 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
                %{"deletion_reason" => "Destroyed post"}
              )
 
-    assert {:ok, _} = Posts.destroy_post(moderator, forum.short_name, topic.slug, post.id)
+    assert {:ok, _} = Posts.create_post_delete(moderator, forum.short_name, topic.slug, post.id)
 
     assert_topic_caches(topic)
     assert_forum_caches(forum)
 
-    assert {:ok, _} = Topics.unhide_topic(moderator, forum.short_name, topic.slug)
+    assert {:ok, _} = Topics.delete_topic_hide(moderator, forum.short_name, topic.slug)
 
     assert_topic_caches(topic)
     assert_forum_caches(forum)
@@ -280,7 +280,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
     destroyer = actor(moderator_user_fixture(), ip: random_ip())
 
     assert {:ok, %Post{hidden_from_users: true}} =
-             Posts.hide_post(
+             Posts.create_post_hide(
                moderator,
                forum.short_name,
                topic.slug,
@@ -292,8 +292,8 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
 
     [approval_result, destroy_result] =
       concurrently([
-        fn -> Posts.approve_post(moderator, forum.short_name, topic.slug, post.id) end,
-        fn -> Posts.destroy_post(destroyer, forum.short_name, topic.slug, post.id) end
+        fn -> Posts.create_post_approve(moderator, forum.short_name, topic.slug, post.id) end,
+        fn -> Posts.create_post_delete(destroyer, forum.short_name, topic.slug, post.id) end
       ])
 
     assert match?({:ok, %Post{}}, destroy_result)
@@ -317,7 +317,7 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
     unhide_actor = actor(moderator_user_fixture(), ip: random_ip())
 
     assert {:ok, %Post{hidden_from_users: true}} =
-             Posts.hide_post(
+             Posts.create_post_hide(
                moderator,
                forum.short_name,
                topic.slug,
@@ -327,8 +327,8 @@ defmodule Philomena.ForumHierarchyConcurrencyTest do
 
     [destroy_result, unhide_result] =
       concurrently([
-        fn -> Posts.destroy_post(moderator, forum.short_name, topic.slug, post.id) end,
-        fn -> Posts.unhide_post(unhide_actor, forum.short_name, topic.slug, post.id) end
+        fn -> Posts.create_post_delete(moderator, forum.short_name, topic.slug, post.id) end,
+        fn -> Posts.delete_post_hide(unhide_actor, forum.short_name, topic.slug, post.id) end
       ])
 
     assert Enum.count([destroy_result, unhide_result], &match?({:ok, %Post{}}, &1)) == 1

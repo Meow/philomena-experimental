@@ -84,7 +84,7 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.load_profile_page(actor(), scope(), current_filter(), user.slug)
+               Profiles.show_profile(actor(), scope(), current_filter(), user.slug)
 
       assert page.user.id == user.id
 
@@ -137,7 +137,7 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.load_profile_page(actor(), scope(), current_filter(), user.slug)
+               Profiles.show_profile(actor(), scope(), current_filter(), user.slug)
 
       # The comment itself is not hidden, so it matches the search, but an
       # anonymous viewer cannot see the hidden image, so it is dropped from the
@@ -147,7 +147,7 @@ defmodule Philomena.ProfilesTest do
 
     test "an unknown slug is not found for every viewer" do
       for viewer <- [actor(), actor(confirmed_user_fixture()), actor(admin_user_fixture())] do
-        assert Profiles.load_profile_page(
+        assert Profiles.show_profile(
                  viewer,
                  scope(),
                  current_filter(),
@@ -163,7 +163,7 @@ defmodule Philomena.ProfilesTest do
       |> Ecto.Changeset.change(deleted_at: DateTime.utc_now(:second))
       |> Repo.update!()
 
-      assert Profiles.load_profile_page(
+      assert Profiles.show_profile(
                actor(admin_user_fixture()),
                scope(),
                current_filter(),
@@ -267,7 +267,7 @@ defmodule Philomena.ProfilesTest do
       user_ip_fixture(alias_user, "203.0.113.40")
 
       assert {:ok, %IpHistory{user: loaded, user_ips: user_ips, other_users: other_users}} =
-               Profiles.load_ip_history(
+               Profiles.list_profile_ip_history(
                  actor(moderator_user_fixture()),
                  subject.slug,
                  @scrivener
@@ -283,7 +283,7 @@ defmodule Philomena.ProfilesTest do
     end
 
     test "a regular user may not load IP history" do
-      assert Profiles.load_ip_history(
+      assert Profiles.list_profile_ip_history(
                actor(confirmed_user_fixture()),
                confirmed_user_fixture().slug,
                @scrivener
@@ -292,13 +292,13 @@ defmodule Philomena.ProfilesTest do
     end
 
     test "an anonymous viewer may not load IP history" do
-      assert Profiles.load_ip_history(actor(), confirmed_user_fixture().slug, @scrivener) ==
+      assert Profiles.list_profile_ip_history(actor(), confirmed_user_fixture().slug, @scrivener) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not found before authorization for every viewer" do
       for viewer <- [actor(), actor(confirmed_user_fixture()), actor(moderator_user_fixture())] do
-        assert Profiles.load_ip_history(viewer, "no-such-user", @scrivener) ==
+        assert Profiles.list_profile_ip_history(viewer, "no-such-user", @scrivener) ==
                  {:error, :not_found}
       end
     end
@@ -309,7 +309,7 @@ defmodule Philomena.ProfilesTest do
       user_ip_fixture(subject, "203.0.113.42")
 
       assert {:ok, %IpHistory{user_ips: page}} =
-               Profiles.load_ip_history(
+               Profiles.list_profile_ip_history(
                  actor(moderator_user_fixture()),
                  subject.slug,
                  page: 1,
@@ -334,7 +334,7 @@ defmodule Philomena.ProfilesTest do
                 user_fingerprints: user_fingerprints,
                 other_users: other_users
               }} =
-               Profiles.load_fingerprint_history(
+               Profiles.list_profile_fingerprint_history(
                  actor(moderator_user_fixture()),
                  subject.slug,
                  @scrivener
@@ -349,7 +349,7 @@ defmodule Philomena.ProfilesTest do
     end
 
     test "a regular user may not load fingerprint history" do
-      assert Profiles.load_fingerprint_history(
+      assert Profiles.list_profile_fingerprint_history(
                actor(confirmed_user_fixture()),
                confirmed_user_fixture().slug,
                @scrivener
@@ -359,7 +359,7 @@ defmodule Philomena.ProfilesTest do
 
     test "an unknown slug is not found before authorization for every viewer" do
       for viewer <- [actor(), actor(confirmed_user_fixture()), actor(moderator_user_fixture())] do
-        assert Profiles.load_fingerprint_history(viewer, "no-such-user", @scrivener) ==
+        assert Profiles.list_profile_fingerprint_history(viewer, "no-such-user", @scrivener) ==
                  {:error, :not_found}
       end
     end

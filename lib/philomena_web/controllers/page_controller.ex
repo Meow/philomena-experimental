@@ -7,13 +7,13 @@ defmodule PhilomenaWeb.PageController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with {:ok, static_pages} <- StaticPages.load_page_listing(conn.assigns.actor) do
+    with {:ok, static_pages} <- StaticPages.list_pages(conn.assigns.actor) do
       render(conn, "index.html", title: "Pages", static_pages: static_pages)
     end
   end
 
   def show(conn, %{"id" => slug}) do
-    with {:ok, static_page} <- StaticPages.load_page_for_show(conn.assigns.actor, slug) do
+    with {:ok, static_page} <- StaticPages.show_page(conn.assigns.actor, slug) do
       rendered = MarkdownRenderer.render_unsafe(static_page.body, conn)
 
       render(conn, "show.html",
@@ -47,7 +47,7 @@ defmodule PhilomenaWeb.PageController do
 
   def edit(conn, %{"id" => slug}) do
     with {:ok, {static_page, changeset}} <-
-           StaticPages.load_page_for_edit(conn.assigns.actor, slug) do
+           StaticPages.edit_page(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing Page",
         static_page: static_page,

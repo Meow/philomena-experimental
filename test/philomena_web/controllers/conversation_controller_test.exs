@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.ConversationControllerTest do
     hidden = conversation_fixture(confirmed_user_fixture(), user)
 
     {:ok, _} =
-      Philomena.Conversations.set_conversation_hidden(
+      Philomena.Conversations.update_conversation_hide(
         Philomena.AttributionFixtures.actor(user),
         hidden.slug
       )

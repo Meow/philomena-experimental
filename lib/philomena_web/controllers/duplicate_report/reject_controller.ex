@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.DuplicateReport.RejectController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"duplicate_report_id" => id}) do
-    case DuplicateReports.reject_duplicate_report(conn.assigns.actor, id) do
+    case DuplicateReports.create_duplicate_report_reject(conn.assigns.actor, id) do
       {:ok, _report} ->
         conn
         |> put_flash(:info, "Successfully rejected report.")

@@ -104,7 +104,7 @@ defmodule Philomena.ArtistLinksTest do
       user = confirmed_user_fixture()
 
       assert {:ok, {loaded_user, %Ecto.Changeset{data: %ArtistLink{}}}} =
-               ArtistLinks.load_artist_link_for_new(actor(user), user.slug)
+               ArtistLinks.new_artist_link(actor(user), user.slug)
 
       assert loaded_user.id == user.id
     end
@@ -112,14 +112,14 @@ defmodule Philomena.ArtistLinksTest do
     test "a banned actor is rejected before any authorization" do
       user = confirmed_user_fixture()
 
-      assert ArtistLinks.load_artist_link_for_new(actor(user, ban: @ban), user.slug) ==
+      assert ArtistLinks.new_artist_link(actor(user, ban: @ban), user.slug) ==
                {:error, :ban}
     end
 
     test "an actor without a fingerprint is rejected before authorization" do
       user = confirmed_user_fixture()
 
-      assert ArtistLinks.load_artist_link_for_new(
+      assert ArtistLinks.new_artist_link(
                actor(user, fingerprint: nil),
                user.slug
              ) == {:error, :unauthorized}
@@ -128,7 +128,7 @@ defmodule Philomena.ArtistLinksTest do
     test "an unrelated user may not open another user's new form" do
       user = confirmed_user_fixture()
 
-      assert ArtistLinks.load_artist_link_for_new(actor(confirmed_user_fixture()), user.slug) ==
+      assert ArtistLinks.new_artist_link(actor(confirmed_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
   end
@@ -191,7 +191,7 @@ defmodule Philomena.ArtistLinksTest do
       link = artist_link_fixture(user, artist_tag_fixture())
 
       assert {:ok, {loaded_user, loaded_link}} =
-               ArtistLinks.load_artist_link_for_show(actor(user), user.slug, "#{link.id}")
+               ArtistLinks.show_artist_link(actor(user), user.slug, "#{link.id}")
 
       assert loaded_user.id == user.id
       assert loaded_link.id == link.id
@@ -202,7 +202,7 @@ defmodule Philomena.ArtistLinksTest do
       link = artist_link_fixture(user, artist_tag_fixture())
 
       assert {:ok, {_user, loaded_link}} =
-               ArtistLinks.load_artist_link_for_show(
+               ArtistLinks.show_artist_link(
                  actor(moderator_user_fixture()),
                  user.slug,
                  "#{link.id}"
@@ -214,7 +214,7 @@ defmodule Philomena.ArtistLinksTest do
     test "a non-castable id is not-found" do
       user = confirmed_user_fixture()
 
-      assert ArtistLinks.load_artist_link_for_show(actor(user), user.slug, "abc") ==
+      assert ArtistLinks.show_artist_link(actor(user), user.slug, "abc") ==
                {:error, :not_found}
     end
 
@@ -223,7 +223,7 @@ defmodule Philomena.ArtistLinksTest do
       other = confirmed_user_fixture()
       link = artist_link_fixture(owner, artist_tag_fixture())
 
-      assert ArtistLinks.load_artist_link_for_show(
+      assert ArtistLinks.show_artist_link(
                actor(moderator_user_fixture()),
                other.slug,
                link.id
@@ -237,7 +237,7 @@ defmodule Philomena.ArtistLinksTest do
       link = artist_link_fixture(user, artist_tag_fixture())
 
       assert {:ok, {loaded_link, %Ecto.Changeset{}}} =
-               ArtistLinks.load_artist_link_for_edit(
+               ArtistLinks.edit_artist_link(
                  actor(moderator_user_fixture()),
                  user.slug,
                  "#{link.id}"
@@ -252,14 +252,14 @@ defmodule Philomena.ArtistLinksTest do
       user = confirmed_user_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
 
-      assert ArtistLinks.load_artist_link_for_edit(actor(user), user.slug, "#{link.id}") ==
+      assert ArtistLinks.edit_artist_link(actor(user), user.slug, "#{link.id}") ==
                {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do
       user = confirmed_user_fixture()
 
-      assert ArtistLinks.load_artist_link_for_edit(
+      assert ArtistLinks.edit_artist_link(
                actor(moderator_user_fixture()),
                user.slug,
                "abc"
@@ -272,7 +272,7 @@ defmodule Philomena.ArtistLinksTest do
       other = confirmed_user_fixture()
       link = artist_link_fixture(owner, artist_tag_fixture())
 
-      assert ArtistLinks.load_artist_link_for_edit(
+      assert ArtistLinks.edit_artist_link(
                actor(moderator_user_fixture()),
                other.slug,
                link.id
@@ -370,19 +370,19 @@ defmodule Philomena.ArtistLinksTest do
 
     test "a moderator and an admin may list, an anonymous viewer and a regular user may not" do
       assert {:ok, %Scrivener.Page{}, %Ecto.Changeset{}} =
-               ArtistLinks.load_artist_links_index(
+               ArtistLinks.list_admin_artist_links(
                  actor(moderator_user_fixture()),
                  %{},
                  @pagination
                )
 
       assert {:ok, %Scrivener.Page{}, %Ecto.Changeset{}} =
-               ArtistLinks.load_artist_links_index(actor(admin_user_fixture()), %{}, @pagination)
+               ArtistLinks.list_admin_artist_links(actor(admin_user_fixture()), %{}, @pagination)
 
-      assert ArtistLinks.load_artist_links_index(actor(), %{}, @pagination) ==
+      assert ArtistLinks.list_admin_artist_links(actor(), %{}, @pagination) ==
                {:error, :unauthorized}
 
-      assert ArtistLinks.load_artist_links_index(
+      assert ArtistLinks.list_admin_artist_links(
                actor(confirmed_user_fixture()),
                %{},
                @pagination
@@ -401,7 +401,7 @@ defmodule Philomena.ArtistLinksTest do
       verified = verified_artist_link_fixture(user, artist_tag_fixture())
 
       assert {:ok, page, _changeset} =
-               ArtistLinks.load_artist_links_index(actor(moderator), %{}, @pagination)
+               ArtistLinks.list_admin_artist_links(actor(moderator), %{}, @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
       assert pending.id in ids
@@ -415,7 +415,7 @@ defmodule Philomena.ArtistLinksTest do
       verified = verified_artist_link_fixture(user, artist_tag_fixture())
 
       assert {:ok, page, _changeset} =
-               ArtistLinks.load_artist_links_index(
+               ArtistLinks.list_admin_artist_links(
                  actor(moderator),
                  %{"states" => ArtistLink.states()},
                  @pagination
@@ -433,7 +433,7 @@ defmodule Philomena.ArtistLinksTest do
       verified = verified_artist_link_fixture(user, artist_tag_fixture())
 
       assert {:ok, page, _changeset} =
-               ArtistLinks.load_artist_links_index(
+               ArtistLinks.list_admin_artist_links(
                  actor(moderator),
                  %{"states" => []},
                  @pagination
@@ -459,7 +459,7 @@ defmodule Philomena.ArtistLinksTest do
         })
 
       assert {:ok, page, _changeset} =
-               ArtistLinks.load_artist_links_index(
+               ArtistLinks.list_admin_artist_links(
                  actor(moderator),
                  %{"text" => "needle"},
                  @pagination
@@ -479,7 +479,7 @@ defmodule Philomena.ArtistLinksTest do
       _other = artist_link_fixture(other_user, artist_tag_fixture())
 
       assert {:ok, page, _changeset} =
-               ArtistLinks.load_artist_links_index(
+               ArtistLinks.list_admin_artist_links(
                  actor(moderator),
                  %{"text" => wanted_user.name},
                  @pagination
@@ -496,7 +496,9 @@ defmodule Philomena.ArtistLinksTest do
       badge = badge_fixture(%{title: "Artist"})
       link = artist_link_fixture(user, artist_tag_fixture())
 
-      assert {:ok, verified} = ArtistLinks.verify_artist_link(actor(moderator), "#{link.id}")
+      assert {:ok, verified} =
+               ArtistLinks.create_artist_link_verification(actor(moderator), "#{link.id}")
+
       assert verified.aasm_state == "verified"
       assert Repo.get(ArtistLink, link.id).aasm_state == "verified"
 
@@ -515,7 +517,10 @@ defmodule Philomena.ArtistLinksTest do
       link = artist_link_fixture(user, artist_tag_fixture())
 
       assert {:ok, verified} =
-               ArtistLinks.verify_artist_link(actor(admin_user_fixture()), "#{link.id}")
+               ArtistLinks.create_artist_link_verification(
+                 actor(admin_user_fixture()),
+                 "#{link.id}"
+               )
 
       assert verified.aasm_state == "verified"
     end
@@ -524,7 +529,10 @@ defmodule Philomena.ArtistLinksTest do
       user = confirmed_user_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
 
-      assert ArtistLinks.verify_artist_link(actor(confirmed_user_fixture()), "#{link.id}") ==
+      assert ArtistLinks.create_artist_link_verification(
+               actor(confirmed_user_fixture()),
+               "#{link.id}"
+             ) ==
                {:error, :unauthorized}
 
       assert Repo.get(ArtistLink, link.id).aasm_state == "unverified"
@@ -532,15 +540,21 @@ defmodule Philomena.ArtistLinksTest do
     end
 
     test "a non-castable id is not-found" do
-      assert ArtistLinks.verify_artist_link(actor(moderator_user_fixture()), "abc") ==
+      assert ArtistLinks.create_artist_link_verification(actor(moderator_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "an unknown integer id is not-found for every actor" do
-      assert ArtistLinks.verify_artist_link(actor(moderator_user_fixture()), "2147483647") ==
+      assert ArtistLinks.create_artist_link_verification(
+               actor(moderator_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :not_found}
 
-      assert ArtistLinks.verify_artist_link(actor(admin_user_fixture()), "2147483647") ==
+      assert ArtistLinks.create_artist_link_verification(
+               actor(admin_user_fixture()),
+               "2147483647"
+             ) ==
                {:error, :not_found}
     end
   end
@@ -551,7 +565,9 @@ defmodule Philomena.ArtistLinksTest do
       user = link_owner_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
 
-      assert {:ok, contacted} = ArtistLinks.contact_artist_link(actor(moderator), "#{link.id}")
+      assert {:ok, contacted} =
+               ArtistLinks.create_artist_link_contact(actor(moderator), "#{link.id}")
+
       assert contacted.aasm_state == "contacted"
       assert Repo.get(ArtistLink, link.id).contacted_by_user_id == moderator.id
 
@@ -566,7 +582,7 @@ defmodule Philomena.ArtistLinksTest do
       user = confirmed_user_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
 
-      assert ArtistLinks.contact_artist_link(actor(confirmed_user_fixture()), "#{link.id}") ==
+      assert ArtistLinks.create_artist_link_contact(actor(confirmed_user_fixture()), "#{link.id}") ==
                {:error, :unauthorized}
 
       assert Repo.get(ArtistLink, link.id).aasm_state == "unverified"
@@ -574,15 +590,15 @@ defmodule Philomena.ArtistLinksTest do
     end
 
     test "a non-castable id is not-found" do
-      assert ArtistLinks.contact_artist_link(actor(moderator_user_fixture()), "abc") ==
+      assert ArtistLinks.create_artist_link_contact(actor(moderator_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "an unknown integer id is not-found for every actor" do
-      assert ArtistLinks.contact_artist_link(actor(moderator_user_fixture()), "2147483647") ==
+      assert ArtistLinks.create_artist_link_contact(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert ArtistLinks.contact_artist_link(actor(admin_user_fixture()), "2147483647") ==
+      assert ArtistLinks.create_artist_link_contact(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -593,7 +609,9 @@ defmodule Philomena.ArtistLinksTest do
       user = link_owner_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
 
-      assert {:ok, rejected} = ArtistLinks.reject_artist_link(actor(moderator), "#{link.id}")
+      assert {:ok, rejected} =
+               ArtistLinks.create_artist_link_reject(actor(moderator), "#{link.id}")
+
       assert rejected.aasm_state == "rejected"
       assert Repo.get(ArtistLink, link.id).aasm_state == "rejected"
 
@@ -608,7 +626,7 @@ defmodule Philomena.ArtistLinksTest do
       user = confirmed_user_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
 
-      assert ArtistLinks.reject_artist_link(actor(confirmed_user_fixture()), "#{link.id}") ==
+      assert ArtistLinks.create_artist_link_reject(actor(confirmed_user_fixture()), "#{link.id}") ==
                {:error, :unauthorized}
 
       assert Repo.get(ArtistLink, link.id).aasm_state == "unverified"
@@ -616,15 +634,15 @@ defmodule Philomena.ArtistLinksTest do
     end
 
     test "a non-castable id is not-found" do
-      assert ArtistLinks.reject_artist_link(actor(moderator_user_fixture()), "abc") ==
+      assert ArtistLinks.create_artist_link_reject(actor(moderator_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "an unknown integer id is not-found for every actor" do
-      assert ArtistLinks.reject_artist_link(actor(moderator_user_fixture()), "2147483647") ==
+      assert ArtistLinks.create_artist_link_reject(actor(moderator_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert ArtistLinks.reject_artist_link(actor(admin_user_fixture()), "2147483647") ==
+      assert ArtistLinks.create_artist_link_reject(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -635,9 +653,9 @@ defmodule Philomena.ArtistLinksTest do
       link = artist_link_fixture(confirmed_user_fixture(), artist_tag_fixture())
 
       for operation <- [
-            &ArtistLinks.verify_artist_link(&1, link.id),
-            &ArtistLinks.reject_artist_link(&1, link.id),
-            &ArtistLinks.contact_artist_link(&1, link.id)
+            &ArtistLinks.create_artist_link_verification(&1, link.id),
+            &ArtistLinks.create_artist_link_reject(&1, link.id),
+            &ArtistLinks.create_artist_link_contact(&1, link.id)
           ] do
         assert operation.(actor(moderator, ban: @ban)) == {:error, :ban}
         assert operation.(actor(moderator, fingerprint: nil)) == {:error, :unauthorized}

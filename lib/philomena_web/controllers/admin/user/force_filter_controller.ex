@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Admin.User.ForceFilterController do
 
   def new(conn, %{"user_id" => slug}) do
     with {:ok, %Ecto.Changeset{} = changeset} <-
-           Users.load_user_for_force_filter(conn.assigns.actor, slug) do
+           Users.new_user_force_filter(conn.assigns.actor, slug) do
       render(conn, "new.html",
         title: "Forcing filter for user",
         user: changeset.data,
@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Admin.User.ForceFilterController do
   end
 
   def create(conn, %{"user_id" => slug, "user" => user_params}) do
-    case Users.admin_force_filter(conn.assigns.actor, slug, user_params) do
+    case Users.create_user_force_filter(conn.assigns.actor, slug, user_params) do
       {:ok, user} ->
         conn
         |> put_flash(:info, "Filter was forced.")
@@ -36,7 +36,7 @@ defmodule PhilomenaWeb.Admin.User.ForceFilterController do
   end
 
   def delete(conn, %{"user_id" => slug}) do
-    with {:ok, user} <- Users.admin_unforce_filter(conn.assigns.actor, slug) do
+    with {:ok, user} <- Users.delete_user_force_filter(conn.assigns.actor, slug) do
       conn
       |> put_flash(:info, "Forced filter was removed.")
       |> redirect(to: ~p"/profiles/#{user}")

@@ -58,7 +58,7 @@ defmodule PhilomenaWeb.Topic.SubscriptionControllerTest do
 
   test "a hidden topic cannot be subscribed to but can be unsubscribed from",
        %{conn: conn} do
-    # NOTE: the context's load_forum_topic passes show_hidden: true for
+    # NOTE: the context's show_forum_topic passes show_hidden: true for
     # unsubscribe (:delete) only, so the two actions diverge on hidden topics
     %{conn: conn, user: user} = register_and_log_in_user(%{conn: conn})
     forum = forum_fixture()
@@ -67,7 +67,7 @@ defmodule PhilomenaWeb.Topic.SubscriptionControllerTest do
     moderator = moderator_user_fixture()
 
     {:ok, {_forum, topic}} =
-      Topics.hide_topic(
+      Topics.create_topic_hide(
         Philomena.AttributionFixtures.actor(moderator),
         forum.short_name,
         topic.slug,

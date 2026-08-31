@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Topic.MoveController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Topics.move_topic(
+    case Topics.create_topic_move(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],

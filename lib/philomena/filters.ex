@@ -145,9 +145,9 @@ defmodule Philomena.Filters do
       {:ok, {%Scrivener.Page{}, [%Filter{}, ...]}}
 
   """
-  @spec index_filters(Actor.t(), Repo.pagination_params()) ::
+  @spec list_filters(Actor.t(), Repo.pagination_params()) ::
           {:ok, {Scrivener.Page.t(Filter.t()) | nil, [Filter.t()]}} | {:error, :unauthorized}
-  def index_filters(%Actor{user: user} = actor, pagination) do
+  def list_filters(%Actor{user: user} = actor, pagination) do
     with :ok <- authorize(actor, :index, Filter) do
       my_filters =
         if user do
@@ -238,9 +238,9 @@ defmodule Philomena.Filters do
       {:error, :unauthorized}
 
   """
-  @spec load_filter(Actor.t(), Loader.integer_id()) ::
+  @spec show_filter(Actor.t(), Loader.integer_id()) ::
           {:ok, Filter.t()} | {:error, :not_found | :unauthorized}
-  def load_filter(%Actor{} = actor, id) do
+  def show_filter(%Actor{} = actor, id) do
     load_and_authorize_filter(actor, id, :show, [:user])
   end
 
@@ -262,9 +262,9 @@ defmodule Philomena.Filters do
       {:error, "There was an error parsing your query."}
 
   """
-  @spec search_filters(Actor.t(), String.t(), Search.pagination_params()) ::
+  @spec query_filters(Actor.t(), String.t(), Search.pagination_params()) ::
           {:ok, Scrivener.Page.t(Filter.t())} | {:error, String.t()}
-  def search_filters(%Actor{user: user} = actor, query_string, pagination) do
+  def query_filters(%Actor{user: user} = actor, query_string, pagination) do
     with :ok <- authorize(actor, :search, Filter),
          {:ok, query} <- Query.compile(query_string, user: user) do
       filters =
@@ -308,10 +308,10 @@ defmodule Philomena.Filters do
       {:error, :unauthorized}
 
   """
-  @spec load_filter_page(Actor.t(), Loader.integer_id()) ::
+  @spec show_filter_page(Actor.t(), Loader.integer_id()) ::
           {:ok, FilterPage.t()} | {:error, :not_found | :unauthorized}
-  def load_filter_page(%Actor{} = actor, id) do
-    with {:ok, filter} <- load_filter(actor, id) do
+  def show_filter_page(%Actor{} = actor, id) do
+    with {:ok, filter} <- show_filter(actor, id) do
       {:ok,
        %FilterPage{
          filter: filter,
@@ -379,10 +379,10 @@ defmodule Philomena.Filters do
       {:error, :unauthorized}
 
   """
-  @spec load_filter_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_filter(Actor.t(), Loader.integer_id()) ::
           {:ok, {Filter.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_filter_for_edit(%Actor{} = actor, id) do
+  def edit_filter(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :edit, user: :settings) do
       filter =
@@ -419,10 +419,10 @@ defmodule Philomena.Filters do
       {:ok, %Filter{name: "Default"}}
 
   """
-  @spec switch_current_filter(Actor.t(), Loader.integer_id() | nil) ::
+  @spec update_current_filter(Actor.t(), Loader.integer_id() | nil) ::
           {:ok, Filter.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def switch_current_filter(%Actor{user: user} = actor, id) do
+  def update_current_filter(%Actor{user: user} = actor, id) do
     with :ok <- authorize(actor, :switch, Filter),
          {:ok, filter} <- filter_for_switch(actor, id) do
       if user do
@@ -573,11 +573,11 @@ defmodule Philomena.Filters do
       {:error, :not_found}
 
   """
-  @spec make_filter_public(Actor.t(), Loader.integer_id()) ::
+  @spec create_filter_public(Actor.t(), Loader.integer_id()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def make_filter_public(%Actor{} = actor, id) do
+  def create_filter_public(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, filter} <- load_and_authorize_filter(actor, id, :publish) do
       filter_changeset = Filter.public_changeset(filter)
@@ -714,11 +714,11 @@ defmodule Philomena.Filters do
       {:error, :unauthorized}
 
   """
-  @spec hide_tag(Actor.t(), Filter.t(), String.t()) ::
+  @spec create_filter_hide(Actor.t(), Filter.t(), String.t()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def hide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+  def create_filter_hide(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :hide_tag, filter, tag_slug) do
       Multi.new()
@@ -763,11 +763,11 @@ defmodule Philomena.Filters do
       {:error, :unauthorized}
 
   """
-  @spec unhide_tag(Actor.t(), Filter.t(), String.t()) ::
+  @spec delete_filter_hide(Actor.t(), Filter.t(), String.t()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def unhide_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+  def delete_filter_hide(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :unhide_tag, filter, tag_slug) do
       Multi.new()
@@ -812,11 +812,11 @@ defmodule Philomena.Filters do
       {:error, :unauthorized}
 
   """
-  @spec spoiler_tag(Actor.t(), Filter.t(), String.t()) ::
+  @spec create_filter_spoiler(Actor.t(), Filter.t(), String.t()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def spoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+  def create_filter_spoiler(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :spoiler_tag, filter, tag_slug) do
       Multi.new()
@@ -861,11 +861,11 @@ defmodule Philomena.Filters do
       {:error, :unauthorized}
 
   """
-  @spec unspoiler_tag(Actor.t(), Filter.t(), String.t()) ::
+  @spec delete_filter_spoiler(Actor.t(), Filter.t(), String.t()) ::
           {:ok, Filter.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :not_found | :unauthorized}
-  def unspoiler_tag(%Actor{} = actor, %Filter{} = filter, tag_slug) do
+  def delete_filter_spoiler(%Actor{} = actor, %Filter{} = filter, tag_slug) do
     with :ok <- verify_write_access(actor),
          {:ok, tag} <- authorize_filter_tag(actor, :unspoiler_tag, filter, tag_slug) do
       Multi.new()

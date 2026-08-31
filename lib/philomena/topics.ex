@@ -154,12 +154,16 @@ defmodule Philomena.Topics do
       {:error, :not_found}
 
   """
-  @spec subscribe(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
+  @spec create_topic_subscription(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t()
+        ) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def subscribe(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :subscribe),
+  def create_topic_subscription(%Actor{} = actor, forum_slug, topic_slug) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :subscribe),
          {:ok, _subscription} <- create_subscription(topic, actor.user) do
       {:ok, {forum, topic}}
     end
@@ -184,11 +188,15 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unsubscribe(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
+  @spec delete_topic_subscription(
+          actor :: Actor.t(),
+          forum_slug :: String.t(),
+          topic_slug :: String.t()
+        ) ::
           {:ok, {Forum.t(), Topic.t()}} | {:error, :unauthorized | :not_found}
-  def unsubscribe(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :unsubscribe) do
+  def delete_topic_subscription(%Actor{} = actor, forum_slug, topic_slug) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :unsubscribe) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(topic, actor.user)
       {:ok, {forum, topic}}
@@ -209,9 +217,9 @@ defmodule Philomena.Topics do
       {:ok, %Topic{}}
 
   """
-  @spec load_forum_topic(Actor.t(), Forum.t(), String.t(), atom()) ::
+  @spec show_forum_topic(Actor.t(), Forum.t(), String.t(), atom()) ::
           {:ok, Topic.t()} | {:error, :unauthorized | :not_found}
-  def load_forum_topic(%Actor{} = actor, %Forum{} = forum, topic_slug, action) do
+  def show_forum_topic(%Actor{} = actor, %Forum{} = forum, topic_slug, action) do
     Topic
     |> where(forum_id: ^forum.id, slug: ^topic_slug)
     |> preload([:user, :forum])
@@ -240,11 +248,11 @@ defmodule Philomena.Topics do
       {:error, :not_found}
 
   """
-  @spec mark_topic_read(Actor.t(), String.t(), String.t()) ::
+  @spec create_topic_read(Actor.t(), String.t(), String.t()) ::
           {:ok, Topic.t()} | {:error, :not_found | :unauthorized}
-  def mark_topic_read(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :mark_read) do
+  def create_topic_read(%Actor{} = actor, forum_slug, topic_slug) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :mark_read) do
       clear_topic_notification(topic, actor.user)
       {:ok, topic}
     end
@@ -279,7 +287,7 @@ defmodule Philomena.Topics do
       {:ok, %TopicPage{}}
 
   """
-  @spec load_topic_page(
+  @spec show_topic_page(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
@@ -287,9 +295,9 @@ defmodule Philomena.Topics do
           pagination :: Repo.pagination_params()
         ) ::
           {:ok, TopicPage.t()} | {:error, :unauthorized | :not_found}
-  def load_topic_page(%Actor{} = actor, forum_slug, topic_slug, post_id, pagination) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :show) do
+  def show_topic_page(%Actor{} = actor, forum_slug, topic_slug, post_id, pagination) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :show) do
       topic = Repo.preload(topic, [:user, :forum, :deleted_by, :locked_by, poll: :options])
       pagination = topic_pagination(actor, topic, post_id, pagination)
 
@@ -321,11 +329,11 @@ defmodule Philomena.Topics do
       {:error, :not_found}
 
   """
-  @spec load_topic(Actor.t(), String.t(), String.t()) ::
+  @spec show_topic(Actor.t(), String.t(), String.t()) ::
           {:ok, Topic.t()} | {:error, :not_found | :unauthorized}
-  def load_topic(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug) do
-      load_forum_topic(actor, forum, topic_slug, :show)
+  def show_topic(%Actor{} = actor, forum_slug, topic_slug) do
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug) do
+      show_forum_topic(actor, forum, topic_slug, :show)
     end
   end
 
@@ -414,12 +422,12 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Ecto.Changeset{}}}
 
   """
-  @spec load_new_topic(Actor.t(), String.t()) ::
+  @spec new_topic(Actor.t(), String.t()) ::
           {:ok, {Forum.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_new_topic(%Actor{} = actor, forum_slug) do
+  def new_topic(%Actor{} = actor, forum_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
          :ok <- authorize(actor, :create_topic, forum) do
       changeset =
         Topic.changeset(%Topic{
@@ -454,7 +462,7 @@ defmodule Philomena.Topics do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec hide_topic(
+  @spec create_topic_hide(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
@@ -463,7 +471,7 @@ defmodule Philomena.Topics do
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def hide_topic(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
+  def create_topic_hide(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor) do
       user
       |> hide_topic_steps(forum_slug, topic_slug, params)
@@ -512,11 +520,11 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unhide_topic(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
+  @spec delete_topic_hide(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def unhide_topic(%Actor{} = actor, forum_slug, topic_slug) do
+  def delete_topic_hide(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor) do
       Multi.new()
       |> put_forum_and_topic_locks(actor, forum_slug, :show, topic_slug, :unhide)
@@ -577,7 +585,7 @@ defmodule Philomena.Topics do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec move_topic(
+  @spec create_topic_move(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
@@ -586,7 +594,7 @@ defmodule Philomena.Topics do
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def move_topic(%Actor{} = actor, source_forum_slug, topic_slug, params) do
+  def create_topic_move(%Actor{} = actor, source_forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
          {:ok, target_forum_slug} <- MoveForm.fetch_target_forum_short_name(params) do
       Multi.new()
@@ -651,14 +659,14 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec stick_topic(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
+  @spec create_topic_stick(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def stick_topic(%Actor{} = actor, forum_slug, topic_slug) do
+  def create_topic_stick(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :stick) do
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :stick) do
       topic_changeset = Topic.stick_changeset(topic)
 
       Multi.new()
@@ -698,14 +706,14 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unstick_topic(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
+  @spec delete_topic_stick(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def unstick_topic(%Actor{} = actor, forum_slug, topic_slug) do
+  def delete_topic_stick(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :unstick) do
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :unstick) do
       topic_changeset = Topic.unstick_changeset(topic)
 
       Multi.new()
@@ -751,7 +759,7 @@ defmodule Philomena.Topics do
       {:error, %Forum{}, %Topic{}}
 
   """
-  @spec lock_topic(
+  @spec create_topic_lock(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
@@ -760,10 +768,10 @@ defmodule Philomena.Topics do
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def lock_topic(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
+  def create_topic_lock(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :lock) do
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :lock) do
       topic_changeset = Topic.lock_changeset(topic, params, user)
 
       Multi.new()
@@ -807,14 +815,14 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec unlock_topic(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
+  @spec delete_topic_lock(actor :: Actor.t(), forum_slug :: String.t(), topic_slug :: String.t()) ::
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def unlock_topic(%Actor{} = actor, forum_slug, topic_slug) do
+  def delete_topic_lock(%Actor{} = actor, forum_slug, topic_slug) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :unlock) do
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :unlock) do
       topic_changeset = Topic.unlock_changeset(topic)
 
       Multi.new()
@@ -857,7 +865,7 @@ defmodule Philomena.Topics do
       {:ok, {%Forum{}, %Topic{}}}
 
   """
-  @spec update_topic_title(
+  @spec update_topic(
           actor :: Actor.t(),
           forum_slug :: String.t(),
           topic_slug :: String.t(),
@@ -866,10 +874,10 @@ defmodule Philomena.Topics do
           {:ok, {Forum.t(), Topic.t()}}
           | {:error, Forum.t(), Topic.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def update_topic_title(%Actor{} = actor, forum_slug, topic_slug, params) do
+  def update_topic(%Actor{} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- load_forum_topic(actor, forum, topic_slug, :update_title) do
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- show_forum_topic(actor, forum, topic_slug, :update_title) do
       topic
       |> Topic.title_changeset(params)
       |> Repo.update()

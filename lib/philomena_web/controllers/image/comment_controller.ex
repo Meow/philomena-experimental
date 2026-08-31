@@ -9,7 +9,7 @@ defmodule PhilomenaWeb.Image.CommentController do
 
   def index(conn, %{"comment_id" => comment_id, "image_id" => image_id}) do
     with {:ok, {image, page}} <-
-           Comments.find_comment_page(
+           Comments.list_comment_page(
              conn.assigns.actor,
              image_id,
              comment_id,
@@ -22,7 +22,7 @@ defmodule PhilomenaWeb.Image.CommentController do
   def index(conn, %{"image_id" => image_id}) do
     with {:ok, image} <- Comments.load_image(conn.assigns.actor, image_id, :index) do
       comments =
-        Comments.paginate_image_comments(
+        Comments.list_image_comments(
           conn.assigns.actor,
           image,
           conn.assigns.comment_scrivener
@@ -38,7 +38,7 @@ defmodule PhilomenaWeb.Image.CommentController do
 
   def show(conn, %{"id" => comment_id, "image_id" => image_id}) do
     with {:ok, {image, comment}} <-
-           Comments.load_comment_for_show(conn.assigns.actor, image_id, comment_id) do
+           Comments.show_comment(conn.assigns.actor, image_id, comment_id) do
       rendered = MarkdownRenderer.render_one(comment, conn)
 
       render(conn, "show.html",
@@ -70,7 +70,7 @@ defmodule PhilomenaWeb.Image.CommentController do
 
   def edit(conn, %{"id" => comment_id, "image_id" => image_id}) do
     with {:ok, form} <-
-           Comments.load_comment_for_edit(conn.assigns.actor, image_id, comment_id) do
+           Comments.edit_comment(conn.assigns.actor, image_id, comment_id) do
       render(conn, "edit.html",
         title: "Editing Comment",
         image: form.data.image,

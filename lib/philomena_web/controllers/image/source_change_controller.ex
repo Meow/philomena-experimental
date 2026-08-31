@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.SourceChangeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"image_id" => image_id} = params) do
-    case SourceChanges.image_source_changes(
+    case SourceChanges.list_image_source_changes(
            conn.assigns.actor,
            image_id,
            params,

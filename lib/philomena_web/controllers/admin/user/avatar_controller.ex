@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.User.AvatarController do
   action_fallback PhilomenaWeb.FallbackController
 
   def delete(conn, %{"user_id" => slug}) do
-    with {:ok, user} <- Users.admin_remove_avatar(conn.assigns.actor, slug) do
+    with {:ok, user} <- Users.delete_user_avatar(conn.assigns.actor, slug) do
       conn
       |> put_flash(:info, "Successfully removed avatar.")
       |> redirect(to: ~p"/admin/users/#{user}/edit")

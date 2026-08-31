@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.Image.SourceController do
   plug PhilomenaWeb.CheckCaptchaPlug
 
   def update(conn, %{"image" => image_params} = params) do
-    case Images.update_sources(conn.assigns.actor, params["image_id"], image_params) do
+    case Images.update_image_sources(conn.assigns.actor, params["image_id"], image_params) do
       {:ok, %{image: image, source_change_count: count}} ->
         changeset =
           %{image | sources: sources_for_edit(image.sources)}

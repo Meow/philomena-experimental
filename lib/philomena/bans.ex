@@ -68,11 +68,11 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec admin_fingerprint_bans(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec list_fingerprint_bans(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Fingerprint.t()), Ecto.Changeset.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def admin_fingerprint_bans(%Actor{} = actor, params, pagination) do
+  def list_fingerprint_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Fingerprint),
          {:ok, query, form} <- FingerprintQueryBuilder.build_query(params) do
       fingerprint_bans =
@@ -174,10 +174,10 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec load_fingerprint_ban_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_fingerprint_ban(Actor.t(), Loader.integer_id()) ::
           {:ok, {Fingerprint.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_fingerprint_ban_for_edit(%Actor{} = actor, id) do
+  def edit_fingerprint_ban(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, fingerprint_ban} <- load_ban(actor, Fingerprint, id, :edit) do
       {:ok, {fingerprint_ban, Fingerprint.changeset(fingerprint_ban)}}
@@ -313,11 +313,11 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec admin_subnet_bans(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec list_subnet_bans(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Subnet.t()), Ecto.Changeset.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def admin_subnet_bans(%Actor{} = actor, params, pagination) do
+  def list_subnet_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Subnet),
          {:ok, query, form} <- SubnetQueryBuilder.build_query(params) do
       subnet_bans =
@@ -423,10 +423,10 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec load_subnet_ban_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_subnet_ban(Actor.t(), Loader.integer_id()) ::
           {:ok, {Subnet.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_subnet_ban_for_edit(%Actor{} = actor, id) do
+  def edit_subnet_ban(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, subnet_ban} <- load_ban(actor, Subnet, id, :edit) do
       {:ok, {subnet_ban, Subnet.changeset(subnet_ban)}}
@@ -574,11 +574,11 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec admin_user_bans(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec list_user_bans(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(User.t()), Ecto.Changeset.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def admin_user_bans(%Actor{} = actor, params, pagination) do
+  def list_user_bans(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, User),
          {:ok, query, form} <- UserQueryBuilder.build_query(params) do
       user_bans =
@@ -682,10 +682,10 @@ defmodule Philomena.Bans do
       {:error, :unauthorized}
 
   """
-  @spec load_user_ban_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_user_ban(Actor.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_user_ban_for_edit(%Actor{} = actor, id) do
+  def edit_user_ban(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, user_ban} <- load_ban(actor, User, id, :edit, [:user]) do
       {:ok, {user_ban, User.changeset(user_ban)}}

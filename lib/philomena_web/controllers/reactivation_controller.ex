@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.ReactivationController do
   end
 
   def create(conn, %{"token" => token}) do
-    Users.reactivate_user_by_token(token)
+    Users.create_reactivation(token)
 
     conn
     |> put_flash(:info, "If the token provided was valid, your account has been reactivated.")

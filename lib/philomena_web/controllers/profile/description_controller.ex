@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Profile.DescriptionController do
 
   def edit(conn, %{"profile_id" => slug}) do
     with {:ok, %Ecto.Changeset{} = changeset} <-
-           Users.load_profile_for_description_edit(conn.assigns.actor, slug) do
+           Users.edit_profile_description(conn.assigns.actor, slug) do
       render(conn, "edit.html",
         title: "Editing Profile Description",
         changeset: changeset,
@@ -17,7 +17,7 @@ defmodule PhilomenaWeb.Profile.DescriptionController do
   end
 
   def update(conn, %{"profile_id" => slug, "user" => user_params}) do
-    case Users.update_description(conn.assigns.actor, slug, user_params) do
+    case Users.update_profile_description(conn.assigns.actor, slug, user_params) do
       {:ok, user} ->
         conn
         |> put_flash(:info, "Description successfully updated.")

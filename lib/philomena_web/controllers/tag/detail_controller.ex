@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Tag.DetailController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    with {:ok, detail} <- Tags.tag_detail(conn.assigns.actor, params["tag_id"]) do
+    with {:ok, detail} <- Tags.list_tag_details(conn.assigns.actor, params["tag_id"]) do
       render(
         conn,
         "index.html",

@@ -60,9 +60,9 @@ defmodule Philomena.SiteNotices do
       {:error, :unauthorized}
 
   """
-  @spec load_site_notices(Actor.t(), Repo.pagination_params()) ::
+  @spec list_site_notices(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_site_notices(%Actor{} = actor, pagination) do
+  def list_site_notices(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, SiteNotice) do
       site_notices =
         SiteNotice
@@ -140,10 +140,10 @@ defmodule Philomena.SiteNotices do
       {:error, :not_found}
 
   """
-  @spec load_site_notice_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_site_notice(Actor.t(), Loader.integer_id()) ::
           {:ok, {SiteNotice.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_site_notice_for_edit(%Actor{} = actor, id) do
+  def edit_site_notice(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, site_notice} <- load_site_notice(actor, id, :edit) do
       {:ok, {site_notice, SiteNotice.changeset(site_notice)}}

@@ -44,7 +44,7 @@ defmodule Philomena.BadgesTest do
       user = awardee_fixture()
 
       assert {:ok, {_user, _changeset, badges}} =
-               Badges.load_award_for_new(actor(admin_user_fixture()), user.slug)
+               Badges.new_award(actor(admin_user_fixture()), user.slug)
 
       titles = Enum.map(badges, & &1.title)
 
@@ -59,7 +59,7 @@ defmodule Philomena.BadgesTest do
       user = awardee_fixture()
 
       assert {:ok, {loaded_user, %Ecto.Changeset{data: %Award{}}, badges}} =
-               Badges.load_award_for_new(actor(admin_user_fixture()), user.slug)
+               Badges.new_award(actor(admin_user_fixture()), user.slug)
 
       assert loaded_user.id == user.id
       assert is_list(badges)
@@ -68,12 +68,12 @@ defmodule Philomena.BadgesTest do
     test "a regular user may not award badges" do
       user = awardee_fixture()
 
-      assert Badges.load_award_for_new(actor(confirmed_user_fixture()), user.slug) ==
+      assert Badges.new_award(actor(confirmed_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
 
     test "a permitted actor naming an unknown slug is not-found" do
-      assert Badges.load_award_for_new(actor(admin_user_fixture()), "no-such-user") ==
+      assert Badges.new_award(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -85,7 +85,7 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture(%{title: "Test Award Badge"})
 
       assert {:ok, {loaded_user, %Award{} = award}} =
-               Badges.award_badge(actor(admin), user.slug, %{"badge_id" => badge.id})
+               Badges.create_award(actor(admin), user.slug, %{"badge_id" => badge.id})
 
       assert loaded_user.id == user.id
       assert Repo.get(Award, award.id).user_id == user.id
@@ -102,7 +102,7 @@ defmodule Philomena.BadgesTest do
 
       # No badge_id, so the award changeset is invalid.
       assert {:error, {loaded_user, %Ecto.Changeset{} = changeset, badges}} =
-               Badges.award_badge(actor(admin_user_fixture()), user.slug, %{})
+               Badges.create_award(actor(admin_user_fixture()), user.slug, %{})
 
       assert loaded_user.id == user.id
       refute changeset.valid?
@@ -115,7 +115,7 @@ defmodule Philomena.BadgesTest do
       user = awardee_fixture()
       badge = badge_fixture()
 
-      assert Badges.award_badge(actor(confirmed_user_fixture()), user.slug, %{
+      assert Badges.create_award(actor(confirmed_user_fixture()), user.slug, %{
                "badge_id" => badge.id
              }) ==
                {:error, :unauthorized}
@@ -130,10 +130,10 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture()
 
       assert {:ok, {_user, first}} =
-               Badges.award_badge(actor(moderator), user.slug, %{"badge_id" => badge.id})
+               Badges.create_award(actor(moderator), user.slug, %{"badge_id" => badge.id})
 
       assert {:ok, {_user, second}} =
-               Badges.award_badge(actor(moderator), user.slug, %{"badge_id" => badge.id})
+               Badges.create_award(actor(moderator), user.slug, %{"badge_id" => badge.id})
 
       refute first.id == second.id
       assert Repo.aggregate(Award, :count) == 2
@@ -147,7 +147,7 @@ defmodule Philomena.BadgesTest do
       award = badge_award_fixture(admin, user)
 
       assert {:ok, {loaded_user, loaded_award, %Ecto.Changeset{}, badges}} =
-               Badges.load_award_for_edit(actor(admin), user.slug, "#{award.id}")
+               Badges.edit_award(actor(admin), user.slug, "#{award.id}")
 
       assert loaded_user.id == user.id
       assert loaded_award.id == award.id
@@ -157,14 +157,14 @@ defmodule Philomena.BadgesTest do
     test "a non-castable award id is not-found" do
       user = awardee_fixture()
 
-      assert Badges.load_award_for_edit(actor(admin_user_fixture()), user.slug, "abc") ==
+      assert Badges.edit_award(actor(admin_user_fixture()), user.slug, "abc") ==
                {:error, :not_found}
     end
 
     test "an unknown award id is not-found" do
       user = awardee_fixture()
 
-      assert Badges.load_award_for_edit(actor(admin_user_fixture()), user.slug, "2147483647") ==
+      assert Badges.edit_award(actor(admin_user_fixture()), user.slug, "2147483647") ==
                {:error, :not_found}
     end
 
@@ -174,7 +174,7 @@ defmodule Philomena.BadgesTest do
       other = awardee_fixture()
       award = badge_award_fixture(admin, owner)
 
-      assert Badges.load_award_for_edit(actor(admin), other.slug, award.id) ==
+      assert Badges.edit_award(actor(admin), other.slug, award.id) ==
                {:error, :not_found}
     end
   end
@@ -187,7 +187,7 @@ defmodule Philomena.BadgesTest do
       award = badge_award_fixture(admin, user, badge)
 
       assert {:ok, {loaded_user, updated}} =
-               Badges.update_badge_award(actor(admin), user.slug, "#{award.id}", %{
+               Badges.update_award(actor(admin), user.slug, "#{award.id}", %{
                  "label" => "Best"
                })
 
@@ -207,7 +207,7 @@ defmodule Philomena.BadgesTest do
       other = awardee_fixture()
       award = badge_award_fixture(moderator, owner, nil, %{label: "Before"})
 
-      assert Badges.update_badge_award(actor(moderator), other.slug, award.id, %{
+      assert Badges.update_award(actor(moderator), other.slug, award.id, %{
                "label" => "After"
              }) == {:error, :not_found}
 
@@ -224,7 +224,7 @@ defmodule Philomena.BadgesTest do
       award = badge_award_fixture(admin, user, badge)
 
       assert {:ok, {loaded_user, revoked}} =
-               Badges.revoke_badge_award(actor(admin), user.slug, "#{award.id}")
+               Badges.delete_award(actor(admin), user.slug, "#{award.id}")
 
       assert loaded_user.id == user.id
       assert revoked.id == award.id
@@ -242,7 +242,7 @@ defmodule Philomena.BadgesTest do
       user = awardee_fixture()
       award = badge_award_fixture(admin, user)
 
-      assert Badges.revoke_badge_award(actor(confirmed_user_fixture()), user.slug, "#{award.id}") ==
+      assert Badges.delete_award(actor(confirmed_user_fixture()), user.slug, "#{award.id}") ==
                {:error, :unauthorized}
 
       assert Repo.get(Award, award.id).id == award.id
@@ -255,7 +255,7 @@ defmodule Philomena.BadgesTest do
       other = awardee_fixture()
       award = badge_award_fixture(moderator, owner)
 
-      assert Badges.revoke_badge_award(actor(moderator), other.slug, award.id) ==
+      assert Badges.delete_award(actor(moderator), other.slug, award.id) ==
                {:error, :not_found}
 
       assert Repo.get(Award, award.id)
@@ -272,9 +272,9 @@ defmodule Philomena.BadgesTest do
 
       for operation <- [
             fn actor -> Badges.new_badge(actor) end,
-            fn actor -> Badges.load_badge_for_edit(actor, badge.id) end,
-            fn actor -> Badges.load_award_for_new(actor, user.slug) end,
-            fn actor -> Badges.load_award_for_edit(actor, user.slug, award.id) end
+            fn actor -> Badges.edit_badge(actor, badge.id) end,
+            fn actor -> Badges.new_award(actor, user.slug) end,
+            fn actor -> Badges.edit_award(actor, user.slug, award.id) end
           ] do
         assert operation.(actor(admin, ban: @ban)) == {:error, :ban}
         assert operation.(actor(admin, fingerprint: nil)) == {:error, :unauthorized}
@@ -291,11 +291,11 @@ defmodule Philomena.BadgesTest do
         fn actor -> Badges.create_badge(actor, %{}, nil) end,
         fn actor -> Badges.update_badge(actor, badge.id, %{"title" => "Changed"}) end,
         fn actor -> Badges.update_badge_image(actor, badge.id, nil) end,
-        fn actor -> Badges.award_badge(actor, user.slug, %{"badge_id" => badge.id}) end,
+        fn actor -> Badges.create_award(actor, user.slug, %{"badge_id" => badge.id}) end,
         fn actor ->
-          Badges.update_badge_award(actor, user.slug, award.id, %{"label" => "Changed"})
+          Badges.update_award(actor, user.slug, award.id, %{"label" => "Changed"})
         end,
-        fn actor -> Badges.revoke_badge_award(actor, user.slug, award.id) end
+        fn actor -> Badges.delete_award(actor, user.slug, award.id) end
       ]
 
       for operation <- operations do
@@ -314,25 +314,25 @@ defmodule Philomena.BadgesTest do
       _badge = badge_fixture()
 
       assert {:ok, %Scrivener.Page{}} =
-               Badges.load_badges(actor(admin_user_fixture()), @pagination)
+               Badges.list_badges(actor(admin_user_fixture()), @pagination)
 
       assert {:ok, %Scrivener.Page{}} =
-               Badges.load_badges(actor(role_moderator_fixture("Badge")), @pagination)
+               Badges.list_badges(actor(role_moderator_fixture("Badge")), @pagination)
 
-      assert Badges.load_badges(actor(moderator_user_fixture()), @pagination) ==
+      assert Badges.list_badges(actor(moderator_user_fixture()), @pagination) ==
                {:error, :unauthorized}
 
-      assert Badges.load_badges(actor(confirmed_user_fixture()), @pagination) ==
+      assert Badges.list_badges(actor(confirmed_user_fixture()), @pagination) ==
                {:error, :unauthorized}
 
-      assert Badges.load_badges(actor(), @pagination) == {:error, :unauthorized}
+      assert Badges.list_badges(actor(), @pagination) == {:error, :unauthorized}
     end
 
     test "the listing is ordered by title" do
       beta = badge_fixture(%{title: "Zeta Listing Badge"})
       alpha = badge_fixture(%{title: "Alpha Listing Badge"})
 
-      assert {:ok, page} = Badges.load_badges(actor(admin_user_fixture()), @pagination)
+      assert {:ok, page} = Badges.list_badges(actor(admin_user_fixture()), @pagination)
 
       titles = Enum.map(page.entries, & &1.title)
 
@@ -418,7 +418,7 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture()
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               Badges.load_badge_for_edit(actor(admin_user_fixture()), "#{badge.id}")
+               Badges.edit_badge(actor(admin_user_fixture()), "#{badge.id}")
 
       assert loaded.id == badge.id
     end
@@ -426,7 +426,7 @@ defmodule Philomena.BadgesTest do
     test "a plain moderator is unauthorized" do
       badge = badge_fixture()
 
-      assert Badges.load_badge_for_edit(actor(moderator_user_fixture()), "#{badge.id}") ==
+      assert Badges.edit_badge(actor(moderator_user_fixture()), "#{badge.id}") ==
                {:error, :unauthorized}
     end
 
@@ -434,21 +434,21 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture()
 
       assert {:ok, {%Badge{id: id}, %Ecto.Changeset{}}} =
-               Badges.load_badge_for_edit(actor(role_moderator_fixture("Badge")), badge.id)
+               Badges.edit_badge(actor(role_moderator_fixture("Badge")), badge.id)
 
       assert id == badge.id
     end
 
     test "a non-castable id is not-found" do
-      assert Badges.load_badge_for_edit(actor(admin_user_fixture()), "abc") ==
+      assert Badges.edit_badge(actor(admin_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "an unknown id is not-found for a Badge-role moderator and an admin alike" do
-      assert Badges.load_badge_for_edit(actor(admin_user_fixture()), "2147483647") ==
+      assert Badges.edit_badge(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Badges.load_badge_for_edit(actor(role_moderator_fixture("Badge")), "2147483647") ==
+      assert Badges.edit_badge(actor(role_moderator_fixture("Badge")), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -575,7 +575,7 @@ defmodule Philomena.BadgesTest do
       _award = badge_award_fixture(admin, user, badge)
 
       assert {:ok, {loaded, users}} =
-               Badges.load_badge_users(actor(admin), "#{badge.id}", @pagination)
+               Badges.list_badge_users(actor(admin), "#{badge.id}", @pagination)
 
       assert loaded.id == badge.id
       assert %Scrivener.Page{} = users
@@ -585,7 +585,7 @@ defmodule Philomena.BadgesTest do
     test "a plain moderator is unauthorized" do
       badge = badge_fixture()
 
-      assert Badges.load_badge_users(actor(moderator_user_fixture()), "#{badge.id}", @pagination) ==
+      assert Badges.list_badge_users(actor(moderator_user_fixture()), "#{badge.id}", @pagination) ==
                {:error, :unauthorized}
     end
 
@@ -593,7 +593,7 @@ defmodule Philomena.BadgesTest do
       badge = badge_fixture()
 
       assert {:ok, {%Badge{}, %Scrivener.Page{}}} =
-               Badges.load_badge_users(
+               Badges.list_badge_users(
                  actor(role_moderator_fixture("Badge")),
                  badge.id,
                  @pagination
@@ -601,12 +601,12 @@ defmodule Philomena.BadgesTest do
     end
 
     test "a non-castable id is not-found" do
-      assert Badges.load_badge_users(actor(admin_user_fixture()), "abc", @pagination) ==
+      assert Badges.list_badge_users(actor(admin_user_fixture()), "abc", @pagination) ==
                {:error, :not_found}
     end
 
     test "an unknown id is not-found" do
-      assert Badges.load_badge_users(actor(admin_user_fixture()), "2147483647", @pagination) ==
+      assert Badges.list_badge_users(actor(admin_user_fixture()), "2147483647", @pagination) ==
                {:error, :not_found}
     end
   end

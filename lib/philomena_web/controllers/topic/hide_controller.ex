@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Topic.HideController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Topics.hide_topic(
+    case Topics.create_topic_hide(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"],
@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Topic.HideController do
   end
 
   def delete(conn, params) do
-    case Topics.unhide_topic(
+    case Topics.delete_topic_hide(
            conn.assigns.actor,
            params["forum_id"],
            params["topic_id"]

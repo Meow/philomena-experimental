@@ -59,7 +59,9 @@ defmodule PhilomenaWeb.Filter.SpoilerControllerTest do
     filter = filter_fixture(user)
     {:ok, _} = Users.set_current_filter(user, filter)
     tag = tag_fixture()
-    {:ok, _} = Filters.spoiler_tag(Philomena.AttributionFixtures.actor(user), filter, tag.slug)
+
+    {:ok, _} =
+      Filters.create_filter_spoiler(Philomena.AttributionFixtures.actor(user), filter, tag.slug)
 
     path = ~p"/filters/spoiler?#{[tag: tag.slug]}"
     conn = delete(conn, path)

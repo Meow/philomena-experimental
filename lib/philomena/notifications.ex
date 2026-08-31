@@ -233,11 +233,11 @@ defmodule Philomena.Notifications do
       {:error, :unauthorized}
 
   """
-  @spec load_unread(Actor.t(), Repo.pagination_params()) ::
+  @spec list_unread_notifications(Actor.t(), Repo.pagination_params()) ::
           {:ok, [{category(), Scrivener.Page.t()}]} | {:error, :unauthorized}
-  def load_unread(%Actor{user: nil}, _pagination), do: {:error, :unauthorized}
+  def list_unread_notifications(%Actor{user: nil}, _pagination), do: {:error, :unauthorized}
 
-  def load_unread(%Actor{user: %User{} = user}, pagination) do
+  def list_unread_notifications(%Actor{user: %User{} = user}, pagination) do
     unread =
       Enum.map(@categories, fn category ->
         {category, unread_page(category, user, pagination)}
@@ -261,13 +261,13 @@ defmodule Philomena.Notifications do
       {:error, :not_found}
 
   """
-  @spec load_unread_category(Actor.t(), any(), Repo.pagination_params()) ::
+  @spec show_unread_notification_category(Actor.t(), any(), Repo.pagination_params()) ::
           {:ok, {category(), Scrivener.Page.t()}}
           | {:error, :not_found | :unauthorized}
-  def load_unread_category(%Actor{user: nil}, _param, _pagination),
+  def show_unread_notification_category(%Actor{user: nil}, _param, _pagination),
     do: {:error, :unauthorized}
 
-  def load_unread_category(%Actor{user: %User{} = user}, param, pagination) do
+  def show_unread_notification_category(%Actor{user: %User{} = user}, param, pagination) do
     with {:ok, category} <- parse_category(param) do
       {:ok, {category, unread_page(category, user, pagination)}}
     end

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Notification.CategoryController do
 
   def show(conn, params) do
     with {:ok, {category, notifications}} <-
-           Notifications.load_unread_category(
+           Notifications.show_unread_notification_category(
              conn.assigns.actor,
              params["id"],
              conn.assigns.scrivener

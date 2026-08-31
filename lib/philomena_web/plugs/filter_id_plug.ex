@@ -16,6 +16,6 @@ defmodule PhilomenaWeb.FilterIdPlug do
     end
   end
 
-  defp load_filter(actor, %{"filter_id" => filter_id}), do: Filters.load_filter(actor, filter_id)
+  defp load_filter(actor, %{"filter_id" => filter_id}), do: Filters.show_filter(actor, filter_id)
   defp load_filter(_actor, _params), do: {:error, :not_found}
 end

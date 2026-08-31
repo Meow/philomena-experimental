@@ -271,7 +271,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
 
       assert {:ok, {%Gallery{} = loaded, %Ecto.Changeset{} = changeset}} =
-               Galleries.load_gallery_for_edit(actor(user), "#{gallery.id}")
+               Galleries.edit_gallery(actor(user), "#{gallery.id}")
 
       assert loaded.id == gallery.id
       assert changeset.data.id == gallery.id
@@ -280,31 +280,31 @@ defmodule Philomena.GalleriesTest do
     test "an unrelated user is unauthorized" do
       gallery = gallery_fixture(confirmed_user_fixture())
 
-      assert Galleries.load_gallery_for_edit(actor(confirmed_user_fixture()), "#{gallery.id}") ==
+      assert Galleries.edit_gallery(actor(confirmed_user_fixture()), "#{gallery.id}") ==
                {:error, :unauthorized}
     end
 
     test "a banned actor is rejected even while carrying a fingerprint" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Galleries.load_gallery_for_edit(actor, "abc") == {:error, :ban}
+      assert Galleries.edit_gallery(actor, "abc") == {:error, :ban}
     end
 
     test "an actor without a fingerprint is rejected before loading" do
-      assert Galleries.load_gallery_for_edit(actor(nil, fingerprint: nil), "abc") ==
+      assert Galleries.edit_gallery(actor(nil, fingerprint: nil), "abc") ==
                {:error, :unauthorized}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.load_gallery_for_edit(actor(confirmed_user_fixture()), "abc") ==
+      assert Galleries.edit_gallery(actor(confirmed_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "a well-formed id naming no row is not-found for every actor" do
-      assert Galleries.load_gallery_for_edit(actor(confirmed_user_fixture()), "999999999") ==
+      assert Galleries.edit_gallery(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
 
-      assert Galleries.load_gallery_for_edit(actor(admin_user_fixture()), "999999999") ==
+      assert Galleries.edit_gallery(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
   end
@@ -316,7 +316,7 @@ defmodule Philomena.GalleriesTest do
       image = image_fixture()
 
       assert {:ok, %Gallery{} = result} =
-               Galleries.add_image_to_gallery(actor(user), "#{gallery.id}", "#{image.id}")
+               Galleries.create_gallery_image(actor(user), "#{gallery.id}", "#{image.id}")
 
       assert %Gallery{} = result
       assert result.image_count == 1
@@ -327,7 +327,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(confirmed_user_fixture())
       image = image_fixture()
 
-      assert Galleries.add_image_to_gallery(
+      assert Galleries.create_gallery_image(
                actor(confirmed_user_fixture()),
                "#{gallery.id}",
                "#{image.id}"
@@ -338,10 +338,10 @@ defmodule Philomena.GalleriesTest do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
 
-      assert Galleries.add_image_to_gallery(actor(user), gallery.id, "abc") ==
+      assert Galleries.create_gallery_image(actor(user), gallery.id, "abc") ==
                {:error, :not_found}
 
-      assert Galleries.add_image_to_gallery(actor(user), gallery.id, "999999999") ==
+      assert Galleries.create_gallery_image(actor(user), gallery.id, "999999999") ==
                {:error, :not_found}
     end
 
@@ -350,7 +350,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
       image = image_fixture(hidden_from_users: true)
 
-      assert Galleries.add_image_to_gallery(actor(user), gallery.id, image.id) ==
+      assert Galleries.create_gallery_image(actor(user), gallery.id, image.id) ==
                {:error, :unauthorized}
 
       assert Repo.aggregate(Interaction, :count) == 0
@@ -359,7 +359,7 @@ defmodule Philomena.GalleriesTest do
     test "a banned actor is rejected" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Galleries.add_image_to_gallery(actor, "abc", "abc") == {:error, :ban}
+      assert Galleries.create_gallery_image(actor, "abc", "abc") == {:error, :ban}
     end
 
     test "adding an image already in the gallery returns a changeset error" do
@@ -367,10 +367,10 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
       image = image_fixture()
 
-      {:ok, _} = Galleries.add_image_to_gallery(actor(user), "#{gallery.id}", "#{image.id}")
+      {:ok, _} = Galleries.create_gallery_image(actor(user), "#{gallery.id}", "#{image.id}")
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Galleries.add_image_to_gallery(actor(user), "#{gallery.id}", "#{image.id}")
+               Galleries.create_gallery_image(actor(user), "#{gallery.id}", "#{image.id}")
 
       assert changeset.errors[:interactions]
       assert Repo.reload!(gallery).image_count == 1
@@ -384,10 +384,10 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
       image = image_fixture()
 
-      {:ok, _} = Galleries.add_image_to_gallery(actor(user), "#{gallery.id}", "#{image.id}")
+      {:ok, _} = Galleries.create_gallery_image(actor(user), "#{gallery.id}", "#{image.id}")
 
       assert {:ok, result} =
-               Galleries.remove_image_from_gallery(actor(user), "#{gallery.id}", "#{image.id}")
+               Galleries.delete_gallery_image(actor(user), "#{gallery.id}", "#{image.id}")
 
       assert result.image_count == 0
       assert Repo.reload!(gallery).image_count == 0
@@ -398,7 +398,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
       image = image_fixture()
 
-      assert Galleries.remove_image_from_gallery(actor(user), "#{gallery.id}", "#{image.id}") ==
+      assert Galleries.delete_gallery_image(actor(user), "#{gallery.id}", "#{image.id}") ==
                {:error, :not_found}
     end
 
@@ -406,7 +406,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(confirmed_user_fixture())
       image = image_fixture()
 
-      assert Galleries.remove_image_from_gallery(
+      assert Galleries.delete_gallery_image(
                actor(confirmed_user_fixture()),
                "#{gallery.id}",
                "#{image.id}"
@@ -424,7 +424,7 @@ defmodule Philomena.GalleriesTest do
       requested_ids = Enum.map(images, & &1.id)
 
       assert {:ok, %ReorderForm{} = returned} =
-               Galleries.reorder_gallery(
+               Galleries.update_gallery_order(
                  actor(user),
                  "#{gallery.id}",
                  %{image_ids: requested_ids}
@@ -448,7 +448,7 @@ defmodule Philomena.GalleriesTest do
       image_a = image_fixture()
       image_b = image_fixture()
 
-      assert Galleries.reorder_gallery(actor(confirmed_user_fixture()), "#{gallery.id}", %{
+      assert Galleries.update_gallery_order(actor(confirmed_user_fixture()), "#{gallery.id}", %{
                "image_ids" => [image_a.id, image_b.id]
              }) ==
                {:error, :unauthorized}
@@ -457,7 +457,7 @@ defmodule Philomena.GalleriesTest do
     test "a banned actor is rejected" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
-      assert Galleries.reorder_gallery(actor, "abc", [1]) == {:error, :ban}
+      assert Galleries.update_gallery_order(actor, "abc", [1]) == {:error, :ban}
     end
 
     test "accepts a subset but rejects extra, duplicate, and malformed image ids" do
@@ -468,7 +468,9 @@ defmodule Philomena.GalleriesTest do
       gallery_image_fixture(gallery, image_b)
 
       assert {:ok, %ReorderForm{}} =
-               Galleries.reorder_gallery(actor(user), gallery.id, %{"image_ids" => [image_a.id]})
+               Galleries.update_gallery_order(actor(user), gallery.id, %{
+                 "image_ids" => [image_a.id]
+               })
 
       for invalid_order <- [
             [image_a.id, image_b.id, 999_999_999],
@@ -476,7 +478,7 @@ defmodule Philomena.GalleriesTest do
             [to_string(image_a.id), "not-an-id"]
           ] do
         assert {:error, %Ecto.Changeset{}} =
-                 Galleries.reorder_gallery(actor(user), gallery.id, %{
+                 Galleries.update_gallery_order(actor(user), gallery.id, %{
                    "image_ids" => invalid_order
                  })
       end
@@ -490,7 +492,7 @@ defmodule Philomena.GalleriesTest do
       gallery_image_fixture(gallery, image_b)
 
       assert {:ok, %ReorderForm{}} =
-               Galleries.reorder_gallery(actor(user), gallery.id, %{
+               Galleries.update_gallery_order(actor(user), gallery.id, %{
                  "image_ids" => [to_string(image_b.id)]
                })
     end
@@ -525,7 +527,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(confirmed_user_fixture())
 
       assert {:ok, %Gallery{} = returned} =
-               Galleries.mark_gallery_read(actor(user), "#{gallery.id}")
+               Galleries.create_gallery_read(actor(user), "#{gallery.id}")
 
       assert returned.id == gallery.id
     end
@@ -533,22 +535,22 @@ defmodule Philomena.GalleriesTest do
     # No authorization runs here, so an unknown id is not-found for everyone,
     # admins included.
     test "an unknown id is not-found for a user and for an admin" do
-      assert Galleries.mark_gallery_read(actor(confirmed_user_fixture()), "999999999") ==
+      assert Galleries.create_gallery_read(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
 
-      assert Galleries.mark_gallery_read(actor(admin_user_fixture()), "999999999") ==
+      assert Galleries.create_gallery_read(actor(admin_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.mark_gallery_read(actor(confirmed_user_fixture()), "abc") ==
+      assert Galleries.create_gallery_read(actor(confirmed_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "an anonymous actor is unauthorized for a real gallery" do
       gallery = gallery_fixture(confirmed_user_fixture())
 
-      assert Galleries.mark_gallery_read(actor(), gallery.id) == {:error, :unauthorized}
+      assert Galleries.create_gallery_read(actor(), gallery.id) == {:error, :unauthorized}
     end
   end
 
@@ -557,10 +559,14 @@ defmodule Philomena.GalleriesTest do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(confirmed_user_fixture())
 
-      assert {:ok, %Gallery{}} = Galleries.subscribe_gallery(actor(user), "#{gallery.id}")
+      assert {:ok, %Gallery{}} =
+               Galleries.create_gallery_subscription(actor(user), "#{gallery.id}")
+
       assert Galleries.subscribed?(gallery, user)
 
-      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(actor(user), "#{gallery.id}")
+      assert {:ok, %Gallery{}} =
+               Galleries.delete_gallery_subscription(actor(user), "#{gallery.id}")
+
       refute Galleries.subscribed?(gallery, user)
     end
 
@@ -568,17 +574,19 @@ defmodule Philomena.GalleriesTest do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(confirmed_user_fixture())
 
-      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(actor(user), "#{gallery.id}")
+      assert {:ok, %Gallery{}} =
+               Galleries.delete_gallery_subscription(actor(user), "#{gallery.id}")
+
       refute Galleries.subscribed?(gallery, user)
     end
 
     test "subscribing to an unknown id is not-found" do
-      assert Galleries.subscribe_gallery(actor(confirmed_user_fixture()), "999999999") ==
+      assert Galleries.create_gallery_subscription(actor(confirmed_user_fixture()), "999999999") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.subscribe_gallery(actor(confirmed_user_fixture()), "abc") ==
+      assert Galleries.create_gallery_subscription(actor(confirmed_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
@@ -587,10 +595,10 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(confirmed_user_fixture())
       actor = actor(user, ban: @ban)
 
-      assert {:ok, %Gallery{}} = Galleries.subscribe_gallery(actor, "#{gallery.id}")
+      assert {:ok, %Gallery{}} = Galleries.create_gallery_subscription(actor, "#{gallery.id}")
       assert Galleries.subscribed?(gallery, user)
 
-      assert {:ok, %Gallery{}} = Galleries.unsubscribe_gallery(actor, "#{gallery.id}")
+      assert {:ok, %Gallery{}} = Galleries.delete_gallery_subscription(actor, "#{gallery.id}")
       refute Galleries.subscribed?(gallery, user)
     end
   end
@@ -605,7 +613,7 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.load_gallery_page(actor(user), scope(), "#{gallery.id}")
+               Galleries.show_gallery(actor(user), scope(), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
       # The images page carries {image, hit} tuples, not bare image structs.
@@ -621,19 +629,19 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.load_gallery_page(actor(), scope(), "#{gallery.id}")
+               Galleries.show_gallery(actor(), scope(), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
       assert Enum.empty?(page.images)
     end
 
     test "an unknown id is not-found for an anonymous viewer" do
-      assert Galleries.load_gallery_page(actor(), scope(), "999999999") ==
+      assert Galleries.show_gallery(actor(), scope(), "999999999") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.load_gallery_page(actor(), scope(), "abc") == {:error, :not_found}
+      assert Galleries.show_gallery(actor(), scope(), "abc") == {:error, :not_found}
     end
   end
 
@@ -645,7 +653,7 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Gallery)
 
       assert {:ok, page, _changeset} =
-               Galleries.load_gallery_index(
+               Galleries.list_galleries(
                  actor(),
                  %{"title" => "wanted"},
                  @pagination
@@ -661,7 +669,7 @@ defmodule Philomena.GalleriesTest do
       gallery = gallery_fixture(user)
       SearchHelpers.reindex_all!(Gallery)
 
-      assert {:ok, page, _changeset} = Galleries.load_gallery_index(actor(), %{}, @pagination)
+      assert {:ok, page, _changeset} = Galleries.list_galleries(actor(), %{}, @pagination)
 
       assert [%Gallery{} = loaded] = Enum.filter(page.entries, &(&1.id == gallery.id))
       # The thumbnail association is loaded, not left as a lazy placeholder.
@@ -678,15 +686,15 @@ defmodule Philomena.GalleriesTest do
       :ok = Search.refresh_index!(Gallery)
 
       params = %{"include_image" => to_string(image.id)}
-      assert {:ok, page, _changeset} = Galleries.load_gallery_index(actor(), params, @pagination)
+      assert {:ok, page, _changeset} = Galleries.list_galleries(actor(), params, @pagination)
       assert Enum.any?(page.entries, &(&1.id == gallery.id))
 
       assert {:ok, _gallery} =
-               Galleries.remove_image_from_gallery(actor(user), gallery.id, image.id)
+               Galleries.delete_gallery_image(actor(user), gallery.id, image.id)
 
       assert :ok = Galleries.perform_reindex(:id, [gallery.id])
       :ok = Search.refresh_index!(Gallery)
-      assert {:ok, page, _changeset} = Galleries.load_gallery_index(actor(), params, @pagination)
+      assert {:ok, page, _changeset} = Galleries.list_galleries(actor(), params, @pagination)
       refute Enum.any?(page.entries, &(&1.id == gallery.id))
     end
   end

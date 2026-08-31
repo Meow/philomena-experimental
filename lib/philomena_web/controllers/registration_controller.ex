@@ -10,12 +10,12 @@ defmodule PhilomenaWeb.RegistrationController do
   plug :assign_email_and_password_changesets when action in [:edit]
 
   def new(conn, _params) do
-    changeset = Users.change_user_registration(%User{})
+    changeset = Users.new_registration(%User{})
     render(conn, "new.html", changeset: changeset)
   end
 
   def create(conn, %{"user" => user_params}) do
-    case Users.register_user(user_params) do
+    case Users.create_registration(user_params) do
       {:ok, user} ->
         UserAuth.update_usages(conn, user)
 
@@ -46,6 +46,6 @@ defmodule PhilomenaWeb.RegistrationController do
 
     conn
     |> assign(:email_changeset, Users.change_user_email(user))
-    |> assign(:password_changeset, Users.change_user_password(user))
+    |> assign(:password_changeset, Users.edit_password(user))
   end
 end

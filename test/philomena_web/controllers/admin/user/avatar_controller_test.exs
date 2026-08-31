@@ -1,7 +1,7 @@
 defmodule PhilomenaWeb.Admin.User.AvatarControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
-  # Postgres-only: the S3 delete in Users.remove_avatar/1 goes through the
+  # Postgres-only: the S3 delete in Users.delete_avatar/1 goes through the
   # stubbed ex_aws client and the reindex is a dead Exq enqueue;
   # moderation_log/2 is a synchronous insert.
 

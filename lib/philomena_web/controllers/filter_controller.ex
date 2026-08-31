@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.FilterController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"fq" => fq}) do
-    case Filters.search_filters(conn.assigns.actor, fq, conn.assigns.pagination) do
+    case Filters.query_filters(conn.assigns.actor, fq, conn.assigns.pagination) do
       {:ok, filters} ->
         render(conn, "index.html", title: "Filters", filters: filters)
 
@@ -19,7 +19,7 @@ defmodule PhilomenaWeb.FilterController do
 
   def index(conn, _params) do
     with {:ok, {my_filters, system_filters}} <-
-           Filters.index_filters(conn.assigns.actor, conn.assigns.scrivener) do
+           Filters.list_filters(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "Filters",
         my_filters: my_filters,
@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def show(conn, %{"id" => id}) do
-    with {:ok, page} <- Filters.load_filter_page(conn.assigns.actor, id) do
+    with {:ok, page} <- Filters.show_filter_page(conn.assigns.actor, id) do
       render(conn, "show.html",
         title: "Showing Filter",
         filter: page.filter,
@@ -58,7 +58,7 @@ defmodule PhilomenaWeb.FilterController do
   end
 
   def edit(conn, %{"id" => id}) do
-    with {:ok, {filter, changeset}} <- Filters.load_filter_for_edit(conn.assigns.actor, id) do
+    with {:ok, {filter, changeset}} <- Filters.edit_filter(conn.assigns.actor, id) do
       render(conn, "edit.html", title: "Editing Filter", filter: filter, changeset: changeset)
     end
   end

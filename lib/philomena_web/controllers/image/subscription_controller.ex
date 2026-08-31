@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Image.SubscriptionController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, params) do
-    case Images.subscribe_image(conn.assigns.actor, params["image_id"]) do
+    case Images.create_image_subscription(conn.assigns.actor, params["image_id"]) do
       {:ok, image} ->
         render(conn, "_subscription.html", image: image, watching: true, layout: false)
 
@@ -19,7 +19,7 @@ defmodule PhilomenaWeb.Image.SubscriptionController do
   end
 
   def delete(conn, params) do
-    with {:ok, image} <- Images.unsubscribe_image(conn.assigns.actor, params["image_id"]) do
+    with {:ok, image} <- Images.delete_image_subscription(conn.assigns.actor, params["image_id"]) do
       render(conn, "_subscription.html", image: image, watching: false, layout: false)
     end
   end

@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.FingerprintProfileController do
 
   def show(conn, %{"id" => fingerprint}) do
     with {:ok, profile} <-
-           UserFingerprints.load_fingerprint_profile(conn.assigns.actor, fingerprint) do
+           UserFingerprints.show_fingerprint_profile(conn.assigns.actor, fingerprint) do
       render(conn, "show.html",
         title: "#{profile.fingerprint}'s fingerprint profile",
         fingerprint: profile.fingerprint,

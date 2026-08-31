@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.IpProfile.TagChangeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"ip_profile_id" => ip} = params) do
-    case TagChanges.ip_tag_changes(conn.assigns.actor, ip, params, conn.assigns.pagination) do
+    case TagChanges.list_ip_tag_changes(conn.assigns.actor, ip, params, conn.assigns.pagination) do
       {:ok, %TagChangePage{target: normalized_ip, tag_changes: tag_changes}, changeset} ->
         ip = to_string(normalized_ip)
         path = ~p"/ip_profiles/#{ip}/tag_changes"

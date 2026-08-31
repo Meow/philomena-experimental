@@ -10,7 +10,7 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
     renderer = &MarkdownRenderer.render_collection(&1, conn)
 
     with {:ok, mod_notes} <-
-           ModNotes.load_mod_note_index(
+           ModNotes.list_mod_notes(
              conn.assigns.actor,
              params,
              renderer,
@@ -43,7 +43,7 @@ defmodule PhilomenaWeb.Admin.ModNoteController do
 
   def edit(conn, %{"id" => id}) do
     with {:ok, {mod_note, changeset}} <-
-           ModNotes.load_mod_note_for_edit(conn.assigns.actor, id) do
+           ModNotes.edit_mod_note(conn.assigns.actor, id) do
       render(conn, "edit.html",
         title: "Editing Mod Note",
         mod_note: mod_note,

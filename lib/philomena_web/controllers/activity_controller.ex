@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.ActivityController do
 
   def index(conn, _params) do
     with {:ok, page} <-
-           Activities.load_front_page(
+           Activities.list_activities(
              conn.assigns.actor,
              ImageScope.search_scope(conn),
              conn.assigns.current_filter,

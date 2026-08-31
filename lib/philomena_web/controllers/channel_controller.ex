@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.ChannelController do
   def index(conn, params) do
     show_nsfw? = conn.cookies["chan_nsfw"] == "true"
 
-    case Channels.load_channels(conn.assigns.actor, show_nsfw?, params, conn.assigns.scrivener) do
+    case Channels.list_channels(conn.assigns.actor, show_nsfw?, params, conn.assigns.scrivener) do
       {:ok, channels, subscriptions, changeset} ->
         render(conn, "index.html",
           title: "Livestreams",
@@ -30,7 +30,7 @@ defmodule PhilomenaWeb.ChannelController do
   end
 
   def show(conn, params) do
-    with {:ok, channel} <- Channels.visit_channel(conn.assigns.actor, params["id"]) do
+    with {:ok, channel} <- Channels.show_channel(conn.assigns.actor, params["id"]) do
       redirect(conn, external: channel_url(channel))
     end
   end
@@ -58,7 +58,7 @@ defmodule PhilomenaWeb.ChannelController do
 
   def edit(conn, params) do
     with {:ok, {channel, changeset}} <-
-           Channels.load_channel_for_edit(conn.assigns.actor, params["id"]) do
+           Channels.edit_channel(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Channel", channel: channel, changeset: changeset)
     end
   end

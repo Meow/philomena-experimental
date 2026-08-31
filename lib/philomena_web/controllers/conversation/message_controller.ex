@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Conversation.MessageController do
 
   defp render_message_error(conn, conversation_id, changeset) do
     with {:ok, page} <-
-           Conversations.load_conversation_page(
+           Conversations.show_conversation(
              conn.assigns.actor,
              conversation_id,
              conn.assigns.scrivener

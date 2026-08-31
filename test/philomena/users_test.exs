@@ -196,7 +196,7 @@ defmodule Philomena.UsersTest do
     test "loads an active profile and its public associations" do
       user = confirmed_user_fixture()
 
-      assert {:ok, loaded} = Users.load_profile_by_id(actor(), user.id)
+      assert {:ok, loaded} = Users.show_profile(actor(), user.id)
       assert loaded.id == user.id
       assert is_list(loaded.public_links)
       assert is_list(loaded.awards)
@@ -210,14 +210,14 @@ defmodule Philomena.UsersTest do
 
       for viewer <- [actor(), actor(confirmed_user_fixture()), actor(admin_user_fixture())],
           id <- ["not-an-id", -1, user.id] do
-        assert Users.load_profile_by_id(viewer, id) == {:error, :not_found}
+        assert Users.show_profile(viewer, id) == {:error, :not_found}
       end
     end
   end
 
   describe "register_user/1" do
     test "requires email and password to be set" do
-      {:error, changeset} = Users.register_user(%{})
+      {:error, changeset} = Users.create_registration(%{})
 
       assert %{
                password: ["can't be blank"],
@@ -226,7 +226,8 @@ defmodule Philomena.UsersTest do
     end
 
     test "validates email and password when given" do
-      {:error, changeset} = Users.register_user(%{email: "not valid", password: "not valid"})
+      {:error, changeset} =
+        Users.create_registration(%{email: "not valid", password: "not valid"})
 
       assert %{
                email: ["must be valid (e.g., user@example.com)"],
@@ -236,7 +237,7 @@ defmodule Philomena.UsersTest do
 
     test "validates maximum values for email and password for security" do
       too_long = String.duplicate("db", 100)
-      {:error, changeset} = Users.register_user(%{email: too_long, password: too_long})
+      {:error, changeset} = Users.create_registration(%{email: too_long, password: too_long})
       assert "should be at most 160 character(s)" in errors_on(changeset).email
       assert "should be at most 80 character(s)" in errors_on(changeset).password
     end
@@ -245,13 +246,13 @@ defmodule Philomena.UsersTest do
       %{email: email} = user_fixture()
 
       {:error, changeset} =
-        Users.register_user(%{name: email, password: valid_user_password(), email: email})
+        Users.create_registration(%{name: email, password: valid_user_password(), email: email})
 
       assert "has already been taken" in errors_on(changeset).email
 
       # Now try with the upper cased email too, to check that email case is ignored.
       {:error, changeset} =
-        Users.register_user(%{
+        Users.create_registration(%{
           name: String.upcase(email),
           email: String.upcase(email),
           password: valid_user_password()
@@ -264,7 +265,7 @@ defmodule Philomena.UsersTest do
       email = unique_user_email()
 
       {:ok, user} =
-        Users.register_user(%{name: email, email: email, password: valid_user_password()})
+        Users.create_registration(%{name: email, email: email, password: valid_user_password()})
 
       assert user.email == email
       assert is_binary(user.hashed_password)
@@ -276,7 +277,7 @@ defmodule Philomena.UsersTest do
       email = unique_user_email()
 
       {:ok, user} =
-        Users.register_user(%{name: email, email: email, password: valid_user_password()})
+        Users.create_registration(%{name: email, email: email, password: valid_user_password()})
 
       settings = Repo.get!(Settings, user.id)
       assert settings.user_id == user.id
@@ -291,7 +292,7 @@ defmodule Philomena.UsersTest do
 
   describe "change_user_registration/2" do
     test "returns a changeset" do
-      assert %Ecto.Changeset{} = changeset = Users.change_user_registration(%User{})
+      assert %Ecto.Changeset{} = changeset = Users.new_registration(%User{})
       assert changeset.required == [:password, :email, :name]
     end
   end
@@ -309,13 +310,13 @@ defmodule Philomena.UsersTest do
     end
 
     test "requires email to change", %{user: user} do
-      {:error, changeset} = Users.apply_user_email(user, valid_user_password(), %{})
+      {:error, changeset} = Users.create_email(user, valid_user_password(), %{})
       assert %{email: ["did not change"]} = errors_on(changeset)
     end
 
     test "validates email", %{user: user} do
       {:error, changeset} =
-        Users.apply_user_email(user, valid_user_password(), %{email: "not valid"})
+        Users.create_email(user, valid_user_password(), %{email: "not valid"})
 
       assert %{email: ["must be valid (e.g., user@example.com)"]} = errors_on(changeset)
     end
@@ -324,7 +325,7 @@ defmodule Philomena.UsersTest do
       too_long = String.duplicate("db", 100)
 
       {:error, changeset} =
-        Users.apply_user_email(user, valid_user_password(), %{email: too_long})
+        Users.create_email(user, valid_user_password(), %{email: too_long})
 
       assert "should be at most 160 character(s)" in errors_on(changeset).email
     end
@@ -332,20 +333,20 @@ defmodule Philomena.UsersTest do
     test "validates email uniqueness", %{user: user} do
       %{email: email} = user_fixture()
 
-      {:error, changeset} = Users.apply_user_email(user, valid_user_password(), %{email: email})
+      {:error, changeset} = Users.create_email(user, valid_user_password(), %{email: email})
 
       assert "has already been taken" in errors_on(changeset).email
     end
 
     test "validates current password", %{user: user} do
-      {:error, changeset} = Users.apply_user_email(user, "invalid", %{email: unique_user_email()})
+      {:error, changeset} = Users.create_email(user, "invalid", %{email: unique_user_email()})
 
       assert %{current_password: ["is not valid"]} = errors_on(changeset)
     end
 
     test "applies the email without persisting it", %{user: user} do
       email = unique_user_email()
-      {:ok, user} = Users.apply_user_email(user, valid_user_password(), %{email: email})
+      {:ok, user} = Users.create_email(user, valid_user_password(), %{email: email})
       assert user.email == email
       assert Users.fetch_user_for_worker!(user.id).email != email
     end
@@ -384,7 +385,7 @@ defmodule Philomena.UsersTest do
     end
 
     test "updates the email with a valid token", %{user: user, token: token, email: email} do
-      assert Users.update_user_email(user, token) == :ok
+      assert Users.show_email(user, token) == :ok
       changed_user = Repo.get!(User, user.id)
       assert changed_user.email != user.email
       assert changed_user.email == email
@@ -394,20 +395,20 @@ defmodule Philomena.UsersTest do
     end
 
     test "does not update email with invalid token", %{user: user} do
-      assert Users.update_user_email(user, "oops") == :error
+      assert Users.show_email(user, "oops") == :error
       assert Repo.get!(User, user.id).email == user.email
       assert Repo.get_by(UserToken, user_id: user.id)
     end
 
     test "does not update email if user email changed", %{user: user, token: token} do
-      assert Users.update_user_email(%{user | email: "current@example.com"}, token) == :error
+      assert Users.show_email(%{user | email: "current@example.com"}, token) == :error
       assert Repo.get!(User, user.id).email == user.email
       assert Repo.get_by(UserToken, user_id: user.id)
     end
 
     test "does not update email if token expired", %{user: user, token: token} do
       {1, nil} = Repo.update_all(UserToken, set: [created_at: ~N[2020-01-01 00:00:00]])
-      assert Users.update_user_email(user, token) == :error
+      assert Users.show_email(user, token) == :error
       assert Repo.get!(User, user.id).email == user.email
       assert Repo.get_by(UserToken, user_id: user.id)
     end
@@ -415,7 +416,7 @@ defmodule Philomena.UsersTest do
 
   describe "change_user_password/2" do
     test "returns a user changeset" do
-      assert %Ecto.Changeset{} = changeset = Users.change_user_password(%User{})
+      assert %Ecto.Changeset{} = changeset = Users.edit_password(%User{})
       assert changeset.required == [:password]
     end
   end
@@ -427,7 +428,7 @@ defmodule Philomena.UsersTest do
 
     test "validates password", %{user: user} do
       {:error, changeset} =
-        Users.update_user_password(user, valid_user_password(), %{
+        Users.update_password(user, valid_user_password(), %{
           password: "not valid",
           password_confirmation: "another"
         })
@@ -442,21 +443,21 @@ defmodule Philomena.UsersTest do
       too_long = String.duplicate("db", 200)
 
       {:error, changeset} =
-        Users.update_user_password(user, valid_user_password(), %{password: too_long})
+        Users.update_password(user, valid_user_password(), %{password: too_long})
 
       assert "should be at most 80 character(s)" in errors_on(changeset).password
     end
 
     test "validates current password", %{user: user} do
       {:error, changeset} =
-        Users.update_user_password(user, "invalid", %{password: valid_user_password()})
+        Users.update_password(user, "invalid", %{password: valid_user_password()})
 
       assert %{current_password: ["is not valid"]} = errors_on(changeset)
     end
 
     test "updates the password", %{user: user} do
       {:ok, user} =
-        Users.update_user_password(user, valid_user_password(), %{
+        Users.update_password(user, valid_user_password(), %{
           password: "new valid password"
         })
 
@@ -470,7 +471,7 @@ defmodule Philomena.UsersTest do
       _ = Users.generate_user_session_token(user)
 
       {:ok, _} =
-        Users.update_user_password(user, valid_user_password(), %{
+        Users.update_password(user, valid_user_password(), %{
           password: "new valid password"
         })
 
@@ -627,7 +628,7 @@ defmodule Philomena.UsersTest do
     end
 
     test "confirms the email with a valid token", %{user: user, token: token} do
-      assert {:ok, confirmed_user} = Users.confirm_user(token)
+      assert {:ok, confirmed_user} = Users.update_confirmation(token)
       assert confirmed_user.confirmed_at
       assert confirmed_user.confirmed_at != user.confirmed_at
       assert Repo.get!(User, user.id).confirmed_at
@@ -635,14 +636,14 @@ defmodule Philomena.UsersTest do
     end
 
     test "does not confirm with invalid token", %{user: user} do
-      assert Users.confirm_user("oops") == :error
+      assert Users.update_confirmation("oops") == :error
       refute Repo.get!(User, user.id).confirmed_at
       assert Repo.get_by(UserToken, user_id: user.id)
     end
 
     test "does not confirm email if token expired", %{user: user, token: token} do
       {1, nil} = Repo.update_all(UserToken, set: [created_at: ~N[2020-01-01 00:00:00]])
-      assert Users.confirm_user(token) == :error
+      assert Users.update_confirmation(token) == :error
       refute Repo.get!(User, user.id).confirmed_at
       assert Repo.get_by(UserToken, user_id: user.id)
     end
@@ -680,21 +681,21 @@ defmodule Philomena.UsersTest do
     end
 
     test "unlocks the user with a valid token", %{user: user, token: token} do
-      assert {:ok, unlocked_user} = Users.unlock_user_by_token(token)
+      assert {:ok, unlocked_user} = Users.show_unlock(token)
       refute unlocked_user.locked_at
       refute Repo.get!(User, user.id).locked_at
       refute Repo.get_by(UserToken, user_id: user.id)
     end
 
     test "does not confirm with invalid token", %{user: user} do
-      assert Users.unlock_user_by_token("oops") == :error
+      assert Users.show_unlock("oops") == :error
       assert Repo.get!(User, user.id).locked_at
       assert Repo.get_by(UserToken, user_id: user.id)
     end
 
     test "does not unlocked if token expired", %{user: user, token: token} do
       {1, nil} = Repo.update_all(UserToken, set: [created_at: ~N[2020-01-01 00:00:00]])
-      assert Users.unlock_user_by_token(token) == :error
+      assert Users.show_unlock(token) == :error
       assert Repo.get!(User, user.id).locked_at
       assert Repo.get_by(UserToken, user_id: user.id)
     end
@@ -755,7 +756,7 @@ defmodule Philomena.UsersTest do
 
     test "validates password", %{user: user} do
       {:error, changeset} =
-        Users.reset_user_password(user, %{
+        Users.update_password(user, %{
           password: "not valid",
           password_confirmation: "another"
         })
@@ -768,12 +769,12 @@ defmodule Philomena.UsersTest do
 
     test "validates maximum values for password for security", %{user: user} do
       too_long = String.duplicate("db", 100)
-      {:error, changeset} = Users.reset_user_password(user, %{password: too_long})
+      {:error, changeset} = Users.update_password(user, %{password: too_long})
       assert "should be at most 80 character(s)" in errors_on(changeset).password
     end
 
     test "updates the password", %{user: user} do
-      {:ok, updated_user} = Users.reset_user_password(user, %{password: "new valid password"})
+      {:ok, updated_user} = Users.update_password(user, %{password: "new valid password"})
       assert is_nil(updated_user.password)
 
       assert {:ok, _} =
@@ -782,7 +783,7 @@ defmodule Philomena.UsersTest do
 
     test "deletes all tokens for the given user", %{user: user} do
       _ = Users.generate_user_session_token(user)
-      {:ok, _} = Users.reset_user_password(user, %{password: "new valid password"})
+      {:ok, _} = Users.update_password(user, %{password: "new valid password"})
       refute Repo.get_by(UserToken, user_id: user.id)
     end
   end
@@ -798,7 +799,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, %Ecto.Changeset{data: loaded}} =
-               Users.load_profile_for_description_edit(actor(user), user.slug)
+               Users.edit_profile_description(actor(user), user.slug)
 
       assert loaded.id == user.id
     end
@@ -807,7 +808,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, %Ecto.Changeset{data: loaded}} =
-               Users.load_profile_for_description_edit(actor(moderator_user_fixture()), user.slug)
+               Users.edit_profile_description(actor(moderator_user_fixture()), user.slug)
 
       assert loaded.id == user.id
     end
@@ -815,34 +816,34 @@ defmodule Philomena.UsersTest do
     test "an unrelated user may not edit another user's description" do
       user = confirmed_user_fixture()
 
-      assert Users.load_profile_for_description_edit(actor(confirmed_user_fixture()), user.slug) ==
+      assert Users.edit_profile_description(actor(confirmed_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
 
     test "a banned actor is rejected before any authorization" do
       user = confirmed_user_fixture()
 
-      assert Users.load_profile_for_description_edit(actor(user, ban: @ban), user.slug) ==
+      assert Users.edit_profile_description(actor(user, ban: @ban), user.slug) ==
                {:error, :ban}
     end
 
     test "an actor without a fingerprint is rejected before authorization" do
       user = confirmed_user_fixture()
 
-      assert Users.load_profile_for_description_edit(
+      assert Users.edit_profile_description(
                actor(user, fingerprint: nil),
                user.slug
              ) == {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before instance authorization" do
-      assert Users.load_profile_for_description_edit(
+      assert Users.edit_profile_description(
                actor(moderator_user_fixture()),
                "no-such-user"
              ) ==
                {:error, :not_found}
 
-      assert Users.load_profile_for_description_edit(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.edit_profile_description(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -852,7 +853,9 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, updated} =
-               Users.update_description(actor(user), user.slug, %{"description" => "New bio text"})
+               Users.update_profile_description(actor(user), user.slug, %{
+                 "description" => "New bio text"
+               })
 
       assert updated.id == user.id
       assert Users.fetch_user_for_worker!(user.id).description == "New bio text"
@@ -863,14 +866,14 @@ defmodule Philomena.UsersTest do
       rule_fixture(name: "Review")
 
       assert {:ok, _updated} =
-               Users.update_description(actor(user), user.slug, %{
+               Users.update_profile_description(actor(user), user.slug, %{
                  "description" => "https://outside.example/profile"
                })
 
       assert Repo.aggregate(Report, :count) == 1
 
       assert {:ok, _updated} =
-               Users.update_description(actor(user), user.slug, %{
+               Users.update_profile_description(actor(user), user.slug, %{
                  "description" => "https://another-outside.example/profile"
                })
 
@@ -880,7 +883,7 @@ defmodule Philomena.UsersTest do
     test "a banned actor is rejected" do
       user = confirmed_user_fixture()
 
-      assert Users.update_description(actor(user, ban: @ban), user.slug, %{
+      assert Users.update_profile_description(actor(user, ban: @ban), user.slug, %{
                "description" => "New bio text"
              }) == {:error, :ban}
     end
@@ -888,7 +891,7 @@ defmodule Philomena.UsersTest do
     test "an actor with no fingerprint is unauthorized" do
       user = confirmed_user_fixture()
 
-      assert Users.update_description(actor(user, fingerprint: nil), user.slug, %{
+      assert Users.update_profile_description(actor(user, fingerprint: nil), user.slug, %{
                "description" => "New bio text"
              }) == {:error, :unauthorized}
     end
@@ -896,7 +899,7 @@ defmodule Philomena.UsersTest do
     test "an unrelated user may not update another user's description" do
       user = confirmed_user_fixture()
 
-      assert Users.update_description(actor(confirmed_user_fixture()), user.slug, %{
+      assert Users.update_profile_description(actor(confirmed_user_fixture()), user.slug, %{
                "description" => "New bio text"
              }) == {:error, :unauthorized}
     end
@@ -907,7 +910,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, %Ecto.Changeset{data: loaded}} =
-               Users.load_profile_for_scratchpad_edit(actor(moderator_user_fixture()), user.slug)
+               Users.edit_profile_scratchpad(actor(moderator_user_fixture()), user.slug)
 
       assert loaded.id == user.id
     end
@@ -916,7 +919,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, %Ecto.Changeset{data: loaded}} =
-               Users.load_profile_for_scratchpad_edit(actor(assistant_user_fixture()), user.slug)
+               Users.edit_profile_scratchpad(actor(assistant_user_fixture()), user.slug)
 
       assert loaded.id == user.id
     end
@@ -924,14 +927,14 @@ defmodule Philomena.UsersTest do
     test "a regular user may not edit the scratchpad" do
       user = confirmed_user_fixture()
 
-      assert Users.load_profile_for_scratchpad_edit(actor(confirmed_user_fixture()), user.slug) ==
+      assert Users.edit_profile_scratchpad(actor(confirmed_user_fixture()), user.slug) ==
                {:error, :unauthorized}
     end
 
     test "a banned actor is rejected before the mod-note check" do
       user = confirmed_user_fixture()
 
-      assert Users.load_profile_for_scratchpad_edit(
+      assert Users.edit_profile_scratchpad(
                actor(moderator_user_fixture(), ban: @ban),
                user.slug
              ) == {:error, :ban}
@@ -940,14 +943,14 @@ defmodule Philomena.UsersTest do
     test "an actor without a fingerprint is rejected before the mod-note check" do
       user = confirmed_user_fixture()
 
-      assert Users.load_profile_for_scratchpad_edit(
+      assert Users.edit_profile_scratchpad(
                actor(moderator_user_fixture(), fingerprint: nil),
                user.slug
              ) == {:error, :unauthorized}
     end
 
     test "a permitted actor naming an unknown slug is not-found" do
-      assert Users.load_profile_for_scratchpad_edit(
+      assert Users.edit_profile_scratchpad(
                actor(moderator_user_fixture()),
                "no-such-user"
              ) ==
@@ -960,7 +963,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, updated} =
-               Users.update_scratchpad(actor(moderator_user_fixture()), user.slug, %{
+               Users.update_profile_scratchpad(actor(moderator_user_fixture()), user.slug, %{
                  "scratchpad" => "Mod notes here"
                })
 
@@ -971,7 +974,7 @@ defmodule Philomena.UsersTest do
     test "a regular user may not update the scratchpad" do
       user = confirmed_user_fixture()
 
-      assert Users.update_scratchpad(actor(confirmed_user_fixture()), user.slug, %{
+      assert Users.update_profile_scratchpad(actor(confirmed_user_fixture()), user.slug, %{
                "scratchpad" => "Mod notes here"
              }) == {:error, :unauthorized}
     end
@@ -979,9 +982,13 @@ defmodule Philomena.UsersTest do
     test "a banned actor is rejected" do
       user = confirmed_user_fixture()
 
-      assert Users.update_scratchpad(actor(moderator_user_fixture(), ban: @ban), user.slug, %{
-               "scratchpad" => "Mod notes here"
-             }) == {:error, :ban}
+      assert Users.update_profile_scratchpad(
+               actor(moderator_user_fixture(), ban: @ban),
+               user.slug,
+               %{
+                 "scratchpad" => "Mod notes here"
+               }
+             ) == {:error, :ban}
     end
   end
 
@@ -993,7 +1000,7 @@ defmodule Philomena.UsersTest do
       user_ip_fixture(alias_user, "203.0.113.70")
 
       assert {:ok, %AliasMatches{} = matches} =
-               Users.load_alias_matches(actor(moderator_user_fixture()), subject.slug)
+               Users.list_profile_aliases(actor(moderator_user_fixture()), subject.slug)
 
       assert alias_user.id in Enum.map(matches.ip_matches, & &1.id)
       refute alias_user.id in Enum.map(matches.fp_matches, & &1.id)
@@ -1007,7 +1014,7 @@ defmodule Philomena.UsersTest do
       user_fingerprint_fixture(alias_user, "aliasfp70")
 
       assert {:ok, %AliasMatches{} = matches} =
-               Users.load_alias_matches(actor(moderator_user_fixture()), subject.slug)
+               Users.list_profile_aliases(actor(moderator_user_fixture()), subject.slug)
 
       assert alias_user.id in Enum.map(matches.fp_matches, & &1.id)
       refute alias_user.id in Enum.map(matches.ip_matches, & &1.id)
@@ -1022,7 +1029,7 @@ defmodule Philomena.UsersTest do
       user_fingerprint_fixture(alias_user, "aliasfp71")
 
       assert {:ok, %AliasMatches{} = matches} =
-               Users.load_alias_matches(actor(moderator_user_fixture()), subject.slug)
+               Users.list_profile_aliases(actor(moderator_user_fixture()), subject.slug)
 
       assert alias_user.id in Enum.map(matches.both_matches, & &1.id)
       refute alias_user.id in Enum.map(matches.ip_matches, & &1.id)
@@ -1030,7 +1037,7 @@ defmodule Philomena.UsersTest do
     end
 
     test "a regular user may not load alias matches" do
-      assert Users.load_alias_matches(
+      assert Users.list_profile_aliases(
                actor(confirmed_user_fixture()),
                confirmed_user_fixture().slug
              ) ==
@@ -1038,10 +1045,10 @@ defmodule Philomena.UsersTest do
     end
 
     test "an unknown slug is not-found before instance authorization" do
-      assert Users.load_alias_matches(actor(moderator_user_fixture()), "no-such-user") ==
+      assert Users.list_profile_aliases(actor(moderator_user_fixture()), "no-such-user") ==
                {:error, :not_found}
 
-      assert Users.load_alias_matches(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.list_profile_aliases(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1111,7 +1118,7 @@ defmodule Philomena.UsersTest do
       user = renameable_user()
 
       assert {:ok, %Ecto.Changeset{data: loaded}} =
-               Users.load_user_for_rename(actor(user))
+               Users.edit_name(actor(user))
 
       assert loaded.id == user.id
     end
@@ -1119,20 +1126,20 @@ defmodule Philomena.UsersTest do
     test "a banned actor is rejected before authorization" do
       user = confirmed_user_fixture()
 
-      assert Users.load_user_for_rename(actor(user, ban: @ban)) == {:error, :ban}
+      assert Users.edit_name(actor(user, ban: @ban)) == {:error, :ban}
     end
 
     test "an actor without a fingerprint is rejected before authorization" do
       user = confirmed_user_fixture()
 
-      assert Users.load_user_for_rename(actor(user, fingerprint: nil)) ==
+      assert Users.edit_name(actor(user, fingerprint: nil)) ==
                {:error, :unauthorized}
     end
 
     test "a user who renamed within the window is unauthorized" do
       user = recently_renamed_user()
 
-      assert Users.load_user_for_rename(actor(user)) == {:error, :unauthorized}
+      assert Users.edit_name(actor(user)) == {:error, :unauthorized}
     end
   end
 
@@ -1187,7 +1194,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
 
       assert {:ok, %Ecto.Changeset{data: loaded}} =
-               Users.load_user_for_avatar_edit(actor(user))
+               Users.edit_avatar(actor(user))
 
       assert loaded.id == user.id
     end
@@ -1195,13 +1202,13 @@ defmodule Philomena.UsersTest do
     test "a banned actor is rejected" do
       user = confirmed_user_fixture()
 
-      assert Users.load_user_for_avatar_edit(actor(user, ban: @ban)) == {:error, :ban}
+      assert Users.edit_avatar(actor(user, ban: @ban)) == {:error, :ban}
     end
 
     test "an actor without a fingerprint is rejected" do
       user = confirmed_user_fixture()
 
-      assert Users.load_user_for_avatar_edit(actor(user, fingerprint: nil)) ==
+      assert Users.edit_avatar(actor(user, fingerprint: nil)) ==
                {:error, :unauthorized}
     end
   end
@@ -1252,7 +1259,7 @@ defmodule Philomena.UsersTest do
     test "removes the acting user's avatar" do
       user = user_with_avatar_fixture()
 
-      assert {:ok, updated} = Users.remove_avatar(actor(user))
+      assert {:ok, updated} = Users.delete_avatar(actor(user))
       refute updated.avatar
       refute Users.fetch_user_for_worker!(user.id).avatar
     end
@@ -1260,13 +1267,13 @@ defmodule Philomena.UsersTest do
     test "a banned actor is rejected" do
       user = user_with_avatar_fixture()
 
-      assert Users.remove_avatar(actor(user, ban: @ban)) == {:error, :ban}
+      assert Users.delete_avatar(actor(user, ban: @ban)) == {:error, :ban}
     end
 
     test "an actor with no fingerprint is unauthorized" do
       user = user_with_avatar_fixture()
 
-      assert Users.remove_avatar(actor(user, fingerprint: nil)) == {:error, :unauthorized}
+      assert Users.delete_avatar(actor(user, fingerprint: nil)) == {:error, :unauthorized}
     end
   end
 
@@ -1275,7 +1282,7 @@ defmodule Philomena.UsersTest do
       user = confirmed_user_fixture()
       refute user.encrypted_otp_secret
 
-      assert {:ok, updated} = Users.setup_totp_secret(user)
+      assert {:ok, updated} = Users.edit_totp(user)
       assert updated.encrypted_otp_secret
       refute updated.otp_required_for_login
     end
@@ -1283,7 +1290,7 @@ defmodule Philomena.UsersTest do
 
   describe "update_totp/2" do
     test "enables 2FA with a valid code, returning ten fresh backup codes" do
-      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+      {:ok, user} = Users.edit_totp(confirmed_user_fixture())
 
       assert {:ok, updated, backup_codes} =
                Users.update_totp(user, totp_params(valid_totp_code(user)))
@@ -1309,7 +1316,7 @@ defmodule Philomena.UsersTest do
     end
 
     test "a wrong password is a rejected changeset" do
-      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+      {:ok, user} = Users.edit_totp(confirmed_user_fixture())
 
       assert {:error, %Ecto.Changeset{} = changeset} =
                Users.update_totp(user, %{
@@ -1324,7 +1331,7 @@ defmodule Philomena.UsersTest do
     end
 
     test "an invalid second-factor code is a rejected changeset when enabling" do
-      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+      {:ok, user} = Users.edit_totp(confirmed_user_fixture())
 
       assert {:error, %Ecto.Changeset{} = changeset} =
                Users.update_totp(user, totp_params("not a code"))
@@ -1339,7 +1346,7 @@ defmodule Philomena.UsersTest do
       user = totp_user_fixture()
 
       assert {:ok, %User{} = consumed} =
-               Users.consume_totp_token(user, %{
+               Users.create_session_totp(user, %{
                  "user" => %{"twofactor_token" => valid_totp_code(user)}
                })
 
@@ -1347,13 +1354,13 @@ defmodule Philomena.UsersTest do
     end
 
     test "accepts a backup code once, then rejects the same code" do
-      {:ok, user} = Users.setup_totp_secret(confirmed_user_fixture())
+      {:ok, user} = Users.edit_totp(confirmed_user_fixture())
 
       {:ok, user, [backup_code | _rest]} =
         Users.update_totp(user, totp_params(valid_totp_code(user)))
 
       assert {:ok, %User{} = consumed} =
-               Users.consume_totp_token(user, %{
+               Users.create_session_totp(user, %{
                  "user" => %{"twofactor_token" => backup_code}
                })
 
@@ -1361,7 +1368,7 @@ defmodule Philomena.UsersTest do
       assert length(consumed.otp_backup_codes) == 9
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Users.consume_totp_token(consumed, %{
+               Users.create_session_totp(consumed, %{
                  "user" => %{"twofactor_token" => backup_code}
                })
 
@@ -1372,7 +1379,7 @@ defmodule Philomena.UsersTest do
       user = totp_user_fixture()
 
       assert {:error, %Ecto.Changeset{} = changeset} =
-               Users.consume_totp_token(user, %{
+               Users.create_session_totp(user, %{
                  "user" => %{"twofactor_token" => "not a code"}
                })
 
@@ -1387,11 +1394,11 @@ defmodule Philomena.UsersTest do
     end
 
     test "an anonymous viewer is rejected before any search" do
-      assert Users.search_users(actor(), %{}, @pagination) == {:error, :unauthorized}
+      assert Users.query_users(actor(), %{}, @pagination) == {:error, :unauthorized}
     end
 
     test "a regular user is rejected" do
-      assert Users.search_users(actor(confirmed_user_fixture()), %{}, @pagination) ==
+      assert Users.query_users(actor(confirmed_user_fixture()), %{}, @pagination) ==
                {:error, :unauthorized}
     end
 
@@ -1400,7 +1407,7 @@ defmodule Philomena.UsersTest do
       SearchHelpers.reindex_all!(User)
 
       assert {:ok, page, _changeset} =
-               Users.search_users(actor(moderator_user_fixture()), %{}, @pagination)
+               Users.query_users(actor(moderator_user_fixture()), %{}, @pagination)
 
       assert target.id in Enum.map(page.entries, & &1.id)
     end
@@ -1410,7 +1417,7 @@ defmodule Philomena.UsersTest do
       SearchHelpers.reindex_all!(User)
 
       assert {:ok, page, _changeset} =
-               Users.search_users(actor(admin_user_fixture()), %{}, @pagination)
+               Users.query_users(actor(admin_user_fixture()), %{}, @pagination)
 
       assert target.id in Enum.map(page.entries, & &1.id)
     end
@@ -1420,7 +1427,7 @@ defmodule Philomena.UsersTest do
       SearchHelpers.reindex_all!(User)
 
       assert {:ok, page, _changeset} =
-               Users.search_users(actor(admin_user_fixture()), %{"query" => ""}, @pagination)
+               Users.query_users(actor(admin_user_fixture()), %{"query" => ""}, @pagination)
 
       assert target.id in Enum.map(page.entries, & &1.id)
     end
@@ -1431,7 +1438,7 @@ defmodule Philomena.UsersTest do
       SearchHelpers.reindex_all!(User)
 
       assert {:ok, page, _changeset} =
-               Users.search_users(
+               Users.query_users(
                  actor(admin_user_fixture()),
                  %{"query" => "name:search_target_needle"},
                  @pagination
@@ -1442,7 +1449,7 @@ defmodule Philomena.UsersTest do
 
     test "an unparsable query returns the parser's message string" do
       assert {:error, changeset} =
-               Users.search_users(actor(admin_user_fixture()), %{"query" => "("}, @pagination)
+               Users.query_users(actor(admin_user_fixture()), %{"query" => "("}, @pagination)
 
       assert errors_on(changeset)[:query]
     end
@@ -1454,7 +1461,7 @@ defmodule Philomena.UsersTest do
       role = Repo.insert!(%Role{name: "admin", resource_type: "Forum"})
 
       assert {:ok, %AdminUserForm{changeset: changeset, roles: roles}} =
-               Users.load_user_for_edit(actor(admin_user_fixture()), target.slug)
+               Users.edit_user(actor(admin_user_fixture()), target.slug)
 
       user = changeset.data
 
@@ -1467,28 +1474,28 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.load_user_for_edit(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.edit_user(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "a User-admin role_map moderator is rejected" do
       target = managed_target()
 
-      assert Users.load_user_for_edit(actor(user_admin_moderator()), target.slug) ==
+      assert Users.edit_user(actor(user_admin_moderator()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous actor is rejected" do
       target = managed_target()
 
-      assert Users.load_user_for_edit(actor(), target.slug) == {:error, :unauthorized}
+      assert Users.edit_user(actor(), target.slug) == {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found before instance authorization" do
-      assert Users.load_user_for_edit(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.edit_user(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
 
-      assert Users.load_user_for_edit(actor(moderator_user_fixture()), "no-such-user") ==
+      assert Users.edit_user(actor(moderator_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1498,7 +1505,7 @@ defmodule Philomena.UsersTest do
       target = managed_target()
 
       assert {:ok, updated} =
-               Users.update_user_details(actor(admin_user_fixture()), target.slug, %{
+               Users.update_user(actor(admin_user_fixture()), target.slug, %{
                  "name" => target.name,
                  "email" => target.email,
                  "role" => "assistant"
@@ -1517,7 +1524,7 @@ defmodule Philomena.UsersTest do
       target = managed_target()
 
       assert {:error, %AdminUserForm{changeset: changeset}} =
-               Users.update_user_details(actor(admin_user_fixture()), target.slug, %{
+               Users.update_user(actor(admin_user_fixture()), target.slug, %{
                  "name" => target.name,
                  "email" => target.email,
                  "role" => "not-a-role"
@@ -1539,13 +1546,13 @@ defmodule Philomena.UsersTest do
       }
 
       assert {:ok, updated} =
-               Users.update_user_details(actor(admin_user_fixture()), target.slug, valid_params)
+               Users.update_user(actor(admin_user_fixture()), target.slug, valid_params)
 
       assert Enum.map(updated.roles, & &1.id) == [role.id]
 
       for invalid_id <- ["not-an-id", "2147483647"] do
         assert {:error, %AdminUserForm{changeset: changeset}} =
-                 Users.update_user_details(
+                 Users.update_user(
                    actor(admin_user_fixture()),
                    target.slug,
                    %{valid_params | "roles" => [invalid_id]}
@@ -1566,7 +1573,7 @@ defmodule Philomena.UsersTest do
     test "a plain moderator may not update a user" do
       target = managed_target()
 
-      assert Users.update_user_details(actor(moderator_user_fixture()), target.slug, %{
+      assert Users.update_user(actor(moderator_user_fixture()), target.slug, %{
                "name" => target.name,
                "email" => target.email,
                "role" => "assistant"
@@ -1576,7 +1583,7 @@ defmodule Philomena.UsersTest do
     test "a User-admin role_map moderator may not update a user" do
       target = managed_target()
 
-      assert Users.update_user_details(actor(user_admin_moderator()), target.slug, %{
+      assert Users.update_user(actor(user_admin_moderator()), target.slug, %{
                "name" => target.name,
                "email" => target.email,
                "role" => "assistant"
@@ -1584,7 +1591,7 @@ defmodule Philomena.UsersTest do
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.update_user_details(actor(admin_user_fixture()), "no-such-user", %{}) ==
+      assert Users.update_user(actor(admin_user_fixture()), "no-such-user", %{}) ==
                {:error, :not_found}
     end
   end
@@ -1595,34 +1602,34 @@ defmodule Philomena.UsersTest do
   # target behavior.
   describe "staff user-management authorization gate" do
     test "a missing target is not-found before instance authorization" do
-      assert Users.admin_unlock_user(actor(), "no-such-user") == {:error, :not_found}
+      assert Users.create_user_unlock(actor(), "no-such-user") == {:error, :not_found}
     end
 
     test "a regular user is rejected" do
       target = managed_target()
 
-      assert Users.admin_unlock_user(actor(confirmed_user_fixture()), target.slug) ==
+      assert Users.create_user_unlock(actor(confirmed_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_unlock_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.create_user_unlock(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "a User-admin role_map moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_unlock_user(actor(user_admin_moderator()), target.slug) ==
+      assert Users.create_user_unlock(actor(user_admin_moderator()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin is permitted" do
       target = managed_target()
 
-      assert {:ok, _user} = Users.admin_unlock_user(actor(admin_user_fixture()), target.slug)
+      assert {:ok, _user} = Users.create_user_unlock(actor(admin_user_fixture()), target.slug)
     end
   end
 
@@ -1630,7 +1637,7 @@ defmodule Philomena.UsersTest do
     test "an admin reactivates a deactivated user and logs it" do
       target = deactivated_user_fixture()
 
-      assert {:ok, user} = Users.admin_reactivate_user(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.create_user_activation(actor(admin_user_fixture()), target.slug)
       refute user.deleted_at
       refute Users.fetch_user_for_worker!(target.id).deleted_at
 
@@ -1643,12 +1650,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = deactivated_user_fixture()
 
-      assert Users.admin_reactivate_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.create_user_activation(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_reactivate_user(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.create_user_activation(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1658,7 +1665,7 @@ defmodule Philomena.UsersTest do
       target = managed_target()
       admin = admin_user_fixture()
 
-      assert {:ok, user} = Users.admin_deactivate_user(actor(admin), target.slug)
+      assert {:ok, user} = Users.delete_user_activation(actor(admin), target.slug)
       assert user.deleted_at
       assert user.deleted_by_user_id == admin.id
       assert Users.fetch_user_for_worker!(target.id).deleted_at
@@ -1672,12 +1679,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_deactivate_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.delete_user_activation(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_deactivate_user(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.delete_user_activation(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1687,7 +1694,7 @@ defmodule Philomena.UsersTest do
       target = managed_target()
       old_token = target.authentication_token
 
-      assert {:ok, user} = Users.admin_reset_api_key(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.delete_user_api_key(actor(admin_user_fixture()), target.slug)
       assert user.authentication_token != old_token
 
       assert Users.fetch_user_for_worker!(target.id).authentication_token ==
@@ -1702,12 +1709,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_reset_api_key(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.delete_user_api_key(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_reset_api_key(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.delete_user_api_key(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1717,7 +1724,7 @@ defmodule Philomena.UsersTest do
       target =
         user_with_avatar_fixture(%{name: "avatar_target_#{System.unique_integer([:positive])}"})
 
-      assert {:ok, user} = Users.admin_remove_avatar(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.delete_user_avatar(actor(admin_user_fixture()), target.slug)
       refute user.avatar
       refute Users.fetch_user_for_worker!(target.id).avatar
 
@@ -1730,12 +1737,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = user_with_avatar_fixture()
 
-      assert Users.admin_remove_avatar(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.delete_user_avatar(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_remove_avatar(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.delete_user_avatar(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1744,7 +1751,7 @@ defmodule Philomena.UsersTest do
     test "an admin starts the downvote wipe and logs it" do
       target = managed_target()
 
-      assert {:ok, user} = Users.admin_wipe_downvotes(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.delete_user_downvotes(actor(admin_user_fixture()), target.slug)
       assert user.id == target.id
 
       log = last_moderation_log()
@@ -1756,12 +1763,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_wipe_downvotes(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.delete_user_downvotes(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_wipe_downvotes(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.delete_user_downvotes(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1770,7 +1777,7 @@ defmodule Philomena.UsersTest do
     test "an admin starts the vote and fave wipe and logs it" do
       target = managed_target()
 
-      assert {:ok, user} = Users.admin_wipe_votes(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.delete_user_votes(actor(admin_user_fixture()), target.slug)
       assert user.id == target.id
 
       log = last_moderation_log()
@@ -1782,12 +1789,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_wipe_votes(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.delete_user_votes(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_wipe_votes(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.delete_user_votes(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1796,7 +1803,7 @@ defmodule Philomena.UsersTest do
     test "an admin queues the PII wipe and logs it" do
       target = managed_target()
 
-      assert {:ok, user} = Users.admin_wipe_user(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.create_user_wipe(actor(admin_user_fixture()), target.slug)
       assert user.id == target.id
 
       log = last_moderation_log()
@@ -1808,12 +1815,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_wipe_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.create_user_wipe(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_wipe_user(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.create_user_wipe(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1822,7 +1829,7 @@ defmodule Philomena.UsersTest do
     test "an admin unlocks a locked user and logs it" do
       target = locked_user_fixture(%{name: "unlock_target_#{System.unique_integer([:positive])}"})
 
-      assert {:ok, user} = Users.admin_unlock_user(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.create_user_unlock(actor(admin_user_fixture()), target.slug)
       refute user.locked_at
       refute Users.fetch_user_for_worker!(target.id).locked_at
 
@@ -1835,12 +1842,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = locked_user_fixture()
 
-      assert Users.admin_unlock_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.create_user_unlock(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_unlock_user(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.create_user_unlock(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1849,7 +1856,9 @@ defmodule Philomena.UsersTest do
     test "an admin grants verification and logs it" do
       target = managed_target()
 
-      assert {:ok, user} = Users.admin_verify_user(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} =
+               Users.create_user_verification(actor(admin_user_fixture()), target.slug)
+
       assert user.verified
       assert Users.fetch_user_for_worker!(target.id).verified
 
@@ -1862,12 +1871,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_verify_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.create_user_verification(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_verify_user(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.create_user_verification(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1877,7 +1886,9 @@ defmodule Philomena.UsersTest do
       target =
         verified_user_fixture(%{name: "unverify_target_#{System.unique_integer([:positive])}"})
 
-      assert {:ok, user} = Users.admin_unverify_user(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} =
+               Users.delete_user_verification(actor(admin_user_fixture()), target.slug)
+
       refute user.verified
       refute Users.fetch_user_for_worker!(target.id).verified
 
@@ -1890,12 +1901,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = verified_user_fixture()
 
-      assert Users.admin_unverify_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.delete_user_verification(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_unverify_user(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.delete_user_verification(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1905,7 +1916,7 @@ defmodule Philomena.UsersTest do
       target = managed_target()
 
       assert {:ok, %Ecto.Changeset{data: user}} =
-               Users.load_user_for_force_filter(actor(admin_user_fixture()), target.slug)
+               Users.new_user_force_filter(actor(admin_user_fixture()), target.slug)
 
       assert user.id == target.id
     end
@@ -1913,12 +1924,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.load_user_for_force_filter(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.new_user_force_filter(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.load_user_for_force_filter(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.new_user_force_filter(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -1929,7 +1940,7 @@ defmodule Philomena.UsersTest do
       filter = filter_fixture(confirmed_user_fixture())
 
       assert {:ok, user} =
-               Users.admin_force_filter(actor(admin_user_fixture()), target.slug, %{
+               Users.create_user_force_filter(actor(admin_user_fixture()), target.slug, %{
                  "forced_filter_id" => filter.id
                })
 
@@ -1946,7 +1957,7 @@ defmodule Philomena.UsersTest do
       target = managed_target()
 
       assert {:error, %Ecto.Changeset{data: user} = changeset} =
-               Users.admin_force_filter(actor(admin_user_fixture()), target.slug, %{
+               Users.create_user_force_filter(actor(admin_user_fixture()), target.slug, %{
                  "forced_filter_id" => 2_000_000_000
                })
 
@@ -1959,13 +1970,13 @@ defmodule Philomena.UsersTest do
       target = managed_target()
       filter = filter_fixture(confirmed_user_fixture())
 
-      assert Users.admin_force_filter(actor(moderator_user_fixture()), target.slug, %{
+      assert Users.create_user_force_filter(actor(moderator_user_fixture()), target.slug, %{
                "forced_filter_id" => filter.id
              }) == {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_force_filter(actor(admin_user_fixture()), "no-such-user", %{}) ==
+      assert Users.create_user_force_filter(actor(admin_user_fixture()), "no-such-user", %{}) ==
                {:error, :not_found}
     end
   end
@@ -1979,7 +1990,9 @@ defmodule Philomena.UsersTest do
       |> User.force_filter_changeset(%{"forced_filter_id" => filter.id})
       |> Repo.update!()
 
-      assert {:ok, user} = Users.admin_unforce_filter(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} =
+               Users.delete_user_force_filter(actor(admin_user_fixture()), target.slug)
+
       refute user.forced_filter_id
       refute Users.fetch_user_for_worker!(target.id).forced_filter_id
 
@@ -1992,12 +2005,12 @@ defmodule Philomena.UsersTest do
     test "a plain moderator is rejected" do
       target = managed_target()
 
-      assert Users.admin_unforce_filter(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.delete_user_force_filter(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an admin naming an unknown slug gets not-found" do
-      assert Users.admin_unforce_filter(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.delete_user_force_filter(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
   end
@@ -2006,18 +2019,18 @@ defmodule Philomena.UsersTest do
     test "an admin loads an ordinary unverified user with roles preloaded" do
       target = managed_target()
 
-      assert {:ok, user} = Users.load_user_for_erase(actor(admin_user_fixture()), target.slug)
+      assert {:ok, user} = Users.new_user_erase(actor(admin_user_fixture()), target.slug)
       assert user.id == target.id
       assert is_list(user.roles)
     end
 
     test "a missing target is not-found before instance authorization" do
-      assert Users.load_user_for_erase(actor(moderator_user_fixture()), "no-such-user") ==
+      assert Users.new_user_erase(actor(moderator_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
 
     test "an unknown slug is not-found" do
-      assert Users.load_user_for_erase(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.new_user_erase(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
 
@@ -2025,7 +2038,7 @@ defmodule Philomena.UsersTest do
       target = assistant_user_fixture()
 
       assert {:error, {:privileged, user}} =
-               Users.load_user_for_erase(actor(admin_user_fixture()), target.slug)
+               Users.new_user_erase(actor(admin_user_fixture()), target.slug)
 
       assert user.id == target.id
     end
@@ -2034,7 +2047,7 @@ defmodule Philomena.UsersTest do
       target = verified_user_fixture()
 
       assert {:error, {:verified, user}} =
-               Users.load_user_for_erase(actor(admin_user_fixture()), target.slug)
+               Users.new_user_erase(actor(admin_user_fixture()), target.slug)
 
       assert user.id == target.id
     end
@@ -2045,7 +2058,7 @@ defmodule Philomena.UsersTest do
       target = managed_target()
       original_name = target.name
 
-      assert {:ok, erased} = Users.admin_erase_user(actor(admin_user_fixture()), target.slug)
+      assert {:ok, erased} = Users.create_user_erase(actor(admin_user_fixture()), target.slug)
       assert erased.name =~ ~r/^deactivated_/
       assert erased.name != original_name
       assert erased.deleted_at
@@ -2065,12 +2078,12 @@ defmodule Philomena.UsersTest do
     test "an unauthorized actor is rejected" do
       target = managed_target()
 
-      assert Users.admin_erase_user(actor(moderator_user_fixture()), target.slug) ==
+      assert Users.create_user_erase(actor(moderator_user_fixture()), target.slug) ==
                {:error, :unauthorized}
     end
 
     test "an unknown slug is not-found" do
-      assert Users.admin_erase_user(actor(admin_user_fixture()), "no-such-user") ==
+      assert Users.create_user_erase(actor(admin_user_fixture()), "no-such-user") ==
                {:error, :not_found}
     end
 
@@ -2078,7 +2091,7 @@ defmodule Philomena.UsersTest do
       target = assistant_user_fixture()
 
       assert {:error, {:privileged, _user}} =
-               Users.admin_erase_user(actor(admin_user_fixture()), target.slug)
+               Users.create_user_erase(actor(admin_user_fixture()), target.slug)
 
       assert Users.fetch_user_for_worker!(target.id).role == "assistant"
     end
@@ -2087,7 +2100,7 @@ defmodule Philomena.UsersTest do
       target = verified_user_fixture()
 
       assert {:error, {:verified, _user}} =
-               Users.admin_erase_user(actor(admin_user_fixture()), target.slug)
+               Users.create_user_erase(actor(admin_user_fixture()), target.slug)
 
       refute Users.fetch_user_for_worker!(target.id).deleted_at
     end

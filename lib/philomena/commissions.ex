@@ -85,9 +85,9 @@ defmodule Philomena.Commissions do
       {:ok, %Directory{}}
 
   """
-  @spec load_directory(Actor.t(), map(), Repo.pagination_params()) ::
+  @spec list_commissions(Actor.t(), map(), Repo.pagination_params()) ::
           {:ok, Directory.t()} | {:error, :unauthorized}
-  def load_directory(%Actor{user: user} = actor, params, pagination) do
+  def list_commissions(%Actor{user: user} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Commission) do
       {commissions, changeset} =
         params
@@ -122,9 +122,9 @@ defmodule Philomena.Commissions do
       {:ok, %Commission{}}
 
   """
-  @spec load_commission_for_show(Actor.t(), String.t()) ::
+  @spec show_commission(Actor.t(), String.t()) ::
           {:ok, Commission.t()} | {:error, :unauthorized | :not_found}
-  def load_commission_for_show(%Actor{} = actor, slug) do
+  def show_commission(%Actor{} = actor, slug) do
     with {:ok, user} <- load_profile(actor, slug, :show) do
       load_profile_commission(actor, user, :show)
     end
@@ -144,7 +144,7 @@ defmodule Philomena.Commissions do
   @spec load_report_target(Actor.t(), String.t()) ::
           {:ok, Commission.t()} | {:error, :unauthorized | :not_found}
   def load_report_target(%Actor{} = actor, slug) do
-    load_commission_for_show(actor, slug)
+    show_commission(actor, slug)
   end
 
   @doc """
@@ -215,10 +215,10 @@ defmodule Philomena.Commissions do
       {:ok, %Ecto.Changeset{}}
 
   """
-  @spec load_commission_for_edit(Actor.t(), String.t()) ::
+  @spec edit_commission(Actor.t(), String.t()) ::
           {:ok, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def load_commission_for_edit(%Actor{} = actor, slug) do
+  def edit_commission(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_profile(actor, slug, :show),
          {:ok, commission} <- load_profile_commission(actor, user, :edit) do
@@ -372,9 +372,9 @@ defmodule Philomena.Commissions do
       {:error, :not_found}
 
   """
-  @spec load_item_for_edit(Actor.t(), String.t(), IntegerId.integer_id()) ::
+  @spec edit_item(Actor.t(), String.t(), IntegerId.integer_id()) ::
           {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized | :not_found}
-  def load_item_for_edit(%Actor{} = actor, slug, id) do
+  def edit_item(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_profile(actor, slug, :show),
          {:ok, commission} <- load_profile_commission(actor, user, :edit_item),

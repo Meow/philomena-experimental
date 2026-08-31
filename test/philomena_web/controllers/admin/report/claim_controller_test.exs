@@ -85,7 +85,7 @@ defmodule PhilomenaWeb.Admin.Report.ClaimControllerTest do
       user: mod
     } do
       {:ok, _report} =
-        Philomena.Reports.claim_report(Philomena.AttributionFixtures.actor(mod), report.id)
+        Philomena.Reports.create_report_claim(Philomena.AttributionFixtures.actor(mod), report.id)
 
       conn = delete(conn, ~p"/admin/reports/#{report}/claim")
       assert redirected_to(conn) == ~p"/admin/reports/#{report}"

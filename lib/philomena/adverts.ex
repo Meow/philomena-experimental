@@ -137,9 +137,9 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec load_adverts(Actor.t(), Repo.pagination_params()) ::
+  @spec list_adverts(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Advert.t())} | {:error, :unauthorized}
-  def load_adverts(%Actor{} = actor, pagination) do
+  def list_adverts(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, Advert) do
       adverts =
         Advert
@@ -229,10 +229,10 @@ defmodule Philomena.Adverts do
       {:error, :unauthorized}
 
   """
-  @spec load_advert_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_advert(Actor.t(), Loader.integer_id()) ::
           {:ok, {Advert.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_advert_for_edit(%Actor{} = actor, id) do
+  def edit_advert(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, advert} <- load_advert(actor, :edit, id) do
       {:ok, {advert, Advert.changeset(advert)}}

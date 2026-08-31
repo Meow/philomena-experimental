@@ -92,10 +92,10 @@ defmodule Philomena.Channels do
       {:ok, %Scrivener.Page{}, %{12 => true}, %Ecto.Changeset{}}
 
   """
-  @spec load_channels(Actor.t(), boolean(), map(), Repo.pagination_params()) ::
+  @spec list_channels(Actor.t(), boolean(), map(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(), %{optional(integer()) => true}, Ecto.Changeset.t()}
           | {:error, Ecto.Changeset.t()}
-  def load_channels(%Actor{} = actor, show_nsfw?, params, pagination) do
+  def list_channels(%Actor{} = actor, show_nsfw?, params, pagination) do
     with {:ok, query, query_form} <- QueryBuilder.build_query(params) do
       channels =
         query
@@ -125,9 +125,9 @@ defmodule Philomena.Channels do
       {:error, :not_found}
 
   """
-  @spec visit_channel(Actor.t(), Loader.integer_id()) ::
+  @spec show_channel(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
-  def visit_channel(%Actor{} = actor, id) do
+  def show_channel(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :visit) do
       clear_notification_for(channel, actor.user)
       {:ok, channel}
@@ -150,9 +150,9 @@ defmodule Philomena.Channels do
       {:error, :not_found}
 
   """
-  @spec clear_notification(Actor.t(), Loader.integer_id()) ::
+  @spec create_channel_read(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
-  def clear_notification(%Actor{} = actor, id) do
+  def create_channel_read(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :mark_read) do
       clear_notification_for(channel, actor.user)
       {:ok, channel}
@@ -240,10 +240,10 @@ defmodule Philomena.Channels do
       {:error, :unauthorized}
 
   """
-  @spec load_channel_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_channel(Actor.t(), Loader.integer_id()) ::
           {:ok, {Channel.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :not_found | :unauthorized}
-  def load_channel_for_edit(%Actor{} = actor, id) do
+  def edit_channel(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, channel} <- load_channel(actor, id, :edit) do
       {:ok, {channel, Channel.changeset(channel)}}
@@ -361,10 +361,10 @@ defmodule Philomena.Channels do
       {:error, :not_found}
 
   """
-  @spec subscribe(Actor.t(), Loader.integer_id()) ::
+  @spec create_channel_subscription(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()}
           | {:error, :not_found | :unauthorized | Ecto.Changeset.t()}
-  def subscribe(%Actor{} = actor, id) do
+  def create_channel_subscription(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :subscribe),
          {:ok, _subscription} <- create_subscription(channel, actor.user) do
       {:ok, channel}
@@ -391,9 +391,9 @@ defmodule Philomena.Channels do
       {:error, :not_found}
 
   """
-  @spec unsubscribe(Actor.t(), Loader.integer_id()) ::
+  @spec delete_channel_subscription(Actor.t(), Loader.integer_id()) ::
           {:ok, Channel.t()} | {:error, :not_found | :unauthorized}
-  def unsubscribe(%Actor{} = actor, id) do
+  def delete_channel_subscription(%Actor{} = actor, id) do
     with {:ok, channel} <- load_channel(actor, id, :unsubscribe),
          {:ok, _subscription} <- delete_subscription(channel, actor.user) do
       clear_notification_for(channel, actor.user)

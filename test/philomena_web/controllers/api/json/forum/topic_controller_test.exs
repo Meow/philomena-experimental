@@ -59,7 +59,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       topic = topic_fixture(forum)
 
       {:ok, {_forum, _topic}} =
-        Topics.hide_topic(
+        Topics.create_topic_hide(
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
@@ -77,7 +77,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       topic = topic_fixture(forum)
 
       {:ok, {_forum, _topic}} =
-        Topics.hide_topic(
+        Topics.create_topic_hide(
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
@@ -160,7 +160,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       topic = topic_fixture(forum)
 
       {:ok, {_forum, _topic}} =
-        Topics.hide_topic(
+        Topics.create_topic_hide(
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,

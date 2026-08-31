@@ -81,9 +81,9 @@ defmodule Philomena.Conversations do
       {:ok, %ConversationIndex{}}
 
   """
-  @spec load_conversation_index(Actor.t(), term(), Repo.pagination_params()) ::
+  @spec list_conversations(Actor.t(), term(), Repo.pagination_params()) ::
           {:ok, ConversationIndex.t()} | {:error, :unauthorized}
-  def load_conversation_index(%Actor{user: user} = actor, params, pagination) do
+  def list_conversations(%Actor{user: user} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Conversation) do
       {conversations, changeset} =
         params
@@ -141,9 +141,9 @@ defmodule Philomena.Conversations do
       {:ok, %ConversationPage{}}
 
   """
-  @spec load_conversation_page(Actor.t(), String.t(), Repo.pagination_params()) ::
+  @spec show_conversation(Actor.t(), String.t(), Repo.pagination_params()) ::
           {:ok, ConversationPage.t()} | {:error, :unauthorized | :not_found}
-  def load_conversation_page(%Actor{user: user} = actor, slug, pagination) do
+  def show_conversation(%Actor{user: user} = actor, slug, pagination) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show, [:to, :from]) do
       {:ok, _conversation} =
         conversation
@@ -266,9 +266,9 @@ defmodule Philomena.Conversations do
   because they are not a participant, do not change either participant flag.
   Missing slugs are always not found.
   """
-  @spec set_conversation_read(Actor.t(), String.t(), boolean()) ::
+  @spec update_conversation_read(Actor.t(), String.t(), boolean()) ::
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def set_conversation_read(%Actor{user: user} = actor, slug, read \\ true) do
+  def update_conversation_read(%Actor{user: user} = actor, slug, read \\ true) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show) do
       conversation
       |> Conversation.read_changeset(user, read)
@@ -282,9 +282,9 @@ defmodule Philomena.Conversations do
   The operation is idempotent. Authorized staff may view the conversation, but
   do not change either participant flag. Missing slugs are always not found.
   """
-  @spec set_conversation_hidden(Actor.t(), String.t(), boolean()) ::
+  @spec update_conversation_hide(Actor.t(), String.t(), boolean()) ::
           {:ok, Conversation.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def set_conversation_hidden(%Actor{user: user} = actor, slug, hidden \\ true) do
+  def update_conversation_hide(%Actor{user: user} = actor, slug, hidden \\ true) do
     with {:ok, conversation} <- load_conversation(actor, slug, :show) do
       conversation
       |> Conversation.hidden_changeset(user, hidden)
@@ -366,10 +366,10 @@ defmodule Philomena.Conversations do
       {:ok, %Message{}}
 
   """
-  @spec approve_message(Actor.t(), String.t(), IntegerId.integer_id()) ::
+  @spec create_message_approve(Actor.t(), String.t(), IntegerId.integer_id()) ::
           {:ok, Message.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def approve_message(%Actor{} = actor, conversation_slug, message_id) do
+  def create_message_approve(%Actor{} = actor, conversation_slug, message_id) do
     with {:ok, conversation} <- load_conversation(actor, conversation_slug, :show),
          {:ok, message} <- load_conversation_message(actor, conversation, message_id, :approve) do
       conversation_update_query =

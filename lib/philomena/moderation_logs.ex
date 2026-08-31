@@ -44,9 +44,9 @@ defmodule Philomena.ModerationLogs do
       {:error, :unauthorized}
 
   """
-  @spec load_moderation_logs(Actor.t(), Repo.pagination_params()) ::
+  @spec list_moderation_logs(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(ModerationLog.t())} | {:error, :unauthorized}
-  def load_moderation_logs(%Actor{} = actor, pagination) do
+  def list_moderation_logs(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, ModerationLog) do
       {:ok, list_moderation_logs(pagination)}
     end

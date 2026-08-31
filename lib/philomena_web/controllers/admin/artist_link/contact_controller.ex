@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.ArtistLink.ContactController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"artist_link_id" => id}) do
-    with {:ok, _artist_link} <- ArtistLinks.contact_artist_link(conn.assigns.actor, id) do
+    with {:ok, _artist_link} <- ArtistLinks.create_artist_link_contact(conn.assigns.actor, id) do
       conn
       |> put_flash(:info, "Artist successfully marked as contacted.")
       |> redirect(to: ~p"/admin/artist_links")

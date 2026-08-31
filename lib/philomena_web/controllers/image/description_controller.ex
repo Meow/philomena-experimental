@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.DescriptionController do
   action_fallback PhilomenaWeb.FallbackController
 
   def update(conn, %{"image" => image_params} = params) do
-    case Images.update_description(conn.assigns.actor, params["image_id"], image_params) do
+    case Images.update_image_description(conn.assigns.actor, params["image_id"], image_params) do
       {:ok, {image, _old_description}} ->
         body = MarkdownRenderer.render_one(%{body: image.description}, conn)
 

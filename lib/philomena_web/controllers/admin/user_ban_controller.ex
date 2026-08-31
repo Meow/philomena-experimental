@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Bans.admin_user_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
+    case Bans.list_user_bans(conn.assigns.actor, params, conn.assigns.scrivener) do
       {:ok, user_bans, changeset} ->
         render(conn, "index.html",
           title: "Admin - User Bans",
@@ -74,7 +74,7 @@ defmodule PhilomenaWeb.Admin.UserBanController do
 
   def edit(conn, params) do
     with {:ok, {user_ban, changeset}} <-
-           Bans.load_user_ban_for_edit(conn.assigns.actor, params["id"]) do
+           Bans.edit_user_ban(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing User Ban", user: user_ban, changeset: changeset)
     end
   end

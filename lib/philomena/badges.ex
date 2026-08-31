@@ -36,9 +36,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_badges(Actor.t(), Repo.pagination_params()) ::
+  @spec list_badges(Actor.t(), Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t()} | {:error, :unauthorized}
-  def load_badges(%Actor{} = actor, pagination) do
+  def list_badges(%Actor{} = actor, pagination) do
     with :ok <- authorize(actor, :index, Badge) do
       {:ok,
        Badge
@@ -132,10 +132,10 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_badge_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_badge(Actor.t(), Loader.integer_id()) ::
           {:ok, {Badge.t(), Ecto.Changeset.t()}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_badge_for_edit(%Actor{} = actor, id) do
+  def edit_badge(%Actor{} = actor, id) do
     with :ok <- verify_write_access(actor),
          {:ok, badge} <- load_badge(actor, :edit, id) do
       {:ok, {badge, Badge.changeset(badge)}}
@@ -260,9 +260,9 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_badge_users(Actor.t(), Loader.integer_id(), Repo.pagination_params()) ::
+  @spec list_badge_users(Actor.t(), Loader.integer_id(), Repo.pagination_params()) ::
           {:ok, {Badge.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
-  def load_badge_users(%Actor{} = actor, id, pagination) do
+  def list_badge_users(%Actor{} = actor, id, pagination) do
     with {:ok, badge} <- load_badge(actor, :show_users, id) do
       users =
         User
@@ -314,10 +314,10 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_award_for_new(Actor.t(), String.t()) ::
+  @spec new_award(Actor.t(), String.t()) ::
           {:ok, {User.t(), Ecto.Changeset.t(), [Badge.t()]}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_award_for_new(%Actor{} = actor, slug) do
+  def new_award(%Actor{} = actor, slug) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_authorized_profile(actor, :show, slug),
          :ok <- authorize(actor, :new, Award) do
@@ -347,11 +347,11 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec award_badge(Actor.t(), String.t(), map()) ::
+  @spec create_award(Actor.t(), String.t(), map()) ::
           {:ok, {User.t(), Award.t()}}
           | {:error, {User.t(), Ecto.Changeset.t(), [Badge.t()]}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def award_badge(%Actor{user: creator} = actor, slug, attrs) do
+  def create_award(%Actor{user: creator} = actor, slug, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, user} <- load_authorized_profile(actor, :show, slug),
          :ok <- authorize(actor, :create, Award) do
@@ -400,10 +400,10 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec load_award_for_edit(Actor.t(), String.t(), Loader.integer_id()) ::
+  @spec edit_award(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Award.t(), Ecto.Changeset.t(), [Badge.t()]}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def load_award_for_edit(%Actor{} = actor, slug, id) do
+  def edit_award(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
          {:ok, award} <- load_scoped_award(actor, :edit, slug, id) do
       {:ok, {award.user, award, Award.changeset(award), awardable_badges()}}
@@ -434,11 +434,11 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec update_badge_award(Actor.t(), String.t(), Loader.integer_id(), map()) ::
+  @spec update_award(Actor.t(), String.t(), Loader.integer_id(), map()) ::
           {:ok, {User.t(), Award.t()}}
           | {:error, {User.t(), Award.t(), Ecto.Changeset.t(), [Badge.t()]}}
           | {:error, Authorization.write_error_reason() | :not_found}
-  def update_badge_award(%Actor{} = actor, slug, id, attrs) do
+  def update_award(%Actor{} = actor, slug, id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, award} <- load_scoped_award(actor, :update, slug, id) do
       award_changeset = Award.changeset(award, attrs)
@@ -488,10 +488,10 @@ defmodule Philomena.Badges do
       {:error, :unauthorized}
 
   """
-  @spec revoke_badge_award(Actor.t(), String.t(), Loader.integer_id()) ::
+  @spec delete_award(Actor.t(), String.t(), Loader.integer_id()) ::
           {:ok, {User.t(), Award.t()}}
           | {:error, Authorization.write_error_reason() | :not_found | Ecto.Changeset.t()}
-  def revoke_badge_award(%Actor{} = actor, slug, id) do
+  def delete_award(%Actor{} = actor, slug, id) do
     with :ok <- verify_write_access(actor),
          {:ok, award} <- load_scoped_award(actor, :delete, slug, id) do
       Multi.new()

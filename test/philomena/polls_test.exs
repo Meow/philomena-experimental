@@ -38,7 +38,7 @@ defmodule Philomena.PollsTest do
       {forum, topic, poll} = forum_topic_poll()
 
       assert {:ok, %Ecto.Changeset{data: loaded_poll}} =
-               Polls.load_poll_for_edit(actor(moderator), forum.short_name, topic.slug)
+               Polls.edit_poll(actor(moderator), forum.short_name, topic.slug)
 
       assert loaded_poll.topic.forum.id == forum.id
       assert loaded_poll.topic.id == topic.id
@@ -55,7 +55,7 @@ defmodule Philomena.PollsTest do
       {forum, topic, poll} = forum_topic_poll()
 
       assert {:ok, %Ecto.Changeset{data: loaded_poll}} =
-               Polls.load_poll_for_edit(actor(admin), forum.short_name, topic.slug)
+               Polls.edit_poll(actor(admin), forum.short_name, topic.slug)
 
       assert loaded_poll.id == poll.id
     end
@@ -67,7 +67,7 @@ defmodule Philomena.PollsTest do
       user = confirmed_user_fixture()
       {forum, topic, _poll} = forum_topic_poll()
 
-      assert Polls.load_poll_for_edit(actor(user), forum.short_name, topic.slug) ==
+      assert Polls.edit_poll(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
     end
 
@@ -77,19 +77,19 @@ defmodule Philomena.PollsTest do
       # clean unauthorized rather than a crash on the nil actor.
       {forum, topic, _poll} = forum_topic_poll()
 
-      assert Polls.load_poll_for_edit(actor(), forum.short_name, topic.slug) ==
+      assert Polls.edit_poll(actor(), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
     end
 
     test "an unknown forum is not found for a regular user" do
-      assert Polls.load_poll_for_edit(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
+      assert Polls.edit_poll(actor(confirmed_user_fixture()), "nonexistent", "whatever") ==
                {:error, :not_found}
     end
 
     test "an existing forum with an unknown topic is not found" do
       forum = forum_fixture()
 
-      assert Polls.load_poll_for_edit(
+      assert Polls.edit_poll(
                actor(moderator_user_fixture()),
                forum.short_name,
                "nonexistent-topic"
@@ -101,7 +101,7 @@ defmodule Philomena.PollsTest do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
-      assert Polls.load_poll_for_edit(
+      assert Polls.edit_poll(
                actor(moderator_user_fixture()),
                forum.short_name,
                topic.slug
@@ -114,7 +114,7 @@ defmodule Philomena.PollsTest do
       forum = forum_fixture()
       topic = topic_fixture(forum)
 
-      assert Polls.load_poll_for_edit(actor(user), forum.short_name, topic.slug) ==
+      assert Polls.edit_poll(actor(user), forum.short_name, topic.slug) ==
                {:error, :unauthorized}
     end
   end

@@ -47,8 +47,8 @@ defmodule Philomena.PollVotes do
   @spec list_votes(Actor.t(), String.t(), String.t()) ::
           {:ok, [PollOption.t()]} | {:error, :not_found | :unauthorized}
   def list_votes(%Actor{} = actor, forum_slug, topic_slug) do
-    with {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :list_poll_votes),
+    with {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :list_poll_votes),
          {:ok, poll} <- Polls.load_topic_poll(topic) do
       {:ok,
        PollOption
@@ -82,8 +82,8 @@ defmodule Philomena.PollVotes do
           | {:error, :ban | :not_found | :unauthorized}
   def create_votes(%Actor{user: user} = actor, forum_slug, topic_slug, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :vote),
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :vote),
          {:ok, poll} <- Polls.load_topic_poll(topic) do
       options = PollOptions.load_options(poll)
       poll_query = where(Poll, id: ^poll.id)
@@ -137,8 +137,8 @@ defmodule Philomena.PollVotes do
           {:ok, Poll.t()} | {:error, :ban | :not_found | :unauthorized}
   def delete_vote(%Actor{} = actor, forum_slug, topic_slug, vote_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, forum} <- Forums.load_forum(actor, forum_slug),
-         {:ok, topic} <- Topics.load_forum_topic(actor, forum, topic_slug, :delete_poll_vote),
+         {:ok, forum} <- Forums.show_forum(actor, forum_slug),
+         {:ok, topic} <- Topics.show_forum_topic(actor, forum, topic_slug, :delete_poll_vote),
          {:ok, poll} <- Polls.load_topic_poll(topic),
          {:ok, poll_vote} <- load_poll_vote(poll, vote_id) do
       poll_query = where(Poll, id: ^poll.id)

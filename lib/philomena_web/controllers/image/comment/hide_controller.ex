@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.Image.Comment.HideController do
         "comment_id" => comment_id,
         "comment" => comment_params
       }) do
-    case Comments.hide_comment(conn.assigns.actor, image_id, comment_id, comment_params) do
+    case Comments.create_comment_hide(conn.assigns.actor, image_id, comment_id, comment_params) do
       {:ok, comment} ->
         conn
         |> put_flash(:info, "Comment successfully deleted!")
@@ -28,7 +28,7 @@ defmodule PhilomenaWeb.Image.Comment.HideController do
   end
 
   def delete(conn, %{"image_id" => image_id, "comment_id" => comment_id}) do
-    case Comments.unhide_comment(conn.assigns.actor, image_id, comment_id) do
+    case Comments.delete_comment_hide(conn.assigns.actor, image_id, comment_id) do
       {:ok, comment} ->
         conn
         |> put_flash(:info, "Comment successfully restored!")

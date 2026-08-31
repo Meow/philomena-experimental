@@ -57,7 +57,7 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
       post = post_fixture(topic, user, %{"body" => "Rule-breaking post"})
 
       {:ok, _} =
-        Posts.hide_post(
+        Posts.create_post_hide(
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,
@@ -76,7 +76,7 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
       post = post_fixture(topic, nil)
 
       {:ok, _} =
-        Posts.hide_post(
+        Posts.create_post_hide(
           Philomena.AttributionFixtures.actor(moderator_user_fixture()),
           forum.short_name,
           topic.slug,
@@ -85,7 +85,7 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
         )
 
       {:ok, _} =
-        Posts.destroy_post(
+        Posts.create_post_delete(
           Philomena.AttributionFixtures.actor(moderator_user_fixture()),
           forum.short_name,
           topic.slug,
@@ -104,7 +104,7 @@ defmodule PhilomenaWeb.Api.Json.PostControllerTest do
       post = post_fixture(topic, nil)
 
       {:ok, {_forum, _topic}} =
-        Topics.hide_topic(
+        Topics.create_topic_hide(
           Philomena.AttributionFixtures.actor(moderator),
           forum.short_name,
           topic.slug,

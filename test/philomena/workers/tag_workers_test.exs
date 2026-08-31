@@ -89,7 +89,7 @@ defmodule Philomena.TagWorkersTest do
     target_link = artist_link_fixture(user, target, %{"uri" => uri})
 
     assert {:ok, _tag} =
-             Tags.alias_tag(
+             Tags.update_tag_alias(
                actor(admin),
                source.slug,
                %{"target_tag" => target.name}

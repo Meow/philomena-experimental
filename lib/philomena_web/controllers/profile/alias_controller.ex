@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Profile.AliasController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"profile_id" => slug}) do
-    with {:ok, matches} <- Users.load_alias_matches(conn.assigns.actor, slug) do
+    with {:ok, matches} <- Users.list_profile_aliases(conn.assigns.actor, slug) do
       render(conn, "index.html",
         title: "Potential Aliases for `#{matches.user.name}'",
         both_matches: matches.both_matches,

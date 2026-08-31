@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.User.DownvoteController do
   action_fallback PhilomenaWeb.FallbackController
 
   def delete(conn, %{"user_id" => slug}) do
-    with {:ok, user} <- Users.admin_wipe_downvotes(conn.assigns.actor, slug) do
+    with {:ok, user} <- Users.delete_user_downvotes(conn.assigns.actor, slug) do
       conn
       |> put_flash(:info, "Downvote wipe started.")
       |> redirect(to: ~p"/profiles/#{user}")

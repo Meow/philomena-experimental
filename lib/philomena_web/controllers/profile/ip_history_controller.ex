@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Profile.IpHistoryController do
 
   def index(conn, %{"profile_id" => slug}) do
     with {:ok, history} <-
-           Profiles.load_ip_history(conn.assigns.actor, slug, conn.assigns.scrivener) do
+           Profiles.list_profile_ip_history(conn.assigns.actor, slug, conn.assigns.scrivener) do
       render(conn, "index.html",
         title: "IP History for `#{history.user.name}'",
         user: history.user,

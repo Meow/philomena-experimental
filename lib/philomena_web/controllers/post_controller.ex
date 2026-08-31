@@ -11,7 +11,7 @@ defmodule PhilomenaWeb.PostController do
     conn = Map.put(conn, :params, params)
 
     conn.assigns.actor
-    |> Posts.search_posts(pq, conn.assigns.pagination)
+    |> Posts.query_posts(pq, conn.assigns.pagination)
     |> render_index(conn)
   end
 

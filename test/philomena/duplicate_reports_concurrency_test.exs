@@ -17,7 +17,7 @@ defmodule Philomena.DuplicateReportsConcurrencyTest do
     results =
       concurrently(
         for moderator <- [moderator_user_fixture(), moderator_user_fixture()] do
-          fn -> DuplicateReports.claim_duplicate_report(actor(moderator), report.id) end
+          fn -> DuplicateReports.create_duplicate_report_claim(actor(moderator), report.id) end
         end
       )
 

@@ -241,9 +241,9 @@ defmodule Philomena.Profiles do
       {:error, :not_found}
 
   """
-  @spec load_profile_page(Actor.t(), Scope.t(), Filter.t(), String.t()) ::
+  @spec show_profile(Actor.t(), Scope.t(), Filter.t(), String.t()) ::
           {:ok, ProfilePage.t()} | {:error, :unauthorized | :not_found}
-  def load_profile_page(
+  def show_profile(
         %Actor{} = actor,
         %Scope{} = scope,
         %Filter{} = current_filter,
@@ -344,9 +344,9 @@ defmodule Philomena.Profiles do
       {:ok, %IpHistory{}}
 
   """
-  @spec load_ip_history(Actor.t(), String.t(), Repo.pagination_params()) ::
+  @spec list_profile_ip_history(Actor.t(), String.t(), Repo.pagination_params()) ::
           {:ok, IpHistory.t()} | {:error, :unauthorized | :not_found}
-  def load_ip_history(%Actor{} = actor, slug, pagination) do
+  def list_profile_ip_history(%Actor{} = actor, slug, pagination) do
     with {:ok, user} <- load_detailed_profile(actor, slug),
          {:ok, {user_ips, other_users}} <-
            UserIps.load_user_history(actor, user, pagination) do
@@ -367,9 +367,9 @@ defmodule Philomena.Profiles do
       {:ok, %FingerprintHistory{}}
 
   """
-  @spec load_fingerprint_history(Actor.t(), String.t(), Repo.pagination_params()) ::
+  @spec list_profile_fingerprint_history(Actor.t(), String.t(), Repo.pagination_params()) ::
           {:ok, FingerprintHistory.t()} | {:error, :unauthorized | :not_found}
-  def load_fingerprint_history(%Actor{} = actor, slug, pagination) do
+  def list_profile_fingerprint_history(%Actor{} = actor, slug, pagination) do
     with {:ok, user} <- load_detailed_profile(actor, slug),
          {:ok, {user_fingerprints, other_users}} <-
            UserFingerprints.load_user_history(actor, user, pagination) do

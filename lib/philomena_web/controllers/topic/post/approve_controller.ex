@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Topic.Post.ApproveController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"forum_id" => forum_id, "topic_id" => topic_id, "post_id" => post_id}) do
-    case Posts.approve_post(conn.assigns.actor, forum_id, topic_id, post_id) do
+    case Posts.create_post_approve(conn.assigns.actor, forum_id, topic_id, post_id) do
       {:ok, post} ->
         conn
         |> put_flash(:info, "Post successfully approved.")

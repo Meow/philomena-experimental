@@ -376,10 +376,10 @@ defmodule Philomena.Galleries do
       {:error, :not_found}
 
   """
-  @spec load_gallery_for_edit(Actor.t(), Loader.integer_id()) ::
+  @spec edit_gallery(Actor.t(), Loader.integer_id()) ::
           {:ok, {Gallery.t(), Ecto.Changeset.t()}}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def load_gallery_for_edit(%Actor{} = actor, gallery_id) do
+  def edit_gallery(%Actor{} = actor, gallery_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery} <- load_gallery(actor, gallery_id, :edit) do
       {:ok, {gallery, Gallery.changeset(gallery)}}
@@ -416,11 +416,11 @@ defmodule Philomena.Galleries do
       {:error, %Ecto.Changeset{}}
 
   """
-  @spec load_gallery_index(Actor.t(), map(), Search.pagination_params()) ::
+  @spec list_galleries(Actor.t(), map(), Search.pagination_params()) ::
           {:ok, Scrivener.Page.t(Gallery.t()), Ecto.Changeset.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :unauthorized}
-  def load_gallery_index(%Actor{} = actor, params, pagination) do
+  def list_galleries(%Actor{} = actor, params, pagination) do
     with :ok <- authorize(actor, :index, Gallery),
          {:ok, query, form} <- QueryBuilder.build_query(params) do
       galleries =
@@ -449,9 +449,9 @@ defmodule Philomena.Galleries do
       {:error, "Imbalanced parentheses."}
 
   """
-  @spec search_galleries(Actor.t(), String.t() | nil, Repo.pagination_params()) ::
+  @spec query_galleries(Actor.t(), String.t() | nil, Repo.pagination_params()) ::
           {:ok, Scrivener.Page.t(Gallery.t())} | {:error, :unauthorized | String.t()}
-  def search_galleries(%Actor{user: user} = actor, query_string, pagination) do
+  def query_galleries(%Actor{user: user} = actor, query_string, pagination) do
     with :ok <- authorize(actor, :search, Gallery) do
       case Philomena.Galleries.Query.compile(query_string, user: user) do
         {:ok, query} ->
@@ -493,9 +493,9 @@ defmodule Philomena.Galleries do
       {:error, :not_found}
 
   """
-  @spec load_gallery_page(Actor.t(), Scope.t(), Loader.integer_id()) ::
+  @spec show_gallery(Actor.t(), Scope.t(), Loader.integer_id()) ::
           {:ok, GalleryPage.t()} | {:error, :unauthorized | :not_found}
-  def load_gallery_page(%Actor{} = actor, %Scope{} = scope, gallery_id) do
+  def show_gallery(%Actor{} = actor, %Scope{} = scope, gallery_id) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :show) do
       %{images: images, leading: leading, trailing: trailing} =
         reorder_window(actor, scope, gallery)
@@ -592,7 +592,7 @@ defmodule Philomena.Galleries do
       {:error, :not_found}
 
   """
-  @spec add_image_to_gallery(
+  @spec create_gallery_image(
           actor :: Actor.t(),
           gallery_id :: Loader.integer_id(),
           image_id :: Loader.integer_id()
@@ -600,7 +600,7 @@ defmodule Philomena.Galleries do
           {:ok, Gallery.t()}
           | {:error, Ecto.Changeset.t()}
           | {:error, :ban | :unauthorized | :not_found}
-  def add_image_to_gallery(%Actor{} = actor, gallery_id, image_id) do
+  def create_gallery_image(%Actor{} = actor, gallery_id, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery_id} <- Loader.parse_id(gallery_id),
          {:ok, image_id} <- Loader.parse_id(image_id) do
@@ -654,7 +654,7 @@ defmodule Philomena.Galleries do
       {:ok, %Gallery{}}
 
   """
-  @spec remove_image_from_gallery(
+  @spec delete_gallery_image(
           actor :: Actor.t(),
           gallery_id :: Loader.integer_id(),
           image_id :: Loader.integer_id()
@@ -662,7 +662,7 @@ defmodule Philomena.Galleries do
           {:ok, Gallery.t()}
           | {:error, :ban | :unauthorized | :not_found}
           | Ecto.Multi.failure()
-  def remove_image_from_gallery(%Actor{} = actor, gallery_id, image_id) do
+  def delete_gallery_image(%Actor{} = actor, gallery_id, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery_id} <- Loader.parse_id(gallery_id),
          {:ok, image_id} <- Loader.parse_id(image_id) do
@@ -716,10 +716,10 @@ defmodule Philomena.Galleries do
       {:ok, %ReorderForm{}}
 
   """
-  @spec reorder_gallery(Actor.t(), Loader.integer_id(), map()) ::
+  @spec update_gallery_order(Actor.t(), Loader.integer_id(), map()) ::
           {:ok, ReorderForm.t()}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def reorder_gallery(%Actor{} = actor, gallery_id, params) do
+  def update_gallery_order(%Actor{} = actor, gallery_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, gallery_id} <- Loader.parse_id(gallery_id),
          {:ok, reorder_form} <-
@@ -785,9 +785,9 @@ defmodule Philomena.Galleries do
       {:error, :not_found}
 
   """
-  @spec mark_gallery_read(Actor.t(), Loader.integer_id()) ::
+  @spec create_gallery_read(Actor.t(), Loader.integer_id()) ::
           {:ok, Gallery.t()} | {:error, :unauthorized | :not_found}
-  def mark_gallery_read(%Actor{user: user} = actor, gallery_id) do
+  def create_gallery_read(%Actor{user: user} = actor, gallery_id) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :mark_read) do
       clear_gallery_notification(gallery, user)
       {:ok, gallery}
@@ -807,10 +807,10 @@ defmodule Philomena.Galleries do
       {:ok, %Gallery{}}
 
   """
-  @spec subscribe_gallery(Actor.t(), Loader.integer_id()) ::
+  @spec create_gallery_subscription(Actor.t(), Loader.integer_id()) ::
           {:ok, Gallery.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
-  def subscribe_gallery(%Actor{} = actor, gallery_id) do
+  def create_gallery_subscription(%Actor{} = actor, gallery_id) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :subscribe),
          {:ok, _subscription} <- create_subscription(gallery, actor.user) do
       {:ok, gallery}
@@ -826,9 +826,9 @@ defmodule Philomena.Galleries do
       {:ok, %Gallery{}}
 
   """
-  @spec unsubscribe_gallery(Actor.t(), Loader.integer_id()) ::
+  @spec delete_gallery_subscription(Actor.t(), Loader.integer_id()) ::
           {:ok, Gallery.t()} | {:error, :unauthorized | :not_found}
-  def unsubscribe_gallery(%Actor{} = actor, gallery_id) do
+  def delete_gallery_subscription(%Actor{} = actor, gallery_id) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :unsubscribe) do
       # Deletion is idempotent and cannot fail; the hard match crashes if it does.
       {:ok, _subscription} = delete_subscription(gallery, actor.user)

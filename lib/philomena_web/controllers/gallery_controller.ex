@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.GalleryController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, params) do
-    case Galleries.load_gallery_index(
+    case Galleries.list_galleries(
            conn.assigns.actor,
            params["gallery"] || %{},
            conn.assigns.pagination
@@ -39,7 +39,7 @@ defmodule PhilomenaWeb.GalleryController do
   end
 
   def show(conn, params) do
-    case Galleries.load_gallery_page(
+    case Galleries.show_gallery(
            conn.assigns.actor,
            ImageScope.search_scope(conn),
            params["id"]
@@ -92,7 +92,7 @@ defmodule PhilomenaWeb.GalleryController do
 
   def edit(conn, params) do
     with {:ok, {gallery, changeset}} <-
-           Galleries.load_gallery_for_edit(conn.assigns.actor, params["id"]) do
+           Galleries.edit_gallery(conn.assigns.actor, params["id"]) do
       render(conn, "edit.html", title: "Editing Gallery", gallery: gallery, changeset: changeset)
     end
   end

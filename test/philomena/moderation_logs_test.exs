@@ -96,23 +96,23 @@ defmodule Philomena.ModerationLogsTest do
       log = logged_entry()
 
       assert {:ok, %Page{} = page} =
-               ModerationLogs.load_moderation_logs(actor(moderator_user_fixture()), @pagination)
+               ModerationLogs.list_moderation_logs(actor(moderator_user_fixture()), @pagination)
 
       assert log.id in Enum.map(page.entries, & &1.id)
     end
 
     test "an admin gets the paginated logs" do
       assert {:ok, %Page{}} =
-               ModerationLogs.load_moderation_logs(actor(admin_user_fixture()), @pagination)
+               ModerationLogs.list_moderation_logs(actor(admin_user_fixture()), @pagination)
     end
 
     test "a regular user is unauthorized" do
-      assert ModerationLogs.load_moderation_logs(actor(confirmed_user_fixture()), @pagination) ==
+      assert ModerationLogs.list_moderation_logs(actor(confirmed_user_fixture()), @pagination) ==
                {:error, :unauthorized}
     end
 
     test "an anonymous viewer is unauthorized" do
-      assert ModerationLogs.load_moderation_logs(actor(), @pagination) == {:error, :unauthorized}
+      assert ModerationLogs.list_moderation_logs(actor(), @pagination) == {:error, :unauthorized}
     end
 
     test "orders equal-timestamp entries by newest ID and excludes expired logs" do
@@ -146,7 +146,7 @@ defmodule Philomena.ModerationLogsTest do
       })
 
       assert {:ok, page} =
-               ModerationLogs.load_moderation_logs(actor(moderator_user_fixture()), @pagination)
+               ModerationLogs.list_moderation_logs(actor(moderator_user_fixture()), @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
       assert Enum.take(ids, 2) == [newer.id, older.id]

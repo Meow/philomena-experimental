@@ -9,7 +9,7 @@ defmodule PhilomenaWeb.DnpEntryController do
 
   def index(conn, params) do
     listing =
-      DnpEntries.load_dnp_listing(conn.assigns.actor, params, conn.assigns.scrivener)
+      DnpEntries.list_dnp_entries(conn.assigns.actor, params, conn.assigns.scrivener)
 
     bodies =
       listing.dnp_entries
@@ -31,7 +31,7 @@ defmodule PhilomenaWeb.DnpEntryController do
     renderer = &MarkdownRenderer.render_collection(&1, conn)
 
     with {:ok, %DnpEntryPage{dnp_entry: dnp_entry, mod_notes: mod_notes}} <-
-           DnpEntries.load_dnp_entry_page(conn.assigns.actor, id, renderer) do
+           DnpEntries.show_dnp_entry(conn.assigns.actor, id, renderer) do
       [conditions, reason, instructions] =
         MarkdownRenderer.render_collection(
           [
@@ -58,7 +58,7 @@ defmodule PhilomenaWeb.DnpEntryController do
 
   def new(conn, params) do
     with {:ok, %DnpEntryForm{changeset: changeset, selectable_tags: selectable_tags}} <-
-           DnpEntries.load_new_dnp_entry(conn.assigns.actor, params) do
+           DnpEntries.new_dnp_entry(conn.assigns.actor, params) do
       render(conn, "new.html",
         title: "New DNP Listing",
         changeset: changeset,
@@ -89,7 +89,7 @@ defmodule PhilomenaWeb.DnpEntryController do
             changeset: changeset,
             selectable_tags: selectable_tags
           }} <-
-           DnpEntries.load_dnp_entry_for_edit(conn.assigns.actor, id) do
+           DnpEntries.edit_dnp_entry(conn.assigns.actor, id) do
       render(conn, "edit.html",
         title: "Editing DNP Listing",
         dnp_entry: dnp_entry,

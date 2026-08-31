@@ -48,7 +48,7 @@ defmodule Philomena.ForumsTest do
       _restricted_topic = topic_fixture(restricted_forum)
 
       {:ok, {_forum, _hidden_topic}} =
-        Philomena.Topics.hide_topic(
+        Philomena.Topics.create_topic_hide(
           Philomena.AttributionFixtures.actor(moderator),
           public_forum.short_name,
           hidden_topic.slug,
@@ -56,12 +56,12 @@ defmodule Philomena.ForumsTest do
         )
 
       assert %ForumIndex{forums: user_forums, topic_count: 1} =
-               Forums.load_forum_index(actor(user), @pagination)
+               Forums.list_forums(actor(user), @pagination)
 
       assert Enum.map(user_forums, & &1.id) == [public_forum.id]
 
       assert %ForumIndex{forums: moderator_forums, topic_count: 2} =
-               Forums.load_forum_index(actor(moderator), @pagination)
+               Forums.list_forums(actor(moderator), @pagination)
 
       assert Enum.sort(Enum.map(moderator_forums, & &1.id)) ==
                Enum.sort([public_forum.id, restricted_forum.id])
@@ -73,7 +73,7 @@ defmodule Philomena.ForumsTest do
       user = confirmed_user_fixture()
       forum = forum_fixture()
 
-      assert {:ok, loaded_forum} = Forums.subscribe(actor(user), forum.short_name)
+      assert {:ok, loaded_forum} = Forums.create_forum_subscription(actor(user), forum.short_name)
 
       assert loaded_forum.id == forum.id
       assert subscribed?(forum, user)
@@ -85,8 +85,8 @@ defmodule Philomena.ForumsTest do
       user = confirmed_user_fixture()
       forum = forum_fixture()
 
-      assert {:ok, _} = Forums.subscribe(actor(user), forum.short_name)
-      assert {:ok, _} = Forums.subscribe(actor(user), forum.short_name)
+      assert {:ok, _} = Forums.create_forum_subscription(actor(user), forum.short_name)
+      assert {:ok, _} = Forums.create_forum_subscription(actor(user), forum.short_name)
 
       assert subscription_count(forum, user) == 1
     end
@@ -95,7 +95,9 @@ defmodule Philomena.ForumsTest do
       moderator = moderator_user_fixture()
       forum = forum_fixture()
 
-      assert {:ok, loaded_forum} = Forums.subscribe(actor(moderator), forum.short_name)
+      assert {:ok, loaded_forum} =
+               Forums.create_forum_subscription(actor(moderator), forum.short_name)
+
       assert loaded_forum.id == forum.id
       assert subscribed?(forum, moderator)
     end
@@ -104,24 +106,26 @@ defmodule Philomena.ForumsTest do
       admin = admin_user_fixture()
       forum = forum_fixture()
 
-      assert {:ok, _forum} = Forums.subscribe(actor(admin), forum.short_name)
+      assert {:ok, _forum} = Forums.create_forum_subscription(actor(admin), forum.short_name)
       assert subscribed?(forum, admin)
     end
 
     test "an unknown forum slug is not found for a regular user" do
-      assert Forums.subscribe(actor(confirmed_user_fixture()), "nonexistent") ==
+      assert Forums.create_forum_subscription(actor(confirmed_user_fixture()), "nonexistent") ==
                {:error, :not_found}
     end
 
     test "an unknown forum slug is not found for anonymous" do
-      assert Forums.subscribe(actor(), "nonexistent") == {:error, :not_found}
+      assert Forums.create_forum_subscription(actor(), "nonexistent") == {:error, :not_found}
     end
 
     test "a restricted forum is unauthorized for a regular user and no row is created" do
       user = confirmed_user_fixture()
       forum = forum_fixture(access_level: "staff")
 
-      assert Forums.subscribe(actor(user), forum.short_name) == {:error, :unauthorized}
+      assert Forums.create_forum_subscription(actor(user), forum.short_name) ==
+               {:error, :unauthorized}
+
       refute subscribed?(forum, user)
     end
 
@@ -129,18 +133,19 @@ defmodule Philomena.ForumsTest do
       moderator = moderator_user_fixture()
       forum = forum_fixture(access_level: "staff")
 
-      assert {:ok, _forum} = Forums.subscribe(actor(moderator), forum.short_name)
+      assert {:ok, _forum} = Forums.create_forum_subscription(actor(moderator), forum.short_name)
       assert subscribed?(forum, moderator)
     end
 
     test "anonymous cannot subscribe to a visible forum" do
       forum = forum_fixture()
 
-      assert Forums.subscribe(actor(), forum.short_name) == {:error, :unauthorized}
+      assert Forums.create_forum_subscription(actor(), forum.short_name) ==
+               {:error, :unauthorized}
     end
 
     test "an admin with an unknown forum gets not-found" do
-      assert Forums.subscribe(actor(admin_user_fixture()), "nonexistent") ==
+      assert Forums.create_forum_subscription(actor(admin_user_fixture()), "nonexistent") ==
                {:error, :not_found}
     end
   end
@@ -152,7 +157,7 @@ defmodule Philomena.ForumsTest do
       {:ok, _} = Forums.create_subscription(forum, user)
       assert subscribed?(forum, user)
 
-      assert {:ok, loaded_forum} = Forums.unsubscribe(actor(user), forum.short_name)
+      assert {:ok, loaded_forum} = Forums.delete_forum_subscription(actor(user), forum.short_name)
 
       assert loaded_forum.id == forum.id
       refute subscribed?(forum, user)
@@ -165,7 +170,7 @@ defmodule Philomena.ForumsTest do
       forum = forum_fixture()
       refute subscribed?(forum, user)
 
-      assert {:ok, _forum} = Forums.unsubscribe(actor(user), forum.short_name)
+      assert {:ok, _forum} = Forums.delete_forum_subscription(actor(user), forum.short_name)
       refute subscribed?(forum, user)
     end
 
@@ -174,12 +179,12 @@ defmodule Philomena.ForumsTest do
       forum = forum_fixture()
       {:ok, _} = Forums.create_subscription(forum, moderator)
 
-      assert {:ok, _forum} = Forums.unsubscribe(actor(moderator), forum.short_name)
+      assert {:ok, _forum} = Forums.delete_forum_subscription(actor(moderator), forum.short_name)
       refute subscribed?(forum, moderator)
     end
 
     test "an unknown forum slug is not found for a regular user" do
-      assert Forums.unsubscribe(actor(confirmed_user_fixture()), "nonexistent") ==
+      assert Forums.delete_forum_subscription(actor(confirmed_user_fixture()), "nonexistent") ==
                {:error, :not_found}
     end
 
@@ -187,27 +192,28 @@ defmodule Philomena.ForumsTest do
       user = confirmed_user_fixture()
       forum = forum_fixture(access_level: "staff")
 
-      assert Forums.unsubscribe(actor(user), forum.short_name) == {:error, :unauthorized}
+      assert Forums.delete_forum_subscription(actor(user), forum.short_name) ==
+               {:error, :unauthorized}
     end
   end
 
   describe "load_admin_forums/1" do
     test "an admin receives the forum list" do
       forum = forum_fixture()
-      assert {:ok, forums} = Forums.load_admin_forums(actor(admin_user_fixture()))
+      assert {:ok, forums} = Forums.list_admin_forums(actor(admin_user_fixture()))
       assert Enum.any?(forums, &(&1.id == forum.id))
     end
 
     test "a plain moderator is not authorized" do
-      assert Forums.load_admin_forums(actor(moderator_user_fixture())) == {:error, :unauthorized}
+      assert Forums.list_admin_forums(actor(moderator_user_fixture())) == {:error, :unauthorized}
     end
 
     test "a regular user is not authorized" do
-      assert Forums.load_admin_forums(actor(confirmed_user_fixture())) == {:error, :unauthorized}
+      assert Forums.list_admin_forums(actor(confirmed_user_fixture())) == {:error, :unauthorized}
     end
 
     test "an anonymous visitor is not authorized" do
-      assert Forums.load_admin_forums(actor()) == {:error, :unauthorized}
+      assert Forums.list_admin_forums(actor()) == {:error, :unauthorized}
     end
   end
 
@@ -262,32 +268,32 @@ defmodule Philomena.ForumsTest do
       forum = forum_fixture()
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               Forums.load_forum_for_edit(actor(admin_user_fixture()), forum.short_name)
+               Forums.edit_forum(actor(admin_user_fixture()), forum.short_name)
 
       assert loaded.id == forum.id
     end
 
     test "an unknown short name is not found for an admin" do
-      assert Forums.load_forum_for_edit(actor(admin_user_fixture()), "nonexistent") ==
+      assert Forums.edit_forum(actor(admin_user_fixture()), "nonexistent") ==
                {:error, :not_found}
     end
 
     test "an unknown short name is not found for a plain moderator" do
-      assert Forums.load_forum_for_edit(actor(moderator_user_fixture()), "nonexistent") ==
+      assert Forums.edit_forum(actor(moderator_user_fixture()), "nonexistent") ==
                {:error, :not_found}
     end
 
     test "a real forum is unauthorized for a plain moderator" do
       forum = forum_fixture()
 
-      assert Forums.load_forum_for_edit(actor(moderator_user_fixture()), forum.short_name) ==
+      assert Forums.edit_forum(actor(moderator_user_fixture()), forum.short_name) ==
                {:error, :unauthorized}
     end
 
     test "a regular user is not authorized" do
       forum = forum_fixture()
 
-      assert Forums.load_forum_for_edit(actor(confirmed_user_fixture()), forum.short_name) ==
+      assert Forums.edit_forum(actor(confirmed_user_fixture()), forum.short_name) ==
                {:error, :unauthorized}
     end
   end

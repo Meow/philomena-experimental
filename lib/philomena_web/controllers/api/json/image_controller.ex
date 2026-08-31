@@ -12,7 +12,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
        [params_name: "image", params_key: "image"] when action in [:create]
 
   def show(conn, %{"id" => id}) do
-    case Images.load_api_image(conn.assigns.actor, id) do
+    case Images.show_api_image(conn.assigns.actor, id) do
       {:ok, image} ->
         interactions = Interactions.user_interactions(conn.assigns.actor, [image])
 
@@ -26,7 +26,7 @@ defmodule PhilomenaWeb.Api.Json.ImageController do
   def create(conn, %{"image" => image_params}) do
     upload = PhilomenaMedia.Upload.cast(image_params, "image")
 
-    case Images.upload_image(conn.assigns.actor, image_params, upload) do
+    case Images.create_image(conn.assigns.actor, image_params, upload) do
       {:ok, %{image: image}} ->
         render(conn, "show.json", image: image, interactions: [])
 

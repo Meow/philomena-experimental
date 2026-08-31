@@ -88,7 +88,7 @@ defmodule Philomena.Activities do
   defp load_featured_image(actor, scope) do
     include_hidden? = scope.hidden == true
 
-    case Images.featured_image(actor, include_hidden?) do
+    case Images.show_featured_image(actor, include_hidden?) do
       {:ok, image} -> image
       {:error, :not_found} -> nil
     end
@@ -100,7 +100,7 @@ defmodule Philomena.Activities do
     topics = Topics.list_front_page_topics(actor, @strip_pagination)
 
     {:ok, streams, _subscriptions, _changeset} =
-      Channels.load_channels(actor, show_nsfw_channels?, %{}, @strip_pagination)
+      Channels.list_channels(actor, show_nsfw_channels?, %{}, @strip_pagination)
 
     interactions =
       Interactions.user_interactions(actor, [
@@ -142,9 +142,9 @@ defmodule Philomena.Activities do
       {:ok, %FrontPage{watched: %Scrivener.Page{}}}
 
   """
-  @spec load_front_page(Actor.t(), Scope.t(), Filter.t(), boolean()) ::
+  @spec list_activities(Actor.t(), Scope.t(), Filter.t(), boolean()) ::
           {:ok, FrontPage.t()} | {:error, :unauthorized | String.t()}
-  def load_front_page(
+  def list_activities(
         %Actor{} = actor,
         %Scope{} = scope,
         %Filter{} = filter,

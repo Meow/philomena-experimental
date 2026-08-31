@@ -18,8 +18,8 @@ defmodule Philomena.GalleriesConcurrencyTest do
 
     results =
       concurrently([
-        fn -> Galleries.add_image_to_gallery(actor(user), gallery.id, image.id) end,
-        fn -> Galleries.add_image_to_gallery(actor(user), gallery.id, image.id) end
+        fn -> Galleries.create_gallery_image(actor(user), gallery.id, image.id) end,
+        fn -> Galleries.create_gallery_image(actor(user), gallery.id, image.id) end
       ])
 
     assert Enum.count(results, &match?({:ok, %Gallery{}}, &1)) == 1
@@ -35,7 +35,7 @@ defmodule Philomena.GalleriesConcurrencyTest do
 
     [add_result, delete_result] =
       concurrently([
-        fn -> Galleries.add_image_to_gallery(actor(user), gallery.id, image.id) end,
+        fn -> Galleries.create_gallery_image(actor(user), gallery.id, image.id) end,
         fn -> Galleries.delete_gallery(actor(user), gallery.id) end
       ])
 
@@ -56,8 +56,8 @@ defmodule Philomena.GalleriesConcurrencyTest do
 
     results =
       concurrently([
-        fn -> Galleries.remove_image_from_gallery(actor(user), gallery.id, image.id) end,
-        fn -> Galleries.remove_image_from_gallery(actor(user), gallery.id, image.id) end
+        fn -> Galleries.delete_gallery_image(actor(user), gallery.id, image.id) end,
+        fn -> Galleries.delete_gallery_image(actor(user), gallery.id, image.id) end
       ])
 
     assert Enum.count(results, &match?({:ok, %Gallery{}}, &1)) == 1
@@ -78,7 +78,7 @@ defmodule Philomena.GalleriesConcurrencyTest do
 
     [remove_result, delete_result] =
       concurrently([
-        fn -> Galleries.remove_image_from_gallery(actor(user), gallery.id, image.id) end,
+        fn -> Galleries.delete_gallery_image(actor(user), gallery.id, image.id) end,
         fn -> Galleries.delete_gallery(actor(user), gallery.id) end
       ])
 
@@ -99,7 +99,7 @@ defmodule Philomena.GalleriesConcurrencyTest do
     results =
       concurrently(
         for image <- images do
-          fn -> Galleries.add_image_to_gallery(actor(user), gallery.id, image.id) end
+          fn -> Galleries.create_gallery_image(actor(user), gallery.id, image.id) end
         end
       )
 

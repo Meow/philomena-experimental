@@ -74,9 +74,9 @@ defmodule Philomena.UserIps do
   Returns `{:ok, %IpProfile{}}` carrying the users seen on the address and the
   subnet bans covering it.
   """
-  @spec load_ip_profile(Actor.t(), String.t()) ::
+  @spec show_ip_profile(Actor.t(), String.t()) ::
           {:ok, IpProfile.t()} | {:error, :unauthorized | :not_found}
-  def load_ip_profile(%Actor{} = actor, ip) do
+  def show_ip_profile(%Actor{} = actor, ip) do
     with {:ok, ip} <- cast_ip(ip),
          :ok <- authorize(actor, :show, :identity_metadata) do
       {:ok,

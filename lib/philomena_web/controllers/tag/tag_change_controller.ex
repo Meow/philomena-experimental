@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Tag.TagChangeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"tag_id" => tag_id} = params) do
-    case TagChanges.tag_tag_changes(
+    case TagChanges.list_tag_tag_changes(
            conn.assigns.actor,
            tag_id,
            params,

@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Image.VoteController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"image_id" => image_id} = params) do
-    case Images.create_vote(conn.assigns.actor, image_id, params) do
+    case Images.create_image_vote(conn.assigns.actor, image_id, params) do
       {:ok, image} ->
         json(conn, Image.interaction_data(image))
 
@@ -24,7 +24,7 @@ defmodule PhilomenaWeb.Image.VoteController do
   end
 
   def delete(conn, %{"image_id" => image_id}) do
-    with {:ok, image} <- Images.delete_vote(conn.assigns.actor, image_id) do
+    with {:ok, image} <- Images.delete_image_vote(conn.assigns.actor, image_id) do
       json(conn, Image.interaction_data(image))
     end
   end

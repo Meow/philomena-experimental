@@ -12,7 +12,7 @@ defmodule PhilomenaWeb.Session.TotpController do
   end
 
   def create(conn, %{"user" => user_params} = params) when is_map(user_params) do
-    case Users.consume_totp_token(conn.assigns.current_user, params) do
+    case Users.create_session_totp(conn.assigns.current_user, params) do
       {:ok, user} ->
         UserAuth.totp_auth_user(conn, user, user_params)
 

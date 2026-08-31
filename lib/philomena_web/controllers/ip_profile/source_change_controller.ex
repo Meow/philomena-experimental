@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.IpProfile.SourceChangeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, %{"ip_profile_id" => ip} = params) do
-    case SourceChanges.ip_source_changes(
+    case SourceChanges.list_ip_source_changes(
            conn.assigns.actor,
            ip,
            params,

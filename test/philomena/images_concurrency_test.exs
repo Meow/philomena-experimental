@@ -22,8 +22,8 @@ defmodule Philomena.ImagesConcurrencyTest do
 
     results =
       concurrently([
-        fn -> Images.approve_image(actor(moderator), image.id) end,
-        fn -> Images.approve_image(actor(moderator), image.id) end
+        fn -> Images.create_image_approve(actor(moderator), image.id) end,
+        fn -> Images.create_image_approve(actor(moderator), image.id) end
       ])
 
     assert Enum.count(results, &match?({:ok, %Image{}}, &1)) == 1
@@ -47,7 +47,7 @@ defmodule Philomena.ImagesConcurrencyTest do
       concurrently(
         Enum.zip(actors, sources)
         |> Enum.map(fn {actor, source} ->
-          fn -> Images.update_sources(actor, image.id, source_attrs(source)) end
+          fn -> Images.update_image_sources(actor, image.id, source_attrs(source)) end
         end)
       )
 
@@ -69,9 +69,15 @@ defmodule Philomena.ImagesConcurrencyTest do
     results =
       concurrently([
         fn ->
-          Images.update_sources(Enum.at(actors, 0), image.id, source_attrs([base], [base, added]))
+          Images.update_image_sources(
+            Enum.at(actors, 0),
+            image.id,
+            source_attrs([base], [base, added])
+          )
         end,
-        fn -> Images.update_sources(Enum.at(actors, 1), image.id, source_attrs([base], [])) end
+        fn ->
+          Images.update_image_sources(Enum.at(actors, 1), image.id, source_attrs([base], []))
+        end
       ])
 
     assert Enum.all?(results, &match?({:ok, %{}}, &1))
@@ -96,7 +102,7 @@ defmodule Philomena.ImagesConcurrencyTest do
                 "https://example.com/limited-two",
                 "https://example.com/limited-three"
               ]) do
-          fn -> Images.update_sources(actor, image.id, source_attrs(source)) end
+          fn -> Images.update_image_sources(actor, image.id, source_attrs(source)) end
         end
       )
 
@@ -115,7 +121,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         Enum.zip(actors, added_names)
         |> Enum.map(fn {actor, tag_name} ->
           fn ->
-            Images.update_tags(
+            Images.update_image_tags(
               actor,
               image.id,
               %{
@@ -153,7 +159,7 @@ defmodule Philomena.ImagesConcurrencyTest do
     actors = for _ <- 1..2, do: actor(admin_user_fixture())
 
     add = fn ->
-      Images.update_tags(
+      Images.update_image_tags(
         Enum.at(actors, 0),
         image.id,
         %{"old_tag_input" => old_input, "tag_input" => "#{old_input}, #{added_name}"}
@@ -161,7 +167,7 @@ defmodule Philomena.ImagesConcurrencyTest do
     end
 
     remove = fn ->
-      Images.update_tags(
+      Images.update_image_tags(
         Enum.at(actors, 1),
         image.id,
         %{"old_tag_input" => old_input, "tag_input" => "safe, keep, other"}
@@ -195,7 +201,7 @@ defmodule Philomena.ImagesConcurrencyTest do
       concurrently(
         for {image, tag_name} <- Enum.zip(images, tag_names) do
           fn ->
-            Images.update_tags(
+            Images.update_image_tags(
               actor,
               image.id,
               %{
@@ -236,7 +242,7 @@ defmodule Philomena.ImagesConcurrencyTest do
       concurrently(
         for actor <- actors do
           fn ->
-            Images.update_tags(
+            Images.update_image_tags(
               actor,
               image.id,
               %{

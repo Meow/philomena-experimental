@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.CommissionController do
 
   def index(conn, params) do
     with {:ok, directory} <-
-           Commissions.load_directory(
+           Commissions.list_commissions(
              conn.assigns.actor,
              params["commission"] || %{},
              conn.assigns.scrivener

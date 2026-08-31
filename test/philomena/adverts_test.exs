@@ -46,18 +46,18 @@ defmodule Philomena.AdvertsTest do
       _advert = advert_fixture()
 
       assert {:ok, %Scrivener.Page{}} =
-               Adverts.load_adverts(actor(admin_user_fixture()), @pagination)
+               Adverts.list_adverts(actor(admin_user_fixture()), @pagination)
 
       assert {:ok, %Scrivener.Page{}} =
-               Adverts.load_adverts(actor(role_moderator_fixture("Advert")), @pagination)
+               Adverts.list_adverts(actor(role_moderator_fixture("Advert")), @pagination)
 
-      assert Adverts.load_adverts(actor(moderator_user_fixture()), @pagination) ==
+      assert Adverts.list_adverts(actor(moderator_user_fixture()), @pagination) ==
                {:error, :unauthorized}
 
-      assert Adverts.load_adverts(actor(confirmed_user_fixture()), @pagination) ==
+      assert Adverts.list_adverts(actor(confirmed_user_fixture()), @pagination) ==
                {:error, :unauthorized}
 
-      assert Adverts.load_adverts(actor(), @pagination) == {:error, :unauthorized}
+      assert Adverts.list_adverts(actor(), @pagination) == {:error, :unauthorized}
     end
 
     test "the listing is ordered by finish date descending" do
@@ -65,7 +65,7 @@ defmodule Philomena.AdvertsTest do
       sooner = advert_fixture(%{finish_date: DateTime.add(now, 1, :hour)})
       later = advert_fixture(%{finish_date: DateTime.add(now, 500, :day)})
 
-      assert {:ok, page} = Adverts.load_adverts(actor(admin_user_fixture()), @pagination)
+      assert {:ok, page} = Adverts.list_adverts(actor(admin_user_fixture()), @pagination)
 
       ids = Enum.map(page.entries, & &1.id)
       assert Enum.find_index(ids, &(&1 == later.id)) < Enum.find_index(ids, &(&1 == sooner.id))
@@ -145,7 +145,7 @@ defmodule Philomena.AdvertsTest do
       advert = advert_fixture()
 
       assert {:ok, {loaded, %Ecto.Changeset{}}} =
-               Adverts.load_advert_for_edit(actor(admin_user_fixture()), "#{advert.id}")
+               Adverts.edit_advert(actor(admin_user_fixture()), "#{advert.id}")
 
       assert loaded.id == advert.id
     end
@@ -153,7 +153,7 @@ defmodule Philomena.AdvertsTest do
     test "a plain moderator is rejected by the module gate" do
       advert = advert_fixture()
 
-      assert Adverts.load_advert_for_edit(actor(moderator_user_fixture()), "#{advert.id}") ==
+      assert Adverts.edit_advert(actor(moderator_user_fixture()), "#{advert.id}") ==
                {:error, :unauthorized}
     end
 
@@ -161,7 +161,7 @@ defmodule Philomena.AdvertsTest do
       advert = advert_fixture()
 
       assert {:ok, {%Advert{id: id}, %Ecto.Changeset{}}} =
-               Adverts.load_advert_for_edit(
+               Adverts.edit_advert(
                  actor(role_moderator_fixture("Advert")),
                  advert.id
                )
@@ -170,15 +170,15 @@ defmodule Philomena.AdvertsTest do
     end
 
     test "a non-castable id is not-found" do
-      assert Adverts.load_advert_for_edit(actor(admin_user_fixture()), "abc") ==
+      assert Adverts.edit_advert(actor(admin_user_fixture()), "abc") ==
                {:error, :not_found}
     end
 
     test "an unknown id is not-found for every actor" do
-      assert Adverts.load_advert_for_edit(actor(admin_user_fixture()), "2147483647") ==
+      assert Adverts.edit_advert(actor(admin_user_fixture()), "2147483647") ==
                {:error, :not_found}
 
-      assert Adverts.load_advert_for_edit(actor(role_moderator_fixture("Advert")), "2147483647") ==
+      assert Adverts.edit_advert(actor(role_moderator_fixture("Advert")), "2147483647") ==
                {:error, :not_found}
     end
   end
@@ -405,7 +405,7 @@ defmodule Philomena.AdvertsTest do
       operations = [
         fn actor -> Adverts.new_advert(actor) end,
         fn actor -> Adverts.create_advert(actor, %{}, nil) end,
-        fn actor -> Adverts.load_advert_for_edit(actor, advert.id) end,
+        fn actor -> Adverts.edit_advert(actor, advert.id) end,
         fn actor -> Adverts.update_advert(actor, advert.id, %{"title" => "Changed"}) end,
         fn actor -> Adverts.update_advert_image(actor, advert.id, nil) end,
         fn actor -> Adverts.delete_advert(actor, advert.id) end

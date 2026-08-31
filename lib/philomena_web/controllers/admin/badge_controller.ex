@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.BadgeController do
   action_fallback PhilomenaWeb.FallbackController
 
   def index(conn, _params) do
-    with {:ok, badges} <- Badges.load_badges(conn.assigns.actor, conn.assigns.scrivener) do
+    with {:ok, badges} <- Badges.list_badges(conn.assigns.actor, conn.assigns.scrivener) do
       render(conn, "index.html", title: "Admin - Badges", badges: badges)
     end
   end
@@ -35,7 +35,7 @@ defmodule PhilomenaWeb.Admin.BadgeController do
   end
 
   def edit(conn, %{"id" => id}) do
-    with {:ok, {badge, changeset}} <- Badges.load_badge_for_edit(conn.assigns.actor, id) do
+    with {:ok, {badge, changeset}} <- Badges.edit_badge(conn.assigns.actor, id) do
       render(conn, "edit.html", title: "Editing Badge", badge: badge, changeset: changeset)
     end
   end

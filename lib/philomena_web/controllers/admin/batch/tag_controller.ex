@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.Admin.Batch.TagController do
   action_fallback PhilomenaWeb.FallbackController
 
   def update(conn, params) do
-    case Images.batch_update_tags(conn.assigns.actor, params) do
+    case Images.update_batch_tags(conn.assigns.actor, params) do
       {:ok, result} ->
         json(conn, %{succeeded: result.succeeded, failed: result.failed})
 

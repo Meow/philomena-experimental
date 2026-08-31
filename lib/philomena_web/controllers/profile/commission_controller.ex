@@ -8,7 +8,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
 
   def show(conn, %{"profile_id" => slug}) do
     with {:ok, commission} <-
-           Commissions.load_commission_for_show(conn.assigns.actor, slug) do
+           Commissions.show_commission(conn.assigns.actor, slug) do
       item_descriptions =
         commission.items
         |> Enum.map(&%{body: &1.description})
@@ -86,7 +86,7 @@ defmodule PhilomenaWeb.Profile.CommissionController do
   end
 
   def edit(conn, %{"profile_id" => slug}) do
-    case Commissions.load_commission_for_edit(conn.assigns.actor, slug) do
+    case Commissions.edit_commission(conn.assigns.actor, slug) do
       {:ok, %Ecto.Changeset{data: commission} = changeset} ->
         render(conn, "edit.html",
           title: "Editing Commission",

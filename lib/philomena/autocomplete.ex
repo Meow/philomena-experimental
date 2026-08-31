@@ -46,8 +46,8 @@ defmodule Philomena.Autocomplete do
       {:ok, %Autocomplete{}}
 
   """
-  @spec get_autocomplete() :: {:ok, Autocomplete.t()} | {:error, :not_found}
-  def get_autocomplete do
+  @spec show_compiled_autocomplete() :: {:ok, Autocomplete.t()} | {:error, :not_found}
+  def show_compiled_autocomplete do
     latest_query()
     |> Loader.one()
   end
