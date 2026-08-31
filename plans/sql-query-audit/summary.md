@@ -2,7 +2,7 @@
 
 Refs: master -> context-logic  
 Status: complete  
-Scope: Wave A (20 contexts), Wave B (6 contexts), and Wave C (7 contexts); read-only audit; no application code or migrations changed.
+Scope: Wave A (20 contexts), Wave B (6 contexts), Wave C (7 contexts), and Wave D (7 contexts); read-only audit; no application code or migrations changed.
 
 All 26 Wave A/B assignment-matrix contexts have a complete report: [activities](activities.md),
 [adverts](adverts.md), [artistlinks](artistlinks.md), [autocomplete](autocomplete.md),
@@ -20,6 +20,11 @@ All seven Wave C contexts have a complete report: [forums](forums.md),
 [topics](topics.md), [posts](posts.md), [comments](comments.md),
 [polls](polls.md), [poll options](poll_options.md), and
 [poll votes](poll_votes.md).
+
+All seven Wave D contexts have a complete report: [images](images.md),
+[image faves](image_faves.md), [image features](image_features.md),
+[image hides](image_hides.md), [image intensities](image_intensities.md),
+[image votes](image_votes.md), and [interactions](interactions.md).
 
 ## Confirmed shape changes
 
@@ -73,6 +78,18 @@ active/deleted-user visibility, and nested conversation parent scoping.
 | Polls       | Poll loading is topic-scoped with options/topic/forum preloads; updates and vote totals use explicit PK locks/updates; active checks are now in memory.                                                             | Existing topic, option-parent, and PK indexes cover all retained paths; no candidate.                                                                                                           |
 | PollOptions | Option preloading and counter updates are centralized; counter writes gain `poll_id` parent scope.                                                                                                                  | Existing `(poll_id, label)` and option PK indexes cover the paths; no candidate.                                                                                                                |
 | PollVotes   | Staff listing adds `vote_count > 0`; vote deletion gains poll-parent scoping and a poll lock; existence, insert, and counter transaction shapes remain covered.                                                     | Existing poll/option/vote PK, foreign-key, and unique indexes cover the changed paths; no candidate.                                                                                            |
+
+### Wave D
+
+| Context          | Confirmed delta                                                                                                                                                                                     | Index disposition                                                                                                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Images           | Image workflows consolidate member/lock/preload paths; featured selection consistently applies hidden-image and viewer-hide predicates; batch maintenance adds an explicit visible-image predicate. | Existing image PK, approval partial, feature created-at/image, child foreign-key, and interaction indexes cover the paths. No automatic candidate.                                   |
+| ImageFaves       | Create now deletes an existing `(image_id,user_id)` row before insert; user cleanup is context-owned batch deletion; merge inserts add `RETURNING user_id`.                                         | Existing unique `(image_id,user_id)` and `user_id` indexes cover deletes, conflict checks, preloads, and cleanup. No candidate.                                                      |
+| ImageFeatures    | Featured-image query moved/consolidated into Images; API now excludes the caller's hidden images; feature creation adds an image PK load and lock.                                                  | Existing feature created-at/image indexes, image PK, and hide unique index cover all paths. No candidate.                                                                            |
+| ImageHides       | Hide replacement/deletion and merge/preload/export operations retain their image/user predicates; ownership moved into loaded-image transaction steps.                                              | Existing unique `(image_id,user_id)` and `user_id` indexes cover all changed/moved paths. No candidate.                                                                              |
+| ImageIntensities | Intensity persistence changed from plain insert to `ON CONFLICT (image_id) DO UPDATE`; CRUD surface was removed; image-delete FK now cascades.                                                      | Existing unique `image_intensities(image_id)` is the upsert arbiter; cascade is referential only. No candidate.                                                                      |
+| ImageVotes       | Vote replacement adds per-direction deletes; user cleanup is context-owned batched deletion; merge inserts return inserted user IDs.                                                                | Existing unique `(image_id,user_id)` and `user_id` indexes cover paired deletes/conflicts and cleanup. Conditional `(user_id, up, image_id)` candidate is deferred pending evidence. |
+| Interactions     | Actor-first interaction API and empty-input short-circuit preserve the four-branch `UNION ALL`; merge transaction ownership and `RETURNING` changed only composition/materialization.               | Existing interaction unique/user indexes and image PK cover all paths. No candidate.                                                                                                 |
 
 ## Index candidates ranked by urgency/confidence
 
@@ -146,11 +163,20 @@ LIMIT 50 OFFSET 0` showed a bitmap scan followed by a sort (estimated five
    candidate only; validate both correlated aggregates, table cardinality,
    refresh frequency, and write/storage cost before adding it.
 
+10. **Low / conditional — ImageVotes user cleanup.** Candidate:
+    `image_votes (user_id, up, image_id)` for direction-specific cleanup and
+    ordered batch ID extraction. The existing `user_id` index covers the
+    leading filter, and no representative plan, cardinality, or frequency
+    evidence is available. Treat this as a measurement-only candidate and
+    account for additional write/storage cost before proposing a migration.
+
 No candidate is proposed for random ordering, leading-wildcard text search,
 OR/full-text fragments, conversation participant OR branches without plan
 evidence, DNP state/text branches, unchanged version/rule history shapes,
 notification fan-out, subscriptions, or primary-key/unique-conflict access
-paths.
+paths. Wave D image member, featured, interaction, hide/fave/vote, feature,
+intensity, and preload changes are covered; only the conditional ImageVotes
+cleanup candidate above remains for measurement.
 
 ## Covered/no-action changes
 
@@ -198,6 +224,26 @@ paths.
   checks, staff listings, row locks, counter updates, and uniqueness targets
   are covered by existing primary, topic/parent, foreign-key, and unique
   indexes; no poll index candidate is proposed.
+
+### Wave D
+
+- **Images:** member/lock loads, approval queues/counts, featured joins and
+  viewer-hide checks, lateral image-show aggregates, interaction preloads, and
+  image-child maintenance are covered by existing PK, partial approval,
+  feature, foreign-key, and interaction indexes. Hidden-image predicates are
+  correctness/visibility changes, not automatic index actions.
+- **ImageFaves, ImageHides, and ImageVotes:** per-image
+  replacement/deletion, merge conflict inserts, interaction branches, and
+  user cleanup batches are covered by existing unique pair and user-ID
+  indexes. ImageVotes' optional `(user_id, up, image_id)` ordering
+  optimization is deferred for measurement.
+- **ImageFeatures and ImageIntensities:** feature selection/creation and
+  intensity upsert/preload paths are covered by feature created-at/image,
+  image PK, hide pair, and intensity image-ID indexes. The intensity cascade
+  migration changes delete semantics only.
+- **Interactions:** UNION interaction fan-out, source association preloads,
+  merge inserts, and image counter updates retain covered access paths; no
+  additional shared candidate is proposed.
 
 ## Unresolved questions
 
@@ -252,3 +298,17 @@ paths.
 - No Wave C EXPLAIN was collected because the available Docker/database runtime
   was unavailable or lacked representative data; this lowers confidence in
   optional ordering candidates but does not block the source/schema audit.
+
+### Wave D
+
+- Confirm whether the API's newly consistent viewer-hide predicate for featured
+  images is intentional; it is a visibility/correctness question, not an index
+  action.
+- Measure the ImageVotes cleanup workload before considering
+  `(user_id, up, image_id)`: capture representative `EXPLAIN (ANALYZE,
+BUFFERS)`, table cardinality, direction selectivity, run frequency, and
+  write/storage cost. Do not add a migration from source evidence alone.
+- Confirm that image batch tag/revert visibility checks and intensity upsert /
+  image-delete cascade semantics match the intended correctness behavior.
+- No Wave D EXPLAIN was required for covered PK/unique/FK paths; local runtime
+  data was not representative enough to justify optional image composites.

@@ -2,12 +2,12 @@
 
 Refs: master -> context-logic
 Status: complete
-Scope: Wave A, Wave B, and Wave C; read-only audit; no application code or migrations changed.
+Scope: Wave A, Wave B, Wave C, and Wave D; read-only audit; no application code or migrations changed.
 
-This report owns query shapes shared by multiple Wave A contexts, plus the
-shared Loader, authorization, visibility, subscription, and transaction
-helpers. Individual context reports link here rather than duplicating these
-findings.
+This report owns query shapes shared by contexts across all completed waves,
+plus the shared Loader, authorization, visibility, subscription, interaction,
+and transaction helpers. Individual context reports link here rather than
+duplicating these findings.
 
 ## Canonical shared findings
 
@@ -178,6 +178,42 @@ poll-scoped option query. Existing `polls_pkey`, `poll_options_pkey`,
 cover these paths. The added parent predicates are correctness protections;
 no shared poll index candidate is recommended.
 
+### Wave D image and interaction helpers
+
+`Philomena.Interactions.user_interactions/2` is the canonical image
+interaction fan-out: four `UNION ALL` branches over `image_hides`,
+`image_faves`, and up/down `image_votes`, each constrained by image IDs and
+the actor's user ID. The actor-first API and empty-input short-circuit do not
+change the non-empty SQL shape. Existing `(image_id, user_id)` unique indexes
+and `user_id` indexes cover the branches; no shared candidate is recommended.
+The merge workflow's association preloads and `ON CONFLICT DO NOTHING` inserts
+retain the same image/user predicates; `RETURNING user_id` changes only result
+materialization.
+
+Image member loading and visibility are shared across Images, ImageFeatures,
+ImageFaves, ImageHides, and interaction callers. `Loader.fetch` and
+`fetch_and_authorize` remain primary-key lookups with caller-owned preloads;
+Canada authorization is in memory. Featured-image selection retains the
+`images.hidden_from_users = false` plus `image_features.created_at DESC LIMIT 1`
+shape, with a viewer-hide `NOT EXISTS` branch covered by
+`image_hides(image_id, user_id)`. The API's newly consistent personal-hide
+filter is a correctness/visibility delta, not an index recommendation.
+
+The image interaction persistence contexts share covered shapes: per-image
+delete/replacement by `(image_id, user_id)`, merge inserts with the existing
+unique conflict key, and user cleanup by `user_id` with batch `image_id`
+selection. Image counter and user-stat updates are primary/unique key updates.
+`ImageIntensities.put_for_loaded_image/2` adds an upsert on the existing unique
+`image_intensities(image_id)` key; the image-delete cascade migration changes
+referential behavior only. No shared index is proposed.
+
+`ImageVotes.delete_user_votes!/2` is the only conditional Wave D candidate:
+the cleanup relation filters `user_id` and `up`, then batches/orders by
+`image_id`. Existing `image_votes(user_id)` covers the leading filter. A
+`(user_id, up, image_id)` B-tree should be considered only after representative
+`EXPLAIN (ANALYZE, BUFFERS)`, frequency/cardinality, and write-cost evidence;
+the ImageVotes report owns it so no duplicate shared recommendation is made.
+
 ## Cross-context ownership links
 
 - Activities is the canonical consumer report for homepage composition; its
@@ -205,12 +241,19 @@ no shared poll index candidate is recommended.
 - Polls, PollOptions, and PollVotes link their shared parent-scoped loading,
   existence, preload, lock, and counter-update shapes here; no poll candidate
   is duplicated in the summary.
+- Images owns image member/featured/approval/navigation and image-child
+  preload shapes; ImageFeatures, ImageFaves, ImageHides, ImageIntensities,
+  ImageVotes, and Interactions link their detailed persistence and fan-out
+  findings here. Duplicate comparison intensity ranges remain owned by
+  DuplicateReports and are not re-recommended.
 
 ## Index conclusion
 
 No new index is recommended solely for a shared helper. All shared equality,
 foreign-key, primary-key, unique-conflict, subscription, interaction, profile
-locator, report-target, and tag-canonicalization paths have existing coverage.
-The fingerprint ordered-history candidate, commission-item ordered-preload
+locator, report-target, tag-canonicalization, image interaction, and image
+member/preload paths have existing coverage. The fingerprint ordered-history
+candidate, commission-item ordered-preload
 candidate, and Wave C post last-pointer candidate arise in individual
-contexts and are deduplicated in `summary.md`.
+contexts and are deduplicated in `summary.md`. The conditional ImageVotes
+cleanup candidate remains deferred pending runtime evidence.
