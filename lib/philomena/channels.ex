@@ -43,6 +43,14 @@ defmodule Philomena.Channels do
   defp maybe_show_nsfw(query, true), do: query
   defp maybe_show_nsfw(query, _falsy), do: where(query, nsfw: false)
 
+  defp channels_query(query, show_nsfw?) do
+    query
+    |> maybe_show_nsfw(show_nsfw?)
+    |> where([c], not is_nil(c.last_fetched_at))
+    |> order_by(desc: :is_live, asc: :title)
+    |> preload([:associated_artist_tag])
+  end
+
   @doc """
   Updates all tracked channels for which an automatic fetch scheme is known.
 
@@ -79,6 +87,27 @@ defmodule Philomena.Channels do
   end
 
   @doc """
+  Loads the livestream listing for the home page.
+
+  Only channels the fetcher has stamped (`last_fetched_at` set) are listed,
+  ordered live-first and then by title. `show_nsfw?` includes NSFW channels.
+
+  ## Examples
+
+      iex> list_front_page_channels(actor, false, 6)
+      [%Channel{}, ...]
+
+  """
+  @spec list_front_page_channels(Actor.t(), boolean(), pos_integer()) ::
+          [Channel.t()]
+  def list_front_page_channels(%Actor{} = _actor, show_nsfw?, strip_size) do
+    Channel
+    |> channels_query(show_nsfw?)
+    |> limit(^strip_size)
+    |> Repo.all()
+  end
+
+  @doc """
   Loads the livestream listing and the acting user's subscription state.
 
   Only channels the fetcher has stamped (`last_fetched_at` set) are listed,
@@ -99,10 +128,7 @@ defmodule Philomena.Channels do
     with {:ok, query, query_form} <- QueryBuilder.build_query(params) do
       channels =
         query
-        |> maybe_show_nsfw(show_nsfw?)
-        |> where([c], not is_nil(c.last_fetched_at))
-        |> order_by(desc: :is_live, asc: :title)
-        |> preload([:associated_artist_tag])
+        |> channels_query(show_nsfw?)
         |> Repo.paginate(pagination)
 
       {:ok, channels, subscriptions(channels, actor.user), QueryForm.changeset(query_form)}

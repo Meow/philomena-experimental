@@ -53,7 +53,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
              }
     end
 
-    test "excludes hidden topics", %{conn: conn} do
+    test "excludes hidden topics for users", %{conn: conn} do
       moderator = moderator_user_fixture()
       forum = forum_fixture()
       topic = topic_fixture(forum)
@@ -71,7 +71,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       assert json_response(conn, 200) == %{"topics" => [], "total" => 0}
     end
 
-    test "counts hidden topics for moderators while preserving API redaction", %{conn: conn} do
+    test "excludes hidden topics for moderators", %{conn: conn} do
       moderator = moderator_user_fixture()
       forum = forum_fixture()
       topic = topic_fixture(forum)
@@ -90,7 +90,7 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
           ~p"/api/v1/json/forums/#{forum}/topics?key=#{moderator.authentication_token}"
         )
 
-      assert %{"topics" => [%{"slug" => nil}], "total" => 1} = json_response(conn, 200)
+      assert %{"topics" => [], "total" => 0} = json_response(conn, 200)
     end
 
     test "returns 404 for an unknown forum", %{conn: conn} do
@@ -108,6 +108,17 @@ defmodule PhilomenaWeb.Api.Json.Forum.TopicControllerTest do
       conn = get(conn, ~p"/api/v1/json/forums/#{forum}/topics")
 
       assert json_response(conn, 404) == %{"error" => "Not found"}
+    end
+
+    test "shows restricted forums to staff", %{conn: conn} do
+      moderator = moderator_user_fixture()
+      forum = forum_fixture(access_level: "staff")
+      _topic = topic_fixture(forum)
+
+      conn =
+        get(conn, ~p"/api/v1/json/forums/#{forum}/topics?key=#{moderator.authentication_token}")
+
+      assert %{"topics" => [_], "total" => 1} = json_response(conn, 200)
     end
 
     test "paginates with page and per_page", %{conn: conn} do

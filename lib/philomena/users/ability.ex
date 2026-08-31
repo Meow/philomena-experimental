@@ -651,7 +651,7 @@ defimpl Canada.Can, for: Philomena.Users.User do
       do: true
 
   # View the homepage
-  def can?(%User{}, :index, FrontPage), do: true
+  def can?(%User{}, :show, FrontPage), do: true
 
   def can?(%User{id: id}, action, %Filter{user_id: id})
       when action in [
@@ -815,7 +815,7 @@ defimpl Canada.Can, for: Atom do
   #
 
   # View the assembled homepage
-  def can?(_user, :index, FrontPage), do: true
+  def can?(_user, :show, FrontPage), do: true
 
   # View filters they own and public/system filters
   def can?(_user, action, Filter) when action in [:index, :index_system, :search, :switch],

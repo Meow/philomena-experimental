@@ -275,7 +275,7 @@ defmodule Philomena.DuplicateReports do
 
     {source.intensity, source.image_aspect_ratio}
     |> duplicate_query(dist: 0.2)
-    |> where([image], image.id != ^source.id and image.hidden_from_users == false)
+    |> where([image], image.id != ^source.id)
     |> Repo.all()
     |> Enum.map(fn target ->
       changeset =

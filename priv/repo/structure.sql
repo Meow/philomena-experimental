@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict meqEsa9dlLWwL1L5BNFhedkygWZ7Ko14TPZJ9w0ZplOfcGNsPicK93gYaDwXPgT
+\restrict WWf3jsmDsExHu0PRnAJOKCVwYCcg9NriqOYckARxX9I5Tqu1EDTh8bkObabnmQx
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -4448,13 +4448,6 @@ CREATE INDEX index_user_ips_on_updated_at ON public.user_ips USING btree (update
 
 
 --
--- Name: index_user_ips_on_user_id_and_updated_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_user_ips_on_user_id_and_updated_at ON public.user_ips USING btree (user_id, updated_at DESC);
-
-
---
 -- Name: index_user_name_changes_on_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4721,6 +4714,13 @@ CREATE UNIQUE INDEX rules_position_index ON public.rules USING btree ("position"
 
 
 --
+-- Name: source_changes_fingerprint_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX source_changes_fingerprint_index ON public.source_changes USING btree (fingerprint);
+
+
+--
 -- Name: tag_change_tags_tag_change_id_tag_id_index; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4760,6 +4760,34 @@ CREATE INDEX tag_changes_ip_inet_ops_index ON public.tag_changes USING gist (ip 
 --
 
 CREATE INDEX tag_changes_user_id_index ON public.tag_changes USING btree (user_id);
+
+
+--
+-- Name: topics_forum_id_last_replied_to_at_id_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX topics_forum_id_last_replied_to_at_id_index ON public.topics USING btree (forum_id, last_replied_to_at DESC, id DESC);
+
+
+--
+-- Name: topics_forum_id_sticky_last_replied_to_at_id_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX topics_forum_id_sticky_last_replied_to_at_id_index ON public.topics USING btree (forum_id, sticky DESC, last_replied_to_at DESC, id DESC);
+
+
+--
+-- Name: user_fingerprints_user_id_updated_at_id_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX user_fingerprints_user_id_updated_at_id_index ON public.user_fingerprints USING btree (user_id, updated_at DESC, id DESC);
+
+
+--
+-- Name: user_ips_user_id_updated_at_id_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX user_ips_user_id_updated_at_id_index ON public.user_ips USING btree (user_id, updated_at DESC, id DESC);
 
 
 --
@@ -5924,7 +5952,7 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict meqEsa9dlLWwL1L5BNFhedkygWZ7Ko14TPZJ9w0ZplOfcGNsPicK93gYaDwXPgT
+\unrestrict WWf3jsmDsExHu0PRnAJOKCVwYCcg9NriqOYckARxX9I5Tqu1EDTh8bkObabnmQx
 
 INSERT INTO public."schema_migrations" (version) VALUES (20200503002523);
 INSERT INTO public."schema_migrations" (version) VALUES (20200607000511);
@@ -5969,3 +5997,4 @@ INSERT INTO public."schema_migrations" (version) VALUES (20260719123610);
 INSERT INTO public."schema_migrations" (version) VALUES (20260719123611);
 INSERT INTO public."schema_migrations" (version) VALUES (20260806180557);
 INSERT INTO public."schema_migrations" (version) VALUES (20260810212302);
+INSERT INTO public."schema_migrations" (version) VALUES (20260831235832);

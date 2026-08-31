@@ -9,7 +9,7 @@ defmodule Philomena.Filters.ImageFilter do
   alias Philomena.Attribution.Actor
   alias Philomena.Filters.Filter
   alias Philomena.Images.Query
-  alias PhilomenaQuery.Parse.String
+  alias PhilomenaQuery.Parse
 
   @enforce_keys [:query, :display_query, :display_tag_ids]
   defstruct [:query, :display_query, :display_tag_ids, errors: []]
@@ -23,8 +23,7 @@ defmodule Philomena.Filters.ImageFilter do
           errors: [error()]
         }
 
-  @spec compile(Actor.t(), Filter.t() | nil, Filter.t() | nil) ::
-          {:ok, t()}
+  @spec compile(Actor.t(), Filter.t() | nil, Filter.t() | nil) :: t()
   def compile(%Actor{} = actor, current_filter, forced_filter) do
     current = defaults(current_filter)
     forced = defaults(forced_filter)
@@ -77,7 +76,7 @@ defmodule Philomena.Filters.ImageFilter do
 
   defp compile_expression(actor, filter, field, expression) do
     expression
-    |> String.normalize()
+    |> Parse.String.normalize()
     |> Query.compile(user: actor.user, filter: true)
     |> case do
       {:ok, query} -> {:ok, query}

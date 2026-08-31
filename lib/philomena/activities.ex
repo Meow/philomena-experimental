@@ -21,7 +21,7 @@ defmodule Philomena.Activities do
   alias Philomena.Topics
   alias PhilomenaQuery.Search
 
-  @strip_pagination %{page_number: 1, page_size: 6}
+  @strip_size 6
   @image_preloads [:sources, tags: :aliases]
   @comment_preloads [:user, image: @image_preloads]
 
@@ -76,8 +76,13 @@ defmodule Philomena.Activities do
         show_hidden: false
       )
 
-    with {:ok, watched_definition} <- watched_definition(actor, scope) do
-      {:ok, {images_definition, top_scoring_definition, comments_definition, watched_definition}}
+    case watched_definition(actor, scope) do
+      {:ok, watched_definition} ->
+        {:ok,
+         {images_definition, top_scoring_definition, comments_definition, watched_definition}}
+
+      _error ->
+        {:ok, {images_definition, top_scoring_definition, comments_definition, nil}}
     end
   end
 
@@ -97,10 +102,8 @@ defmodule Philomena.Activities do
   defp assemble_front_page(actor, scope, definitions, show_nsfw_channels?) do
     sections = load_search_sections(definitions)
     featured_image = load_featured_image(actor, scope)
-    topics = Topics.list_front_page_topics(actor, @strip_pagination)
-
-    {:ok, streams, _subscriptions, _changeset} =
-      Channels.list_channels(actor, show_nsfw_channels?, %{}, @strip_pagination)
+    topics = Topics.list_front_page_topics(actor, @strip_size)
+    streams = Channels.list_front_page_channels(actor, show_nsfw_channels?, @strip_size)
 
     interactions =
       Interactions.user_interactions(actor, [
@@ -135,23 +138,23 @@ defmodule Philomena.Activities do
 
   ## Examples
 
-      iex> list_activities(anonymous_actor, scope, filter, false)
+      iex> show_activity(anonymous_actor, scope, filter, false)
       {:ok, %FrontPage{watched: nil}}
 
-      iex> list_activities(actor, scope, filter, true)
+      iex> show_activity(actor, scope, filter, true)
       {:ok, %FrontPage{watched: %Scrivener.Page{}}}
 
   """
-  @spec list_activities(Actor.t(), Scope.t(), Filter.t(), boolean()) ::
-          {:ok, FrontPage.t()} | {:error, :unauthorized | String.t()}
-  def list_activities(
+  @spec show_activity(Actor.t(), Scope.t(), Filter.t(), boolean()) ::
+          {:ok, FrontPage.t()} | {:error, :unauthorized}
+  def show_activity(
         %Actor{} = actor,
         %Scope{} = scope,
         %Filter{} = filter,
         show_nsfw_channels?
       )
       when is_boolean(show_nsfw_channels?) do
-    with :ok <- authorize(actor, :index, FrontPage),
+    with :ok <- authorize(actor, :show, FrontPage),
          {:ok, definitions} <- search_definitions(actor, scope, filter) do
       {:ok, assemble_front_page(actor, scope, definitions, show_nsfw_channels?)}
     end

@@ -36,8 +36,8 @@ defmodule Philomena.Activities.FrontPage do
           comments: Scrivener.Page.t(Comment.t()),
           watched: Scrivener.Page.t(Image.t()) | nil,
           featured_image: Image.t() | nil,
-          streams: Scrivener.Page.t(Channel.t()),
-          topics: Scrivener.Page.t(Topic.t()),
+          streams: [Channel.t()],
+          topics: [Topic.t()],
           interactions: list()
         }
 end

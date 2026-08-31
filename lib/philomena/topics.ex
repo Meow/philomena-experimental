@@ -82,7 +82,7 @@ defmodule Philomena.Topics do
       |> Visibility.available_posts(actor)
       |> where([p], p.topic_position >= ^(page_size * (page_number - 1)))
       |> where([p], p.topic_position < ^(page_size * page_number))
-      |> order_by(asc: :created_at, asc: :id)
+      |> order_by(asc: :topic_position)
       |> preload([:deleted_by, :topic, topic: :forum, user: [awards: :badge]])
       |> Repo.all()
 
@@ -119,17 +119,18 @@ defmodule Philomena.Topics do
       [%Topic{}, ...]
 
   """
-  @spec list_front_page_topics(Actor.t(), Repo.pagination_params()) :: Scrivener.Page.t(Topic.t())
-  def list_front_page_topics(%Actor{} = actor, pagination) do
+  @spec list_front_page_topics(Actor.t(), pos_integer()) :: [Topic.t()]
+  def list_front_page_topics(%Actor{} = actor, strip_size) do
     visible_forums = Visibility.visible_forums(Forum, actor)
 
     Topic
     |> join(:inner, [topic], forum in subquery(visible_forums), on: forum.id == topic.forum_id)
-    |> Visibility.visible_topics(actor)
+    |> where(hidden_from_users: false)
     |> where([topic], fragment("? !~ ?", topic.title, "NSFW"))
-    |> order_by(desc: :last_replied_to_at)
+    |> order_by(desc: :last_replied_to_at, desc: :id)
     |> preload([:forum, last_post: :user])
-    |> Repo.paginate(pagination)
+    |> limit(^strip_size)
+    |> Repo.all()
   end
 
   @doc """
@@ -988,12 +989,22 @@ defmodule Philomena.Topics do
       set: [
         last_post_id:
           fragment(
-            "SELECT max(id) FROM posts WHERE topic_id = ? AND hidden_from_users IS FALSE",
+            """
+            SELECT id FROM posts
+            WHERE topic_id = ?
+            AND hidden_from_users IS FALSE
+            ORDER BY topic_position DESC LIMIT 1
+            """,
             ^topic_id
           ),
         last_replied_to_at:
           fragment(
-            "SELECT max(created_at) FROM posts where topic_id = ? AND hidden_from_users IS FALSE",
+            """
+            SELECT created_at FROM posts
+            WHERE topic_id = ?
+            AND hidden_from_users IS FALSE
+            ORDER BY topic_position DESC LIMIT 1
+            """,
             ^topic_id
           )
       ]

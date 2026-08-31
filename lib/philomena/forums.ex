@@ -123,8 +123,8 @@ defmodule Philomena.Forums do
       topics =
         Topic
         |> where([topic], topic.forum_id == ^forum.id)
-        |> Visibility.visible_topics(actor)
-        |> order_by(desc: :sticky, desc: :last_replied_to_at)
+        |> where(hidden_from_users: false)
+        |> order_by(desc: :sticky, desc: :last_replied_to_at, desc: :id)
         |> preload([:poll, :forum, :user, last_post: :user])
         |> Repo.paginate(pagination)
 
@@ -407,7 +407,13 @@ defmodule Philomena.Forums do
       set: [
         last_post_id:
           fragment(
-            "SELECT max(posts.id) FROM posts JOIN topics ON posts.topic_id = topics.id WHERE topics.forum_id = ? AND topics.hidden_from_users IS FALSE AND posts.hidden_from_users IS FALSE",
+            """
+            SELECT last_post_id FROM topics
+            WHERE forum_id = ?
+            AND hidden_from_users IS FALSE
+            ORDER BY last_replied_to_at DESC, id DESC
+            LIMIT 1
+            """,
             ^forum_id
           )
       ]
