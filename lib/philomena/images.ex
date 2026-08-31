@@ -2148,10 +2148,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> create_image_tamper(moderator, "42", "7")
+      iex> delete_user_vote(moderator, "42", "7")
       {:ok, %Image{}}
 
-      iex> create_image_tamper(user, "42", "7")
+      iex> delete_user_vote(user, "42", "7")
       {:error, :unauthorized}
 
   """

@@ -2777,7 +2777,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "create_image_tamper/3" do
+  describe "delete_user_vote/3" do
     test "a moderator removes a target user's upvote, adjusting the score" do
       moderator = moderator_user_fixture()
       target = confirmed_user_fixture()
