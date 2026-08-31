@@ -2,7 +2,7 @@
 
 Refs: master -> context-logic
 Status: complete
-Scope: Wave A and Wave B; read-only audit; no application code or migrations changed.
+Scope: Wave A, Wave B, and Wave C; read-only audit; no application code or migrations changed.
 
 This report owns query shapes shared by multiple Wave A contexts, plus the
 shared Loader, authorization, visibility, subscription, and transaction
@@ -141,6 +141,43 @@ history queries to SourceChanges, TagChanges, ModNotes, UserIps, and
 UserFingerprints. Those consumers retain ownership of their SQL shapes. The
 delegated profile wrappers add no independent predicates or index candidates.
 
+### Wave C forum hierarchy, visibility, and locking
+
+The Wave C forum hierarchy is shared by Forums, Topics, Posts, and Comments.
+The canonical route chain is a forum lookup by unique `short_name`, a topic
+lookup by `(forum_id, slug)`, and a post/comment lookup by primary key plus
+the appropriate parent scope. `Forums.TransactionWorkflow` composes explicit
+`FOR UPDATE` locks over the forum/topic/post rows; its `EXISTS` parent checks
+use the existing hierarchy primary, foreign-key, and unique indexes. The
+workflow's last-post refreshes add correlated `max(id)`/`max(created_at)`
+scans over visible posts. The existing `(topic_id, created_at)` index covers
+the timestamp branch; a partial `(topic_id, id) WHERE hidden_from_users IS
+FALSE` index remains only a measured candidate for the max-ID branch and is
+not recommended without representative plans and workload data.
+
+`Forums.Visibility`, `Topics.Visibility`, `Posts.Visibility`, and
+`Comments.Visibility` produce actor-dependent SQL branches. These visibility
+predicates are genuine shape and correctness changes when moved from
+controllers into context queries, but low-cardinality booleans, `OR`
+branches, and role-dependent subqueries do not justify generic indexes from
+source inspection. The homepage/forum/topic collection ordering questions
+remain linked to the Topics and Forums reports; no duplicate shared candidate
+is created.
+
+### Wave C poll aggregate and vote persistence
+
+Polls, PollOptions, and PollVotes share the canonical poll chain:
+`polls WHERE topic_id = ?`, `poll_options WHERE poll_id IN (?)`, and
+`poll_votes` joined through `poll_options` for the poll/user existence check.
+Vote creation and deletion lock `polls.id`, bulk insert into `poll_votes`,
+then update option counters with `id IN (?) AND poll_id = ?` and the poll
+counter with `id = ?`. The staff voter listing adds `vote_count > 0` to the
+poll-scoped option query. Existing `polls_pkey`, `poll_options_pkey`,
+`index_polls_on_topic_id`, `index_poll_options_on_poll_id_and_label`,
+`poll_votes_pkey`, and `index_poll_votes_on_poll_option_id_and_user_id`
+cover these paths. The added parent predicates are correctness protections;
+no shared poll index candidate is recommended.
+
 ## Cross-context ownership links
 
 - Activities is the canonical consumer report for homepage composition; its
@@ -162,11 +199,18 @@ delegated profile wrappers add no independent predicates or index candidates.
   closure, report-target preloads, and attribution wiping.
 - Conversations, Commissions, and DnpEntries link their report-target loads
   and report-closing updates here rather than proposing duplicate indexes.
+- Forums, Topics, Posts, and Comments link their hierarchy visibility, route
+  scoping, preloads, and transaction locks here; Posts owns the measured
+  last-post max-ID candidate and Topics owns the homepage/post-page findings.
+- Polls, PollOptions, and PollVotes link their shared parent-scoped loading,
+  existence, preload, lock, and counter-update shapes here; no poll candidate
+  is duplicated in the summary.
 
 ## Index conclusion
 
 No new index is recommended solely for a shared helper. All shared equality,
 foreign-key, primary-key, unique-conflict, subscription, interaction, profile
 locator, report-target, and tag-canonicalization paths have existing coverage.
-The fingerprint ordered-history candidate and commission-item ordered-preload
-candidate arise in individual contexts and are deduplicated in `summary.md`.
+The fingerprint ordered-history candidate, commission-item ordered-preload
+candidate, and Wave C post last-pointer candidate arise in individual
+contexts and are deduplicated in `summary.md`.

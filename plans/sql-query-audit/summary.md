@@ -2,7 +2,7 @@
 
 Refs: master -> context-logic  
 Status: complete  
-Scope: Wave A (20 contexts) and Wave B (6 contexts); read-only audit; no application code or migrations changed.
+Scope: Wave A (20 contexts), Wave B (6 contexts), and Wave C (7 contexts); read-only audit; no application code or migrations changed.
 
 All 26 Wave A/B assignment-matrix contexts have a complete report: [activities](activities.md),
 [adverts](adverts.md), [artistlinks](artistlinks.md), [autocomplete](autocomplete.md),
@@ -15,6 +15,11 @@ All 26 Wave A/B assignment-matrix contexts have a complete report: [activities](
 [profiles](profiles.md), [conversations](conversations.md), [commissions](commissions.md),
 [dnpentries](dnpentries.md), and [reports](reports.md). Shared findings are
 canonicalized in [shared.md](shared.md).
+
+All seven Wave C contexts have a complete report: [forums](forums.md),
+[topics](topics.md), [posts](posts.md), [comments](comments.md),
+[polls](polls.md), [poll options](poll_options.md), and
+[poll votes](poll_votes.md).
 
 ## Confirmed shape changes
 
@@ -56,6 +61,18 @@ are covered in their individual reports.
 
 Correctness follow-ups include the DNP default-state behavior,
 active/deleted-user visibility, and nested conversation parent scoping.
+
+### Wave C
+
+| Context     | Confirmed delta                                                                                                                                                                                                     | Index disposition                                                                                                                                                                               |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Forums      | Forum/topic visibility moved into actor-dependent SQL; route workflows now use slug/parent-scoped locks and page/count relations.                                                                                   | Existing slug, topic foreign-key, and primary-key indexes cover the changed lookups; homepage/order paths need plans, with no unsupported candidate.                                            |
+| Topics      | Homepage/topic-page queries gain actor-dependent visibility, parent-scoped topic lookup, pagination/count, post availability predicates, and deterministic ordering; last-post refresh gains a timestamp aggregate. | Existing `(forum_id, slug)`, `(topic_id, created_at)`, and foreign-key indexes cover the principal paths; homepage composite needs runtime plan evidence.                                       |
+| Posts       | Route post loads gain parent/availability predicates; history gains an ID tie-breaker; last-pointer refresh uses visible-post max aggregates; attribution wipe is user-scoped.                                      | Existing PK, topic/order, version-history, and user indexes cover most paths. A partial `(topic_id, id) WHERE hidden_from_users IS FALSE` candidate is deferred pending plan/workload evidence. |
+| Comments    | Image-comment collections/counts gain hidden-comment visibility predicates and deterministic ID tie-breakers; route/history loads are parent-scoped.                                                                | Existing image/time, image, user, version, and PK indexes cover the primary paths; approval/visibility OR branches need evidence before any specialized index.                                  |
+| Polls       | Poll loading is topic-scoped with options/topic/forum preloads; updates and vote totals use explicit PK locks/updates; active checks are now in memory.                                                             | Existing topic, option-parent, and PK indexes cover all retained paths; no candidate.                                                                                                           |
+| PollOptions | Option preloading and counter updates are centralized; counter writes gain `poll_id` parent scope.                                                                                                                  | Existing `(poll_id, label)` and option PK indexes cover the paths; no candidate.                                                                                                                |
+| PollVotes   | Staff listing adds `vote_count > 0`; vote deletion gains poll-parent scoping and a poll lock; existence, insert, and counter transaction shapes remain covered.                                                     | Existing poll/option/vote PK, foreign-key, and unique indexes cover the changed paths; no candidate.                                                                                            |
 
 ## Index candidates ranked by urgency/confidence
 
@@ -120,6 +137,15 @@ LIMIT 50 OFFSET 0` showed a bitmap scan followed by a sort (estimated five
    path is already covered by `(user_id, updated_at DESC)` and does not create a
    duplicate candidate.
 
+9. **Low-to-medium / needs plan and workload evidence — post last-pointer
+   refresh.** Candidate: partial B-tree
+   `posts (topic_id, id) WHERE hidden_from_users IS FALSE` for the visible-post
+   `max(id)` branch in the Topics/Forums refresh workflow. The existing
+   `(topic_id, created_at)` index covers the timestamp aggregate, but no current
+   index directly orders visible posts by topic and ID. This remains a measured
+   candidate only; validate both correlated aggregates, table cardinality,
+   refresh frequency, and write/storage cost before adding it.
+
 No candidate is proposed for random ordering, leading-wildcard text search,
 OR/full-text fragments, conversation participant OR branches without plan
 evidence, DNP state/text branches, unchanged version/rule history shapes,
@@ -161,6 +187,18 @@ paths.
   commission-item preload; the fingerprint candidate is shared with the
   existing UserFingerprints finding above.
 
+### Wave C
+
+- **Forums, Topics, Posts, and Comments:** hierarchy member loads, route
+  scoping, visibility branches, association preloads, history queries, and
+  transaction locks are covered by existing primary, unique, foreign-key,
+  image/time, version-history, and user indexes. The post last-pointer
+  candidate above is the only Wave C candidate retained for measurement.
+- **Polls, PollOptions, and PollVotes:** topic/option/vote loads, existence
+  checks, staff listings, row locks, counter updates, and uniqueness targets
+  are covered by existing primary, topic/parent, foreign-key, and unique
+  indexes; no poll index candidate is proposed.
+
 ## Unresolved questions
 
 ### Wave A
@@ -196,3 +234,21 @@ paths.
 - Confirm that active/deleted-user filters in profile and commission loads are
   intentional visibility behavior, and that nested conversation approval must
   reject a message outside the route conversation.
+
+### Wave C
+
+- Confirm whether the broader staff forum/topic visibility branches and the
+  homepage/forum aggregate behavior are intentional; these are correctness
+  questions, not automatic index actions.
+- Confirm the intentional API/topic-page ordering change from topic position to
+  `created_at, id`, and validate topic-page availability OR predicates and
+  homepage pagination/count with representative PostgreSQL plans.
+- Validate the visible-post last-pointer refresh candidate with production-like
+  cardinality, refresh frequency, both `max(id)` and `max(created_at)` branches,
+  and write/storage cost. Do not add a migration from source evidence alone.
+- Confirm that comment hidden/approval visibility and poll staff `vote_count`
+  filtering are intended behavior; their current low-cardinality/OR predicates
+  do not support generic index recommendations.
+- No Wave C EXPLAIN was collected because the available Docker/database runtime
+  was unavailable or lacked representative data; this lowers confidence in
+  optional ordering candidates but does not block the source/schema audit.
