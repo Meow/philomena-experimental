@@ -14,6 +14,16 @@ defmodule Philomena.Bans.Finder do
   @subnet "Subnet"
   @user "User"
 
+  # User bans have the highest priority, followed by subnet bans, then
+  # by fingerprint bans.
+  #
+  # Note that signed-in users will never receive subnet or fingerprint
+  # bans; they can only receive user bans. So the priority enumerated
+  # here for user bans is effectively a placeholder.
+  @user_ban_priority 0
+  @subnet_ban_priority 1
+  @fingerprint_ban_priority 2
+
   @doc """
   Returns the first ban, if any, that matches the specified request attributes.
   """
@@ -33,8 +43,13 @@ defmodule Philomena.Bans.Finder do
 
     bans =
       case queries do
-        [] -> []
-        queries -> queries |> union_all_queries() |> Repo.all()
+        [] ->
+          []
+
+        queries ->
+          queries
+          |> Enum.reduce(&union_all(&2, ^&1))
+          |> Repo.all()
       end
 
     # Don't return a fingerprint or subnet ban if the user is currently signed in.
@@ -60,7 +75,7 @@ defmodule Philomena.Bans.Finder do
 
   defp fingerprint_query(fingerprint, now) do
     Fingerprint
-    |> query_base(@fingerprint, 1, now)
+    |> query_base(@fingerprint, @fingerprint_ban_priority, now)
     |> where([f], f.fingerprint == ^fingerprint)
   end
 
@@ -68,13 +83,13 @@ defmodule Philomena.Bans.Finder do
     {:ok, inet} = EctoNetwork.INET.cast(ip)
 
     Subnet
-    |> query_base(@subnet, 0, now)
+    |> query_base(@subnet, @subnet_ban_priority, now)
     |> where(fragment("specification >>= ?", ^inet))
   end
 
   defp user_query(user, now) do
     User
-    |> query_base(@user, 2, now)
+    |> query_base(@user, @user_ban_priority, now)
     |> where([u], u.user_id == ^user.id)
   end
 
@@ -85,10 +100,6 @@ defmodule Philomena.Bans.Finder do
       {nil, _cb} -> []
       {source, cb} -> [cb.(source, now)]
     end)
-  end
-
-  defp union_all_queries([query | rest]) do
-    Enum.reduce(rest, query, fn q, acc -> union_all(acc, ^q) end)
   end
 
   defp user_ban(bans) do
