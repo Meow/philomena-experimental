@@ -2,19 +2,23 @@
 
 Refs: master -> context-logic  
 Status: complete  
-Scope: Wave A, 20 contexts; read-only audit; no application code or migrations changed.
+Scope: Wave A (20 contexts) and Wave B (6 contexts); read-only audit; no application code or migrations changed.
 
-All 20 assignment-matrix contexts have a complete report: [activities](activities.md),
+All 26 Wave A/B assignment-matrix contexts have a complete report: [activities](activities.md),
 [adverts](adverts.md), [artistlinks](artistlinks.md), [autocomplete](autocomplete.md),
 [badges](badges.md), [bans](bans.md), [channels](channels.md), [donations](donations.md),
 [modnotes](modnotes.md), [moderationlogs](moderationlogs.md), [notifications](notifications.md),
 [roles](roles.md), [rules](rules.md), [sitenotices](sitenotices.md),
 [staticpages](staticpages.md), [userfingerprints](userfingerprints.md),
 [userips](userips.md), [usernamechanges](usernamechanges.md),
-[userstatistics](userstatistics.md), and [versions](versions.md). Shared findings are
+[userstatistics](userstatistics.md), [versions](versions.md), [users](users.md),
+[profiles](profiles.md), [conversations](conversations.md), [commissions](commissions.md),
+[dnpentries](dnpentries.md), and [reports](reports.md). Shared findings are
 canonicalized in [shared.md](shared.md).
 
 ## Confirmed shape changes
+
+### Wave A
 
 | Context          | Confirmed delta                                                                                                                                                                                         | Index disposition                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -39,6 +43,20 @@ The remaining contexts—Donations, Rules, SiteNotices, and StaticPages—report
 SQL shape change in their retained workloads; their moved/member/history paths
 are covered in their individual reports.
 
+### Wave B
+
+| Context       | Confirmed delta                                                                                                                                                              | Index disposition                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Users         | Public/profile loads add `deleted_at IS NULL`; alias discovery changes joins to nested `IN` subqueries; erasure adds report-closure selection and wipe ownership delegation. | Slug, PK, user-id, and existing report indexes cover the changed paths; no automatic candidate.                 |
+| Profiles      | IP/fingerprint history becomes bounded pagination with `updated_at DESC, id DESC`; profile and source/tag history ownership is composed through contexts.                    | IP ordering prefix is covered; fingerprint ordering is a measured composite candidate below.                    |
+| Conversations | Conversation and message pages gain `id` tie-breakers; nested approval adds a conversation-parent predicate.                                                                 | Existing message conversation/time and PK indexes cover equality/leading order; tie-breaker indexes need plans. |
+| Commissions   | Directory adds active-user join/filter; commission-item preloads gain `base_price ASC, id ASC` ordering.                                                                     | Existing join indexes cover filters; ordered item preload is a measured candidate below.                        |
+| DnpEntries    | Admin text search normally adds the active-state predicate; count expression changes to `COUNT(*)`; query builders move into context.                                        | Existing partial state/FK indexes cover the relational paths; wildcard OR search needs specialized analysis.    |
+| Reports       | Moderation transitions add PK row locks; report attribution wipe is a new user-scoped maintenance update; other report queries move unchanged.                               | PK, user/admin/open, and partial target-FK indexes cover all changed paths; no automatic candidate.             |
+
+Correctness follow-ups include the DNP default-state behavior,
+active/deleted-user visibility, and nested conversation parent scoping.
+
 ## Index candidates ranked by urgency/confidence
 
 These are candidates for measured follow-up, not approved migrations. Every
@@ -48,18 +66,27 @@ local plans are small or absent, so no recommendation is automatic.
 1. **Medium / highest validation priority — UserFingerprints history/latest.**
    Candidate: `user_fingerprints (user_id, updated_at DESC, id DESC)`. The
    existing `user_id` index covered filtering but a read-only local
-   `EXPLAIN (FORMAT JSON)` showed a bitmap scan followed by a sort. The local
-   table was 8 KB and unanalyzed; validate with production-like cardinality,
-   `EXPLAIN (ANALYZE, BUFFERS)`, and request frequency before accepting the
-   write/storage cost.
+   `EXPLAIN (FORMAT JSON)` for `user_id = 1 ORDER BY updated_at DESC, id DESC
+LIMIT 50 OFFSET 0` showed a bitmap scan followed by a sort (estimated five
+   rows, total cost 12.73). The local table was 8 KB and effectively tiny;
+   validate with production-like cardinality, `EXPLAIN (ANALYZE, BUFFERS)`, and
+   request frequency before accepting the write/storage cost.
 
-2. **Medium / validation priority — ModerationLogs retained page.** Candidate:
+2. **Medium / validation priority — commission item preloads.** Candidate:
+   `commission_items (commission_id, base_price ASC, id ASC)`. A read-only
+   local `EXPLAIN (FORMAT JSON)` for `commission_id IN (1, 2)` used
+   `index_commission_items_on_commission_id` and then sorted by `base_price, id`
+   (estimated four rows, total cost 12.69). The estimate is too small to prove
+   benefit; validate with representative directory/profile fan-out, table
+   cardinality, and write/storage cost before adding it.
+
+3. **Medium / validation priority — ModerationLogs retained page.** Candidate:
    `moderation_logs (created_at DESC, id DESC)`. The existing `created_at`
    index was used with an incremental sort in a local representative plan;
    the estimate was only 183 retained rows. Measure the actual two-week page
    and count workloads before adding a write-maintained ordering index.
 
-3. **Low-to-medium / shape confidence high — ModNotes target-scoped pages.**
+4. **Low-to-medium / shape confidence high — ModNotes target-scoped pages.**
    Candidates, each partial on its existing target predicate:
    `mod_notes (user_id, id DESC) WHERE user_id IS NOT NULL`,
    `mod_notes (report_id, id DESC) WHERE report_id IS NOT NULL`, and
@@ -68,34 +95,40 @@ local plans are small or absent, so no recommendation is automatic.
    plan or workload data proves that avoiding the tie-order sort pays for
    three additional indexes.
 
-4. **Low / shape confidence high, candidate confidence low — ArtistLinks
+5. **Low / shape confidence high, candidate confidence low — ArtistLinks
    admin pages.** For the pending-state branch, candidate
    `artist_links (aasm_state, created_at DESC, id DESC)`; for the all-state
    branch, candidate `artist_links (created_at DESC, id DESC)`. A local plan
    used the state index and sorted, but it was unanalyzed and no production
    selectivity/frequency evidence is available.
 
-5. **Low / no plan evidence — Channels provider maintenance.** Candidate
+6. **Low / no plan evidence — Channels provider maintenance.** Candidate
    `channels (type, short_name)` for the `short_name IN (...)` lookup and
    `type = ? AND short_name NOT IN (...)` update. Search branches use OR and
    leading-wildcard `ILIKE`, so they need specialized analysis rather than a
    generic B-tree.
 
-6. **Low / existing order prefix covers — UserIps history.** Candidate
+7. **Low / existing order prefix covers — UserIps history.** Candidate
    `user_ips (user_id, updated_at DESC, id DESC)`. The existing
    `(user_id, updated_at DESC)` index covers the principal path; no plan or
    workload evidence justifies the suffix.
 
-7. **Low / bounded history — UserNameChanges history.** Candidate
+8. **Low / bounded history — UserNameChanges history.** Candidate
    `user_name_changes (user_id, id DESC)`. The existing user-id index covers
    the filter and the profile page is capped at 250 rows; measure before
-   considering the extra write/storage cost.
+   considering the extra write/storage cost. The related Profiles IP history
+   path is already covered by `(user_id, updated_at DESC)` and does not create a
+   duplicate candidate.
 
 No candidate is proposed for random ordering, leading-wildcard text search,
-OR/full-text fragments, unchanged version/rule history shapes, notification
-fan-out, subscriptions, or primary-key/unique-conflict access paths.
+OR/full-text fragments, conversation participant OR branches without plan
+evidence, DNP state/text branches, unchanged version/rule history shapes,
+notification fan-out, subscriptions, or primary-key/unique-conflict access
+paths.
 
 ## Covered/no-action changes
+
+### Wave A
 
 - **Activities, Adverts, ArtistLinks, Badges, Bans, and Channels:** changed
   member, preload, join, containment, subscription, tag, and write-target
@@ -118,7 +151,19 @@ fan-out, subscriptions, or primary-key/unique-conflict access paths.
 - **UserStatistics and Versions:** primary/unique owner/date keys cover the
   new bulk upsert or retained version existence/history shapes.
 
+### Wave B
+
+- **Users, Profiles, Conversations, Commissions, DnpEntries, and Reports:**
+  Member loads, visibility predicates, participant/unread/count
+  queries, report-target operations, and maintenance writes are covered by
+  existing primary, unique, foreign-key, partial-state, and user/date indexes.
+  The only candidate retained for measured follow-up is the ordered
+  commission-item preload; the fingerprint candidate is shared with the
+  existing UserFingerprints finding above.
+
 ## Unresolved questions
+
+### Wave A
 
 - Confirm whether staff should see the broader forum/topic visibility used by
   the current homepage; this is a correctness question, not an index action.
@@ -137,6 +182,17 @@ fan-out, subscriptions, or primary-key/unique-conflict access paths.
   notification clearing, and moderation-log writes linked to their canonical
   findings instead of adding duplicate candidates.
 - Runtime evidence is limited: several reports intentionally did not run
-  `EXPLAIN`, and the local plans that were run used tiny or unanalyzed tables.
+  `EXPLAIN`; the fingerprint and commission-item checks used local literal
+  parameters (`user_id = 1`, `commission_id IN (1, 2)`) and tiny estimates
+  (about 5 and 4 rows) and therefore do not establish production benefit.
   No migration should be created until representative plans, table sizes,
   selectivity, frequency, and write-cost estimates are available.
+
+### Wave B
+
+- Confirm whether the DnpEntries admin form/controller preserves the intended
+  explicit state selection; the current default may exclude listed/closed
+  entries from text searches.
+- Confirm that active/deleted-user filters in profile and commission loads are
+  intentional visibility behavior, and that nested conversation approval must
+  reject a message outside the route conversation.

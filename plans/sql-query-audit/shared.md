@@ -2,6 +2,7 @@
 
 Refs: master -> context-logic
 Status: complete
+Scope: Wave A and Wave B; read-only audit; no application code or migrations changed.
 
 This report owns query shapes shared by multiple Wave A contexts, plus the
 shared Loader, authorization, visibility, subscription, and transaction
@@ -100,6 +101,46 @@ event/user indexes remain covered. Notification category reads and fan-out
 inserts are canonically summarized in `notifications.md`; no shared index
 candidate remains.
 
+### Profile loading and account visibility
+
+`Users.load_profile/2-3` is the canonical profile locator used by Profiles,
+Commissions, and report/profile-facing controller paths. Its relational shape
+is `users WHERE slug = ? AND deleted_at IS NULL`, followed by caller-selected
+association preloads. `index_users_on_slug` covers the lookup; the added
+`deleted_at` predicate does not justify a second index because the lookup is
+already selective on the unique slug. The predicate is a semantic visibility
+change and should be reviewed separately from index concerns. Generic
+`Loader.fetch_and_authorize` member loads remain primary-key covered and do not
+add SQL authorization predicates.
+
+### Profile history pagination
+
+Profiles composes the canonical `UserIps.load_user_history/3` and
+`UserFingerprints.load_user_history/3` operations. Both now page a user-scoped
+history with `ORDER BY updated_at DESC, id DESC`; the IP path is covered by
+`(user_id, updated_at DESC)`, while the fingerprint path may benefit from
+`(user_id, updated_at DESC, id DESC)`. The latter is one deduplicated candidate
+also owned by the UserFingerprints wave-A report; Profiles is a consumer and
+does not produce a second candidate.
+
+### Cross-context report closure and wipe
+
+`Reports.put_close_reports/4` is the canonical dynamic-target update used by
+Conversations, Commissions, DnpEntries, and other reportable contexts:
+`UPDATE reports ... WHERE <target_fk> = ? AND open = true`. The existing
+partial target-FK indexes cover the valid branches; the shared `open` residual
+predicate has no automatic composite-index recommendation. `Users.UserWipe`
+delegates attribution updates/deletes to owning contexts, so each table's
+`user_id` selection remains owned by that context; shared review should link to
+the Users and Reports reports rather than duplicate those write shapes.
+
+### Shared profile history and association consumers
+
+The Profiles report delegates source, tag, moderation-note, IP, and fingerprint
+history queries to SourceChanges, TagChanges, ModNotes, UserIps, and
+UserFingerprints. Those consumers retain ownership of their SQL shapes. The
+delegated profile wrappers add no independent predicates or index candidates.
+
 ## Cross-context ownership links
 
 - Activities is the canonical consumer report for homepage composition; its
@@ -114,10 +155,18 @@ candidate remains.
   ban lookup shapes and Users owns profile-alias subqueries.
 - Rules, SiteNotices, StaticPages, Adverts, and Badges record their Loader
   consumers here without duplicating the member-query finding.
+- Profiles links the canonical profile locator and the IP/fingerprint history
+  findings here; UserFingerprints owns the deduplicated fingerprint ordering
+  candidate and UserIps owns the covered IP path.
+- Users links delegated wipe and erasure selections here; Reports owns report
+  closure, report-target preloads, and attribution wiping.
+- Conversations, Commissions, and DnpEntries link their report-target loads
+  and report-closing updates here rather than proposing duplicate indexes.
 
 ## Index conclusion
 
 No new index is recommended solely for a shared helper. All shared equality,
-foreign-key, primary-key, unique-conflict, subscription, interaction, and tag
-canonicalization paths have existing coverage. Ordered composite candidates
-that arise in individual contexts are deduplicated in `summary.md`.
+foreign-key, primary-key, unique-conflict, subscription, interaction, profile
+locator, report-target, and tag-canonicalization paths have existing coverage.
+The fingerprint ordered-history candidate and commission-item ordered-preload
+candidate arise in individual contexts and are deduplicated in `summary.md`.
