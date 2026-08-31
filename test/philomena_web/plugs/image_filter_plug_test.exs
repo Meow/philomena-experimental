@@ -23,7 +23,7 @@ defmodule PhilomenaWeb.ImageFilterPlugTest do
     refute conn.halted
   end
 
-  test "halts with an explicit error for an invalid stored filter" do
+  test "assigns an all-hidden filter for an invalid stored filter" do
     conn =
       conn(:get, "/")
       |> assign(:actor, @actor)
@@ -31,8 +31,8 @@ defmodule PhilomenaWeb.ImageFilterPlugTest do
       |> assign(:forced_filter, nil)
       |> ImageFilterPlug.call([])
 
-    assert conn.halted
-    assert conn.status == 422
-    assert conn.resp_body == "Invalid image filter"
+    refute conn.halted
+    assert conn.assigns.image_filter.query == %{match_all: %{}}
+    assert conn.assigns.image_filter.display_query == %{match_all: %{}}
   end
 end

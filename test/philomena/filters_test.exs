@@ -26,8 +26,10 @@ defmodule Philomena.FiltersTest do
   alias Philomena.Filters.FilterPage
   alias Philomena.Filters.ImageFilter
   alias Philomena.Images
+  alias Philomena.Images.Query
   alias Philomena.Repo
   alias Philomena.Users.User
+  alias PhilomenaQuery.Parse.String, as: QueryString
   alias PhilomenaQuery.Search
   alias PhilomenaQuery.SearchHelpers
 
@@ -62,7 +64,8 @@ defmodule Philomena.FiltersTest do
 
       forced = %Filter{hidden_tag_ids: [safe.id], hidden_complex_str: "upvotes.lt:0"}
 
-      assert {:ok, %ImageFilter{} = image_filter} =
+      assert %ImageFilter{} =
+               image_filter =
                Filters.compile_image_filter(actor(), current, forced)
 
       assert safe.id in image_filter.display_tag_ids
@@ -74,17 +77,31 @@ defmodule Philomena.FiltersTest do
       assert safe_id == safe.id
     end
 
-    test "returns invalid stored expressions explicitly" do
-      filter = %Filter{id: 42, hidden_complex_str: "("}
+    test "fails closed for invalid stored expressions" do
+      invalid_filters = [
+        {%Filter{id: 42, hidden_complex_str: "("}, nil, :hidden_complex_str},
+        {%Filter{id: 43, spoilered_complex_str: "("}, nil, :spoilered_complex_str},
+        {nil, %Filter{id: 44, hidden_complex_str: "("}, :hidden_complex_str}
+      ]
 
-      assert {:error, {:invalid_filter, ^filter, :hidden_complex_str, reason}} =
-               Filters.compile_image_filter(actor(), filter, nil)
+      for {current_filter, forced_filter, field} <- invalid_filters do
+        assert %ImageFilter{} =
+                 image_filter =
+                 Filters.compile_image_filter(actor(), current_filter, forced_filter)
 
-      assert is_binary(reason)
+        assert {:error, message} =
+                 Query.compile(QueryString.normalize("("), user: actor().user, filter: true)
+
+        assert image_filter.query == %{match_all: %{}}
+        assert image_filter.display_query == %{match_all: %{}}
+        assert image_filter.display_tag_ids == []
+        assert image_filter.errors == [{field, message}]
+      end
     end
 
     test "an empty selection excludes and spoilers nothing" do
-      assert {:ok, %ImageFilter{} = image_filter} =
+      assert %ImageFilter{} =
+               image_filter =
                Filters.compile_image_filter(actor(), nil, nil)
 
       assert image_filter.display_tag_ids == []

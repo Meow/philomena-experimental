@@ -1,10 +1,9 @@
 defmodule Philomena.Filters.ImageFilter do
   @moduledoc """
-  The compiled image-filter policy for one viewer.
+  Generates the compiled image filter for a viewer.
 
   `query` is the OpenSearch clause used to exclude hidden images. The display
-  fields contain the current filter's hidden/spoiler policy for evaluating an
-  already-loaded image consistently in HTML and JSON representations.
+  fields contain the current filter's hidden/spoiler rules.
   """
 
   alias Philomena.Attribution.Actor
@@ -13,20 +12,19 @@ defmodule Philomena.Filters.ImageFilter do
   alias PhilomenaQuery.Parse.String
 
   @enforce_keys [:query, :display_query, :display_tag_ids]
-  defstruct [:query, :display_query, :display_tag_ids]
+  defstruct [:query, :display_query, :display_tag_ids, errors: []]
+
+  @type error :: {:hidden_complex_str | :spoilered_complex_str, String.t()}
 
   @type t :: %__MODULE__{
           query: map(),
           display_query: map(),
-          display_tag_ids: [integer()]
+          display_tag_ids: [integer()],
+          errors: [error()]
         }
 
-  @type compile_error ::
-          {:invalid_filter, Filter.t() | nil, :hidden_complex_str | :spoilered_complex_str,
-           term()}
-
   @spec compile(Actor.t(), Filter.t() | nil, Filter.t() | nil) ::
-          {:ok, t()} | {:error, compile_error()}
+          {:ok, t()}
   def compile(%Actor{} = actor, current_filter, forced_filter) do
     current = defaults(current_filter)
     forced = defaults(forced_filter)
@@ -54,19 +52,26 @@ defmodule Philomena.Filters.ImageFilter do
            ) do
       hidden_query = %{bool: %{should: [current_hidden, forced_hidden]}}
 
-      {:ok,
-       %__MODULE__{
-         query: %{
-           bool: %{
-             should: [
-               %{terms: %{tag_ids: current.hidden_tag_ids ++ forced.hidden_tag_ids}},
-               hidden_query
-             ]
-           }
-         },
-         display_query: %{bool: %{should: [hidden_query, current_spoiler]}},
-         display_tag_ids: current.spoilered_tag_ids ++ current.hidden_tag_ids
-       }}
+      %__MODULE__{
+        query: %{
+          bool: %{
+            should: [
+              %{terms: %{tag_ids: current.hidden_tag_ids ++ forced.hidden_tag_ids}},
+              hidden_query
+            ]
+          }
+        },
+        display_query: %{bool: %{should: [hidden_query, current_spoiler]}},
+        display_tag_ids: current.spoilered_tag_ids ++ current.hidden_tag_ids
+      }
+    else
+      {:error, _filter, field, message} ->
+        %__MODULE__{
+          query: %{match_all: %{}},
+          display_query: %{match_all: %{}},
+          display_tag_ids: [],
+          errors: [{field, message}]
+        }
     end
   end
 
@@ -76,7 +81,7 @@ defmodule Philomena.Filters.ImageFilter do
     |> Query.compile(user: actor.user, filter: true)
     |> case do
       {:ok, query} -> {:ok, query}
-      {:error, reason} -> {:error, {:invalid_filter, filter, field, reason}}
+      {:error, reason} -> {:error, filter, field, reason}
     end
   end
 

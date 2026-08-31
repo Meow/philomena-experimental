@@ -125,11 +125,9 @@ defmodule Philomena.Filters do
   Compiles the effective image-filter policy for `actor`.
 
   The current filter supplies hidden and spoiler rules; a forced filter adds
-  hidden rules. Invalid stored expressions are returned explicitly with the
-  offending filter and field instead of broadening them to `match_all`.
+  hidden rules. Invalid stored expressions fail closed to an all-hidden filter.
   """
-  @spec compile_image_filter(Actor.t(), Filter.t() | nil, Filter.t() | nil) ::
-          {:ok, ImageFilter.t()} | {:error, ImageFilter.compile_error()}
+  @spec compile_image_filter(Actor.t(), Filter.t() | nil, Filter.t() | nil) :: ImageFilter.t()
   def compile_image_filter(%Actor{} = actor, current_filter, forced_filter) do
     ImageFilter.compile(actor, current_filter, forced_filter)
   end
