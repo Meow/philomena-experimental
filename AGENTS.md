@@ -43,9 +43,7 @@ Test conventions — file layout, auth-level setup helpers, fixtures, OpenSearch
 Before creating or refactoring a `Philomena` domain context, its schemas, or a
 controller-facing context API, read `CONTEXT_STYLE.md`. It defines the expected
 code shape, changeset and query boundaries, transaction composition, result
-types, and testing style. The loading and authorization contract in
-`plans/context-refactor/all-contexts.md` remains authoritative for access and
-error semantics.
+types, and testing style.
 
 ### Database
 
