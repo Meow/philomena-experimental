@@ -23,16 +23,6 @@ defmodule PhilomenaWeb.UserAttributionPlug do
     user = conn.assigns.current_user
     fingerprint = fingerprint(conn, conn.path_info)
 
-    principal = [
-      ip: remote_ip,
-      fingerprint: fingerprint,
-      user: user
-    ]
-
-    # The typed equivalent of `principal`, built from the same values. Existing
-    # consumers keep using the `:attributes` keyword list unchanged; contexts
-    # migrated consume the `:actor` struct instead.
-    #
     # The `:current_ban` assign is read tolerantly: the API pipeline sets no
     # `:current_ban`, and in browser pipelines this plug runs after
     # `CurrentBanPlug` because router pipelines run before controller-level plugs.
@@ -43,9 +33,7 @@ defmodule PhilomenaWeb.UserAttributionPlug do
       ban: conn.assigns[:current_ban]
     }
 
-    conn
-    |> Conn.assign(:attributes, principal)
-    |> Conn.assign(:actor, actor)
+    Conn.assign(conn, :actor, actor)
   end
 
   defp user_agent(conn) do
