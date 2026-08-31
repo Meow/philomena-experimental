@@ -62,7 +62,7 @@ defmodule PhilomenaWeb.Admin.UserControllerTest do
       target = confirmed_user_fixture()
       SearchHelpers.reindex_all!(User)
 
-      conn = get(conn, ~p"/admin/users?#{[user: [query: "name:#{target.name}"]]}")
+      conn = get(conn, ~p"/admin/users?#{[uq: [query: "name:#{target.name}"]]}")
       response = html_response(conn, 200)
       assert response =~ target.name
     end
@@ -70,7 +70,7 @@ defmodule PhilomenaWeb.Admin.UserControllerTest do
     # NOTE: an unparsable query takes the error branch - the index re-renders
     # (200) with a query-parse error message and an empty user list.
     test "renders the parse-error branch for an invalid query", %{conn: conn} do
-      conn = get(conn, ~p"/admin/users?#{[user: [query: "("]]}")
+      conn = get(conn, ~p"/admin/users?#{[uq: [query: "("]]}")
       response = html_response(conn, 200)
       assert response =~ "Imbalanced parentheses."
     end
