@@ -2,7 +2,7 @@
 
 Refs: master -> context-logic  
 Status: complete  
-Scope: Wave A (20 contexts), Wave B (6 contexts), Wave C (7 contexts), and Wave D (7 contexts); read-only audit; no application code or migrations changed.
+Scope: Wave A (20 contexts), Wave B (6 contexts), Wave C (7 contexts), Wave D (7 contexts), and Wave E (6 contexts); read-only audit; no application code or migrations changed.
 
 All 26 Wave A/B assignment-matrix contexts have a complete report: [activities](activities.md),
 [adverts](adverts.md), [artistlinks](artistlinks.md), [autocomplete](autocomplete.md),
@@ -25,6 +25,10 @@ All seven Wave D contexts have a complete report: [images](images.md),
 [image faves](image_faves.md), [image features](image_features.md),
 [image hides](image_hides.md), [image intensities](image_intensities.md),
 [image votes](image_votes.md), and [interactions](interactions.md).
+
+All six Wave E contexts have a complete report: [galleries](galleries.md),
+[duplicate reports](duplicate_reports.md), [filters](filters.md), [tags](tags.md),
+[tag changes](tag_changes.md), and [source changes](source_changes.md).
 
 ## Confirmed shape changes
 
@@ -90,6 +94,17 @@ active/deleted-user visibility, and nested conversation parent scoping.
 | ImageIntensities | Intensity persistence changed from plain insert to `ON CONFLICT (image_id) DO UPDATE`; CRUD surface was removed; image-delete FK now cascades.                                                      | Existing unique `image_intensities(image_id)` is the upsert arbiter; cascade is referential only. No candidate.                                                                      |
 | ImageVotes       | Vote replacement adds per-direction deletes; user cleanup is context-owned batched deletion; merge inserts return inserted user IDs.                                                                | Existing unique `(image_id,user_id)` and `user_id` indexes cover paired deletes/conflicts and cleanup. Conditional `(user_id, up, image_id)` candidate is deferred pending evidence. |
 | Interactions     | Actor-first interaction API and empty-input short-circuit preserve the four-branch `UNION ALL`; merge transaction ownership and `RETURNING` changed only composition/materialization.               | Existing interaction unique/user indexes and image PK cover all paths. No candidate.                                                                                                 |
+
+### Wave E
+
+| Context          | Confirmed delta                                                                                                                                                                                             | Index disposition                                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Galleries        | Add/remove/delete/reorder workflows now lock image/gallery rows, batch interaction cleanup, and use deterministic membership ordering; a new owner gallery selector orders by `updated_at`.                 | Existing gallery/image PKs, gallery-interaction unique/FK/order indexes, and partial report-gallery index cover paths; no candidate without plans.       |
+| DuplicateReports | Perceptual matching adds deterministic image-ID tie-breaking and actor-dependent hidden-image filtering; report pages gain `id DESC`; reverse acceptance adds latest-row ordering and active-state scoping. | Intensity/image/report state and direction indexes cover principal paths. Reverse pair `(image_id, duplicate_of_image_id, id DESC)` is measurement-only. |
+| Filters          | Owner/system pages gain deterministic ordering and pagination; recent/own selection changes limits/order; tag replacement adds array-containment bulk updates.                                              | User/system indexes cover filters; `(user_id, id)` and separate hidden/spoiler tag-array GIN indexes are conditional, plan-dependent candidates.         |
+| Tags             | Canonicalization and alias/deletion workflows add ordered PK locks, slug lookups, and batched tag/image cleanup; implication repair is context-owned.                                                       | Existing tag name/slug/PK, alias/implication, tagging, and dependent FK indexes cover all changed paths; no candidate.                                   |
+| TagChanges       | Tag-change writes/reverts are batch-oriented; selected-ID reversion adds an `id DESC` tie-breaker; attribution cleanup is context-owned.                                                                    | Existing image/user/fingerprint/IP and join-table indexes cover selectors and preloads; no candidate.                                                    |
+| SourceChanges    | Image/user/IP/fingerprint history pages order by `created_at DESC, id DESC` and support an `added` branch; user distinct counts explicitly drop page ordering.                                              | Existing image/user/IP/PK indexes cover filters. Fingerprint and composite history ordering indexes remain measurement-only.                             |
 
 ## Index candidates ranked by urgency/confidence
 
@@ -170,13 +185,44 @@ LIMIT 50 OFFSET 0` showed a bitmap scan followed by a sort (estimated five
     evidence is available. Treat this as a measurement-only candidate and
     account for additional write/storage cost before proposing a migration.
 
+11. **Low-to-medium / measurement-only — DuplicateReports reverse acceptance.**
+    Candidate: `duplicate_reports (image_id, duplicate_of_image_id, id DESC)`
+    for the latest reverse-pair row (`ORDER BY id DESC LIMIT 1`). Existing
+    direction indexes cover filtering, but no representative plan, table
+    cardinality, or acceptance frequency was available. Validate the pair
+    selectivity and write/storage cost first.
+
+12. **Low-to-medium / measurement-only — Filters owner pages.** Candidate:
+    `filters (user_id, id ASC)` for the now-paginated owner listing and the
+    own branch of recent-filter selection. The existing `user_id` index
+    covers equality but not ordering; validate page depth/frequency and the
+    small-table assumption before adding a maintained ordering index.
+
+13. **Low / measurement-only — Filters tag-reference replacement.** Separate
+    GIN indexes on `filters.hidden_tag_ids` and `filters.spoilered_tag_ids`
+    could accelerate the new `@>` bulk updates and ID scans. No GIN indexes
+    exist, and each would increase array-update write cost; require
+    representative `EXPLAIN (ANALYZE, BUFFERS)`, cardinality, selectivity, and
+    replacement frequency before considering either index.
+
+14. **Low / measurement-only — SourceChanges fingerprint/history pages.** A
+    candidate `(fingerprint, created_at DESC, id DESC)` would support the
+    fingerprint history equality-plus-order shape; separate image and user
+    candidates `(image_id, created_at DESC, id DESC)` and
+    `(user_id, created_at DESC, id DESC)` could similarly help their pages.
+    None has plan or workload evidence (and the fingerprint equality index is
+    absent), so these remain validation items rather than recommendations.
+
 No candidate is proposed for random ordering, leading-wildcard text search,
 OR/full-text fragments, conversation participant OR branches without plan
 evidence, DNP state/text branches, unchanged version/rule history shapes,
 notification fan-out, subscriptions, or primary-key/unique-conflict access
-paths. Wave D image member, featured, interaction, hide/fave/vote, feature,
+paths. Gallery owner selection and reordered `IN` scans, tag-change batch
+reverts, tag canonicalization/cleanup, and tag aggregate/random workloads are
+covered or unchanged; they do not add candidates beyond the measured items
+above. Wave D image member, featured, interaction, hide/fave/vote, feature,
 intensity, and preload changes are covered; only the conditional ImageVotes
-cleanup candidate above remains for measurement.
+cleanup candidate above remains for measurement in that wave.
 
 ## Covered/no-action changes
 
@@ -245,6 +291,33 @@ cleanup candidate above remains for measurement.
   merge inserts, and image counter updates retain covered access paths; no
   additional shared candidate is proposed.
 
+### Wave E
+
+- **Galleries:** member loads, image add/remove, batched deletion, reorder
+  locks/upserts, owner selection, report closure, and moved image-interaction
+  maintenance use existing primary, unique, foreign-key, position, and
+  partial report-gallery indexes. No automatic candidate is supported.
+- **DuplicateReports:** intensity range joins, report state pages/counts,
+  image-pair OR branches, hide-image rejection, and transaction locks are
+  covered by existing intensity, image-direction, state/partial-state, FK,
+  and primary-key indexes. Only reverse latest-row ordering remains a
+  measured candidate.
+- **Filters:** default/system/owner lookups, tag preloads, member loads, and
+  worker `IN` lookups are covered by existing system/user/name/PK indexes.
+  The owner ordering and tag-array replacement indexes are conditional items
+  above, not approved migrations.
+- **Tags:** canonical name/slug lookup, implication and alias traversal,
+  batched tagging cleanup, counter locks, and maintenance deletes are covered
+  by existing unique, PK, FK, and tag-ID indexes; unchanged array/random and
+  `images_count` scans are outside the delta.
+- **TagChanges:** image/user/IP/fingerprint selectors, association
+  preloads, empty-history anti-joins, and batch writes/reverts are covered by
+  existing image/user/GiST/PK and join-table indexes; no candidate.
+- **SourceChanges:** image/user history, distinct-image counts, IP range
+  lookups, fingerprint loads, source-count laterals, attribution wipes, and
+  primary-key deletes retain existing index coverage. Ordering/fingerprint
+  composites are measurement-only follow-ups.
+
 ## Unresolved questions
 
 ### Wave A
@@ -312,3 +385,29 @@ BUFFERS)`, table cardinality, direction selectivity, run frequency, and
   image-delete cascade semantics match the intended correctness behavior.
 - No Wave D EXPLAIN was required for covered PK/unique/FK paths; local runtime
   data was not representative enough to justify optional image composites.
+
+### Wave E
+
+- Validate Galleries owner selection and reorder `IN` + `ORDER BY position`
+  with representative plans if those paths are hot; existing indexes are
+  likely sufficient for bounded workloads.
+- Confirm DuplicateReports hidden-image visibility and active-state scoping,
+  and measure reverse-pair acceptance before considering the composite
+  candidate.
+- Confirm Filters' recent/own result cardinality change and whether moving
+  member visibility into application authorization preserves intended access.
+  Measure owner-page ordering and both array replacement updates before any
+  B-tree/GIN addition; array indexes carry write amplification.
+- Confirm Tags' slug-based route semantics and visibility/locking changes are
+  intentional. Existing implication/alias/tagging indexes cover the changed
+  paths; unchanged `images_count` and filter-array scans need separate
+  workload analysis.
+- Confirm TagChanges batch-row semantics and hidden-image reversion behavior;
+  no index gap was found.
+- Confirm SourceChanges timestamp ordering and normalized identity inputs. The
+  fingerprint equality path has no index and all history composites lack
+  production-shaped plans; validate frequency, cardinality, selectivity, and
+  write/storage cost before proposing indexes.
+- No Wave E EXPLAIN was run against a representative production-sized
+  dataset. All conditional candidates above are evidence-gathering tasks, not
+  migration instructions.

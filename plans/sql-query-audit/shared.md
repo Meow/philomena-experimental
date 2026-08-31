@@ -2,7 +2,7 @@
 
 Refs: master -> context-logic
 Status: complete
-Scope: Wave A, Wave B, Wave C, and Wave D; read-only audit; no application code or migrations changed.
+Scope: Wave A, Wave B, Wave C, Wave D, and Wave E; read-only audit; no application code or migrations changed.
 
 This report owns query shapes shared by contexts across all completed waves,
 plus the shared Loader, authorization, visibility, subscription, interaction,
@@ -214,6 +214,50 @@ the cleanup relation filters `user_id` and `up`, then batches/orders by
 `EXPLAIN (ANALYZE, BUFFERS)`, frequency/cardinality, and write-cost evidence;
 the ImageVotes report owns it so no duplicate shared recommendation is made.
 
+### Wave E gallery interactions and subscriptions
+
+Galleries, Images, and the shared subscription helpers use the same
+`gallery_interactions` predicates: membership/existence by
+`gallery_id = ? AND image_id = ?`, owner-side batches by `image_id = ?`, and
+gallery ordering by `gallery_id = ? ORDER BY position`. The unique pair,
+`gallery_id`, `image_id`, and `(gallery_id, position)` indexes cover these
+lookups and the gallery subscription unique `(gallery_id, user_id)` key covers
+subscription existence/insert/delete. Gallery deletion now batches and locks
+rows, but does not add an uncovered selector. The owner gallery selector's
+`galleries.user_id = ? ORDER BY updated_at DESC LIMIT 100` is owned by
+Galleries; any ordering index is a local, measurement-only question.
+
+### Wave E tag and source history consumers
+
+Profiles, Images, and IP/fingerprint profile controllers consume the canonical
+TagChanges and SourceChanges history relations. Their page shapes are
+user/image/IP/fingerprint equality (or inet containment) with
+`created_at DESC, id DESC`, plus optional `added` predicates and association
+preloads. Existing image/user/fingerprint/IP and tag-change join indexes cover
+the selectors where present; timestamp ordering suffixes and the missing
+SourceChanges fingerprint index are deduplicated as conditional candidates in
+`summary.md`, not repeated per consumer.
+
+### Wave E duplicate-report visibility and locking
+
+DuplicateReports and Images share report rejection/closure and image-pair
+lookups. The current workflows add explicit image/report `FOR UPDATE` locks,
+active-state predicates, and actor-dependent hidden-image visibility. Existing
+image-direction, state/partial-state, foreign-key, and primary-key indexes
+cover the relational access paths. The reverse-pair latest-row composite is
+owned by DuplicateReports; no duplicate candidate belongs in shared findings.
+
+### Wave E filter/tag-array maintenance
+
+Filters' `put_replace_tag_references/5` performs separate bulk updates selected
+by `hidden_tag_ids @> ARRAY[...]` and `spoilered_tag_ids @> ARRAY[...]`. Tags'
+alias/deletion workflows call this helper and then reindex affected rows. No
+GIN indexes exist in the current structure dump. The two possible GIN indexes
+are therefore one Filters-owned, measurement-only candidate (with write
+amplification), not a generic shared tag recommendation. Tags' unchanged
+`images_count` ordering and filter-array scans remain outside the
+master/current delta.
+
 ## Cross-context ownership links
 
 - Activities is the canonical consumer report for homepage composition; its
@@ -246,14 +290,28 @@ the ImageVotes report owns it so no duplicate shared recommendation is made.
   ImageVotes, and Interactions link their detailed persistence and fan-out
   findings here. Duplicate comparison intensity ranges remain owned by
   DuplicateReports and are not re-recommended.
+- Galleries owns gallery member, interaction, deletion, reorder, and owner
+  selector queries; shared gallery subscriptions and notification clears link
+  here without duplicate candidates.
+- DuplicateReports owns perceptual intensity joins, report state/order
+  branches, and the reverse-pair latest-row candidate; image visibility and
+  report closure semantics link here.
+- Filters owns owner/system pagination and tag-array replacement updates;
+  Tags links canonicalization and dependent cleanup without duplicating the
+  conditional GIN candidates.
+- TagChanges and SourceChanges own profile/image/IP/fingerprint history and
+  attribution cleanup. Their timestamp/fingerprint ordering candidates are
+  deduplicated in the summary and not repeated for Profiles consumers.
 
 ## Index conclusion
 
 No new index is recommended solely for a shared helper. All shared equality,
 foreign-key, primary-key, unique-conflict, subscription, interaction, profile
-locator, report-target, tag-canonicalization, image interaction, and image
-member/preload paths have existing coverage. The fingerprint ordered-history
-candidate, commission-item ordered-preload
-candidate, and Wave C post last-pointer candidate arise in individual
-contexts and are deduplicated in `summary.md`. The conditional ImageVotes
-cleanup candidate remains deferred pending runtime evidence.
+locator, report-target, tag-canonicalization, image interaction, gallery
+interaction/subscription, and image member/preload paths have existing
+coverage. The fingerprint ordered-history, commission-item ordered-preload,
+Wave C post last-pointer, DuplicateReports reverse-pair, Filters owner/order
+and array-GIN, and Wave E source-history candidates arise in individual
+contexts and are deduplicated in `summary.md`; all remain deferred pending
+runtime evidence. The conditional ImageVotes cleanup candidate remains
+deferred as well.
