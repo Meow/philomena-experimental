@@ -64,7 +64,7 @@ defmodule Philomena.RulesTest do
     end
   end
 
-  describe "load_rule_for_show/2" do
+  describe "show_rule/2" do
     test "loads a visible rule by position for an anonymous viewer" do
       rule = rule_fixture()
 
@@ -108,7 +108,7 @@ defmodule Philomena.RulesTest do
     end
   end
 
-  describe "load_new_rule/1" do
+  describe "new_rule/1" do
     test "an admin gets a blank changeset" do
       assert {:ok, %Ecto.Changeset{data: %Rule{}}} =
                Rules.new_rule(actor(admin_user_fixture()))
@@ -149,7 +149,7 @@ defmodule Philomena.RulesTest do
     end
   end
 
-  describe "load_rule_for_edit/2" do
+  describe "edit_rule/2" do
     test "an admin loads a rule and a changeset" do
       rule = rule_fixture()
 

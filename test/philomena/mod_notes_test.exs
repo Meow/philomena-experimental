@@ -35,7 +35,7 @@ defmodule Philomena.ModNotesTest do
     })
   end
 
-  describe "load_mod_note_index/4" do
+  describe "list_mod_notes/4" do
     test "an anonymous viewer is unauthorized" do
       assert ModNotes.list_mod_notes(actor(), %{}, & &1, @pagination) ==
                {:error, :unauthorized}
@@ -294,7 +294,7 @@ defmodule Philomena.ModNotesTest do
     end
   end
 
-  describe "load_mod_note_for_edit/2" do
+  describe "edit_mod_note/2" do
     test "a moderator loads their own note with a changeset" do
       moderator = moderator_user_fixture()
       note = mod_note_fixture(moderator)

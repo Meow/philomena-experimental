@@ -204,10 +204,10 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> load_user_reports(actor, pagination)
+      iex> list_user_reports(actor, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_user_reports(anonymous, pagination)
+      iex> list_user_reports(anonymous, pagination)
       {:error, :unauthorized}
 
   """
@@ -236,10 +236,10 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> load_report_index(admin, %{"query" => "open:true"}, pagination)
+      iex> list_reports(admin, %{"query" => "open:true"}, pagination)
       {:ok, %ReportPage{}, %Ecto.Changeset{}}
 
-      iex> load_report_index(user, %{}, pagination)
+      iex> list_reports(user, %{}, pagination)
       {:error, :unauthorized}
 
   """
@@ -291,10 +291,10 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> load_report(moderator, "1")
+      iex> show_report(moderator, "1")
       {:ok, %Report{}}
 
-      iex> load_report(moderator, "999999999")
+      iex> show_report(moderator, "999999999")
       {:error, :not_found}
 
   """
@@ -444,10 +444,10 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> claim_report(moderator, "1")
+      iex> create_report_claim(moderator, "1")
       {:ok, %Report{state: "in_progress"}}
 
-      iex> claim_report(user, "1")
+      iex> create_report_claim(user, "1")
       {:error, :unauthorized}
 
   """
@@ -493,7 +493,7 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> unclaim_report(moderator, "1")
+      iex> delete_report_claim(moderator, "1")
       {:ok, %Report{state: "open"}}
 
   """
@@ -539,7 +539,7 @@ defmodule Philomena.Reports do
 
   ## Examples
 
-      iex> close_report(moderator, "1")
+      iex> create_report_close(moderator, "1")
       {:ok, %Report{state: "closed", open: false}}
 
   """

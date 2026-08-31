@@ -65,7 +65,7 @@ defmodule Philomena.ProfilesTest do
     Philomena.FiltersFixtures.system_filter_fixture()
   end
 
-  describe "load_profile_page/4" do
+  describe "show_profile/4" do
     setup do
       Search.clear_index!(Image)
       Search.clear_index!(Comment)
@@ -259,7 +259,7 @@ defmodule Philomena.ProfilesTest do
     end
   end
 
-  describe "load_ip_history/3" do
+  describe "list_profile_ip_history/3" do
     test "a moderator loads the user's IPs and the other users on them" do
       subject = confirmed_user_fixture()
       alias_user = confirmed_user_fixture()
@@ -321,7 +321,7 @@ defmodule Philomena.ProfilesTest do
     end
   end
 
-  describe "load_fingerprint_history/3" do
+  describe "list_profile_fingerprint_history/3" do
     test "a moderator loads the user's fingerprints and the other users on them" do
       subject = confirmed_user_fixture()
       alias_user = confirmed_user_fixture()

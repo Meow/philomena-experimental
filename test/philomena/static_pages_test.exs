@@ -32,7 +32,7 @@ defmodule Philomena.StaticPagesTest do
     end
   end
 
-  describe "load_page_listing/1" do
+  describe "list_pages/1" do
     test "an admin gets the list of static pages" do
       page = static_page_fixture(admin_user_fixture())
 
@@ -56,7 +56,7 @@ defmodule Philomena.StaticPagesTest do
     end
   end
 
-  describe "load_page_for_show/2" do
+  describe "show_page/2" do
     test "an anonymous viewer loads a page by slug" do
       page = static_page_fixture(admin_user_fixture())
 
@@ -73,7 +73,7 @@ defmodule Philomena.StaticPagesTest do
     end
   end
 
-  describe "load_page_history/2" do
+  describe "list_page_history/2" do
     test "an anonymous viewer loads newest-first revision history" do
       admin = admin_user_fixture()
       page = static_page_fixture(admin, %{body: "First"})
@@ -154,7 +154,7 @@ defmodule Philomena.StaticPagesTest do
     end
   end
 
-  describe "load_page_for_edit/2" do
+  describe "edit_page/2" do
     test "an admin loads a page and a changeset" do
       page = static_page_fixture(admin_user_fixture())
 

@@ -102,10 +102,10 @@ defmodule Philomena.SourceChanges do
 
   ## Examples
 
-      iex> image_source_changes(actor, "42", %{}, page: 1, page_size: 25)
+      iex> list_image_source_changes(actor, "42", %{}, page: 1, page_size: 25)
       {:ok, %SourceChangePage{target: %Image{}, source_changes: %Scrivener.Page{}}, changeset}
 
-      iex> image_source_changes(actor, "missing", %{}, page: 1, page_size: 25)
+      iex> list_image_source_changes(actor, "missing", %{}, page: 1, page_size: 25)
       {:error, :not_found}
 
   """
@@ -144,10 +144,10 @@ defmodule Philomena.SourceChanges do
 
   ## Examples
 
-      iex> user_source_changes(moderator, "artist", %{}, page: 1, page_size: 25)
+      iex> list_user_source_changes(moderator, "artist", %{}, page: 1, page_size: 25)
       {:ok, %SourceChangePage{target: %User{}, image_count: 3}, changeset}
 
-      iex> user_source_changes(moderator, "missing", %{}, page: 1, page_size: 25)
+      iex> list_user_source_changes(moderator, "missing", %{}, page: 1, page_size: 25)
       {:error, :not_found}
 
   """
@@ -202,10 +202,10 @@ defmodule Philomena.SourceChanges do
 
   ## Examples
 
-      iex> ip_source_changes(moderator, "203.0.113.5", %{}, page: 1, page_size: 25)
+      iex> list_ip_source_changes(moderator, "203.0.113.5", %{}, page: 1, page_size: 25)
       {:ok, %SourceChangePage{target: %Postgrex.INET{}, range: %Postgrex.INET{}}, changeset}
 
-      iex> ip_source_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
+      iex> list_ip_source_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
       {:error, :not_found}
 
   """
@@ -243,10 +243,10 @@ defmodule Philomena.SourceChanges do
 
   ## Examples
 
-      iex> fingerprint_source_changes(moderator, "c123", %{}, page: 1, page_size: 25)
+      iex> list_fingerprint_source_changes(moderator, "c123", %{}, page: 1, page_size: 25)
       {:ok, %SourceChangePage{target: "c123"}, changeset}
 
-      iex> fingerprint_source_changes(moderator, "invalid", %{}, page: 1, page_size: 25)
+      iex> list_fingerprint_source_changes(moderator, "invalid", %{}, page: 1, page_size: 25)
       {:error, :not_found}
 
   """

@@ -99,10 +99,10 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> load_artist_links_index(admin, params, pagination)
+      iex> list_admin_artist_links(admin, params, pagination)
       {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
-      iex> load_artist_links_index(user, params, pagination)
+      iex> list_admin_artist_links(user, params, pagination)
       {:error, :unauthorized}
 
   """
@@ -139,19 +139,19 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> load_artist_link_for_new(user_actor, user.slug)
+      iex> new_artist_link(user_actor, user.slug)
       {:ok, {%User{}, %Ecto.Changeset{}}}
 
-      iex> load_artist_link_for_new(admin_actor, other_user.slug)
+      iex> new_artist_link(admin_actor, other_user.slug)
       {:ok, {%User{}, %Ecto.Changeset{}}}
 
-      iex> load_artist_link_for_new(banned_actor, banned_user.slug)
+      iex> new_artist_link(banned_actor, banned_user.slug)
       {:error, :ban}
 
-      iex> load_artist_link_for_new(admin_actor, invalid_slug)
+      iex> new_artist_link(admin_actor, invalid_slug)
       {:error, :not_found}
 
-      iex> load_artist_link_for_new(user_actor, other_user.slug)
+      iex> new_artist_link(user_actor, other_user.slug)
       {:error, :unauthorized}
 
   """
@@ -225,16 +225,16 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> load_artist_link_for_show(user, user.slug, artist_link_id)
+      iex> show_artist_link(user, user.slug, artist_link_id)
       {:ok, {%User{}, %ArtistLink{}}}
 
-      iex> load_artist_link_for_show(admin, other_user.slug, artist_link_id)
+      iex> show_artist_link(admin, other_user.slug, artist_link_id)
       {:ok, {%User{}, %ArtistLink{}}}
 
-      iex> load_artist_link_for_show(user, other_user.slug, artist_link_id)
+      iex> show_artist_link(user, other_user.slug, artist_link_id)
       {:error, :unauthorized}
 
-      iex> load_artist_link_for_show(user, invalid_slug, invalid_id)
+      iex> show_artist_link(user, invalid_slug, invalid_id)
       {:error, :not_found}
 
   """
@@ -252,16 +252,16 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> load_artist_link_for_edit(user, user.slug, artist_link_id)
+      iex> edit_artist_link(user, user.slug, artist_link_id)
       {:ok, {%ArtistLink{}, %Ecto.Changeset{}}}
 
-      iex> load_artist_link_for_edit(admin, other_user.slug, artist_link_id)
+      iex> edit_artist_link(admin, other_user.slug, artist_link_id)
       {:ok, {%ArtistLink{}, %Ecto.Changeset{}}}
 
-      iex> load_artist_link_for_edit(user, other_user.slug, artist_link_id)
+      iex> edit_artist_link(user, other_user.slug, artist_link_id)
       {:error, :unauthorized}
 
-      iex> load_artist_link_for_edit(user, invalid_slug, invalid_id)
+      iex> edit_artist_link(user, invalid_slug, invalid_id)
       {:error, :not_found}
 
   """
@@ -331,13 +331,13 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> verify_artist_link(admin, artist_link_id)
+      iex> create_artist_link_verification(admin, artist_link_id)
       {:ok, %ArtistLink{}}
 
-      iex> verify_artist_link(admin, invalid_id)
+      iex> create_artist_link_verification(admin, invalid_id)
       {:error, :not_found}
 
-      iex> verify_artist_link(user, artist_link_id)
+      iex> create_artist_link_verification(user, artist_link_id)
       {:error, :unauthorized}
 
   """
@@ -382,13 +382,13 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> reject_artist_link(admin, artist_link_id)
+      iex> create_artist_link_reject(admin, artist_link_id)
       {:ok, %ArtistLink{}}
 
-      iex> reject_artist_link(admin, invalid_id)
+      iex> create_artist_link_reject(admin, invalid_id)
       {:error, :not_found}
 
-      iex> reject_artist_link(user, artist_link_id)
+      iex> create_artist_link_reject(user, artist_link_id)
       {:error, :unauthorized}
 
   """
@@ -432,13 +432,13 @@ defmodule Philomena.ArtistLinks do
 
   ## Examples
 
-      iex> contact_artist_link(admin, artist_link_id)
+      iex> create_artist_link_contact(admin, artist_link_id)
       {:ok, %ArtistLink{}}
 
-      iex> contact_artist_link(admin, invalid_id)
+      iex> create_artist_link_contact(admin, invalid_id)
       {:error, :not_found}
 
-      iex> contact_artist_link(user, artist_link_id)
+      iex> create_artist_link_contact(user, artist_link_id)
       {:error, :unauthorized}
 
   """

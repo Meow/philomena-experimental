@@ -141,10 +141,10 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> load_topic_post(actor, "dis", "some-topic", "1")
+      iex> show_topic_post(actor, "dis", "some-topic", "1")
       {:ok, %Post{}}
 
-      iex> load_topic_post(actor, "dis", "some-topic", "not-a-number")
+      iex> show_topic_post(actor, "dis", "some-topic", "not-a-number")
       {:error, :not_found}
 
   """
@@ -171,10 +171,10 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> load_post(actor, "1")
+      iex> show_post(actor, "1")
       {:ok, %Post{}}
 
-      iex> load_post(actor, "999999999")
+      iex> show_post(actor, "999999999")
       {:error, :not_found}
 
   """
@@ -209,10 +209,10 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> search_posts(actor, "chartreuse", pagination)
+      iex> query_posts(actor, "chartreuse", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> search_posts(actor, ")", pagination)
+      iex> query_posts(actor, ")", pagination)
       {:error, "Imbalanced parentheses."}
 
   """
@@ -348,7 +348,7 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> load_post_for_edit(actor, "dis", "some-topic", "1")
+      iex> edit_post(actor, "dis", "some-topic", "1")
       {:ok, %Ecto.Changeset{}}
 
   """
@@ -455,13 +455,13 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> hide_post(moderator_actor, "dis", "some-topic", "1", %{"deletion_reason" => "Spam"})
+      iex> create_post_hide(moderator_actor, "dis", "some-topic", "1", %{"deletion_reason" => "Spam"})
       {:ok, %Post{}}
 
-      iex> hide_post(moderator_actor, "dis", "some-topic", "1", %{"deletion_reason" => ""})
+      iex> create_post_hide(moderator_actor, "dis", "some-topic", "1", %{"deletion_reason" => ""})
       {:error, %Ecto.Changeset{}}
 
-      iex> hide_post(user_actor, "dis", "some-topic", "1", %{"deletion_reason" => "Spam"})
+      iex> create_post_hide(user_actor, "dis", "some-topic", "1", %{"deletion_reason" => "Spam"})
       {:error, :unauthorized}
 
   """
@@ -527,10 +527,10 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> unhide_post(moderator_actor, "dis", "some-topic", "1")
+      iex> delete_post_hide(moderator_actor, "dis", "some-topic", "1")
       {:ok, %Post{}}
 
-      iex> unhide_post(user_actor, "dis", "some-topic", "1")
+      iex> delete_post_hide(user_actor, "dis", "some-topic", "1")
       {:error, :unauthorized}
 
   """
@@ -596,13 +596,13 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> destroy_post(moderator_actor, "dis", "some-topic", "1")
+      iex> create_post_delete(moderator_actor, "dis", "some-topic", "1")
       {:ok, %Post{}}
 
-      iex> destroy_post(user_actor, "dis", "some-topic", "1")
+      iex> create_post_delete(user_actor, "dis", "some-topic", "1")
       {:error, :unauthorized}
 
-      iex> destroy_post(moderator_actor, "dis", "some-topic", "not-an-integer")
+      iex> create_post_delete(moderator_actor, "dis", "some-topic", "not-an-integer")
       {:error, :not_found}
 
   """
@@ -673,13 +673,13 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> approve_post(moderator_actor, "dis", "some-topic", "1")
+      iex> create_post_approve(moderator_actor, "dis", "some-topic", "1")
       {:ok, %Post{}}
 
-      iex> approve_post(user_actor, "dis", "some-topic", "1")
+      iex> create_post_approve(user_actor, "dis", "some-topic", "1")
       {:error, :unauthorized}
 
-      iex> approve_post(moderator_actor, "dis", "some-topic", "not-an-integer")
+      iex> create_post_approve(moderator_actor, "dis", "some-topic", "not-an-integer")
       {:error, :not_found}
 
   """
@@ -751,10 +751,10 @@ defmodule Philomena.Posts do
 
   ## Examples
 
-      iex> post_history(user, "dis", "some-topic", "1")
+      iex> list_post_history(user, "dis", "some-topic", "1")
       {:ok, {%Topic{}, %Post{}, [%Version{}, ...]}}
 
-      iex> post_history(user, "dis", "some-topic", "999999999")
+      iex> list_post_history(user, "dis", "some-topic", "999999999")
       {:error, :not_found}
 
   """

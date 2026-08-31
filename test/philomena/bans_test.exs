@@ -82,7 +82,7 @@ defmodule Philomena.BansTest do
     end
   end
 
-  describe "admin_user_bans/3" do
+  describe "list_user_bans/3" do
     test "a moderator gets the paginated user bans" do
       moderator = moderator_user_fixture()
       ban = user_ban_fixture()
@@ -284,7 +284,7 @@ defmodule Philomena.BansTest do
     end
   end
 
-  describe "load_user_ban_for_edit/2" do
+  describe "edit_user_ban/2" do
     test "a moderator loads the ban with the banned user preloaded" do
       moderator = moderator_user_fixture()
       ban = user_ban_fixture()
@@ -455,7 +455,7 @@ defmodule Philomena.BansTest do
     end
   end
 
-  describe "admin_subnet_bans/3" do
+  describe "list_subnet_bans/3" do
     test "a moderator gets the paginated subnet bans" do
       moderator = moderator_user_fixture()
       ban = subnet_ban_fixture()
@@ -581,7 +581,7 @@ defmodule Philomena.BansTest do
     end
   end
 
-  describe "load_subnet_ban_for_edit/2" do
+  describe "edit_subnet_ban/2" do
     test "a moderator loads the ban" do
       moderator = moderator_user_fixture()
       ban = subnet_ban_fixture()
@@ -700,7 +700,7 @@ defmodule Philomena.BansTest do
     end
   end
 
-  describe "admin_fingerprint_bans/3" do
+  describe "list_fingerprint_bans/3" do
     test "a moderator gets the paginated fingerprint bans" do
       moderator = moderator_user_fixture()
       ban = fingerprint_ban_fixture()
@@ -811,7 +811,7 @@ defmodule Philomena.BansTest do
     end
   end
 
-  describe "load_fingerprint_ban_for_edit/2" do
+  describe "edit_fingerprint_ban/2" do
     test "a moderator loads the ban" do
       moderator = moderator_user_fixture()
       ban = fingerprint_ban_fixture()

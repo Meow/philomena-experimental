@@ -52,7 +52,7 @@ defmodule Philomena.DnpEntriesTest do
     })
   end
 
-  describe "load_dnp_listing/3" do
+  describe "list_dnp_entries/3" do
     test "the mine listing returns the user's own entries with the status column" do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
@@ -92,7 +92,7 @@ defmodule Philomena.DnpEntriesTest do
     end
   end
 
-  describe "load_dnp_entry_page/3" do
+  describe "show_dnp_entry/3" do
     test "loads a listed entry for an anonymous viewer, with the tag preloaded" do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag, %{state: "listed"})
@@ -208,7 +208,7 @@ defmodule Philomena.DnpEntriesTest do
     end
   end
 
-  describe "load_new_dnp_entry/2" do
+  describe "new_dnp_entry/2" do
     test "a user with a linked tag gets a changeset and their selectable tags" do
       {user, tag} = linked_user()
 
@@ -330,7 +330,7 @@ defmodule Philomena.DnpEntriesTest do
     end
   end
 
-  describe "load_dnp_entry_for_edit/2" do
+  describe "edit_dnp_entry/2" do
     test "a moderator loads the entry, a changeset, and the selectable tags" do
       {user, tag} = linked_user()
       entry = dnp_entry_fixture(user, tag)
@@ -469,7 +469,7 @@ defmodule Philomena.DnpEntriesTest do
     end
   end
 
-  describe "load_admin_dnp_entries/3" do
+  describe "list_admin_dnp_entries/3" do
     test "an anonymous viewer is unauthorized" do
       assert DnpEntries.list_admin_dnp_entries(actor(), %{}, @pagination) ==
                {:error, :unauthorized}
@@ -563,7 +563,7 @@ defmodule Philomena.DnpEntriesTest do
     end
   end
 
-  describe "transition_dnp_entry/3" do
+  describe "create_dnp_entry_transition/3" do
     test "accepts every declared DNP state" do
       moderator = actor(moderator_user_fixture())
 

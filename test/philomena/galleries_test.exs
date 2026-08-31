@@ -265,7 +265,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "load_gallery_for_edit/2" do
+  describe "edit_gallery/2" do
     test "the owner loads the gallery paired with its edit changeset" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
@@ -309,7 +309,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "add_image_to_gallery/3" do
+  describe "create_gallery_image/3" do
     test "the owner adds an image at the last position" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
@@ -378,7 +378,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "remove_image_from_gallery/3" do
+  describe "delete_gallery_image/3" do
     test "the owner removes an image in the gallery" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
@@ -414,7 +414,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "reorder_gallery/3" do
+  describe "update_gallery_order/3" do
     test "the owner reorders synchronously and gets the reorder form back" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
@@ -521,7 +521,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "mark_gallery_read/2" do
+  describe "create_gallery_read/2" do
     test "a known gallery is marked read for the user" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(confirmed_user_fixture())
@@ -554,7 +554,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "subscribe_gallery/2 and unsubscribe_gallery/2" do
+  describe "create_gallery_subscription/2 and delete_gallery_subscription/2" do
     test "subscribing then unsubscribing toggles the subscription" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(confirmed_user_fixture())
@@ -603,7 +603,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "load_gallery_page/2" do
+  describe "show_gallery/2" do
     test "the owner's scope gets a gallery page containing the gallery's image" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
@@ -645,7 +645,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "load_gallery_index/3" do
+  describe "list_galleries/3" do
     test "a title filter finds a matching gallery and excludes others" do
       user = confirmed_user_fixture()
       wanted = gallery_fixture(user, title: "Test Wanted Gallery")

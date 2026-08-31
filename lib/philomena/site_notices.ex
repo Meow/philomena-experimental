@@ -53,10 +53,10 @@ defmodule Philomena.SiteNotices do
 
   ## Examples
 
-      iex> load_site_notices(actor, %{page_number: 1, page_size: 25})
+      iex> list_site_notices(actor, %{page_number: 1, page_size: 25})
       {:ok, %Scrivener.Page{}}
 
-      iex> load_site_notices(regular_user_actor, %{page_number: 1, page_size: 25})
+      iex> list_site_notices(regular_user_actor, %{page_number: 1, page_size: 25})
       {:error, :unauthorized}
 
   """
@@ -133,10 +133,10 @@ defmodule Philomena.SiteNotices do
 
   ## Examples
 
-      iex> load_site_notice_for_edit(admin_actor, "12")
+      iex> edit_site_notice(admin_actor, "12")
       {:ok, {%SiteNotice{}, %Ecto.Changeset{}}}
 
-      iex> load_site_notice_for_edit(admin_actor, "missing")
+      iex> edit_site_notice(admin_actor, "missing")
       {:error, :not_found}
 
   """

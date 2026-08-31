@@ -26,10 +26,10 @@ defmodule Philomena.Filters.Visibility do
 
   ## Examples
 
-      iex> search_filters(admin_actor)
+      iex> query_filters(admin_actor)
       []
 
-      iex> search_filters(actor)
+      iex> query_filters(actor)
       [%{term: %{public: true}}, ...]
 
   """

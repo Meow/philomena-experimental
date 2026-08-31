@@ -135,10 +135,10 @@ defmodule Philomena.Activities do
 
   ## Examples
 
-      iex> load_front_page(anonymous_actor, scope, filter, false)
+      iex> list_activities(anonymous_actor, scope, filter, false)
       {:ok, %FrontPage{watched: nil}}
 
-      iex> load_front_page(actor, scope, filter, true)
+      iex> list_activities(actor, scope, filter, true)
       {:ok, %FrontPage{watched: %Scrivener.Page{}}}
 
   """

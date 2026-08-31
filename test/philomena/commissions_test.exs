@@ -64,7 +64,7 @@ defmodule Philomena.CommissionsTest do
     })
   end
 
-  describe "load_commission_for_show/2" do
+  describe "show_commission/2" do
     test "returns an ordered commission page" do
       user = confirmed_user_fixture()
       commission = commission_fixture(user)
@@ -206,7 +206,7 @@ defmodule Philomena.CommissionsTest do
     end
   end
 
-  describe "load_commission_for_edit/2" do
+  describe "edit_commission/2" do
     test "the owner loads their commission and a changeset" do
       user = verified_user_with_link()
       commission = commission_fixture(user)
@@ -350,7 +350,7 @@ defmodule Philomena.CommissionsTest do
     end
   end
 
-  describe "load_item_for_edit/3" do
+  describe "edit_item/3" do
     test "the owner loads an item for editing" do
       user = verified_user_with_link()
       commission = commission_fixture(user)
@@ -441,7 +441,7 @@ defmodule Philomena.CommissionsTest do
     end
   end
 
-  describe "load_directory/3" do
+  describe "list_commissions/3" do
     @pagination [page: 1, page_size: 25]
 
     # A commission the directory query surfaces: open, with an item, whose owner

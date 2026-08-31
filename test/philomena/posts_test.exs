@@ -215,7 +215,7 @@ defmodule Philomena.PostsTest do
     end
   end
 
-  describe "approve_post/2" do
+  describe "create_post_approve/2" do
     test "denies an anonymous actor", %{topic: topic} do
       {post, _author} = unapproved_post(topic)
 
@@ -306,7 +306,7 @@ defmodule Philomena.PostsTest do
     hidden
   end
 
-  describe "hide_post/3" do
+  describe "create_post_hide/3" do
     test "denies an anonymous actor", %{topic: topic} do
       post = visible_post(topic)
 
@@ -401,7 +401,7 @@ defmodule Philomena.PostsTest do
     end
   end
 
-  describe "unhide_post/2" do
+  describe "delete_post_hide/2" do
     test "denies an anonymous actor", %{topic: topic} do
       post = already_hidden_post(topic)
 
@@ -470,7 +470,7 @@ defmodule Philomena.PostsTest do
     end
   end
 
-  describe "destroy_post/2" do
+  describe "create_post_delete/2" do
     test "denies an anonymous actor, leaving the body intact", %{topic: topic} do
       post = already_hidden_post(topic)
 
@@ -603,7 +603,7 @@ defmodule Philomena.PostsTest do
     end
   end
 
-  describe "post_history/4" do
+  describe "list_post_history/4" do
     # Unlike the moderation actions above, list_post_history is a public read routed
     # by forum short name and topic slug (not a bare post id), so it takes the
     # loaded topic's addressing rather than a raw "#{post.id}" string.
@@ -953,7 +953,7 @@ defmodule Philomena.PostsTest do
     end
   end
 
-  describe "load_post_for_edit/4" do
+  describe "edit_post/4" do
     # This backs the edit write, so it runs the global write prerequisite and
     # then the same load-and-authorize chain update_post/5 uses.
 

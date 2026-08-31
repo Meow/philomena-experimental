@@ -255,7 +255,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "hide_image/3 gallery cleanup" do
+  describe "create_image_hide/3 gallery cleanup" do
     # Hiding (deleting) an image removes it from every gallery containing it.
     # The gallery search document serializes image_count and image_ids, so the
     # transaction must surface the affected gallery ids for reindexing - the
@@ -364,7 +364,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_file/3 duplicate detection" do
+  describe "update_image_file/3 duplicate detection" do
     # Root cause of the fixed bug: replacing an image's file with a
     # byte-identical copy. The image's own row still holds that file's
     # orig_sha512_hash, so the dedup lookup matches the image against itself;
@@ -404,7 +404,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "mark_image_read/2" do
+  describe "create_image_read/2" do
     test "clears the actor's image comment notification and returns the image" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -496,7 +496,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "remove_image_hash/2" do
+  describe "delete_image_hash/2" do
     test "a moderator clears the hash and gets the updated image" do
       moderator = moderator_user_fixture()
       image = image_fixture()
@@ -589,7 +589,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "repair_image/2" do
+  describe "create_image_repair/2" do
     test "a moderator flags the image for reprocessing and gets the image" do
       # The engine writes with update_all, so the returned struct still carries
       # the pre-repair flags; the cleared flags show on reload.
@@ -695,7 +695,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "remove_source_history/2" do
+  describe "delete_image_source_history/2" do
     test "a moderator clears the source history and source_url and gets the image" do
       moderator = moderator_user_fixture()
       image = image_fixture(source_url: "https://example.com/artwork")
@@ -815,7 +815,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "image_fave_list/2" do
+  describe "list_image_faves/2" do
     test "an anonymous actor gets the faves without vote data on a visible image" do
       image = image_fixture()
 
@@ -1037,7 +1037,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_scratchpad/3" do
+  describe "update_image_scratchpad/3" do
     test "a moderator stores the scratchpad and gets the image" do
       moderator = moderator_user_fixture()
       image = image_fixture()
@@ -1180,7 +1180,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "subscribe_image/2" do
+  describe "create_image_subscription/2" do
     test "a regular user subscribes to a visible image and the row is created" do
       # The :show authorization admits a regular user on a visible image, so
       # subscribing is not staff-gated.
@@ -1268,7 +1268,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "unsubscribe_image/2" do
+  describe "delete_image_subscription/2" do
     test "a regular user unsubscribes from a visible image and the row is removed" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -1350,7 +1350,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "approve_image/2" do
+  describe "create_image_approve/2" do
     test "a moderator approves an unapproved image and gets the image" do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: false)
@@ -1496,7 +1496,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "set_comment_locked/3" do
+  describe "update_image_comment_lock/3" do
     test "a moderator locks comments, clearing commenting_allowed" do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
@@ -1621,7 +1621,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "set_description_locked/3" do
+  describe "update_image_description_lock/3" do
     test "a moderator locks description editing, clearing description_editing_allowed" do
       moderator = moderator_user_fixture()
       image = image_fixture(description_editing_allowed: true)
@@ -1750,7 +1750,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "set_tag_locked/3" do
+  describe "update_image_tag_lock/3" do
     test "a moderator locks tags, clearing tag_editing_allowed" do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
@@ -1896,7 +1896,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_locked_tags/3" do
+  describe "update_image_locked_tags/3" do
     test "a moderator replaces the locked-tags list" do
       moderator = moderator_user_fixture()
       image = image_fixture()
@@ -2079,7 +2079,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "feature_image/2" do
+  describe "create_image_feature/2" do
     test "a moderator features a visible image, creating the feature row" do
       moderator = moderator_user_fixture()
       image = image_fixture()
@@ -2194,7 +2194,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_file/3" do
+  describe "update_image_file/3" do
     test "a moderator replaces the file and gets the image" do
       moderator = moderator_user_fixture()
       image = image_fixture()
@@ -2348,7 +2348,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_anonymous/3" do
+  describe "update_image_anonymous/3" do
     test "a moderator sets anonymity, flagging the image anonymous" do
       moderator = moderator_user_fixture()
       image = image_fixture(anonymous: false)
@@ -2475,7 +2475,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "destroy_image/2" do
+  describe "create_image_destroy/2" do
     test "an Image-admin role_map moderator destroys a hidden image, nulling the file" do
       moderator = role_moderator_fixture("Image")
       image = image_fixture(hidden_from_users: true)
@@ -2602,7 +2602,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_description/3" do
+  describe "update_image_description/3" do
     test "broadcasts the description and rendered image after persistence" do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id, description: "Old")
@@ -2777,7 +2777,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "delete_user_vote/3" do
+  describe "create_image_tamper/3" do
     test "a moderator removes a target user's upvote, adjusting the score" do
       moderator = moderator_user_fixture()
       target = confirmed_user_fixture()
@@ -2954,7 +2954,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_uploader/3" do
+  describe "update_image_uploader/3" do
     test "a moderator reassigns the uploader, preloading the new user with awards" do
       moderator = moderator_user_fixture()
       owner = confirmed_user_fixture()
@@ -3128,7 +3128,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "create_image_hide/2" do
+  describe "create_image_user_hide/2" do
     test "a signed-in actor hides a visible image, recording a row and bumping the count" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -3206,7 +3206,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "delete_image_hide/2" do
+  describe "delete_image_user_hide/2" do
     test "a signed-in actor unhides an image, removing the row and decrementing" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -3333,7 +3333,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "create_fave/2" do
+  describe "create_image_fave/2" do
     test "records a fave and an implicit upvote, bumping faves_count and score" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -3375,7 +3375,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "delete_fave/2" do
+  describe "delete_image_fave/2" do
     test "removes the fave but keeps the upvote, dropping faves_count and leaving score" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -3408,7 +3408,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "create_vote/3" do
+  describe "create_image_vote/3" do
     test "an upvote records the row and bumps score and upvotes_count" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -3453,7 +3453,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "delete_vote/2" do
+  describe "delete_image_vote/2" do
     test "removing an upvote restores the score" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -3490,7 +3490,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "hide_image/3" do
+  describe "create_image_hide/3" do
     test "a moderator hides the image, persisting the reason" do
       moderator = moderator_user_fixture()
       image = image_fixture()
@@ -3626,7 +3626,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_hide_reason/3" do
+  describe "update_image_hide/3" do
     test "a moderator updates the reason on a hidden image" do
       moderator = moderator_user_fixture()
       hidden = hidden_image_fixture("Original reason")
@@ -3745,7 +3745,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "unhide_image/2" do
+  describe "delete_image_hide/2" do
     test "a moderator restores a hidden image" do
       moderator = moderator_user_fixture()
       hidden = hidden_image_fixture()
@@ -3843,7 +3843,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_sources/3" do
+  describe "update_image_sources/3" do
     test "broadcasts source and rendered image updates after persistence" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -4068,7 +4068,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_tags/3" do
+  describe "update_image_tags/3" do
     setup do
       # The shared attribution fixture's anonymous identity (i:<ip>) is not rolled
       # back by the SQL sandbox and accumulates across runs, so clear it before
@@ -4356,7 +4356,7 @@ defmodule Philomena.ImagesTest do
     :ok
   end
 
-  describe "load_image_for_show/2" do
+  describe "show_image/2" do
     test "an anonymous viewer loads a visible image with zero change counts" do
       image = image_fixture()
 
@@ -4456,7 +4456,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "load_image_page/3" do
+  describe "show_image_page/3" do
     test "assembles the page struct for a signed-in viewer" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -4650,7 +4650,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "load_new_image/1" do
+  describe "new_image/1" do
     test "a normal actor gets the upload form changeset" do
       assert {:ok, %Ecto.Changeset{}} = Images.new_image(actor(confirmed_user_fixture()))
     end
@@ -4674,7 +4674,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "upload_image/3" do
+  describe "create_image/3" do
     test "a normal actor uploads an image and the row exists" do
       actor = actor(confirmed_user_fixture())
       :ok = Endpoint.subscribe("firehose")
@@ -4858,7 +4858,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "load_approval_queue/2" do
+  describe "list_approval_queue/2" do
     test "a moderator gets the unapproved images, oldest first, with tags preloaded" do
       approved = image_fixture(approved: true)
       first = image_fixture(approved: false)
@@ -4900,7 +4900,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "batch_update_tags/2" do
+  describe "update_batch_tags/2" do
     test "an admin adds a tag to matched images and logs against their own profile" do
       # A letters-only name keeps the profile subject_path identical to
       # "/profiles/<slug>" with no percent-encoding.
@@ -5103,7 +5103,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "load_image_index/1" do
+  describe "list_images/1" do
     @describetag :search
 
     setup do
@@ -5135,7 +5135,7 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "search_images/1" do
+  describe "query_images/1" do
     @describetag :search
 
     setup do

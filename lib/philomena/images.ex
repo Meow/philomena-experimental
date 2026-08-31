@@ -717,10 +717,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> featured_image(actor, false)
+      iex> show_featured_image(actor, false)
       {:ok, %Image{}}
 
-      iex> featured_image(actor, false)
+      iex> show_featured_image(actor, false)
       {:error, :not_found}
 
   """
@@ -755,7 +755,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> load_image_index(actor, scope)
+      iex> list_images(actor, scope)
       %Scrivener.Page{}
 
   """
@@ -788,10 +788,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> search_images(actor, scope)
+      iex> query_images(actor, scope)
       {:ok, %{images: %Scrivener.Page{}, tags: [%Tag{}]}}
 
-      iex> search_images(actor, bad_query_scope)
+      iex> query_images(actor, bad_query_scope)
       {:error, "There was an error parsing your query."}
 
   """
@@ -820,10 +820,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> load_api_image(actor, "1")
+      iex> show_api_image(actor, "1")
       {:ok, %Image{}}
 
-      iex> load_api_image(actor, "missing")
+      iex> show_api_image(actor, "missing")
       {:error, :not_found}
 
   """
@@ -840,7 +840,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> watched_images(actor, scope)
+      iex> list_watched_images(actor, scope)
       {:ok, %Scrivener.Page{}}
 
   """
@@ -867,13 +867,13 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> load_image_for_show(actor, "1")
+      iex> show_image(actor, "1")
       {:ok, %Image{tag_change_count: 2, tag_change_tag_count: 5, source_change_count: 1}}
 
-      iex> load_image_for_show(actor, "2")
+      iex> show_image(actor, "2")
       {:duplicate_of, %Image{}}
 
-      iex> load_image_for_show(actor, "bad")
+      iex> show_image(actor, "bad")
       {:error, :not_found}
 
   """
@@ -928,7 +928,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> load_image_page(actor, image, page: 1, page_size: 25)
+      iex> show_image_page(actor, image, page: 1, page_size: 25)
       %ImagePage{}
 
   """
@@ -977,7 +977,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> find_consecutive_image(actor, scope, "42")
+      iex> list_image_navigation(actor, scope, "42")
       {:ok, {%Image{}, {%Image{}, %{"sort" => [...]}}}}
 
   """
@@ -1001,7 +1001,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> find_image_index_page(actor, scope, "42")
+      iex> list_image_index_page(actor, scope, "42")
       {:ok, 3}
 
   """
@@ -1033,7 +1033,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> related_images(actor, scope, "42")
+      iex> list_related_images(actor, scope, "42")
       {:ok, {%Image{}, %Scrivener.Page{}}}
 
   """
@@ -1099,7 +1099,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> random_image_id(actor, scope)
+      iex> list_random_images(actor, scope)
       {:ok, 42}
 
   """
@@ -1468,10 +1468,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> load_new_image(actor)
+      iex> new_image(actor)
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_new_image(banned_actor)
+      iex> new_image(banned_actor)
       {:error, :ban}
 
   """
@@ -1499,10 +1499,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> upload_image(actor, %{"tag_input" => "safe"}, upload)
+      iex> create_image(actor, %{"tag_input" => "safe"}, upload)
       {:ok, %{image: %Image{}, upload_pid: pid}}
 
-      iex> upload_image(banned_actor, params, upload)
+      iex> create_image(banned_actor, params, upload)
       {:error, :ban}
 
   """
@@ -1602,10 +1602,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> load_approval_queue(moderator, pagination)
+      iex> list_approval_queue(moderator, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_approval_queue(user, pagination)
+      iex> list_approval_queue(user, pagination)
       {:error, :unauthorized}
 
   """
@@ -1639,10 +1639,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> approve_image(moderator, "42")
+      iex> create_image_approve(moderator, "42")
       {:ok, %Image{}}
 
-      iex> approve_image(user, "42")
+      iex> create_image_approve(user, "42")
       {:error, :unauthorized}
 
   """
@@ -1711,10 +1711,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> feature_image(moderator, "42")
+      iex> create_image_feature(moderator, "42")
       {:ok, %ImageFeature{}}
 
-      iex> feature_image(user, "42")
+      iex> create_image_feature(user, "42")
       {:error, :unauthorized}
 
   """
@@ -1756,10 +1756,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> destroy_image(admin, "42")
+      iex> create_image_destroy(admin, "42")
       {:ok, %Image{}}
 
-      iex> destroy_image(moderator, "42")
+      iex> create_image_destroy(moderator, "42")
       {:error, :unauthorized}
 
   """
@@ -1805,10 +1805,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> set_comment_locked(moderator, "42", true)
+      iex> update_image_comment_lock(moderator, "42", true)
       {:ok, %Image{}}
 
-      iex> set_comment_locked(user, "42", true)
+      iex> update_image_comment_lock(user, "42", true)
       {:error, :unauthorized}
 
   """
@@ -1854,10 +1854,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> set_description_locked(moderator, "42", true)
+      iex> update_image_description_lock(moderator, "42", true)
       {:ok, %Image{}}
 
-      iex> set_description_locked(user, "42", true)
+      iex> update_image_description_lock(user, "42", true)
       {:error, :unauthorized}
 
   """
@@ -1903,10 +1903,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> set_tag_locked(moderator, "42", true)
+      iex> update_image_tag_lock(moderator, "42", true)
       {:ok, %Image{}}
 
-      iex> set_tag_locked(user, "42", true)
+      iex> update_image_tag_lock(user, "42", true)
       {:error, :unauthorized}
 
   """
@@ -1979,10 +1979,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> repair_image(moderator, "42")
+      iex> create_image_repair(moderator, "42")
       {:ok, %Image{}}
 
-      iex> repair_image(user, "42")
+      iex> create_image_repair(user, "42")
       {:error, :unauthorized}
 
   """
@@ -2032,10 +2032,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> hide_image(moderator, "42", %{"deletion_reason" => "Rule violation"})
+      iex> create_image_hide(moderator, "42", %{"deletion_reason" => "Rule violation"})
       {:ok, %Image{}}
 
-      iex> hide_image(user, "42", %{"deletion_reason" => "Rule violation"})
+      iex> create_image_hide(user, "42", %{"deletion_reason" => "Rule violation"})
       {:error, :unauthorized}
 
   """
@@ -2083,10 +2083,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> unhide_image(moderator, "42")
+      iex> delete_image_user_hide(moderator, "42")
       {:ok, %Image{}}
 
-      iex> unhide_image(user, "42")
+      iex> delete_image_user_hide(user, "42")
       {:error, :unauthorized}
 
   """
@@ -2148,10 +2148,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> delete_user_vote(moderator, "42", "7")
+      iex> create_image_tamper(moderator, "42", "7")
       {:ok, %Image{}}
 
-      iex> delete_user_vote(user, "42", "7")
+      iex> create_image_tamper(user, "42", "7")
       {:error, :unauthorized}
 
   """
@@ -2226,10 +2226,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> remove_image_hash(moderator, "42")
+      iex> delete_image_hash(moderator, "42")
       {:ok, %Image{}}
 
-      iex> remove_image_hash(user, "42")
+      iex> delete_image_hash(user, "42")
       {:error, :unauthorized}
 
   """
@@ -2266,10 +2266,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_scratchpad(moderator, "42", %{"scratchpad" => "watch closely"})
+      iex> update_image_scratchpad(moderator, "42", %{"scratchpad" => "watch closely"})
       {:ok, %Image{}}
 
-      iex> update_scratchpad(user, "42", %{"scratchpad" => "watch closely"})
+      iex> update_image_scratchpad(user, "42", %{"scratchpad" => "watch closely"})
       {:error, :unauthorized}
 
   """
@@ -2315,10 +2315,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> remove_source_history(moderator, "42")
+      iex> delete_image_source_history(moderator, "42")
       {:ok, %Image{}}
 
-      iex> remove_source_history(user, "42")
+      iex> delete_image_source_history(user, "42")
       {:error, :unauthorized}
 
   """
@@ -2367,10 +2367,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_file(moderator, "42", upload)
+      iex> update_image_file(moderator, "42", upload)
       {:ok, %Image{}}
 
-      iex> update_file(user, "42", upload)
+      iex> update_image_file(user, "42", upload)
       {:error, :unauthorized}
 
   """
@@ -2424,10 +2424,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_description(actor, "42", %{"description" => "New description"})
+      iex> update_image_description(actor, "42", %{"description" => "New description"})
       {:ok, {%Image{}, "Old description"}}
 
-      iex> update_description(actor, "42", %{"description" => "..."})
+      iex> update_image_description(actor, "42", %{"description" => "..."})
       {:error, :unauthorized}
 
   """
@@ -2483,7 +2483,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_sources(actor, "42", %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => "http://example.com"}}})
+      iex> update_image_sources(actor, "42", %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => "http://example.com"}}})
       {:ok, %{image: %Image{}, source_change_count: 1}}
 
   """
@@ -2540,10 +2540,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_locked_tags(moderator, "42", %{"tag_input" => "safe, solo"})
+      iex> update_image_locked_tags(moderator, "42", %{"tag_input" => "safe, solo"})
       {:ok, %Image{}}
 
-      iex> update_locked_tags(user, "42", %{"tag_input" => "safe, solo"})
+      iex> update_image_locked_tags(user, "42", %{"tag_input" => "safe, solo"})
       {:error, :unauthorized}
 
   """
@@ -2624,7 +2624,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_tags(actor, "42", %{"old_tag_input" => "safe", "tag_input" => "safe, cute"})
+      iex> update_image_tags(actor, "42", %{"old_tag_input" => "safe", "tag_input" => "safe, cute"})
       {:ok, %{image: %Image{}, tag_change_count: 1, tag_change_tag_count: 1}}
 
   """
@@ -2702,10 +2702,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_uploader(moderator, "42", %{"username" => "Admin"})
+      iex> update_image_uploader(moderator, "42", %{"username" => "Admin"})
       {:ok, %Image{}}
 
-      iex> update_uploader(user, "42", %{"username" => "Admin"})
+      iex> update_image_uploader(user, "42", %{"username" => "Admin"})
       {:error, :unauthorized}
 
   """
@@ -2769,10 +2769,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_anonymous(moderator, "42", true)
+      iex> update_image_anonymous(moderator, "42", true)
       {:ok, %Image{}}
 
-      iex> update_anonymous(user, "42", true)
+      iex> update_image_anonymous(user, "42", true)
       {:error, :unauthorized}
 
   """
@@ -2816,10 +2816,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_hide_reason(moderator, "42", %{"deletion_reason" => "Duplicate"})
+      iex> update_image_hide(moderator, "42", %{"deletion_reason" => "Duplicate"})
       {:ok, %Image{}}
 
-      iex> update_hide_reason(user, "42", %{"deletion_reason" => "Duplicate"})
+      iex> update_image_hide(user, "42", %{"deletion_reason" => "Duplicate"})
       {:error, :unauthorized}
 
   """
@@ -3047,10 +3047,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> subscribe_image(user, "42")
+      iex> create_image_subscription(user, "42")
       {:ok, %Image{}}
 
-      iex> subscribe_image(user, "999999999")
+      iex> create_image_subscription(user, "999999999")
       {:error, :not_found}
 
   """
@@ -3076,7 +3076,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> unsubscribe_image(user, "42")
+      iex> delete_image_subscription(user, "42")
       {:ok, %Image{}}
 
   """
@@ -3103,10 +3103,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> mark_image_read(user, "42")
+      iex> create_image_read(user, "42")
       {:ok, %Image{}}
 
-      iex> mark_image_read(user, "nonexistent")
+      iex> create_image_read(user, "nonexistent")
       {:error, :not_found}
 
   """
@@ -3134,7 +3134,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> create_image_hide(actor, "42")
+      iex> create_image_user_hide(actor, "42")
       {:ok, %Image{}}
 
   """
@@ -3165,7 +3165,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> delete_image_hide(actor, "42")
+      iex> delete_image_user_hide(actor, "42")
       {:ok, %Image{}}
 
   """
@@ -3194,7 +3194,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> create_fave(actor, "42")
+      iex> create_image_fave(actor, "42")
       {:ok, %Image{}}
 
   """
@@ -3226,7 +3226,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> delete_fave(actor, "42")
+      iex> delete_image_fave(actor, "42")
       {:ok, %Image{}}
 
   """
@@ -3260,7 +3260,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> create_vote(actor, "42", %{"up" => "1"})
+      iex> create_image_vote(actor, "42", %{"up" => "1"})
       {:ok, %Image{}}
 
   """
@@ -3300,7 +3300,7 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> delete_vote(actor, "42")
+      iex> delete_image_vote(actor, "42")
       {:ok, %Image{}}
 
   """
@@ -3338,10 +3338,10 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> image_fave_list(moderator, "42")
+      iex> list_image_faves(moderator, "42")
       {:ok, {%Image{}, true}}
 
-      iex> image_fave_list(user, "42")
+      iex> list_image_faves(user, "42")
       {:ok, {%Image{}, false}}
 
   """

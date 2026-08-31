@@ -39,10 +39,10 @@ defmodule Philomena.Autocomplete do
 
   ## Examples
 
-      iex> get_autocomplete()
+      iex> show_compiled_autocomplete()
       {:error, :not_found}
 
-      iex> get_autocomplete()
+      iex> show_compiled_autocomplete()
       {:ok, %Autocomplete{}}
 
   """

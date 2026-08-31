@@ -114,10 +114,10 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> load_duplicate_report_index(moderator, %{"states" => ["rejected"]}, pagination)
+      iex> list_duplicate_reports(moderator, %{"states" => ["rejected"]}, pagination)
       {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
-      iex> load_duplicate_report_index(user, %{}, pagination)
+      iex> list_duplicate_reports(user, %{}, pagination)
       {:error, :unauthorized}
 
   """
@@ -146,10 +146,10 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> load_duplicate_report(actor, "42")
+      iex> show_duplicate_report(actor, "42")
       {:ok, %DuplicateReport{}}
 
-      iex> load_duplicate_report(actor, "not-an-id")
+      iex> show_duplicate_report(actor, "not-an-id")
       {:error, :not_found}
 
   """
@@ -309,7 +309,7 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> new_reverse_search(actor)
+      iex> create_reverse_search(actor)
       {:ok, %SearchResult{images: nil}}
 
   """
@@ -335,10 +335,10 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> search_duplicates(actor, %{"distance" => "0.25"}, upload)
+      iex> create_reverse_search(actor, %{"distance" => "0.25"}, upload)
       {:ok, %SearchResult{images: %Scrivener.Page{}}}
 
-      iex> search_duplicates(actor, %{"distance" => "bad"}, upload)
+      iex> create_reverse_search(actor, %{"distance" => "bad"}, upload)
       {:error, %Ecto.Changeset{}}
 
   """
@@ -384,10 +384,10 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> accept_duplicate_report(moderator, "42")
+      iex> create_duplicate_report_accept(moderator, "42")
       {:ok, %DuplicateReport{}}
 
-      iex> accept_duplicate_report(user, "42")
+      iex> create_duplicate_report_accept(user, "42")
       {:error, :unauthorized}
 
   """
@@ -444,7 +444,7 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> accept_reverse_duplicate_report(moderator, "42")
+      iex> create_duplicate_report_accept_reverse(moderator, "42")
       {:ok, %DuplicateReport{}}
 
   """
@@ -522,7 +522,7 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> claim_duplicate_report(moderator, "42")
+      iex> create_duplicate_report_claim(moderator, "42")
       {:ok, %DuplicateReport{state: "claimed"}}
 
   """
@@ -566,7 +566,7 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> unclaim_duplicate_report(moderator, "42")
+      iex> delete_duplicate_report_claim(moderator, "42")
       {:ok, %DuplicateReport{state: "open"}}
 
   """
@@ -610,7 +610,7 @@ defmodule Philomena.DuplicateReports do
 
   ## Examples
 
-      iex> reject_duplicate_report(moderator, "42")
+      iex> create_duplicate_report_reject(moderator, "42")
       {:ok, %DuplicateReport{state: "rejected"}}
 
   """

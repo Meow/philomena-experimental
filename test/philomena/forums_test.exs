@@ -37,7 +37,7 @@ defmodule Philomena.ForumsTest do
     )
   end
 
-  describe "load_forum_index/1" do
+  describe "list_forums/1" do
     test "forum and topic counts include hidden topics but not inaccessible forums" do
       user = confirmed_user_fixture()
       moderator = moderator_user_fixture()
@@ -68,7 +68,7 @@ defmodule Philomena.ForumsTest do
     end
   end
 
-  describe "subscribe/2" do
+  describe "create_forum_subscription/2" do
     test "a regular user subscribes to a visible forum and the row is created" do
       user = confirmed_user_fixture()
       forum = forum_fixture()
@@ -137,7 +137,7 @@ defmodule Philomena.ForumsTest do
       assert subscribed?(forum, moderator)
     end
 
-    test "anonymous cannot subscribe to a visible forum" do
+    test "anonymous cannot create_forum_subscription to a visible forum" do
       forum = forum_fixture()
 
       assert Forums.create_forum_subscription(actor(), forum.short_name) ==
@@ -150,7 +150,7 @@ defmodule Philomena.ForumsTest do
     end
   end
 
-  describe "unsubscribe/2" do
+  describe "delete_forum_subscription/2" do
     test "a regular user unsubscribes from a visible forum and the row is removed" do
       user = confirmed_user_fixture()
       forum = forum_fixture()
@@ -197,7 +197,7 @@ defmodule Philomena.ForumsTest do
     end
   end
 
-  describe "load_admin_forums/1" do
+  describe "list_admin_forums/1" do
     test "an admin receives the forum list" do
       forum = forum_fixture()
       assert {:ok, forums} = Forums.list_admin_forums(actor(admin_user_fixture()))
@@ -263,7 +263,7 @@ defmodule Philomena.ForumsTest do
     end
   end
 
-  describe "load_forum_for_edit/2" do
+  describe "edit_forum/2" do
     test "an admin loads a forum by short name" do
       forum = forum_fixture()
 

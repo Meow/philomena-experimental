@@ -29,7 +29,7 @@ defmodule Philomena.DuplicateReportsTest do
     |> Repo.update!()
   end
 
-  describe "load_duplicate_report_index/3" do
+  describe "list_duplicate_reports/3" do
     test "authorizes the index and applies the state selection" do
       open = duplicate_report_fixture(image_fixture(), image_fixture())
       rejected = duplicate_report_fixture(image_fixture(), image_fixture())
@@ -108,7 +108,7 @@ defmodule Philomena.DuplicateReportsTest do
     end
   end
 
-  describe "load_duplicate_report/2" do
+  describe "show_duplicate_report/2" do
     test "loads a public report only when both images are visible" do
       source = image_fixture()
       target = image_fixture()
@@ -307,7 +307,7 @@ defmodule Philomena.DuplicateReportsTest do
     end
   end
 
-  describe "accept_duplicate_report/2" do
+  describe "create_duplicate_report_accept/2" do
     test "atomically accepts, rejects competing reports, merges, and logs" do
       moderator = moderator_user_fixture()
       source = image_fixture()
@@ -369,7 +369,7 @@ defmodule Philomena.DuplicateReportsTest do
     end
   end
 
-  describe "accept_reverse_duplicate_report/2" do
+  describe "create_duplicate_report_accept_reverse/2" do
     test "rejects the original, accepts the reverse report, merges, and logs" do
       moderator = moderator_user_fixture()
       source = image_fixture()
@@ -451,7 +451,7 @@ defmodule Philomena.DuplicateReportsTest do
     end
   end
 
-  describe "reject_duplicate_report/2" do
+  describe "create_duplicate_report_reject/2" do
     test "rejects an active report and logs its direction" do
       moderator = moderator_user_fixture()
       source = image_fixture()

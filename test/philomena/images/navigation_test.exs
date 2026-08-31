@@ -67,7 +67,7 @@ defmodule Philomena.Images.NavigationTest do
     {older, newer}
   end
 
-  describe "find_consecutive_image/2" do
+  describe "list_image_navigation/2" do
     test "rel=next finds the older image and carries a sort cursor" do
       {older, newer} = two_images()
 
@@ -149,7 +149,7 @@ defmodule Philomena.Images.NavigationTest do
     end
   end
 
-  describe "find_image_index_page/2" do
+  describe "list_image_index_page/2" do
     test "returns the page number as an integer" do
       {older, newer} = two_images()
 
@@ -186,7 +186,7 @@ defmodule Philomena.Images.NavigationTest do
     end
   end
 
-  describe "related_images/2" do
+  describe "list_related_images/2" do
     test "an image sharing a tag lists the related image" do
       image = image_fixture(tags: "safe, test related subject")
       related = image_fixture(tags: "safe, test related subject")
@@ -236,7 +236,7 @@ defmodule Philomena.Images.NavigationTest do
     end
   end
 
-  describe "random_image_id/1" do
+  describe "list_random_images/1" do
     test "returns the id of the only matching image" do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)

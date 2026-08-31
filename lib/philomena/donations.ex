@@ -19,10 +19,10 @@ defmodule Philomena.Donations do
 
   ## Examples
 
-      iex> load_donations(admin, pagination)
+      iex> list_donations(admin, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_donations(user, pagination)
+      iex> list_donations(user, pagination)
       {:error, :unauthorized}
 
   """
@@ -50,13 +50,13 @@ defmodule Philomena.Donations do
 
   ## Examples
 
-      iex> load_user_donations(admin, user.slug)
+      iex> show_user_donations(admin, user.slug)
       {:ok, {%User{}, %Ecto.Changeset{}}}
 
-      iex> load_user_donations(admin, invalid_slug)
+      iex> show_user_donations(admin, invalid_slug)
       {:error, :not_found}
 
-      iex> load_user_donations(user, user.slug)
+      iex> show_user_donations(user, user.slug)
       {:error, :unauthorized}
 
   """

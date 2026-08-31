@@ -234,10 +234,10 @@ defmodule Philomena.Profiles do
 
   ## Examples
 
-      iex> load_profile_page(actor, scope, filter, "somebody")
+      iex> show_profile(actor, scope, filter, "somebody")
       {:ok, %ProfilePage{}}
 
-      iex> load_profile_page(actor, scope, filter, "missing")
+      iex> show_profile(actor, scope, filter, "missing")
       {:error, :not_found}
 
   """
@@ -340,7 +340,7 @@ defmodule Philomena.Profiles do
 
   ## Examples
 
-      iex> load_ip_history(moderator, slug, page: 1, page_size: 25)
+      iex> list_profile_ip_history(moderator, slug, page: 1, page_size: 25)
       {:ok, %IpHistory{}}
 
   """
@@ -363,7 +363,7 @@ defmodule Philomena.Profiles do
 
   ## Examples
 
-      iex> load_fingerprint_history(moderator, slug, page: 1, page_size: 25)
+      iex> list_profile_fingerprint_history(moderator, slug, page: 1, page_size: 25)
       {:ok, %FingerprintHistory{}}
 
   """

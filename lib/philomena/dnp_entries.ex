@@ -84,7 +84,7 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> load_dnp_listing(actor, %{"mine" => "1"}, pagination)
+      iex> list_dnp_entries(actor, %{"mine" => "1"}, pagination)
       %DnpListing{status_column: true}
 
   """
@@ -122,10 +122,10 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> load_admin_dnp_entries(moderator, %{}, pagination)
+      iex> list_admin_dnp_entries(moderator, %{}, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_admin_dnp_entries(user, %{}, pagination)
+      iex> list_admin_dnp_entries(user, %{}, pagination)
       {:error, :unauthorized}
 
   """
@@ -155,10 +155,10 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> load_dnp_entry_page(actor, "1", renderer)
+      iex> show_dnp_entry(actor, "1", renderer)
       {:ok, %DnpEntryPage{}}
 
-      iex> load_dnp_entry_page(actor, "not-an-id", renderer)
+      iex> show_dnp_entry(actor, "not-an-id", renderer)
       {:error, :not_found}
 
   """
@@ -189,10 +189,10 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> load_new_dnp_entry(actor, %{})
+      iex> new_dnp_entry(actor, %{})
       {:ok, %DnpEntryForm{}}
 
-      iex> load_new_dnp_entry(banned_actor, %{})
+      iex> new_dnp_entry(banned_actor, %{})
       {:error, :ban}
 
   """
@@ -261,10 +261,10 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> load_dnp_entry_for_edit(moderator, "1")
+      iex> edit_dnp_entry(moderator, "1")
       {:ok, %DnpEntryForm{}}
 
-      iex> load_dnp_entry_for_edit(user, "1")
+      iex> edit_dnp_entry(user, "1")
       {:error, :unauthorized}
 
   """
@@ -330,10 +330,10 @@ defmodule Philomena.DnpEntries do
 
   ## Examples
 
-      iex> transition_dnp_entry(moderator, "1", "listed")
+      iex> create_dnp_entry_transition(moderator, "1", "listed")
       {:ok, %DnpEntry{aasm_state: "listed"}}
 
-      iex> transition_dnp_entry(user, "1", "listed")
+      iex> create_dnp_entry_transition(user, "1", "listed")
       {:error, :unauthorized}
 
   """

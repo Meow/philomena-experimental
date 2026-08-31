@@ -77,7 +77,7 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> load_conversation_index(actor, %{}, page: 1, page_size: 25)
+      iex> list_conversations(actor, %{}, page: 1, page_size: 25)
       {:ok, %ConversationIndex{}}
 
   """
@@ -137,7 +137,7 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> load_conversation_page(actor, "slug", page_size: 25)
+      iex> show_conversation(actor, "slug", page_size: 25)
       {:ok, %ConversationPage{}}
 
   """
@@ -362,7 +362,7 @@ defmodule Philomena.Conversations do
 
   ## Examples
 
-      iex> approve_message(actor, "conversation-slug", "1")
+      iex> create_message_approve(actor, "conversation-slug", "1")
       {:ok, %Message{}}
 
   """

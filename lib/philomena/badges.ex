@@ -29,10 +29,10 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> load_badges(admin, pagination)
+      iex> list_badges(admin, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_badges(user, pagination)
+      iex> list_badges(user, pagination)
       {:error, :unauthorized}
 
   """
@@ -122,13 +122,13 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> load_badge_for_edit(admin, badge_id)
+      iex> edit_badge(admin, badge_id)
       {:ok, {%Badge{}, %Ecto.Changeset{}}}
 
-      iex> load_badge_for_edit(admin, invalid_id)
+      iex> edit_badge(admin, invalid_id)
       {:error, :not_found}
 
-      iex> load_badge_for_edit(user, badge_id)
+      iex> edit_badge(user, badge_id)
       {:error, :unauthorized}
 
   """
@@ -250,13 +250,13 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> load_badge_users(admin, badge_id, pagination)
+      iex> list_badge_users(admin, badge_id, pagination)
       {:ok, {%Badge{}, %Scrivener.Page{}}}
 
-      iex> load_badge_users(admin, invalid_id, pagination)
+      iex> list_badge_users(admin, invalid_id, pagination)
       {:error, :not_found}
 
-      iex> load_badge_users(user, badge_id, pagination)
+      iex> list_badge_users(user, badge_id, pagination)
       {:error, :unauthorized}
 
   """
@@ -304,13 +304,13 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> load_award_for_new(admin, user.slug)
+      iex> new_award(admin, user.slug)
       {:ok, {%User{}, %Ecto.Changeset{}, [%Badge{}, ...]}}
 
-      iex> load_award_for_new(admin, invalid_slug)
+      iex> new_award(admin, invalid_slug)
       {:error, :not_found}
 
-      iex> load_award_for_new(user, user.slug)
+      iex> new_award(user, user.slug)
       {:error, :unauthorized}
 
   """
@@ -334,16 +334,16 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> award_badge(admin, user.slug, award_params)
+      iex> create_award(admin, user.slug, award_params)
       {:ok, {%User{}, %Award{}}}
 
-      iex> award_badge(admin, user.slug, invalid_params)
+      iex> create_award(admin, user.slug, invalid_params)
       {:error, {%User{}, %Ecto.Changeset{}, [%Badge{}, ...]}}
 
-      iex> award_badge(admin, invalid_slug, award_params)
+      iex> create_award(admin, invalid_slug, award_params)
       {:error, :not_found}
 
-      iex> award_badge(user, user.slug, award_params)
+      iex> create_award(user, user.slug, award_params)
       {:error, :unauthorized}
 
   """
@@ -387,16 +387,16 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> load_award_for_edit(admin, user.slug, award_id)
+      iex> edit_award(admin, user.slug, award_id)
       {:ok, {%User{}, %Award{}, %Ecto.Changeset{}, [%Badge{}, ...]}}
 
-      iex> load_award_for_edit(admin, invalid_slug, award_id)
+      iex> edit_award(admin, invalid_slug, award_id)
       {:error, :not_found}
 
-      iex> load_award_for_edit(admin, user.slug, invalid_id)
+      iex> edit_award(admin, user.slug, invalid_id)
       {:error, :not_found}
 
-      iex> load_award_for_edit(user, user.slug, award_id)
+      iex> edit_award(user, user.slug, award_id)
       {:error, :unauthorized}
 
   """
@@ -418,19 +418,19 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> update_badge_award(admin, user.slug, award_id, award_params)
+      iex> update_award(admin, user.slug, award_id, award_params)
       {:ok, {%User{}, %Award{}}}
 
-      iex> update_badge_award(admin, user.slug, award_id, invalid_params)
+      iex> update_award(admin, user.slug, award_id, invalid_params)
       {:error, {%User{}, %Award{}, %Ecto.Changeset{}, [%Badge{}, ...]}}
 
-      iex> update_badge_award(admin, invalid_slug, award_id, award_params)
+      iex> update_award(admin, invalid_slug, award_id, award_params)
       {:error, :not_found}
 
-      iex> update_badge_award(admin, user.slug, invalid_id, award_params)
+      iex> update_award(admin, user.slug, invalid_id, award_params)
       {:error, :not_found}
 
-      iex> update_badge_award(user, user.slug, award_id, award_params)
+      iex> update_award(user, user.slug, award_id, award_params)
       {:error, :unauthorized}
 
   """
@@ -475,16 +475,16 @@ defmodule Philomena.Badges do
 
   ## Examples
 
-      iex> revoke_badge_award(admin, user.slug, award_id)
+      iex> delete_award(admin, user.slug, award_id)
       {:ok, {%User{}, %Award{}}}
 
-      iex> revoke_badge_award(admin, invalid_slug, award_id)
+      iex> delete_award(admin, invalid_slug, award_id)
       {:error, :not_found}
 
-      iex> revoke_badge_award(admin, user.slug, invalid_id)
+      iex> delete_award(admin, user.slug, invalid_id)
       {:error, :not_found}
 
-      iex> revoke_badge_award(user, user.slug, award_id)
+      iex> delete_award(user, user.slug, award_id)
       {:error, :unauthorized}
 
   """

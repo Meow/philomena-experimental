@@ -148,10 +148,10 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> load_comment(actor, "1")
+      iex> show_comment(actor, "1")
       {:ok, %Comment{}}
 
-      iex> load_comment(actor, "not-a-number")
+      iex> show_comment(actor, "not-a-number")
       {:error, :not_found}
 
   """
@@ -174,10 +174,10 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> search_comments(actor, filter, "created_at.gte:1 week ago", pagination)
+      iex> query_comments(actor, filter, "created_at.gte:1 week ago", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> search_comments(actor, filter, "created_at.gte:not-a-date", pagination)
+      iex> query_comments(actor, filter, "created_at.gte:not-a-date", pagination)
       {:error, "Cannot parse date."}
 
   """
@@ -243,7 +243,7 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> paginate_image_comments(actor, image, page: 1, page_size: 25)
+      iex> list_image_comments(actor, image, page: 1, page_size: 25)
       %Scrivener.Page{}
 
   """
@@ -270,7 +270,7 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> find_comment_page(actor, image_id, comment.id, page_size: 25)
+      iex> list_comment_page(actor, image_id, comment.id, page_size: 25)
       {:ok, {%Image{}, 3}}
 
   """
@@ -422,10 +422,10 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> load_comment_for_show(actor, "1", "2")
+      iex> show_comment(actor, "1", "2")
       {:ok, {%Image{}, %Comment{}}}
 
-      iex> load_comment_for_show(actor, "1", "not-a-number")
+      iex> show_comment(actor, "1", "not-a-number")
       {:error, :not_found}
 
   """
@@ -450,10 +450,10 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> load_comment_for_edit(actor, "1", "2")
+      iex> edit_comment(actor, "1", "2")
       {:ok, %Ecto.Changeset{data: %Comment{}}}
 
-      iex> load_comment_for_edit(banned_actor, "1", "2")
+      iex> edit_comment(banned_actor, "1", "2")
       {:error, :ban}
 
   """
@@ -543,10 +543,10 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> comment_history(actor, "1", "2")
+      iex> list_comment_history(actor, "1", "2")
       {:ok, %CommentHistory{}}
 
-      iex> comment_history(actor, "1", "not-a-number")
+      iex> list_comment_history(actor, "1", "not-a-number")
       {:error, :not_found}
 
   """
@@ -591,7 +591,7 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> hide_comment(moderator, "1", "2", %{"deletion_reason" => "Spam"})
+      iex> create_comment_hide(moderator, "1", "2", %{"deletion_reason" => "Spam"})
       {:ok, %Comment{}}
 
   """
@@ -637,7 +637,7 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> unhide_comment(moderator, "1", "2")
+      iex> delete_comment_hide(moderator, "1", "2")
       {:ok, %Comment{}}
 
   """
@@ -684,7 +684,7 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> destroy_comment(moderator, "1", "2")
+      iex> create_comment_delete(moderator, "1", "2")
       {:ok, %Comment{}}
 
   """
@@ -743,7 +743,7 @@ defmodule Philomena.Comments do
 
   ## Examples
 
-      iex> approve_comment(moderator, "1", "2")
+      iex> create_comment_approve(moderator, "1", "2")
       {:ok, %Comment{}}
 
   """

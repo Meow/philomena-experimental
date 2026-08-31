@@ -404,7 +404,7 @@ defmodule Philomena.TagChangesTest do
     end
   end
 
-  describe "revert_tag_changes/2" do
+  describe "create_tag_change_revert/2" do
     test "denies an anonymous actor" do
       assert TagChanges.create_tag_change_revert(actor(), ["1"]) == {:error, :unauthorized}
     end

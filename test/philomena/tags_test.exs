@@ -138,7 +138,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "search_tags/3" do
+  describe "query_tags/3" do
     test "finds an indexed tag by a wildcard query, carrying the default preloads" do
       tag = tag_fixture()
       SearchHelpers.reindex_all!(Tag)
@@ -184,7 +184,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "load_tag_page/2" do
+  describe "show_tag_page/2" do
     test "assembles the page for a real tag, carrying its tagged image" do
       created_at = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)
       image = image_fixture(tags: "safe", created_at: created_at)
@@ -231,7 +231,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "load_tag/2 and load_canonical_tag/2" do
+  describe "show_tag/2 and load_canonical_tag/2" do
     test "the representation loader preserves an alias while the canonical loader resolves it" do
       target = tag_fixture(name: "canonical target")
 
@@ -257,7 +257,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "load_tag_for_edit/3" do
+  describe "edit_tag/3" do
     test "a moderator loads the tag paired with its edit changeset" do
       tag = tag_fixture()
 
@@ -411,7 +411,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "load_tag_alias_for_edit/2" do
+  describe "edit_tag_alias/2" do
     test "an admin loads the tag paired with its edit changeset" do
       tag = tag_fixture()
 
@@ -437,7 +437,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "alias_tag/3" do
+  describe "update_tag_alias/3" do
     test "an admin aliases the tag into the target and writes a moderation log" do
       target = tag_fixture(name: "alias context target")
       tag = tag_fixture()
@@ -558,7 +558,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "unalias_tag/2" do
+  describe "delete_tag_alias/2" do
     test "an admin queues a dealias and writes a moderation log" do
       target = tag_fixture(name: "dealias context target")
 
@@ -607,7 +607,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "tag_detail/2" do
+  describe "list_tag_details/2" do
     test "a moderator gets the spoilering/hiding filters and watching users" do
       tag = tag_fixture()
 
@@ -650,7 +650,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "load_tag_image_for_edit/2" do
+  describe "edit_tag_image/2" do
     test "loads only the spoiler-image form dependencies" do
       tag = tag_fixture()
 
@@ -723,7 +723,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "remove_tag_image/2" do
+  describe "delete_tag_image/2" do
     test "a moderator removes the spoiler image and writes a moderation log" do
       tag =
         tag_fixture()
@@ -760,7 +760,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "reindex_tag_by_slug/2" do
+  describe "create_tag_reindex/2" do
     test "an admin queues the reindex and gets the tag back" do
       tag = tag_fixture()
 
@@ -797,7 +797,7 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "watch_tag/2 and unwatch_tag/2" do
+  describe "create_tag_watch/2 and delete_tag_watch/2" do
     test "a signed-in user watches then unwatches a tag" do
       user = confirmed_user_fixture()
       tag = tag_fixture()

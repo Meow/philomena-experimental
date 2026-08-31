@@ -81,7 +81,7 @@ defmodule Philomena.Commissions do
 
   ## Examples
 
-      iex> load_directory(actor, params, page: 1, page_size: 25)
+      iex> list_commissions(actor, params, page: 1, page_size: 25)
       {:ok, %Directory{}}
 
   """
@@ -118,7 +118,7 @@ defmodule Philomena.Commissions do
 
   ## Examples
 
-      iex> load_commission_for_show(actor, "artist")
+      iex> show_commission(actor, "artist")
       {:ok, %Commission{}}
 
   """
@@ -211,7 +211,7 @@ defmodule Philomena.Commissions do
 
   ## Examples
 
-      iex> load_commission_for_edit(actor, "artist")
+      iex> edit_commission(actor, "artist")
       {:ok, %Ecto.Changeset{}}
 
   """
@@ -365,10 +365,10 @@ defmodule Philomena.Commissions do
 
   ## Examples
 
-      iex> load_item_for_edit(actor, "artist", "12")
+      iex> edit_item(actor, "artist", "12")
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_item_for_edit(actor, "artist", "bad")
+      iex> edit_item(actor, "artist", "bad")
       {:error, :not_found}
 
   """

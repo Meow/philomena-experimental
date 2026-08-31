@@ -363,16 +363,16 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> load_gallery_for_edit(user, "1")
+      iex> edit_gallery(user, "1")
       {:ok, {%Gallery{}, %Ecto.Changeset{}}}
 
-      iex> load_gallery_for_edit(banned_user, "1")
+      iex> edit_gallery(banned_user, "1")
       {:error, :ban}
 
-      iex> load_gallery_for_edit(other_user, "1")
+      iex> edit_gallery(other_user, "1")
       {:error, :unauthorized}
 
-      iex> load_gallery_for_edit(admin, "999999999")
+      iex> edit_gallery(admin, "999999999")
       {:error, :not_found}
 
   """
@@ -409,10 +409,10 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> load_gallery_index(actor, %{"title" => "sunset"}, pagination)
+      iex> list_galleries(actor, %{"title" => "sunset"}, pagination)
       {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
-      iex> load_gallery_index(actor, %{"include_image" => "abcd"}, pagination)
+      iex> list_galleries(actor, %{"include_image" => "abcd"}, pagination)
       {:error, %Ecto.Changeset{}}
 
   """
@@ -442,10 +442,10 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> search_galleries(user, "title:sunset", pagination)
+      iex> query_galleries(user, "title:sunset", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> search_galleries(user, ")", pagination)
+      iex> query_galleries(user, ")", pagination)
       {:error, "Imbalanced parentheses."}
 
   """
@@ -483,13 +483,13 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> load_gallery_page(actor, user_scope, "1")
+      iex> show_gallery(actor, user_scope, "1")
       {:ok, %GalleryPage{}}
 
-      iex> load_gallery_page(actor, user_scope, "999999999")
+      iex> show_gallery(actor, user_scope, "999999999")
       {:error, :not_found}
 
-      iex> load_gallery_page(admin, admin_scope, "999999999")
+      iex> show_gallery(admin, admin_scope, "999999999")
       {:error, :not_found}
 
   """
@@ -579,16 +579,16 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> add_image_to_gallery(actor, "1", "42")
+      iex> create_gallery_image(actor, "1", "42")
       {:ok, %Gallery{}}
 
-      iex> add_image_to_gallery(banned_actor, "1", "42")
+      iex> create_gallery_image(banned_actor, "1", "42")
       {:error, :ban}
 
-      iex> add_image_to_gallery(other_actor, "1", "42")
+      iex> create_gallery_image(other_actor, "1", "42")
       {:error, :unauthorized}
 
-      iex> add_image_to_gallery(admin_actor, "999999999", "42")
+      iex> create_gallery_image(admin_actor, "999999999", "42")
       {:error, :not_found}
 
   """
@@ -650,7 +650,7 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> remove_image_from_gallery(actor, "1", "42")
+      iex> delete_gallery_image(actor, "1", "42")
       {:ok, %Gallery{}}
 
   """
@@ -712,7 +712,7 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> reorder_gallery(actor, "1", %{image_ids: [3, 1, 2]})
+      iex> update_gallery_order(actor, "1", %{image_ids: [3, 1, 2]})
       {:ok, %ReorderForm{}}
 
   """
@@ -778,10 +778,10 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> mark_gallery_read(user, "1")
+      iex> create_gallery_read(user, "1")
       {:ok, %Gallery{}}
 
-      iex> mark_gallery_read(user, "nonexistent")
+      iex> create_gallery_read(user, "nonexistent")
       {:error, :not_found}
 
   """
@@ -803,7 +803,7 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> subscribe_gallery(user, "1")
+      iex> create_gallery_subscription(user, "1")
       {:ok, %Gallery{}}
 
   """
@@ -822,7 +822,7 @@ defmodule Philomena.Galleries do
 
   ## Examples
 
-      iex> unsubscribe_gallery(user, "1")
+      iex> delete_gallery_subscription(user, "1")
       {:ok, %Gallery{}}
 
   """

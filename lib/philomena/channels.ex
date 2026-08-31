@@ -88,7 +88,7 @@ defmodule Philomena.Channels do
 
   ## Examples
 
-      iex> load_channels(actor, false, %{"cq" => "pony"}, pagination)
+      iex> list_channels(actor, false, %{"cq" => "pony"}, pagination)
       {:ok, %Scrivener.Page{}, %{12 => true}, %Ecto.Changeset{}}
 
   """
@@ -118,10 +118,10 @@ defmodule Philomena.Channels do
 
   ## Examples
 
-      iex> visit_channel(user, "1")
+      iex> show_channel(user, "1")
       {:ok, %Channel{}}
 
-      iex> visit_channel(actor, "999999999")
+      iex> show_channel(actor, "999999999")
       {:error, :not_found}
 
   """
@@ -143,10 +143,10 @@ defmodule Philomena.Channels do
 
   ## Examples
 
-      iex> clear_notification(user, "1")
+      iex> create_channel_read(user, "1")
       {:ok, %Channel{}}
 
-      iex> clear_notification(user, "999999999")
+      iex> create_channel_read(user, "999999999")
       {:error, :not_found}
 
   """
@@ -230,13 +230,13 @@ defmodule Philomena.Channels do
 
   ## Examples
 
-      iex> load_channel_for_edit(moderator, "1")
+      iex> edit_channel(moderator, "1")
       {:ok, {%Channel{}, %Ecto.Changeset{}}}
 
-      iex> load_channel_for_edit(moderator, "999999999")
+      iex> edit_channel(moderator, "999999999")
       {:error, :not_found}
 
-      iex> load_channel_for_edit(user, "1")
+      iex> edit_channel(user, "1")
       {:error, :unauthorized}
 
   """
@@ -351,13 +351,13 @@ defmodule Philomena.Channels do
 
   ## Examples
 
-      iex> subscribe(user, "1")
+      iex> create_channel_subscription(user, "1")
       {:ok, %Channel{}}
 
-      iex> subscribe(anonymous_actor, "1")
+      iex> create_channel_subscription(anonymous_actor, "1")
       {:error, :unauthorized}
 
-      iex> subscribe(user, "999999999")
+      iex> create_channel_subscription(user, "999999999")
       {:error, :not_found}
 
   """
@@ -381,13 +381,13 @@ defmodule Philomena.Channels do
 
   ## Examples
 
-      iex> unsubscribe(user, "1")
+      iex> delete_channel_subscription(user, "1")
       {:ok, %Channel{}}
 
-      iex> unsubscribe(anonymous_actor, "1")
+      iex> delete_channel_subscription(anonymous_actor, "1")
       {:error, :unauthorized}
 
-      iex> unsubscribe(user, "999999999")
+      iex> delete_channel_subscription(user, "999999999")
       {:error, :not_found}
 
   """

@@ -52,7 +52,7 @@ defmodule Philomena.CommentsTest do
   @pagination %{page_number: 1, page_size: 25}
   @empty_filter %Filter{hidden_tag_ids: []}
 
-  describe "search_comments/4" do
+  describe "query_comments/4" do
     test "returns an error for an uncompilable query string" do
       assert {:error, msg} =
                Comments.query_comments(
@@ -198,7 +198,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "load_comment/2 visibility matrix" do
+  describe "show_comment/2 visibility matrix" do
     test "normalizes malformed, missing, hidden-parent, and hidden-comment rows" do
       user = confirmed_user_fixture()
       moderator = moderator_user_fixture()
@@ -280,7 +280,7 @@ defmodule Philomena.CommentsTest do
     |> Repo.update!()
   end
 
-  describe "approve_comment/3" do
+  describe "create_comment_approve/3" do
     setup do
       %{image: image_fixture()}
     end
@@ -427,7 +427,7 @@ defmodule Philomena.CommentsTest do
     hidden
   end
 
-  describe "destroy_comment/3" do
+  describe "create_comment_delete/3" do
     setup do
       %{image: image_fixture()}
     end
@@ -608,7 +608,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "hide_comment/4" do
+  describe "create_comment_hide/4" do
     setup do
       %{image: image_fixture()}
     end
@@ -716,7 +716,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "unhide_comment/3" do
+  describe "delete_comment_hide/3" do
     setup do
       %{image: image_fixture()}
     end
@@ -804,7 +804,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "comment_history/3" do
+  describe "list_comment_history/3" do
     # A public read routed by image id and comment id. It writes no moderation
     # log and runs no ban check; it authorizes :show on the image and, for a
     # hidden comment, :show on the comment.
@@ -1099,7 +1099,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "load_comment_for_show/3" do
+  describe "show_comment/3" do
     setup do
       %{image: image_fixture()}
     end
@@ -1127,7 +1127,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "load_comment_for_edit/3" do
+  describe "edit_comment/3" do
     # Backs the edit write, so it runs the global write prerequisite before
     # loading and authorizing the comment for :edit.
 
@@ -1578,7 +1578,7 @@ defmodule Philomena.CommentsTest do
     %{user | settings: settings}
   end
 
-  describe "paginate_image_comments/3" do
+  describe "list_image_comments/3" do
     setup do
       %{image: image_fixture()}
     end
@@ -1652,7 +1652,7 @@ defmodule Philomena.CommentsTest do
     end
   end
 
-  describe "find_comment_page/4" do
+  describe "list_comment_page/4" do
     setup do
       image = image_fixture()
 

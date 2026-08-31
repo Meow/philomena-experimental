@@ -32,7 +32,7 @@ defmodule Philomena.PollsTest do
     {forum, topic, poll}
   end
 
-  describe "load_poll_for_edit/3" do
+  describe "edit_poll/3" do
     test "a moderator loads the poll, preloaded options, and a changeset for it" do
       moderator = moderator_user_fixture()
       {forum, topic, poll} = forum_topic_poll()

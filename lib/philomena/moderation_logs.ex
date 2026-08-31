@@ -37,10 +37,10 @@ defmodule Philomena.ModerationLogs do
 
   ## Examples
 
-      iex> load_moderation_logs(admin, pagination)
+      iex> list_moderation_logs(admin, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_moderation_logs(user, pagination)
+      iex> list_moderation_logs(user, pagination)
       {:error, :unauthorized}
 
   """

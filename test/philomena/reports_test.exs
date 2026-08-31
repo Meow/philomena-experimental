@@ -248,7 +248,7 @@ defmodule Philomena.ReportsTest do
   end
 
   describe "user and staff indexes" do
-    test "load_user_reports/2 is actor-scoped" do
+    test "list_user_reports/2 is actor-scoped" do
       user = confirmed_user_fixture()
       other = confirmed_user_fixture()
       image = image_fixture()
@@ -266,7 +266,7 @@ defmodule Philomena.ReportsTest do
       assert Reports.count_open_reports(actor(moderator_user_fixture())) == 0
     end
 
-    test "load_report_index/3 returns the assembled default page" do
+    test "list_reports/3 returns the assembled default page" do
       report = report_fixture(image_id: image_fixture().id)
       SearchHelpers.reindex_all!(Report)
 
@@ -306,7 +306,7 @@ defmodule Philomena.ReportsTest do
     end
   end
 
-  describe "load_report/2" do
+  describe "show_report/2" do
     test "loads a real report with its target and normalizes missing IDs" do
       image = image_fixture()
       report = report_fixture(image_id: image.id)

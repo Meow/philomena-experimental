@@ -22,7 +22,7 @@ defmodule Philomena.DonationsTest do
   @pagination [page: 1, page_size: 25]
   @ban %{reason: "Rule #0", valid_until: ~U[3000-01-01 00:00:00Z]}
 
-  describe "load_donations/2" do
+  describe "list_donations/2" do
     test "an anonymous viewer is unauthorized" do
       assert Donations.list_donations(actor(), @pagination) == {:error, :unauthorized}
     end
@@ -50,7 +50,7 @@ defmodule Philomena.DonationsTest do
     end
   end
 
-  describe "load_user_donations/2" do
+  describe "show_user_donations/2" do
     test "a regular user is unauthorized" do
       user = confirmed_user_fixture()
 

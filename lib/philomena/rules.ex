@@ -188,10 +188,10 @@ defmodule Philomena.Rules do
 
   ## Examples
 
-      iex> load_rule_for_show(actor, "1")
+      iex> show_rule(actor, "1")
       {:ok, %Rule{}}
 
-      iex> load_rule_for_show(actor, "not-a-position")
+      iex> show_rule(actor, "not-a-position")
       {:error, :not_found}
   """
   @spec show_rule(Actor.t(), IntegerId.integer_id()) ::
@@ -207,10 +207,10 @@ defmodule Philomena.Rules do
 
   ## Examples
 
-      iex> load_new_rule(admin_actor)
+      iex> new_rule(admin_actor)
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_new_rule(user_actor)
+      iex> new_rule(user_actor)
       {:error, :unauthorized}
   """
   @spec new_rule(Actor.t()) ::
@@ -256,10 +256,10 @@ defmodule Philomena.Rules do
 
   ## Examples
 
-      iex> load_rule_for_edit(admin_actor, "1")
+      iex> edit_rule(admin_actor, "1")
       {:ok, {%Rule{}, %Ecto.Changeset{}}}
 
-      iex> load_rule_for_edit(admin_actor, "missing")
+      iex> edit_rule(admin_actor, "missing")
       {:error, :not_found}
 
   """

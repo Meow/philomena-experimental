@@ -41,7 +41,7 @@ defmodule Philomena.AdvertsTest do
     })
   end
 
-  describe "load_adverts/2" do
+  describe "list_adverts/2" do
     test "an admin and an Advert-role moderator may list, others may not" do
       _advert = advert_fixture()
 
@@ -140,7 +140,7 @@ defmodule Philomena.AdvertsTest do
     end
   end
 
-  describe "load_advert_for_edit/2" do
+  describe "edit_advert/2" do
     test "an admin loads the advert and a changeset" do
       advert = advert_fixture()
 

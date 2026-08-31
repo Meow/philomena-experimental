@@ -53,7 +53,7 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> load_forum_index(actor)
+      iex> list_forums(actor)
       %ForumIndex{forums: [%Forum{}], topic_count: 42}
 
   """
@@ -75,7 +75,7 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> load_admin_forums(admin_actor)
+      iex> list_admin_forums(admin_actor)
       {:ok, [%Forum{}]}
 
   """
@@ -94,10 +94,10 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> load_forum(actor, "dis")
+      iex> show_forum(actor, "dis")
       {:ok, %Forum{}}
 
-      iex> load_forum(actor, "missing")
+      iex> show_forum(actor, "missing")
       {:error, :not_found}
 
   """
@@ -112,7 +112,7 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> load_forum_show(actor, "dis", pagination)
+      iex> show_forum_page(actor, "dis", pagination)
       {:ok, %ForumPage{}}
 
   """
@@ -143,7 +143,7 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> subscribe(actor, "dis")
+      iex> create_forum_subscription(actor, "dis")
       {:ok, %Forum{}}
 
   """
@@ -162,7 +162,7 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> unsubscribe(actor, "dis")
+      iex> delete_forum_subscription(actor, "dis")
       {:ok, %Forum{}}
 
   """
@@ -221,7 +221,7 @@ defmodule Philomena.Forums do
 
   ## Examples
 
-      iex> load_forum_for_edit(admin_actor, "dis")
+      iex> edit_forum(admin_actor, "dis")
       {:ok, {%Forum{}, %Ecto.Changeset{}}}
 
   """

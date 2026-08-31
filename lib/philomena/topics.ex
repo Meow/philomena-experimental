@@ -147,10 +147,10 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> subscribe(user, "dis", "some-topic")
+      iex> create_topic_subscription(user, "dis", "some-topic")
       {:ok, {%Forum{}, %Topic{}}}
 
-      iex> subscribe(user, "dis", "nonexistent")
+      iex> create_topic_subscription(user, "dis", "nonexistent")
       {:error, :not_found}
 
   """
@@ -184,7 +184,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> unsubscribe(user, "dis", "some-topic")
+      iex> delete_topic_subscription(user, "dis", "some-topic")
       {:ok, {%Forum{}, %Topic{}}}
 
   """
@@ -213,7 +213,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> load_forum_topic(moderator_actor, forum, "some-topic", :show)
+      iex> show_forum_topic(moderator_actor, forum, "some-topic", :show)
       {:ok, %Topic{}}
 
   """
@@ -241,10 +241,10 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> mark_topic_read(actor, "dis", "some-topic")
+      iex> create_topic_read(actor, "dis", "some-topic")
       {:ok, %Topic{}}
 
-      iex> mark_topic_read(actor, "dis", "nonexistent")
+      iex> create_topic_read(actor, "dis", "nonexistent")
       {:error, :not_found}
 
   """
@@ -283,7 +283,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> load_topic_page(user, "dis", "some-topic", nil, %{page_number: 1})
+      iex> show_topic_page(user, "dis", "some-topic", nil, %{page_number: 1})
       {:ok, %TopicPage{}}
 
   """
@@ -322,10 +322,10 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> load_topic(actor, "dis", "some-topic")
+      iex> show_topic(actor, "dis", "some-topic")
       {:ok, %Topic{}}
 
-      iex> load_topic(actor, "dis", "nonexistent")
+      iex> show_topic(actor, "dis", "nonexistent")
       {:error, :not_found}
 
   """
@@ -418,7 +418,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> load_new_topic(actor, "dis")
+      iex> new_topic(actor, "dis")
       {:ok, {%Forum{}, %Ecto.Changeset{}}}
 
   """
@@ -455,10 +455,10 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> hide_topic(moderator, "dis", "some-topic", %{"deletion_reason" => "Rule violation"})
+      iex> create_topic_hide(moderator, "dis", "some-topic", %{"deletion_reason" => "Rule violation"})
       {:ok, {%Forum{}, %Topic{}}}
 
-      iex> hide_topic(moderator, "dis", "some-topic", %{})
+      iex> create_topic_hide(moderator, "dis", "some-topic", %{})
       {:error, %Forum{}, %Topic{}}
 
   """
@@ -516,7 +516,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> unhide_topic(moderator, "dis", "some-topic")
+      iex> delete_topic_hide(moderator, "dis", "some-topic")
       {:ok, {%Forum{}, %Topic{}}}
 
   """
@@ -578,10 +578,10 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum" => "generals"})
+      iex> create_topic_move(moderator, "dis", "some-topic", %{"target_forum" => "generals"})
       {:ok, {%Forum{}, %Topic{}}}
 
-      iex> move_topic(moderator, "dis", "some-topic", %{"target_forum" => "bogus"})
+      iex> create_topic_move(moderator, "dis", "some-topic", %{"target_forum" => "bogus"})
       {:error, %Forum{}, %Topic{}}
 
   """
@@ -655,7 +655,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> stick_topic(moderator, "dis", "some-topic")
+      iex> create_topic_stick(moderator, "dis", "some-topic")
       {:ok, {%Forum{}, %Topic{}}}
 
   """
@@ -702,7 +702,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> unstick_topic(moderator, "dis", "some-topic")
+      iex> delete_topic_stick(moderator, "dis", "some-topic")
       {:ok, {%Forum{}, %Topic{}}}
 
   """
@@ -752,10 +752,10 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> lock_topic(moderator, "dis", "some-topic", %{"lock_reason" => "Off topic"})
+      iex> create_topic_lock(moderator, "dis", "some-topic", %{"lock_reason" => "Off topic"})
       {:ok, {%Forum{}, %Topic{}}}
 
-      iex> lock_topic(moderator, "dis", "some-topic", %{"lock_reason" => ""})
+      iex> create_topic_lock(moderator, "dis", "some-topic", %{"lock_reason" => ""})
       {:error, %Forum{}, %Topic{}}
 
   """
@@ -811,7 +811,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> unlock_topic(moderator, "dis", "some-topic")
+      iex> delete_topic_lock(moderator, "dis", "some-topic")
       {:ok, {%Forum{}, %Topic{}}}
 
   """
@@ -861,7 +861,7 @@ defmodule Philomena.Topics do
 
   ## Examples
 
-      iex> update_topic_title(moderator, "dis", "some-topic", %{"title" => "New Title"})
+      iex> update_topic(moderator, "dis", "some-topic", %{"title" => "New Title"})
       {:ok, {%Forum{}, %Topic{}}}
 
   """

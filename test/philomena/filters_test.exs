@@ -100,7 +100,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "index_filters/1" do
+  describe "list_filters/1" do
     test "an anonymous visitor gets no personal filters, only system filters" do
       system = system_filter_fixture()
 
@@ -133,7 +133,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "search_filters/3" do
+  describe "query_filters/3" do
     test "an anonymous viewer finds public and system filters but not private ones" do
       public = filter_fixture(confirmed_user_fixture(), %{public: true})
       private = filter_fixture(confirmed_user_fixture())
@@ -202,7 +202,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "load_filter_page/2" do
+  describe "show_filter_page/2" do
     test "an anonymous viewer loads a system filter's page" do
       system = system_filter_fixture()
 
@@ -284,7 +284,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "load_filter_for_edit/2" do
+  describe "edit_filter/2" do
     test "the owner loads their filter paired with an edit changeset" do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)
@@ -445,7 +445,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "make_filter_public/2" do
+  describe "create_filter_public/2" do
     test "the owner makes their private filter public" do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)
@@ -486,7 +486,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "switch_current_filter/2" do
+  describe "update_current_filter/2" do
     test "a signed-in user switches to their own filter, persisting the choice" do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)
@@ -609,7 +609,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "hide_tag/3 and unhide_tag/3" do
+  describe "create_filter_hide/3 and delete_filter_hide/3" do
     test "the owner hides then unhides a tag by slug" do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)
@@ -672,7 +672,7 @@ defmodule Philomena.FiltersTest do
     end
   end
 
-  describe "spoiler_tag/3 and unspoiler_tag/3" do
+  describe "create_filter_spoiler/3 and delete_filter_spoiler/3" do
     test "the owner spoilers then unspoilers a tag by slug" do
       user = confirmed_user_fixture()
       filter = filter_fixture(user)

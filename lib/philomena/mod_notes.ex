@@ -102,10 +102,10 @@ defmodule Philomena.ModNotes do
 
   ## Examples
 
-      iex> load_mod_note_index(moderator, %{"user_id" => "12"}, renderer, pagination)
+      iex> list_mod_notes(moderator, %{"user_id" => "12"}, renderer, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_mod_note_index(user, %{}, renderer, pagination)
+      iex> list_mod_notes(user, %{}, renderer, pagination)
       {:error, :unauthorized}
 
   """
@@ -205,10 +205,10 @@ defmodule Philomena.ModNotes do
 
   ## Examples
 
-      iex> load_mod_note_for_edit(moderator, "1")
+      iex> edit_mod_note(moderator, "1")
       {:ok, {%ModNote{}, %Ecto.Changeset{}}}
 
-      iex> load_mod_note_for_edit(user, "1")
+      iex> edit_mod_note(user, "1")
       {:error, :unauthorized}
 
   """

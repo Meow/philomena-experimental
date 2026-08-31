@@ -7,7 +7,7 @@ defmodule Philomena.AutocompleteTest do
   alias Philomena.Autocomplete.Autocomplete, as: Artifact
   alias Philomena.Repo
 
-  describe "get_autocomplete/0" do
+  describe "show_compiled_autocomplete/0" do
     test "returns not-found before an artifact has been generated" do
       assert Autocomplete.show_compiled_autocomplete() == {:error, :not_found}
     end

@@ -272,10 +272,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_profile_by_id(actor, "1")
+      iex> show_profile(actor, "1")
       {:ok, %User{}}
 
-      iex> load_profile_by_id(actor, "not-an-id")
+      iex> show_profile(actor, "not-an-id")
       {:error, :not_found}
 
   """
@@ -571,10 +571,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> register_user(%{field: value})
+      iex> create_registration(%{field: value})
       {:ok, %User{}}
 
-      iex> register_user(%{field: bad_value})
+      iex> create_registration(%{field: bad_value})
       {:error, %Ecto.Changeset{}}
 
   """
@@ -601,7 +601,7 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> change_user_registration(user)
+      iex> new_registration(user)
       %Ecto.Changeset{data: %User{}}
 
   """
@@ -634,10 +634,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> apply_user_email(user, "valid password", %{email: ...})
+      iex> create_email(user, "valid password", %{email: ...})
       {:ok, %User{}}
 
-      iex> apply_user_email(user, "invalid password", %{email: ...})
+      iex> create_email(user, "invalid password", %{email: ...})
       {:error, %Ecto.Changeset{}}
 
   """
@@ -659,10 +659,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> update_user_email(user, token)
+      iex> show_email(user, token)
       :ok
 
-      iex> update_user_email(user, "invalid")
+      iex> show_email(user, "invalid")
       :error
 
   """
@@ -715,10 +715,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> unlock_user_by_token(token)
+      iex> show_unlock(token)
       {:ok, %User{}}
 
-      iex> unlock_user_by_token("invalid")
+      iex> show_unlock("invalid")
       :error
 
   """
@@ -765,7 +765,7 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> change_user_password(user)
+      iex> edit_password(user)
       %Ecto.Changeset{data: %User{}}
 
   """
@@ -780,10 +780,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> update_user_password(user, "valid password", %{password: ...})
+      iex> update_password(user, "valid password", %{password: ...})
       {:ok, %User{}}
 
-      iex> update_user_password(user, "invalid password", %{password: ...})
+      iex> update_password(user, "invalid password", %{password: ...})
       {:error, %Ecto.Changeset{}}
 
   """
@@ -820,7 +820,7 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> setup_totp_secret(user)
+      iex> edit_totp(user)
       {:ok, %User{}}
 
   """
@@ -937,7 +937,7 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> consume_totp_token(user, %{"user" => %{"twofactor_token" => "123456"}})
+      iex> create_session_totp(user, %{"user" => %{"twofactor_token" => "123456"}})
       {:ok, %User{}}
 
   """
@@ -1075,10 +1075,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> confirm_user(token)
+      iex> update_confirmation(token)
       {:ok, %User{}}
 
-      iex> confirm_user("invalid")
+      iex> update_confirmation("invalid")
       :error
 
   """
@@ -1146,10 +1146,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> reset_user_password(user, %{password: "new long password", password_confirmation: "new long password"})
+      iex> update_password(user, %{password: "new long password", password_confirmation: "new long password"})
       {:ok, %User{}}
 
-      iex> reset_user_password(user, %{password: "valid", password_confirmation: "not the same"})
+      iex> update_password(user, %{password: "valid", password_confirmation: "not the same"})
       {:error, %Ecto.Changeset{}}
 
   """
@@ -1197,10 +1197,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> reactivate_user_by_token(token)
+      iex> create_reactivation(token)
       {:ok, %User{}}
 
-      iex> reactivate_user_by_token("invalid")
+      iex> create_reactivation("invalid")
       :error
 
   """
@@ -1229,10 +1229,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> deactivate_account(actor, &reactivation_url/1)
+      iex> delete_deactivation(actor, &reactivation_url/1)
       {:ok, %User{}}
 
-      iex> deactivate_account(banned_actor, &reactivation_url/1)
+      iex> delete_deactivation(banned_actor, &reactivation_url/1)
       {:error, :ban}
 
   """
@@ -1361,7 +1361,7 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> clear_recent_filters(actor)
+      iex> delete_recent_filters(actor)
       {:ok, %User{}}
 
   """
@@ -1441,10 +1441,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_profile_for_description_edit(actor, "somebody")
+      iex> edit_profile_description(actor, "somebody")
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_profile_for_description_edit(actor, "missing")
+      iex> edit_profile_description(actor, "missing")
       {:error, :not_found}
 
   """
@@ -1472,10 +1472,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> update_description(actor, "somebody", %{"description" => "About me"})
+      iex> update_profile_description(actor, "somebody", %{"description" => "About me"})
       {:ok, %User{}}
 
-      iex> update_description(actor, "missing", %{})
+      iex> update_profile_description(actor, "missing", %{})
       {:error, :not_found}
 
   """
@@ -1589,10 +1589,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_user_for_avatar_edit(actor)
+      iex> edit_avatar(actor)
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_user_for_avatar_edit(banned_actor)
+      iex> edit_avatar(banned_actor)
       {:error, :ban}
 
   """
@@ -1656,10 +1656,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> remove_avatar(actor)
+      iex> delete_avatar(actor)
       {:ok, %User{}}
 
-      iex> remove_avatar(banned_actor)
+      iex> delete_avatar(banned_actor)
       {:error, :ban}
 
   """
@@ -1682,10 +1682,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_user_for_rename(actor)
+      iex> edit_name(actor)
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_user_for_rename(recently_renamed_actor)
+      iex> edit_name(recently_renamed_actor)
       {:error, :unauthorized}
 
   """
@@ -1769,10 +1769,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> search_users(actor, %{"query" => "name:somebody"}, pagination)
+      iex> query_users(actor, %{"query" => "name:somebody"}, pagination)
       {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
-      iex> search_users(actor, %{"query" => "("}, pagination)
+      iex> query_users(actor, %{"query" => "("}, pagination)
       {:error, %Ecto.Changeset{}}
 
   """
@@ -1803,10 +1803,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_user_for_edit(actor, "somebody")
+      iex> edit_user(actor, "somebody")
       {:ok, %AdminUserForm{}}
 
-      iex> load_user_for_edit(actor, "missing")
+      iex> edit_user(actor, "missing")
       {:error, :not_found}
 
   """
@@ -1834,10 +1834,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> update_user_details(actor, "somebody", %{"role" => "assistant"})
+      iex> update_user(actor, "somebody", %{"role" => "assistant"})
       {:ok, %User{}}
 
-      iex> update_user_details(actor, "missing", %{})
+      iex> update_user(actor, "missing", %{})
       {:error, :not_found}
 
   """
@@ -1884,10 +1884,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_reactivate_user(actor, "somebody")
+      iex> create_user_activation(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_reactivate_user(actor, "missing")
+      iex> create_user_activation(actor, "missing")
       {:error, :not_found}
 
   """
@@ -1935,10 +1935,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_deactivate_user(actor, "somebody")
+      iex> delete_user_activation(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_deactivate_user(actor, "missing")
+      iex> delete_user_activation(actor, "missing")
       {:error, :not_found}
 
   """
@@ -1980,10 +1980,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_reset_api_key(actor, "somebody")
+      iex> delete_user_api_key(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_reset_api_key(actor, "missing")
+      iex> delete_user_api_key(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2024,10 +2024,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_remove_avatar(actor, "somebody")
+      iex> delete_user_avatar(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_remove_avatar(actor, "missing")
+      iex> delete_user_avatar(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2068,10 +2068,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_wipe_downvotes(actor, "somebody")
+      iex> delete_user_downvotes(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_wipe_downvotes(actor, "missing")
+      iex> delete_user_downvotes(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2111,10 +2111,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_user_for_erase(actor, "somebody")
+      iex> new_user_erase(actor, "somebody")
       {:ok, %User{}}
 
-      iex> load_user_for_erase(actor, "missing")
+      iex> new_user_erase(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2146,10 +2146,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_erase_user(actor, "somebody")
+      iex> create_user_erase(actor, "somebody")
       {:ok, %User{name: "deactivated_..."}}
 
-      iex> admin_erase_user(actor, "missing")
+      iex> create_user_erase(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2196,10 +2196,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_user_for_force_filter(actor, "somebody")
+      iex> new_user_force_filter(actor, "somebody")
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_user_for_force_filter(actor, "missing")
+      iex> new_user_force_filter(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2225,10 +2225,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_force_filter(actor, "somebody", %{"forced_filter_id" => filter.id})
+      iex> create_user_force_filter(actor, "somebody", %{"forced_filter_id" => filter.id})
       {:ok, %User{}}
 
-      iex> admin_force_filter(actor, "missing", %{})
+      iex> create_user_force_filter(actor, "missing", %{})
       {:error, :not_found}
 
   """
@@ -2271,10 +2271,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_unforce_filter(actor, "somebody")
+      iex> delete_user_force_filter(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_unforce_filter(actor, "missing")
+      iex> delete_user_force_filter(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2315,10 +2315,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_unlock_user(actor, "somebody")
+      iex> create_user_unlock(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_unlock_user(actor, "missing")
+      iex> create_user_unlock(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2358,10 +2358,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_verify_user(actor, "somebody")
+      iex> create_user_verification(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_verify_user(actor, "missing")
+      iex> create_user_verification(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2402,10 +2402,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_unverify_user(actor, "somebody")
+      iex> delete_user_verification(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_unverify_user(actor, "missing")
+      iex> delete_user_verification(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2447,10 +2447,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_wipe_votes(actor, "somebody")
+      iex> delete_user_votes(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_wipe_votes(actor, "missing")
+      iex> delete_user_votes(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2486,10 +2486,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> admin_wipe_user(actor, "somebody")
+      iex> create_user_wipe(actor, "somebody")
       {:ok, %User{}}
 
-      iex> admin_wipe_user(actor, "missing")
+      iex> create_user_wipe(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2526,10 +2526,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_alias_matches(actor, "somebody")
+      iex> list_profile_aliases(actor, "somebody")
       {:ok, %AliasMatches{}}
 
-      iex> load_alias_matches(actor, "missing")
+      iex> list_profile_aliases(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2601,10 +2601,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> load_profile_for_scratchpad_edit(actor, "somebody")
+      iex> edit_profile_scratchpad(actor, "somebody")
       {:ok, %Ecto.Changeset{}}
 
-      iex> load_profile_for_scratchpad_edit(actor, "missing")
+      iex> edit_profile_scratchpad(actor, "missing")
       {:error, :not_found}
 
   """
@@ -2630,10 +2630,10 @@ defmodule Philomena.Users do
 
   ## Examples
 
-      iex> update_scratchpad(actor, "somebody", %{"scratchpad" => "Staff note"})
+      iex> update_profile_scratchpad(actor, "somebody", %{"scratchpad" => "Staff note"})
       {:ok, %User{}}
 
-      iex> update_scratchpad(actor, "missing", %{})
+      iex> update_profile_scratchpad(actor, "missing", %{})
       {:error, :not_found}
 
   """

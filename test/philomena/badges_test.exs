@@ -36,7 +36,7 @@ defmodule Philomena.BadgesTest do
     assert Repo.aggregate(ModerationLog, :count) == 0
   end
 
-  describe "load_award_for_new/2" do
+  describe "new_award/2" do
     test "returns enabled badges ordered by title and excludes disabled ones" do
       beta = badge_fixture(%{title: "Beta Badge"})
       alpha = badge_fixture(%{title: "Alpha Badge"})
@@ -78,7 +78,7 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "award_badge/3" do
+  describe "create_award/3" do
     test "an admin awards a badge, inserting the award and a byte-exact create log" do
       admin = admin_user_fixture()
       user = awardee_fixture()
@@ -140,7 +140,7 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "load_award_for_edit/3" do
+  describe "edit_award/3" do
     test "an admin loads the award and a changeset" do
       admin = admin_user_fixture()
       user = awardee_fixture()
@@ -179,7 +179,7 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "update_badge_award/4" do
+  describe "update_award/4" do
     test "an admin updates an award and writes a byte-exact update log" do
       admin = admin_user_fixture()
       user = awardee_fixture()
@@ -216,7 +216,7 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "revoke_badge_award/3" do
+  describe "delete_award/3" do
     test "an admin revokes an award, deleting it and writing a byte-exact delete log" do
       admin = admin_user_fixture()
       user = awardee_fixture()
@@ -309,7 +309,7 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "load_badges/2" do
+  describe "list_badges/2" do
     test "an admin and a Badge-role moderator may list, others may not" do
       _badge = badge_fixture()
 
@@ -413,7 +413,7 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "load_badge_for_edit/2" do
+  describe "edit_badge/2" do
     test "an admin loads the badge and a changeset" do
       badge = badge_fixture()
 
@@ -567,7 +567,7 @@ defmodule Philomena.BadgesTest do
     end
   end
 
-  describe "load_badge_users/3" do
+  describe "list_badge_users/3" do
     test "an admin loads the badge with the users who hold it" do
       admin = admin_user_fixture()
       badge = badge_fixture()

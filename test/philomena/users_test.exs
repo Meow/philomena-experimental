@@ -192,7 +192,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_profile_by_id/2" do
+  describe "show_profile/2" do
     test "loads an active profile and its public associations" do
       user = confirmed_user_fixture()
 
@@ -215,7 +215,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "register_user/1" do
+  describe "create_registration/1" do
     test "requires email and password to be set" do
       {:error, changeset} = Users.create_registration(%{})
 
@@ -290,7 +290,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "change_user_registration/2" do
+  describe "new_registration/2" do
     test "returns a changeset" do
       assert %Ecto.Changeset{} = changeset = Users.new_registration(%User{})
       assert changeset.required == [:password, :email, :name]
@@ -304,7 +304,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "apply_user_email/3" do
+  describe "create_email/3" do
     setup do
       %{user: user_fixture()}
     end
@@ -371,7 +371,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "update_user_email/2" do
+  describe "show_email/2" do
     setup do
       user = user_fixture()
       email = unique_user_email()
@@ -414,14 +414,14 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "change_user_password/2" do
+  describe "edit_password/2" do
     test "returns a user changeset" do
       assert %Ecto.Changeset{} = changeset = Users.edit_password(%User{})
       assert changeset.required == [:password]
     end
   end
 
-  describe "update_user_password/3" do
+  describe "update_password/3" do
     setup do
       %{user: confirmed_user_fixture()}
     end
@@ -615,7 +615,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "confirm_user/2" do
+  describe "update_confirmation/2" do
     setup do
       user = user_fixture()
 
@@ -668,7 +668,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "unlock_user_by_token/1" do
+  describe "show_unlock/1" do
     setup do
       user = locked_user_fixture()
 
@@ -749,7 +749,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "reset_user_password/3" do
+  describe "update_password/2" do
     setup do
       %{user: confirmed_user_fixture()}
     end
@@ -794,7 +794,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_profile_for_description_edit/2" do
+  describe "edit_profile_description/2" do
     test "the profile owner may edit their own description" do
       user = confirmed_user_fixture()
 
@@ -848,7 +848,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "update_description/3" do
+  describe "update_profile_description/3" do
     test "the owner updates their description" do
       user = confirmed_user_fixture()
 
@@ -905,7 +905,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_profile_for_scratchpad_edit/2" do
+  describe "edit_profile_scratchpad/2" do
     test "a moderator may edit the scratchpad" do
       user = confirmed_user_fixture()
 
@@ -958,7 +958,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "update_scratchpad/3" do
+  describe "update_profile_scratchpad/3" do
     test "a moderator updates the scratchpad" do
       user = confirmed_user_fixture()
 
@@ -992,7 +992,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_alias_matches/2" do
+  describe "list_profile_aliases/2" do
     test "a moderator sees a user sharing only an IP under ip_matches" do
       subject = confirmed_user_fixture()
       alias_user = confirmed_user_fixture()
@@ -1113,7 +1113,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_user_for_rename/1" do
+  describe "edit_name/1" do
     test "returns a changeset for a user whose rename window is open" do
       user = renameable_user()
 
@@ -1189,7 +1189,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_user_for_avatar_edit/1" do
+  describe "edit_avatar/1" do
     test "returns the avatar form changeset for a normal actor" do
       user = confirmed_user_fixture()
 
@@ -1255,7 +1255,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "remove_avatar/1 (actor)" do
+  describe "delete_avatar/1 (actor)" do
     test "removes the acting user's avatar" do
       user = user_with_avatar_fixture()
 
@@ -1277,7 +1277,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "setup_totp_secret/1" do
+  describe "edit_totp/1" do
     test "stores a fresh TOTP secret without enabling 2FA" do
       user = confirmed_user_fixture()
       refute user.encrypted_otp_secret
@@ -1341,7 +1341,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "consume_totp_token/2" do
+  describe "create_session_totp/2" do
     test "accepts a valid live TOTP code" do
       user = totp_user_fixture()
 
@@ -1387,7 +1387,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "search_users/3" do
+  describe "query_users/3" do
     setup do
       Search.clear_index!(User)
       :ok
@@ -1455,7 +1455,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_user_for_edit/2" do
+  describe "edit_user/2" do
     test "an admin loads the user with roles preloaded" do
       target = managed_target()
       role = Repo.insert!(%Role{name: "admin", resource_type: "Forum"})
@@ -1500,7 +1500,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "update_user_details/3" do
+  describe "update_user/3" do
     test "an admin updates the user and writes the update log" do
       target = managed_target()
 
@@ -1633,7 +1633,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_reactivate_user/2" do
+  describe "create_user_activation/2" do
     test "an admin reactivates a deactivated user and logs it" do
       target = deactivated_user_fixture()
 
@@ -1660,7 +1660,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_deactivate_user/2" do
+  describe "delete_user_activation/2" do
     test "an admin deactivates a user, recording the actor, and logs it" do
       target = managed_target()
       admin = admin_user_fixture()
@@ -1689,7 +1689,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_reset_api_key/2" do
+  describe "delete_user_api_key/2" do
     test "an admin resets the API token and logs it" do
       target = managed_target()
       old_token = target.authentication_token
@@ -1719,7 +1719,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_remove_avatar/2" do
+  describe "delete_user_avatar/2" do
     test "an admin removes the avatar and logs it" do
       target =
         user_with_avatar_fixture(%{name: "avatar_target_#{System.unique_integer([:positive])}"})
@@ -1747,7 +1747,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_wipe_downvotes/2" do
+  describe "delete_user_downvotes/2" do
     test "an admin starts the downvote wipe and logs it" do
       target = managed_target()
 
@@ -1773,7 +1773,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_wipe_votes/2" do
+  describe "delete_user_votes/2" do
     test "an admin starts the vote and fave wipe and logs it" do
       target = managed_target()
 
@@ -1799,7 +1799,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_wipe_user/2" do
+  describe "create_user_wipe/2" do
     test "an admin queues the PII wipe and logs it" do
       target = managed_target()
 
@@ -1825,7 +1825,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_unlock_user/2" do
+  describe "create_user_unlock/2" do
     test "an admin unlocks a locked user and logs it" do
       target = locked_user_fixture(%{name: "unlock_target_#{System.unique_integer([:positive])}"})
 
@@ -1852,7 +1852,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_verify_user/2" do
+  describe "create_user_verification/2" do
     test "an admin grants verification and logs it" do
       target = managed_target()
 
@@ -1881,7 +1881,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_unverify_user/2" do
+  describe "delete_user_verification/2" do
     test "an admin revokes verification and logs it" do
       target =
         verified_user_fixture(%{name: "unverify_target_#{System.unique_integer([:positive])}"})
@@ -1911,7 +1911,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_user_for_force_filter/2" do
+  describe "new_user_force_filter/2" do
     test "an admin loads the target user" do
       target = managed_target()
 
@@ -1934,7 +1934,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_force_filter/3" do
+  describe "create_user_force_filter/3" do
     test "an admin forces a filter and logs it" do
       target = managed_target()
       filter = filter_fixture(confirmed_user_fixture())
@@ -1981,7 +1981,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_unforce_filter/2" do
+  describe "delete_user_force_filter/2" do
     test "an admin clears a forced filter and logs it" do
       target = managed_target()
       filter = filter_fixture(confirmed_user_fixture())
@@ -2015,7 +2015,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "load_user_for_erase/2" do
+  describe "new_user_erase/2" do
     test "an admin loads an ordinary unverified user with roles preloaded" do
       target = managed_target()
 
@@ -2053,7 +2053,7 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "admin_erase_user/2" do
+  describe "create_user_erase/2" do
     test "an admin erases the user, renaming and deactivating the account, and logs it" do
       target = managed_target()
       original_name = target.name

@@ -474,10 +474,10 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> load_tag(actor, "safe")
+      iex> show_tag(actor, "safe")
       {:ok, %Tag{}}
 
-      iex> load_tag(actor, "nonexistent")
+      iex> show_tag(actor, "nonexistent")
       {:error, :not_found}
 
   """
@@ -522,10 +522,10 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> search_tags(actor, %{"query" => "artist:*"}, pagination)
+      iex> query_tags(actor, %{"query" => "artist:*"}, pagination)
       {:ok, %Scrivener.Page{}, %Ecto.Changeset{}}
 
-      iex> search_tags(actor, %{"query" => ")"}, pagination)
+      iex> query_tags(actor, %{"query" => ")"}, pagination)
       {:error, %Ecto.Changeset{}}
 
   """
@@ -658,10 +658,10 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> load_tag_page(actor, scope, "safe")
+      iex> show_tag_page(actor, scope, "safe")
       {:ok, %TagPage{}}
 
-      iex> load_tag_page(actor, scope, "artist-colon-somebody")
+      iex> show_tag_page(actor, scope, "artist-colon-somebody")
       {:aliased_to, %Tag{}}
 
   """
@@ -699,7 +699,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> load_tag_for_edit(moderator, "safe")
+      iex> edit_tag(moderator, "safe")
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
@@ -720,7 +720,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> load_tag_image_for_edit(moderator, "safe")
+      iex> edit_tag_image(moderator, "safe")
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
@@ -745,7 +745,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> load_tag_alias_for_edit(admin, "safe")
+      iex> edit_tag_alias(admin, "safe")
       {:ok, {%Tag{}, %Ecto.Changeset{}}}
 
   """
@@ -769,7 +769,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> tag_detail(moderator, "safe")
+      iex> list_tag_details(moderator, "safe")
       {:ok, %TagDetail{tag: %Tag{}}}
 
   """
@@ -819,7 +819,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> watch_tag(actor, "safe")
+      iex> create_tag_watch(actor, "safe")
       {:ok, %User{}}
 
   """
@@ -844,7 +844,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> unwatch_tag(actor, "safe")
+      iex> delete_tag_watch(actor, "safe")
       {:ok, %User{}}
 
   """
@@ -978,7 +978,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> remove_tag_image(moderator, "safe")
+      iex> delete_tag_image(moderator, "safe")
       {:ok, %Tag{}}
 
   """
@@ -1060,7 +1060,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> alias_tag(admin, "artist-colon-somebody", %{"target_tag" => "somebody"})
+      iex> update_tag_alias(admin, "artist-colon-somebody", %{"target_tag" => "somebody"})
       {:ok, %Tag{}}
 
   """
@@ -1152,7 +1152,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> reindex_tag_by_slug(admin, "safe")
+      iex> create_tag_reindex(admin, "safe")
       {:ok, %Tag{}}
 
   """
@@ -1176,7 +1176,7 @@ defmodule Philomena.Tags do
 
   ## Examples
 
-      iex> unalias_tag(admin, "artist-colon-somebody")
+      iex> delete_tag_alias(admin, "artist-colon-somebody")
       {:ok, %Tag{}}
 
   """

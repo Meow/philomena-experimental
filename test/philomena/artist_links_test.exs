@@ -99,7 +99,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "load_artist_link_for_new/2" do
+  describe "new_artist_link/2" do
     test "the profile owner gets a changeset" do
       user = confirmed_user_fixture()
 
@@ -185,7 +185,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "load_artist_link_for_show/3" do
+  describe "show_artist_link/3" do
     test "the profile owner views their own link" do
       user = confirmed_user_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
@@ -231,7 +231,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "load_artist_link_for_edit/3" do
+  describe "edit_artist_link/3" do
     test "a moderator loads the edit form" do
       user = confirmed_user_fixture()
       link = artist_link_fixture(user, artist_tag_fixture())
@@ -365,7 +365,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "load_artist_links_index/3 authorization" do
+  describe "list_admin_artist_links/3 authorization" do
     @pagination %{page_number: 1, page_size: 25}
 
     test "a moderator and an admin may list, an anonymous viewer and a regular user may not" do
@@ -391,7 +391,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "load_artist_links_index/3 listing modes" do
+  describe "list_admin_artist_links/3 listing modes" do
     @pagination %{page_number: 1, page_size: 25}
 
     test "the default listing shows only links awaiting moderation" do
@@ -489,7 +489,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "verify_artist_link/2" do
+  describe "create_artist_link_verification/2" do
     test "a moderator verifies a link, awards the Artist badge, and writes a byte-exact log" do
       moderator = moderator_user_fixture()
       user = link_owner_fixture()
@@ -559,7 +559,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "contact_artist_link/2" do
+  describe "create_artist_link_contact/2" do
     test "a moderator marks a link as contacted and writes a byte-exact log" do
       moderator = moderator_user_fixture()
       user = link_owner_fixture()
@@ -603,7 +603,7 @@ defmodule Philomena.ArtistLinksTest do
     end
   end
 
-  describe "reject_artist_link/2" do
+  describe "create_artist_link_reject/2" do
     test "a moderator rejects a link and writes a byte-exact log" do
       moderator = moderator_user_fixture()
       user = link_owner_fixture()

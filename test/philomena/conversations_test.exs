@@ -53,7 +53,7 @@ defmodule Philomena.ConversationsTest do
     {conversation, message}
   end
 
-  describe "load_conversation_index/3" do
+  describe "list_conversations/3" do
     test "lists the user's sent and received conversations but not unrelated ones" do
       user = confirmed_user_fixture()
       received = conversation_fixture(confirmed_user_fixture(), user)
@@ -136,7 +136,7 @@ defmodule Philomena.ConversationsTest do
     end
   end
 
-  describe "load_conversation_page/3" do
+  describe "show_conversation/3" do
     test "the recipient loads the page, its messages, and marks their side read" do
       sender = confirmed_user_fixture()
       recipient = confirmed_user_fixture()
@@ -348,7 +348,7 @@ defmodule Philomena.ConversationsTest do
     end
   end
 
-  describe "set_conversation_read/2 and set_conversation_read/3" do
+  describe "update_conversation_read/2 and update_conversation_read/3" do
     test "the recipient marks their conversation read then unread" do
       sender = confirmed_user_fixture()
       recipient = confirmed_user_fixture()
@@ -414,7 +414,7 @@ defmodule Philomena.ConversationsTest do
     end
   end
 
-  describe "set_conversation_hidden/2 and set_conversation_hidden/3" do
+  describe "update_conversation_hide/2 and update_conversation_hide/3" do
     test "the recipient hides then restores their conversation" do
       sender = confirmed_user_fixture()
       recipient = confirmed_user_fixture()
@@ -533,7 +533,7 @@ defmodule Philomena.ConversationsTest do
     end
   end
 
-  describe "approve_message/3" do
+  describe "create_message_approve/3" do
     test "a missing route conversation is not found before the message lookup" do
       assert Conversations.create_message_approve(
                actor(moderator_user_fixture()),

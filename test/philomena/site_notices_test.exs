@@ -68,7 +68,7 @@ defmodule Philomena.SiteNoticesTest do
     end
   end
 
-  describe "load_site_notices/2" do
+  describe "list_site_notices/2" do
     test "an admin gets the paginated site notices" do
       admin = admin_user_fixture()
       notice = site_notice_fixture()
@@ -166,7 +166,7 @@ defmodule Philomena.SiteNoticesTest do
     end
   end
 
-  describe "load_site_notice_for_edit/2" do
+  describe "edit_site_notice/2" do
     test "an admin loads the notice with a changeset" do
       admin = admin_user_fixture()
       notice = site_notice_fixture()

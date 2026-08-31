@@ -38,7 +38,7 @@ defmodule Philomena.ChannelsTest do
     end
   end
 
-  describe "load_channels/4" do
+  describe "list_channels/4" do
     test "lists only channels the fetcher has stamped" do
       fetched = listed_channel_fixture()
       unfetched = channel_fixture()
@@ -157,7 +157,7 @@ defmodule Philomena.ChannelsTest do
     end
   end
 
-  describe "visit_channel/2" do
+  describe "show_channel/2" do
     test "an anonymous visitor visits a channel" do
       channel = channel_fixture()
 
@@ -200,7 +200,7 @@ defmodule Philomena.ChannelsTest do
     end
   end
 
-  describe "clear_notification/2" do
+  describe "create_channel_read/2" do
     test "an anonymous actor is unauthorized" do
       channel = channel_fixture()
 
@@ -306,7 +306,7 @@ defmodule Philomena.ChannelsTest do
     end
   end
 
-  describe "load_channel_for_edit/2" do
+  describe "edit_channel/2" do
     test "a moderator loads a channel paired with an edit changeset" do
       channel = channel_fixture()
 
@@ -445,7 +445,7 @@ defmodule Philomena.ChannelsTest do
     end
   end
 
-  describe "subscribe/2 and unsubscribe/2" do
+  describe "create_channel_subscription/2 and delete_channel_subscription/2" do
     test "an anonymous actor cannot mutate subscription state" do
       channel = channel_fixture()
 
@@ -500,7 +500,7 @@ defmodule Philomena.ChannelsTest do
                {:error, :not_found}
     end
 
-    test "a non-integer id is not found on subscribe" do
+    test "a non-integer id is not found on create_channel_subscription" do
       assert Channels.create_channel_subscription(
                actor(confirmed_user_fixture()),
                "not-an-integer"
@@ -508,7 +508,7 @@ defmodule Philomena.ChannelsTest do
                {:error, :not_found}
     end
 
-    test "an unknown well-formed id is not found on unsubscribe" do
+    test "an unknown well-formed id is not found on delete_channel_subscription" do
       assert Channels.delete_channel_subscription(actor(confirmed_user_fixture()), "2147483647") ==
                {:error, :not_found}
 

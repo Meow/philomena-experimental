@@ -61,10 +61,10 @@ defmodule Philomena.Bans do
 
   ## Examples
 
-      iex> admin_fingerprint_bans(admin, params, pagination)
+      iex> list_fingerprint_bans(admin, params, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> admin_fingerprint_bans(user, params, pagination)
+      iex> list_fingerprint_bans(user, params, pagination)
       {:error, :unauthorized}
 
   """
@@ -164,13 +164,13 @@ defmodule Philomena.Bans do
 
   ## Examples
 
-      iex> load_fingerprint_ban_for_edit(admin, fingerprint_ban_id)
+      iex> edit_fingerprint_ban(admin, fingerprint_ban_id)
       {:ok, {%Fingerprint{}, %Ecto.Changeset{}}}
 
-      iex> load_fingerprint_ban_for_edit(admin, invalid_id)
+      iex> edit_fingerprint_ban(admin, invalid_id)
       {:error, :not_found}
 
-      iex> load_fingerprint_ban_for_edit(user, fingerprint_ban_id)
+      iex> edit_fingerprint_ban(user, fingerprint_ban_id)
       {:error, :unauthorized}
 
   """
@@ -303,13 +303,13 @@ defmodule Philomena.Bans do
 
   ## Examples
 
-      iex> admin_subnet_bans(admin, params, pagination)
+      iex> list_subnet_bans(admin, params, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> admin_subnet_bans(admin, %{"ip" => "512.512.512.512"}, pagination)
+      iex> list_subnet_bans(admin, %{"ip" => "512.512.512.512"}, pagination)
       {:error, {:invalid_ip, "512.512.512.512}}
 
-      iex> admin_subnet_bans(user, params, pagination)
+      iex> list_subnet_bans(user, params, pagination)
       {:error, :unauthorized}
 
   """
@@ -413,13 +413,13 @@ defmodule Philomena.Bans do
 
   ## Examples
 
-      iex> load_subnet_ban_for_edit(admin, subnet_ban_id)
+      iex> edit_subnet_ban(admin, subnet_ban_id)
       {:ok, {%Subnet{}, %Ecto.Changeset{}}}
 
-      iex> load_subnet_ban_for_edit(admin, invalid_id)
+      iex> edit_subnet_ban(admin, invalid_id)
       {:error, :not_found}
 
-      iex> load_subnet_ban_for_edit(user, subnet_ban_id)
+      iex> edit_subnet_ban(user, subnet_ban_id)
       {:error, :unauthorized}
 
   """
@@ -567,10 +567,10 @@ defmodule Philomena.Bans do
 
   ## Examples
 
-      iex> admin_user_bans(admin, params, pagination)
+      iex> list_user_bans(admin, params, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> admin_user_bans(user, params, pagination)
+      iex> list_user_bans(user, params, pagination)
       {:error, :unauthorized}
 
   """
@@ -672,13 +672,13 @@ defmodule Philomena.Bans do
 
   ## Examples
 
-      iex> load_user_ban_for_edit(admin, user_ban_id)
+      iex> edit_user_ban(admin, user_ban_id)
       {:ok, {%User{}, %Ecto.Changeset{}}}
 
-      iex> load_user_ban_for_edit(admin, invalid_id)
+      iex> edit_user_ban(admin, invalid_id)
       {:error, :not_found}
 
-      iex> load_user_ban_for_edit(user, user_ban_id)
+      iex> edit_user_ban(user, user_ban_id)
       {:error, :unauthorized}
 
   """

@@ -128,7 +128,7 @@ defmodule Philomena.TopicsTest do
 
   defp moderation_log_count, do: Repo.aggregate(ModerationLog, :count)
 
-  describe "subscribe/3" do
+  describe "create_topic_subscription/3" do
     test "a regular user subscribes to a visible topic and the row is created" do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
@@ -258,7 +258,7 @@ defmodule Philomena.TopicsTest do
       assert subscribed?(topic, moderator)
     end
 
-    test "anonymous cannot subscribe to a visible topic" do
+    test "anonymous cannot create_topic_subscription to a visible topic" do
       {forum, topic} = visible_topic()
 
       assert Topics.create_topic_subscription(actor(), forum.short_name, topic.slug) ==
@@ -275,7 +275,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "unsubscribe/3" do
+  describe "delete_topic_subscription/3" do
     test "a regular user unsubscribes from a visible topic and the row is removed" do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
@@ -363,7 +363,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "mark_topic_read/3" do
+  describe "create_topic_read/3" do
     test "an unknown forum slug is not found for a regular user" do
       # Divergence from create_topic_subscription/3: the read path loads the forum with a plain
       # required load and no authorization, so a missing forum is :not_found
@@ -456,7 +456,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "hide_topic/4" do
+  describe "create_topic_hide/4" do
     test "a regular user cannot hide a visible topic and the topic stays visible" do
       # The visibility loader clears a regular user on a normal, visible topic;
       # the block on the topic :hide permission is what denies the action.
@@ -574,7 +574,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "unhide_topic/3" do
+  describe "delete_topic_hide/3" do
     test "a regular user cannot reach a hidden topic through the visibility loader" do
       # delete_topic_hide/3 loads with show_hidden: false, so a hidden topic falls to
       # the topic :show check, which a regular user fails before :hide is even
@@ -646,7 +646,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "lock_topic/4" do
+  describe "create_topic_lock/4" do
     test "a regular user cannot lock a visible topic and the topic stays unlocked" do
       # The visibility loader clears a regular user on a normal, visible topic;
       # the block on the topic :hide permission is what denies the lock.
@@ -749,7 +749,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "unlock_topic/3" do
+  describe "delete_topic_lock/3" do
     test "a regular user cannot unlock a topic and it stays locked" do
       # Locking leaves the topic visible, so the loader admits a regular user,
       # who is then denied by the topic :hide permission.
@@ -817,7 +817,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "stick_topic/3" do
+  describe "create_topic_stick/3" do
     test "a regular user cannot stick a visible topic and the topic stays unstuck" do
       # The visibility loader clears a regular user on a normal, visible topic;
       # the block on the topic :hide permission is what denies the stick.
@@ -891,7 +891,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "unstick_topic/3" do
+  describe "delete_topic_stick/3" do
     test "a regular user cannot unstick a topic and it stays sticky" do
       # Sticking leaves the topic visible, so the loader admits a regular user,
       # who is then denied by the topic :hide permission.
@@ -975,7 +975,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "move_topic/4" do
+  describe "create_topic_move/4" do
     test "a regular user is not found with a malformed target" do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()
@@ -1094,7 +1094,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "load_topic_page/5" do
+  describe "show_topic_page/5" do
     test "an anonymous visitor reaches a visible topic with raw posts and both changesets" do
       {forum, topic} = visible_topic()
 
@@ -1270,7 +1270,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "load_new_topic/2" do
+  describe "new_topic/2" do
     test "a banned actor is rejected before any loading" do
       actor = actor(confirmed_user_fixture(), ban: @ban)
 
@@ -1429,7 +1429,7 @@ defmodule Philomena.TopicsTest do
     end
   end
 
-  describe "update_topic_title/4" do
+  describe "update_topic/4" do
     test "a regular user cannot edit a topic title and it stays unchanged" do
       user = confirmed_user_fixture()
       {forum, topic} = visible_topic()

@@ -77,7 +77,7 @@ defmodule Philomena.ActivitiesTest do
     |> Repo.update!()
   end
 
-  describe "load_front_page/4 for an anonymous scope" do
+  describe "list_activities/4 for an anonymous scope" do
     test "empty search and database sections stay empty" do
       assert {:ok, front} = Activities.list_activities(actor(), scope(), filter(), false)
 
@@ -144,7 +144,7 @@ defmodule Philomena.ActivitiesTest do
     end
   end
 
-  describe "load_front_page/4 for a signed-in scope" do
+  describe "list_activities/4 for a signed-in scope" do
     test "the watched strip is a page rather than nil" do
       user = confirmed_user_fixture()
 
@@ -202,7 +202,7 @@ defmodule Philomena.ActivitiesTest do
     end
   end
 
-  describe "load_front_page/4 topic visibility" do
+  describe "list_activities/4 topic visibility" do
     test "forum and hidden-topic visibility delegates to the forum hierarchy scopes" do
       moderator = moderator_user_fixture()
       forum = forum_fixture()
@@ -231,7 +231,7 @@ defmodule Philomena.ActivitiesTest do
     end
   end
 
-  describe "load_front_page/4 stream strip" do
+  describe "list_activities/4 stream strip" do
     test "a channel with a fetch time appears in the streams" do
       channel = live_channel(%{})
 

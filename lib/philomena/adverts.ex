@@ -130,10 +130,10 @@ defmodule Philomena.Adverts do
 
   ## Examples
 
-      iex> load_adverts(admin, pagination)
+      iex> list_adverts(admin, pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> load_adverts(user, pagination)
+      iex> list_adverts(user, pagination)
       {:error, :unauthorized}
 
   """
@@ -219,13 +219,13 @@ defmodule Philomena.Adverts do
 
   ## Examples
 
-      iex> load_advert_for_edit(admin, advert_id)
+      iex> edit_advert(admin, advert_id)
       {:ok, {%Advert{}, %Ecto.Changeset{}}}
 
-      iex> load_advert_for_edit(admin, invalid_id)
+      iex> edit_advert(admin, invalid_id)
       {:error, :not_found}
 
-      iex> load_advert_for_edit(user, advert_id)
+      iex> edit_advert(user, advert_id)
       {:error, :unauthorized}
 
   """

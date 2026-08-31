@@ -69,7 +69,7 @@ defmodule Philomena.StaticPages do
 
   ## Examples
 
-      iex> load_page_listing(admin_actor)
+      iex> list_pages(admin_actor)
       {:ok, [%StaticPage{}]}
 
   """
@@ -88,10 +88,10 @@ defmodule Philomena.StaticPages do
 
   ## Examples
 
-      iex> load_page_for_show(actor, "about")
+      iex> show_page(actor, "about")
       {:ok, %StaticPage{}}
 
-      iex> load_page_for_show(actor, "missing")
+      iex> show_page(actor, "missing")
       {:error, :not_found}
 
   """
@@ -110,7 +110,7 @@ defmodule Philomena.StaticPages do
 
   ## Examples
 
-      iex> load_page_history(actor, "about")
+      iex> list_page_history(actor, "about")
       {:ok, {%StaticPage{}, [%Version{}]}}
 
   """
@@ -194,7 +194,7 @@ defmodule Philomena.StaticPages do
 
   ## Examples
 
-      iex> load_page_for_edit(admin_actor, "about")
+      iex> edit_page(admin_actor, "about")
       {:ok, {%StaticPage{}, %Ecto.Changeset{}}}
 
   """

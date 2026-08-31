@@ -226,10 +226,10 @@ defmodule Philomena.Notifications do
 
   ## Examples
 
-      iex> load_unread(actor, page_size: 10)
+      iex> list_unread_notifications(actor, page_size: 10)
       {:ok, [channel_live: %Scrivener.Page{}, ...]}
 
-      iex> load_unread(anonymous_actor, page_size: 10)
+      iex> list_unread_notifications(anonymous_actor, page_size: 10)
       {:error, :unauthorized}
 
   """
@@ -254,10 +254,10 @@ defmodule Philomena.Notifications do
 
   ## Examples
 
-      iex> load_unread_category(actor, "forum_post", pagination)
+      iex> show_unread_notification_category(actor, "forum_post", pagination)
       {:ok, {:forum_post, %Scrivener.Page{}}}
 
-      iex> load_unread_category(actor, "unknown", pagination)
+      iex> show_unread_notification_category(actor, "unknown", pagination)
       {:error, :not_found}
 
   """

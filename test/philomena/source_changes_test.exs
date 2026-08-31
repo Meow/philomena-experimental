@@ -17,7 +17,7 @@ defmodule Philomena.SourceChangesTest do
 
   @pagination [page: 1, page_size: 25]
 
-  describe "image_source_changes/3" do
+  describe "list_image_source_changes/3" do
     test "an anonymous actor lists a public image's source changes newest-first" do
       image = image_fixture()
       older = source_change_fixture(image)
@@ -233,7 +233,7 @@ defmodule Philomena.SourceChangesTest do
     end
   end
 
-  describe "user_source_changes/4" do
+  describe "list_user_source_changes/4" do
     test "a moderator lists a user's source changes newest-first" do
       user = confirmed_user_fixture()
       image = image_fixture()
@@ -417,7 +417,7 @@ defmodule Philomena.SourceChangesTest do
     end
   end
 
-  describe "ip_source_changes/4" do
+  describe "list_ip_source_changes/4" do
     test "a moderator lists the changes attributed to an address, newest first" do
       image = image_fixture()
       older = source_change_fixture(image, ip: "203.0.113.5")
@@ -496,7 +496,7 @@ defmodule Philomena.SourceChangesTest do
     end
   end
 
-  describe "fingerprint_source_changes/4" do
+  describe "list_fingerprint_source_changes/4" do
     test "a moderator lists the changes attributed to a fingerprint, newest first" do
       image = image_fixture()
       older = source_change_fixture(image, fingerprint: "c123")

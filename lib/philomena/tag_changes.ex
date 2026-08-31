@@ -153,7 +153,7 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> full_revert_user_tag_changes(moderator, "some-user")
+      iex> create_user_tag_change_revert(moderator, "some-user")
       {:ok, %User{}}
 
   """
@@ -189,7 +189,7 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> full_revert_ip_tag_changes(moderator, "203.0.113.5")
+      iex> create_ip_tag_change_revert(moderator, "203.0.113.5")
       {:ok, "203.0.113.5"}
 
   """
@@ -227,7 +227,7 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> full_revert_fingerprint_tag_changes(moderator, "C123")
+      iex> create_fingerprint_tag_change_revert(moderator, "C123")
       {:ok, "c123"}
 
   """
@@ -288,10 +288,10 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> image_tag_changes(actor, "42", %{}, page: 1, page_size: 25)
+      iex> list_image_tag_changes(actor, "42", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{target: image}, changeset}
 
-      iex> image_tag_changes(actor, "missing", %{}, page: 1, page_size: 25)
+      iex> list_image_tag_changes(actor, "missing", %{}, page: 1, page_size: 25)
       {:error, :not_found}
 
   """
@@ -316,7 +316,7 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> tag_tag_changes(actor, "safe", %{}, page: 1, page_size: 25)
+      iex> list_tag_tag_changes(actor, "safe", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{target: tag}, changeset}
 
   """
@@ -340,7 +340,7 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> user_tag_changes(actor, "Somebody", %{}, page: 1, page_size: 25)
+      iex> list_user_tag_changes(actor, "Somebody", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{target: user}, changeset}
 
   """
@@ -374,10 +374,10 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> ip_tag_changes(moderator, "203.0.113.5", %{}, page: 1, page_size: 25)
+      iex> list_ip_tag_changes(moderator, "203.0.113.5", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{target: ip}, changeset}
 
-      iex> ip_tag_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
+      iex> list_ip_tag_changes(moderator, "not-an-ip", %{}, page: 1, page_size: 25)
       {:error, :not_found}
 
   """
@@ -400,7 +400,7 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> fingerprint_tag_changes(moderator, "C123", %{}, page: 1, page_size: 25)
+      iex> list_fingerprint_tag_changes(moderator, "C123", %{}, page: 1, page_size: 25)
       {:ok, %TagChangePage{target: fingerprint}, changeset}
 
   """
@@ -472,7 +472,7 @@ defmodule Philomena.TagChanges do
 
   ## Examples
 
-      iex> revert_tag_changes(moderator, %{"ids" => ["12", "13"]})
+      iex> create_tag_change_revert(moderator, %{"ids" => ["12", "13"]})
       {:ok, [%TagChange{}, %TagChange{}]}
 
   """

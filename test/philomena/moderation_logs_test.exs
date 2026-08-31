@@ -75,7 +75,7 @@ defmodule Philomena.ModerationLogsTest do
     end
   end
 
-  describe "load_moderation_logs/2" do
+  describe "list_moderation_logs/2" do
     alias Scrivener.Page
 
     @pagination [page: 1, page_size: 25]

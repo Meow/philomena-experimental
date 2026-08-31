@@ -45,7 +45,7 @@ defmodule Philomena.Polls do
 
   ## Examples
 
-      iex> load_poll_for_edit(moderator_actor, "dis", "favorite-pony")
+      iex> edit_poll(moderator_actor, "dis", "favorite-pony")
       {:ok, %Ecto.Changeset{}}
 
   """

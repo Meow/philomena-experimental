@@ -32,7 +32,7 @@ defmodule Philomena.UserFingerprintsTest do
     end
   end
 
-  describe "load_fingerprint_profile/2" do
+  describe "show_fingerprint_profile/2" do
     test "a moderator gets the users seen with the fingerprint and the matching bans" do
       user = confirmed_user_fixture()
       user_fingerprint_fixture(user, "d015c342859dde3")

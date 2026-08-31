@@ -141,7 +141,7 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> index_filters(actor, pagination)
+      iex> list_filters(actor, pagination)
       {:ok, {%Scrivener.Page{}, [%Filter{}, ...]}}
 
   """
@@ -228,13 +228,13 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> load_filter(actor, "1")
+      iex> show_filter(actor, "1")
       {:ok, %Filter{}}
 
-      iex> load_filter(actor, "not-a-number")
+      iex> show_filter(actor, "not-a-number")
       {:error, :not_found}
 
-      iex> load_filter(actor, unowned_private_filter_id)
+      iex> show_filter(actor, unowned_private_filter_id)
       {:error, :unauthorized}
 
   """
@@ -255,10 +255,10 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> search_filters(actor, "name:test", pagination)
+      iex> query_filters(actor, "name:test", pagination)
       {:ok, %Scrivener.Page{}}
 
-      iex> search_filters(actor, "name:(", pagination)
+      iex> query_filters(actor, "name:(", pagination)
       {:error, "There was an error parsing your query."}
 
   """
@@ -298,13 +298,13 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> load_filter_page(actor, "1")
+      iex> show_filter_page(actor, "1")
       {:ok, %FilterPage{}}
 
-      iex> load_filter_page(actor, "999999999")
+      iex> show_filter_page(actor, "999999999")
       {:error, :not_found}
 
-      iex> load_filter_page(actor, unowned_private_filter_id)
+      iex> show_filter_page(actor, unowned_private_filter_id)
       {:error, :unauthorized}
 
   """
@@ -369,13 +369,13 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> load_filter_for_edit(actor, "1")
+      iex> edit_filter(actor, "1")
       {:ok, {%Filter{}, %Ecto.Changeset{}}}
 
-      iex> load_filter_for_edit(actor, "999999999")
+      iex> edit_filter(actor, "999999999")
       {:error, :not_found}
 
-      iex> load_filter_for_edit(actor, unowned_filter_id)
+      iex> edit_filter(actor, unowned_filter_id)
       {:error, :unauthorized}
 
   """
@@ -409,13 +409,13 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> switch_current_filter(actor, "1")
+      iex> update_current_filter(actor, "1")
       {:ok, %Filter{}}
 
-      iex> switch_current_filter(actor, "999999999")
+      iex> update_current_filter(actor, "999999999")
       {:error, :not_found}
 
-      iex> switch_current_filter(actor, nil)
+      iex> update_current_filter(actor, nil)
       {:ok, %Filter{name: "Default"}}
 
   """
@@ -563,13 +563,13 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> make_filter_public(actor, "1")
+      iex> create_filter_public(actor, "1")
       {:ok, %Filter{}}
 
-      iex> make_filter_public(actor, unowned_filter_id)
+      iex> create_filter_public(actor, unowned_filter_id)
       {:error, :unauthorized}
 
-      iex> make_filter_public(actor, "999999999")
+      iex> create_filter_public(actor, "999999999")
       {:error, :not_found}
 
   """
@@ -701,16 +701,16 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> hide_tag(actor, filter, tag_slug)
+      iex> create_filter_hide(actor, filter, tag_slug)
       {:ok, %Filter{}}
 
-      iex> hide_tag(banned_actor, filter, tag_slug)
+      iex> create_filter_hide(banned_actor, filter, tag_slug)
       {:error, :ban}
 
-      iex> hide_tag(actor, filter, unknown_tag_slug)
+      iex> create_filter_hide(actor, filter, unknown_tag_slug)
       {:error, :not_found}
 
-      iex> hide_tag(actor, unowned_filter, tag_slug)
+      iex> create_filter_hide(actor, unowned_filter, tag_slug)
       {:error, :unauthorized}
 
   """
@@ -750,16 +750,16 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> unhide_tag(actor, filter, tag_slug)
+      iex> delete_filter_hide(actor, filter, tag_slug)
       {:ok, %Filter{}}
 
-      iex> unhide_tag(banned_actor, filter, tag_slug)
+      iex> delete_filter_hide(banned_actor, filter, tag_slug)
       {:error, :ban}
 
-      iex> unhide_tag(actor, filter, unknown_tag_slug)
+      iex> delete_filter_hide(actor, filter, unknown_tag_slug)
       {:error, :not_found}
 
-      iex> unhide_tag(actor, unowned_filter, tag_slug)
+      iex> delete_filter_hide(actor, unowned_filter, tag_slug)
       {:error, :unauthorized}
 
   """
@@ -799,16 +799,16 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> spoiler_tag(actor, filter, tag_slug)
+      iex> create_filter_spoiler(actor, filter, tag_slug)
       {:ok, %Filter{}}
 
-      iex> spoiler_tag(banned_actor, filter, tag_slug)
+      iex> create_filter_spoiler(banned_actor, filter, tag_slug)
       {:error, :ban}
 
-      iex> spoiler_tag(actor, filter, unknown_tag_slug)
+      iex> create_filter_spoiler(actor, filter, unknown_tag_slug)
       {:error, :not_found}
 
-      iex> spoiler_tag(actor, unowned_filter, tag_slug)
+      iex> create_filter_spoiler(actor, unowned_filter, tag_slug)
       {:error, :unauthorized}
 
   """
@@ -848,16 +848,16 @@ defmodule Philomena.Filters do
 
   ## Examples
 
-      iex> unspoiler_tag(actor, filter, tag_slug)
+      iex> delete_filter_spoiler(actor, filter, tag_slug)
       {:ok, %Filter{}}
 
-      iex> unspoiler_tag(banned_actor, filter, tag_slug)
+      iex> delete_filter_spoiler(banned_actor, filter, tag_slug)
       {:error, :ban}
 
-      iex> unspoiler_tag(actor, filter, unknown_tag_slug)
+      iex> delete_filter_spoiler(actor, filter, unknown_tag_slug)
       {:error, :not_found}
 
-      iex> unspoiler_tag(actor, unowned_filter, tag_slug)
+      iex> delete_filter_spoiler(actor, unowned_filter, tag_slug)
       {:error, :unauthorized}
 
   """

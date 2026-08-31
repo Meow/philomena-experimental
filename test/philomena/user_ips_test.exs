@@ -18,7 +18,7 @@ defmodule Philomena.UserIpsTest do
   alias Philomena.UserIps
   alias Philomena.UserIps.IpProfile
 
-  describe "load_ip_profile/2" do
+  describe "show_ip_profile/2" do
     test "a moderator gets the users seen on the address and the covering subnet bans" do
       user = confirmed_user_fixture()
       user_ip_fixture(user, "203.0.113.50")
