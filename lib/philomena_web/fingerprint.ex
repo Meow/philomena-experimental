@@ -25,7 +25,7 @@ defmodule PhilomenaWeb.Fingerprint do
       |> put_session(@name, fingerprint)
       |> assign(:fingerprint, fingerprint)
     else
-      assign(conn, :fingerprint, nil)
+      maybe_assign_api_fingerprint(conn, conn.path_info)
     end
   end
 
@@ -43,5 +43,22 @@ defmodule PhilomenaWeb.Fingerprint do
   defp upgrade(session_value, cookie_value) do
     # Prefer the session value, using the cookie value if it is unavailable.
     session_value || cookie_value
+  end
+
+  defp user_agent(conn) do
+    case get_req_header(conn, "user-agent") do
+      [user_agent | _] -> user_agent
+      _ -> ""
+    end
+  end
+
+  defp maybe_assign_api_fingerprint(conn, ["api" | _]) do
+    # Cookieless API requests receive a fingerprint based solely on the
+    # provided user-agent string.
+    assign(conn, :fingerprint, "a#{:erlang.crc32(user_agent(conn))}")
+  end
+
+  defp maybe_assign_api_fingerprint(conn, _path_info) do
+    assign(conn, :fingerprint, nil)
   end
 end

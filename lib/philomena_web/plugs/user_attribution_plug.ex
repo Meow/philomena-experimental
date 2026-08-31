@@ -9,6 +9,7 @@ defmodule PhilomenaWeb.UserAttributionPlug do
   """
 
   alias Philomena.Attribution.Actor
+  alias Philomena.Bans
   alias Plug.Conn
 
   @doc false
@@ -18,36 +19,21 @@ defmodule PhilomenaWeb.UserAttributionPlug do
   @doc false
   @spec call(Plug.Conn.t(), any()) :: Plug.Conn.t()
   def call(conn, _opts) do
-    {:ok, remote_ip} = EctoNetwork.INET.cast(conn.remote_ip)
-    conn = Conn.fetch_cookies(conn)
+    {:ok, ip} = EctoNetwork.INET.cast(conn.remote_ip)
+    fingerprint = conn.assigns.fingerprint
     user = conn.assigns.current_user
-    fingerprint = fingerprint(conn, conn.path_info)
 
-    # The `:current_ban` assign is read tolerantly: the API pipeline sets no
-    # `:current_ban`, and in browser pipelines this plug runs after
-    # `CurrentBanPlug` because router pipelines run before controller-level plugs.
+    ban = Bans.find(user, ip, fingerprint)
+
     actor = %Actor{
-      ip: remote_ip,
+      ip: ip,
       fingerprint: fingerprint,
       user: user,
-      ban: conn.assigns[:current_ban]
+      ban: ban
     }
 
-    Conn.assign(conn, :actor, actor)
-  end
-
-  defp user_agent(conn) do
-    case Conn.get_req_header(conn, "user-agent") do
-      [ua] -> ua
-      _ -> ""
-    end
-  end
-
-  defp fingerprint(conn, ["api" | _]) do
-    "a#{:erlang.crc32(user_agent(conn))}"
-  end
-
-  defp fingerprint(conn, _) do
-    conn.cookies["_ses"]
+    conn
+    |> Conn.assign(:actor, actor)
+    |> Conn.assign(:current_ban, ban)
   end
 end

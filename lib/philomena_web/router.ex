@@ -13,7 +13,6 @@ defmodule PhilomenaWeb.Router do
     plug :fetch_fingerprint
     plug :fetch_current_user
     plug PhilomenaWeb.EnsureUserEnabledPlug
-    plug PhilomenaWeb.CurrentBanPlug
     plug PhilomenaWeb.UserAttributionPlug
     plug PhilomenaWeb.ContentSecurityPolicyPlug
     plug PhilomenaWeb.CurrentFilterPlug
@@ -28,6 +27,7 @@ defmodule PhilomenaWeb.Router do
   end
 
   pipeline :api do
+    plug :fetch_fingerprint
     plug PhilomenaWeb.ApiTokenPlug
     plug PhilomenaWeb.EnsureUserEnabledPlug
     plug PhilomenaWeb.UserAttributionPlug

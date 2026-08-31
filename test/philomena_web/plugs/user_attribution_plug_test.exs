@@ -12,6 +12,7 @@ defmodule PhilomenaWeb.UserAttributionPlugTest do
   use PhilomenaWeb.ConnCase, async: true
 
   import Philomena.UsersFixtures
+  import Philomena.BansFixtures
 
   alias PhilomenaWeb.UserAttributionPlug
   alias Philomena.Attribution.Actor
@@ -26,13 +27,13 @@ defmodule PhilomenaWeb.UserAttributionPlugTest do
     build_conn()
     |> Map.put(:remote_ip, {10, 0, 0, 1})
     |> Map.put(:path_info, path_info)
-    |> put_req_cookie("_ses", "test-session-fingerprint")
     |> put_req_header("user-agent", "TestAgent/1.0")
+    |> assign(:fingerprint, "test-session-fingerprint")
     |> assign(:current_user, current_user)
   end
 
   describe "call/2 for a normal (non-API) request" do
-    test "assigns :actor consistent with the _ses fingerprint" do
+    test "assigns :actor consistent with the fingerprint" do
       {:ok, expected_ip} = EctoNetwork.INET.cast({10, 0, 0, 1})
 
       conn =
@@ -45,7 +46,7 @@ defmodule PhilomenaWeb.UserAttributionPlugTest do
       assert actor.user == nil
     end
 
-    test "carries the logged-in user through to both assigns" do
+    test "carries the logged-in user through to the actor" do
       user = confirmed_user_fixture()
 
       conn =
@@ -59,40 +60,24 @@ defmodule PhilomenaWeb.UserAttributionPlugTest do
   end
 
   describe "call/2 ban field" do
-    test "mirrors the :current_ban assign when it is set" do
-      ban = %{reason: "Rule #0", generated_ban_id: "B123"}
+    test "sets the :current_ban assign" do
+      ban = fingerprint_ban_fixture(%{"fingerprint" => "test-session-fingerprint"})
 
       conn =
         build_attribution_conn(path_info: ["images"], current_user: nil)
-        |> assign(:current_ban, ban)
         |> UserAttributionPlug.call([])
 
-      assert conn.assigns.actor.ban == ban
+      assert conn.assigns.actor.ban.generated_ban_id == ban.generated_ban_id
+      assert conn.assigns.current_ban.generated_ban_id == ban.generated_ban_id
     end
 
-    test "is nil when the :current_ban assign was never set (API pipeline shape)" do
+    test "is nil when there is no ban" do
       conn =
         build_attribution_conn(path_info: ["api", "v1", "json", "images"], current_user: nil)
         |> UserAttributionPlug.call([])
 
-      # The API pipeline runs no ban lookup, so the assign is absent and the
-      # tolerant Access read yields nil.
-      refute Map.has_key?(conn.assigns, :current_ban)
       assert conn.assigns.actor.ban == nil
-    end
-  end
-
-  describe "call/2 for an /api/... request" do
-    test "derives the fingerprint from the user-agent, not the cookie" do
-      expected_fingerprint = "a#{:erlang.crc32("TestAgent/1.0")}"
-
-      conn =
-        build_attribution_conn(path_info: ["api", "v1", "json", "images"], current_user: nil)
-        |> UserAttributionPlug.call([])
-
-      # NOTE: the API fingerprint ignores the _ses cookie entirely and is a
-      # deterministic function of the user-agent string.
-      assert conn.assigns.actor.fingerprint == expected_fingerprint
+      assert conn.assigns.current_ban == nil
     end
   end
 end
