@@ -208,27 +208,28 @@ Relevant indexes in `priv/repo/structure.sql`:
 | `tags`                       | primary key; unique `name`; unique `slug`; `aliased_tag_id`                                     |
 
 No index candidate is recommended for Channels. The only plausible missing
-access path is `(type, short_name)` for automatic provider maintenance, but it
-requires plan and workload evidence. The `cq` searches require specialized
-analysis because of OR predicates and leading-wildcard `ILIKE`; a generic
-B-tree would not be an evidence-backed recommendation.
+access path is `(type, short_name)` for automatic provider maintenance, but the
+focused review rejects it at the current table size (727 channels). The `cq`
+searches require specialized analysis because of OR predicates and
+leading-wildcard `ILIKE`; a generic B-tree would not be an evidence-backed
+recommendation.
 
 ## Correctness/performance follow-ups (not index recommendations)
 
-- `QueryBuilder.like_sanitize/1` adds leading `%` before the title and
-  short-name prefix wildcard. Verify whether this is intentional; it changes
-  prefix search into contains search and can materially worsen search cost.
+- `QueryBuilder.like_sanitize/1` briefly added leading/trailing wildcards,
+  changing prefix search into contains search; the focused review says this was
+  fixed and the Commissions helper aligned. Retain a regression test.
 - The refactored search query should be checked for duplicate rows/count
   behavior if the artist-tag association ever ceases to be one-to-one.
-- The `type`/`short_name` provider maintenance workload has no composite index;
-  collect representative plans and table/cardinality data before deciding on
-  `(type, short_name)`.
+- The `type`/`short_name` provider maintenance workload remains covered by the
+  current small table; no composite index is planned unless cardinality or
+  workload changes materially.
 - Authorization, notification clearing, and subscription helper queries are
   shared concerns and should be linked from the coordinator's `shared.md`.
 
 ## Follow-ups
 
-- Verify the intentional leading-wildcard change in `like_sanitize/1` and
-  collect representative plans before considering specialized search indexes.
+- Keep regression coverage for the corrected `like_sanitize/1` behavior; no
+  index action follows from the fixed helper.
 - The provider `(type, short_name)` workload has no evidence-backed candidate;
   measure it before proposing a composite index.

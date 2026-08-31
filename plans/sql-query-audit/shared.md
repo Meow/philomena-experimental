@@ -64,7 +64,9 @@ shape change and a possible correctness issue, not an automatic index
 recommendation. Existing `topics(forum_id)`, `topics(hidden_from_users)`,
 `topics(last_replied_to_at)`, and `forums(id)` coverage is retained. A
 composite or partial ordered index requires representative plans and
-selectivity data.
+selectivity data. The focused review distinguishes direct staff actions from
+collection policy: forum topic listings must still exclude hidden topics even
+if staff may load them for authorized direct operations.
 
 ### Tags canonicalization and locking
 
@@ -118,10 +120,12 @@ add SQL authorization predicates.
 Profiles composes the canonical `UserIps.load_user_history/3` and
 `UserFingerprints.load_user_history/3` operations. Both now page a user-scoped
 history with `ORDER BY updated_at DESC, id DESC`; the IP path is covered by
-`(user_id, updated_at DESC)`, while the fingerprint path may benefit from
-`(user_id, updated_at DESC, id DESC)`. The latter is one deduplicated candidate
-also owned by the UserFingerprints wave-A report; Profiles is a consumer and
-does not produce a second candidate.
+`(user_id, updated_at DESC)`, while the fingerprint path is a confirmed
+follow-up for `(user_id, updated_at DESC, id DESC)`. The same composite is one
+deduplicated candidate owned by UserFingerprints; Profiles is a consumer and
+does not produce a second candidate. The focused review also confirms replacing
+the IP two-column index with the three-column form so the deterministic tie
+breaker is covered.
 
 ### Cross-context report closure and wipe
 
@@ -151,9 +155,10 @@ the appropriate parent scope. `Forums.TransactionWorkflow` composes explicit
 use the existing hierarchy primary, foreign-key, and unique indexes. The
 workflow's last-post refreshes add correlated `max(id)`/`max(created_at)`
 scans over visible posts. The existing `(topic_id, created_at)` index covers
-the timestamp branch; a partial `(topic_id, id) WHERE hidden_from_users IS
-FALSE` index remains only a measured candidate for the max-ID branch and is
-not recommended without representative plans and workload data.
+the timestamp branch; the focused production review confirms a partial
+`(topic_id, id) WHERE hidden_from_users IS FALSE` follow-up for the repeated
+max-ID branch. Reconcile it with the timestamp branch and capture build/write
+cost during migration review.
 
 `Forums.Visibility`, `Topics.Visibility`, `Posts.Visibility`, and
 `Comments.Visibility` produce actor-dependent SQL branches. These visibility
@@ -207,12 +212,14 @@ selection. Image counter and user-stat updates are primary/unique key updates.
 `image_intensities(image_id)` key; the image-delete cascade migration changes
 referential behavior only. No shared index is proposed.
 
-`ImageVotes.delete_user_votes!/2` is the only conditional Wave D candidate:
+`ImageVotes.delete_user_votes!/2` has a confirmed Wave D follow-up from the
+focused production review:
 the cleanup relation filters `user_id` and `up`, then batches/orders by
-`image_id`. Existing `image_votes(user_id)` covers the leading filter. A
-`(user_id, up, image_id)` B-tree should be considered only after representative
-`EXPLAIN (ANALYZE, BUFFERS)`, frequency/cardinality, and write-cost evidence;
-the ImageVotes report owns it so no duplicate shared recommendation is made.
+`image_id`. Replace `image_votes(user_id)` with `(user_id, image_id)` so the
+user equality and batch ordering are covered; `up` remains residual. Compare
+that requested two-column shape with `(user_id, up, image_id)` during migration
+review, and account for index size/write cost. The ImageVotes report owns it,
+so no duplicate shared recommendation is made.
 
 ### Wave E gallery interactions and subscriptions
 
@@ -225,7 +232,8 @@ lookups and the gallery subscription unique `(gallery_id, user_id)` key covers
 subscription existence/insert/delete. Gallery deletion now batches and locks
 rows, but does not add an uncovered selector. The owner gallery selector's
 `galleries.user_id = ? ORDER BY updated_at DESC LIMIT 100` is owned by
-Galleries; any ordering index is a local, measurement-only question.
+Galleries; the focused review finds the existing owner index sufficient for
+the current unbounded production workload.
 
 ### Wave E tag and source history consumers
 
@@ -234,9 +242,9 @@ TagChanges and SourceChanges history relations. Their page shapes are
 user/image/IP/fingerprint equality (or inet containment) with
 `created_at DESC, id DESC`, plus optional `added` predicates and association
 preloads. Existing image/user/fingerprint/IP and tag-change join indexes cover
-the selectors where present; timestamp ordering suffixes and the missing
-SourceChanges fingerprint index are deduplicated as conditional candidates in
-`summary.md`, not repeated per consumer.
+the selectors where present. Timestamp ordering suffixes and the missing
+SourceChanges fingerprint index are intentionally deferred (the latter to a
+possible OpenSearch migration) and are not repeated per consumer.
 
 ### Wave E duplicate-report visibility and locking
 
@@ -251,12 +259,11 @@ owned by DuplicateReports; no duplicate candidate belongs in shared findings.
 
 Filters' `put_replace_tag_references/5` performs separate bulk updates selected
 by `hidden_tag_ids @> ARRAY[...]` and `spoilered_tag_ids @> ARRAY[...]`. Tags'
-alias/deletion workflows call this helper and then reindex affected rows. No
-GIN indexes exist in the current structure dump. The two possible GIN indexes
-are therefore one Filters-owned, measurement-only candidate (with write
-amplification), not a generic shared tag recommendation. Tags' unchanged
-`images_count` ordering and filter-array scans remain outside the
-master/current delta.
+alias/deletion workflows call this helper and then reindex affected rows. This
+is a moved, unchanged production workload; no GIN indexes are recommended.
+The focused review instead calls for normalizing the filter/tag association
+into an indexed join table. Tags' unchanged `images_count` ordering and
+filter-array scans remain outside the master/current delta.
 
 ## Cross-context ownership links
 
@@ -273,14 +280,14 @@ master/current delta.
 - Rules, SiteNotices, StaticPages, Adverts, and Badges record their Loader
   consumers here without duplicating the member-query finding.
 - Profiles links the canonical profile locator and the IP/fingerprint history
-  findings here; UserFingerprints owns the deduplicated fingerprint ordering
-  candidate and UserIps owns the covered IP path.
+  findings here; UserFingerprints owns the confirmed fingerprint ordering
+  candidate and UserIps owns the confirmed replacement index.
 - Users links delegated wipe and erasure selections here; Reports owns report
   closure, report-target preloads, and attribution wiping.
 - Conversations, Commissions, and DnpEntries link their report-target loads
   and report-closing updates here rather than proposing duplicate indexes.
 - Forums, Topics, Posts, and Comments link their hierarchy visibility, route
-  scoping, preloads, and transaction locks here; Posts owns the measured
+  scoping, preloads, and transaction locks here; Posts owns the confirmed
   last-post max-ID candidate and Topics owns the homepage/post-page findings.
 - Polls, PollOptions, and PollVotes link their shared parent-scoped loading,
   existence, preload, lock, and counter-update shapes here; no poll candidate
@@ -294,14 +301,16 @@ master/current delta.
   selector queries; shared gallery subscriptions and notification clears link
   here without duplicate candidates.
 - DuplicateReports owns perceptual intensity joins, report state/order
-  branches, and the reverse-pair latest-row candidate; image visibility and
-  report closure semantics link here.
-- Filters owns owner/system pagination and tag-array replacement updates;
-  Tags links canonicalization and dependent cleanup without duplicating the
-  conditional GIN candidates.
+  branches, and the reviewed/rejected reverse-pair candidate; image visibility
+  and report closure semantics link here.
+- Filters owns owner/system pagination and the moved tag-array replacement
+  workload; Tags links canonicalization and dependent cleanup. The array
+  update shape is unchanged from production and should be normalized into an
+  indexed join table rather than receiving speculative GIN indexes.
 - TagChanges and SourceChanges own profile/image/IP/fingerprint history and
-  attribution cleanup. Their timestamp/fingerprint ordering candidates are
-  deduplicated in the summary and not repeated for Profiles consumers.
+  attribution cleanup. Their timestamp/fingerprint ordering ideas are
+  deduplicated in the summary and intentionally deferred, not repeated for
+  Profiles consumers.
 
 ## Index conclusion
 
@@ -309,9 +318,8 @@ No new index is recommended solely for a shared helper. All shared equality,
 foreign-key, primary-key, unique-conflict, subscription, interaction, profile
 locator, report-target, tag-canonicalization, image interaction, gallery
 interaction/subscription, and image member/preload paths have existing
-coverage. The fingerprint ordered-history, commission-item ordered-preload,
-Wave C post last-pointer, DuplicateReports reverse-pair, Filters owner/order
-and array-GIN, and Wave E source-history candidates arise in individual
-contexts and are deduplicated in `summary.md`; all remain deferred pending
-runtime evidence. The conditional ImageVotes cleanup candidate remains
-deferred as well.
+coverage. The confirmed UserFingerprints, UserIps, Posts last-pointer, and
+ImageVotes cleanup follow-ups arise in individual contexts and are deduplicated
+in `summary.md`. Commission-item, SourceChanges history, DuplicateReports
+reverse-pair, and Filters owner/order/array-GIN ideas were reviewed and rejected
+or superseded by the normalization plan; none is a shared candidate.

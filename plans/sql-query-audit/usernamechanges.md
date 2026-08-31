@@ -25,11 +25,12 @@ Query sites inspected: 7 UserNameChanges-owned, moved, delegated, preload, expor
   retrieval. The old controller-level authorization became context/profile
   authorization, which is a boundary/correctness change rather than an index
   predicate change.
-- Index status: no index action; needs plan evidence for any ordering index
+- Index status: no index action; ordering extension rejected by focused review
 - Evidence: `index_user_name_changes_on_user_id` exists in
   `priv/repo/structure.sql:4458-4461` and covers the equality predicate and
   count query. A possible covering candidate would be
-  `(user_id, id DESC)`, but no representative `EXPLAIN` was run and the
+  `(user_id, id DESC)`, but the focused review rejects it because name changes
+  are infrequent and per-user history is tightly bounded; the
   history listing is capped at 250 rows per profile. The current single-column
   index is sufficient evidence for the changed filter; do not add a composite
   index without production-like history cardinality and workload evidence.
@@ -121,7 +122,7 @@ Query sites inspected: 7 UserNameChanges-owned, moved, delegated, preload, expor
   removes, or changes a UserNameChanges index. The later
   `20200617113333_prod_schema_sync2.exs` only changes the sequence type for
   `user_name_changes_id_seq`.
-- No automatic index candidate is raised. The existing foreign-key index
-  covers the changed history filter, preload, export, and count access paths;
-  a `(user_id, id DESC)` replacement/extension requires representative plan,
-  cardinality, and frequency evidence.
+- No index candidate is raised. The focused review notes names can change only
+  once per 90 days (at most about 40 changes per user over a decade), so the
+  existing foreign-key index plus bounded history page makes an ordering
+  extension unjustified.

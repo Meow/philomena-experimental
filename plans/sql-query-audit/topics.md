@@ -175,6 +175,7 @@ false`, `forum.short_name`, and `forum.access_level = 'normal'`; the web plug
 - Correctness review: `show_forum_topic/4` intentionally loads hidden topics
   before `authorize/3` for moderator and personal unsubscribe/read actions, but
   the changed API behavior should be covered by authorization tests. The old
-  API post ordering was `topic_position`; the current shared page ordering is
-  `created_at, id`, which should be confirmed as an intentional response-order
-  change.
+  API post ordering was `topic_position`; the current shared page filters by
+  `topic_position` but orders by `created_at, id`. The focused production review
+  says the page must order ascending `topic_position`; treat this as a
+  correctness/presentation fix before merge, not an index recommendation.

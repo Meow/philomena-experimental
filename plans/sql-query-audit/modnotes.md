@@ -50,7 +50,7 @@ Query sites inspected: 18
   set follows.
 - Delta: added target member lookup and a bounded newest-first result; target
   filter column, operator, ordering, and boolean shape are unchanged.
-- Index status: candidate
+- Index status: reviewed and rejected (human production review)
 - Evidence: `priv/repo/structure.sql` in both refs contains
   `mod_notes_user_id_index`, `mod_notes_report_id_index`, and
   `mod_notes_dnp_entry_id_index`, each a partial B-tree on its target column
@@ -62,6 +62,7 @@ Query sites inspected: 18
   `(report_id, id DESC) WHERE report_id IS NOT NULL`, and
   `(dnp_entry_id, id DESC) WHERE dnp_entry_id IS NOT NULL`; this needs a
   representative `EXPLAIN` and workload/cardinality evidence before adoption.
+  The focused review rejects these additions at p99 note count two.
 - Confidence: high
 
 ### Admin target-filtered page (`list_mod_notes_for_target/3` -> `list_mod_notes/4`)
@@ -189,12 +190,10 @@ Query sites inspected: 18
   to the unfiltered note page. In particular, an unauthorized target can cause
   all notes to be listed to an actor who can index ModNotes. This should be
   reviewed separately from indexing.
-- Plan evidence is still missing for the optional three-index family
-  `(target_id, id DESC)` partial indexes. Check representative filtered page
-  and embedded queries with `EXPLAIN (FORMAT JSON)`, plus table size, target
-  cardinality, and request frequency, before accepting their write/storage
-  cost. Existing single-column partial indexes are sufficient predicate
-  coverage and are the current no-regret baseline.
+- The focused review rejects the optional three-index family
+  `(target_id, id DESC)` partial indexes at p99 note count two. Existing
+  single-column partial indexes are sufficient predicate coverage and remain
+  the no-regret baseline.
 - Shared-query link: `Philomena.Loader` member loading and
   `ModerationLogs.put_log` belong in the shared audit; this report only records
   their participation in ModNotes operations.

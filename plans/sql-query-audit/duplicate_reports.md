@@ -92,9 +92,9 @@ Reverse accept's lookup changed from exact reverse pair plus `LIMIT 1` to the
 same pair with subject-ID exclusion and `ORDER BY id DESC LIMIT 1`; the separate
 directional indexes cover pair filtering, while no existing index covers the
 requested ID ordering. A possible candidate is
-`duplicate_reports(image_id, duplicate_of_image_id, id DESC)`, but it remains a
-measurement-dependent candidate (no `EXPLAIN`/workload evidence was available),
-not an automatic recommendation.
+`duplicate_reports(image_id, duplicate_of_image_id, id DESC)`, but the focused
+production review rejects it at the observed p99 pair cardinality; the existing
+directional indexes are sufficient for this infrequent lookup.
 
 ### Hide-image report rejection — unchanged (moved)
 
@@ -125,10 +125,20 @@ the report locator access path. Primary-key/FK coverage is sufficient. Shared
 - Existing coverage: report `state`, active-state partial `state`, `created_at`,
   both image-pair direction columns, report/user/modifier FKs, report PK, image
   PK, and unique intensity `image_id`.
-- Measurement-dependent candidate only: `(image_id, duplicate_of_image_id,
-id DESC)` for reverse-report latest-row lookup. Validate with representative
-  `EXPLAIN (FORMAT JSON)`, table cardinality, and reverse-accept frequency before
-  proposing a migration.
+- The reverse-report latest-row composite `(image_id, duplicate_of_image_id,
+id DESC)` was considered and rejected in the focused production review
+  because p99 pair cardinality is five. Existing direction indexes are
+  sufficient; no migration is proposed.
 - No index action for visibility additions, deterministic tie-break ordering,
   lock-by-primary-key queries, hide-image rejection, or the count query absent
   workload evidence.
+
+## Follow-ups
+
+- The focused review identifies a correctness gap: automated perceptual reports
+  should be allowed to target hidden images when that policy is intended, but
+  `generate_reports/1` currently appends `hidden_from_users == false`.
+- Per-image report SQL already selects both image-pair directions without an
+  endpoint-visibility predicate. Verify the renderer/authorization path keeps
+  those candidate reports visible to viewers who cannot see a hidden endpoint;
+  do not add an index for this policy requirement.

@@ -22,15 +22,14 @@ Query sites inspected: 8 UserIps-owned operation shapes, plus delegated and move
   removed because the caller already has the user, and both retained history
   paths gained `id DESC` as a deterministic tie-breaker. The added tie-breaker
   is a correctness/order change as well as a possible access-path change.
-- Index status: needs plan evidence. A candidate would be
-  `(user_id, updated_at DESC, id DESC)` on `user_ips`, but the existing
-  `(user_id, updated_at DESC)` index already covers the equality predicate and
-  primary ordering. The extra `id` key should not be added without a
-  representative plan and workload/cardinality evidence.
-- Evidence: `index_user_ips_on_user_id_and_updated_at` exists in
-  `priv/repo/structure.sql`; no `EXPLAIN` was run because the current index
-  clearly covers the principal filter/order and the benefit of the tie-breaker
-  suffix is data-dependent.
+- Index status: confirmed follow-up candidate (human production review)
+- Evidence: `index_user_ips_on_user_id_and_updated_at` covers the equality
+  predicate and primary ordering but not the deterministic `id` tie-breaker.
+  The focused production review confirms replacing it with
+  `(user_id, updated_at DESC, id DESC)` for timeout-prone history/latest reads.
+  The new index has the old index as an exact prefix, so removal of the old
+  two-column index is defensible for the audited query set; verify repository-
+  wide index usage and foreign-key maintenance behavior before dropping it.
 - Confidence: high
 
 ## Unchanged or non-index-relevant sites
@@ -120,15 +119,15 @@ Query sites inspected: 8 UserIps-owned operation shapes, plus delegated and move
   `80c8b744` (`add structure file`). `20200617113333_prod_schema_sync2.exs`
   only adjusts the `user_ips` sequence type; no migration between `master` and
   `context-logic` adds, removes, or changes a UserIps index.
-- No automatic index recommendation is made. The only changed access path is
-  the `id DESC` suffix on the user-history/latest-row ordering, for which the
-  existing composite index is substantially covering and a three-column
-  replacement needs plan and workload evidence.
+- The focused production review confirms replacing the two-column ordering
+  index with `(user_id, updated_at DESC, id DESC)`. The replacement retains the
+  old index's prefix coverage; validate index usage/size and drop timing before
+  removing the redundant two-column index.
 
 ## Follow-ups
 
-- Measure the paginated history query on representative user-history sizes
-  before considering `(user_id, updated_at DESC, id DESC)`; the existing index
-  covers the primary filter/order and no candidate is recommended yet.
+- Capture production-sized plans and index-size/build timing for
+  `(user_id, updated_at DESC, id DESC)` before rollout, and verify no
+  non-audited query depends on retaining the old two-column index.
 - Keep the inet-containment profile query and alias cross-reference assigned to
   their owning Bans/Users findings during shared synthesis.

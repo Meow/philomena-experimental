@@ -70,12 +70,14 @@ WHERE post.topic_id = topic.id)`, with `topic:forum`/user preloads.
   helper shape to two correlated aggregate scans with a hidden-post predicate;
   it is index-relevant for repeated last-post refreshes. This also encodes a
   correctness change: hidden posts are excluded from cached last-post values.
-- Index status: candidate, needs plan evidence.
+- Index status: confirmed follow-up candidate (human production review).
 - Evidence: `(topic_id, created_at)` supports the `max(created_at)` branch;
   `(topic_id, topic_position)` does not directly cover `max(id)`. There is no
   partial index on `(topic_id, id)` for `hidden_from_users IS FALSE` in the
-  current `structure.sql`. A generic index recommendation is deferred because
-  the aggregate/visibility workload and table cardinality were not measured.
+  current `structure.sql`. The focused production review confirms this
+  partial index for the repeated last-pointer refresh workload; capture
+  production-sized plan, index-size, and write-cost evidence as part of the
+  migration review.
 - Confidence: medium
 
 ### Post history read
@@ -174,16 +176,17 @@ user: [awards: :badge]` for HTML.
   `load_post_in_topic/4` shape and is covered by the route-load finding.
 - No required ref, schema, or database container was needed for this source
   audit. No EXPLAIN was run: the available workspace did not provide a
-  representative PostgreSQL dataset, so the last-pointer candidate remains
-  medium-confidence and requires runtime plan evidence.
+  representative PostgreSQL dataset. The focused production review supplies
+  the workload decision for the partial last-pointer index; build and write
+  costs still require migration-time validation.
 
 ## Follow-ups
 
 - Shared helper follow-up: reconcile the last-post refresh SQL across Posts,
-  Topics, Forums, and topic visibility workflows before any index change. The
-  candidate, if plans/workload justify it, is a partial B-tree beginning
-  `(topic_id, id)` with predicate `hidden_from_users IS FALSE`; validate it
-  against the `max(created_at)` branch and write/storage cost first.
+  Topics, Forums, and topic visibility workflows before the confirmed partial
+  index is migrated. The index is a partial B-tree beginning `(topic_id, id)`
+  with predicate `hidden_from_users IS FALSE`; validate it against the
+  `max(created_at)` branch and write/storage cost first.
 - Shared helper follow-up: `Forums.TransactionWorkflow` owns forum/topic/post
   lock query shapes used by Posts and Topics. Keep its canonical finding in
   `shared.md`; this report intentionally does not duplicate a shared report.

@@ -89,15 +89,14 @@ base_price ASC, id ASC`.
 - Delta: item preload SQL gained an `ORDER BY base_price ASC, id ASC`; the
   profile-side in-memory sort was removed. This is index-relevant for large
   listings, although the directory's parent query still uses random ordering.
-- Index status: candidate
+- Index status: reviewed and rejected (human production review)
 - Evidence: current `index_commission_items_on_commission_id` covers the
   equality predicate, but neither ref has `(commission_id, base_price, id)`.
   A possible follow-up is `CREATE INDEX ... ON commission_items
 (commission_id, base_price, id)` to support the equality-plus-ordering
-  preload. The index should be validated with representative `EXPLAIN` and
-  workload/table-size evidence first; commission listings are likely small and
-  the extra write/storage cost may outweigh avoiding a sort. The unique/PK
-  indexes do not cover this path.
+  preload. The focused review rejects it at p99 item count 14; the existing
+  foreign-key index and small fan-out make the sort cheaper than maintaining a
+  second ordering index.
 - Confidence: high
 
 ## Unchanged or non-index-relevant sites

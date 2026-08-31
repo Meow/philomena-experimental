@@ -53,3 +53,38 @@
 - Slug-based loading and authorization for tags is an intended consistency fix. Consistent handling of image visibility is an intended correctness fix.
 - TagChanges are intended to create one row for each image affected by a batch update (tag change reversion/batch tagging).
 - SourceChanges timestamp ordering is intentional to match the currently OpenSearch-backed TagChanges. New candidate indexes are not currently considered necessary. Should the need arise, querying will be migrated to OpenSearch.
+
+## Audit reconciliation
+
+The shared and summary reports were checked against the review and source/index
+evidence. The following dispositions are now reflected in those reports:
+
+- Confirmed follow-ups are the UserFingerprints composite, the UserIps
+  three-column replacement (with the old two-column index removable only after
+  repository-wide usage verification), the partial Posts last-pointer index,
+  and the ImageVotes cleanup replacement. The ImageVotes two-column request
+  leaves `up` residual; migration review should compare it with the
+  three-column equality variant.
+- Commission-item, ModerationLogs, ModNotes, ArtistLinks, Channels,
+  UserNameChanges, DuplicateReports reverse-pair, Filters owner-ordering, and
+  SourceChanges history candidates are explicitly rejected for their reviewed
+  low-volume/infrequent workloads, existing coverage, or planned OpenSearch/
+  association-normalization paths.
+- Filters array replacement is a moved, unchanged workload from tag aliasing;
+  speculative GIN indexes were removed from the candidate list. Normalize the
+  filter/tag association and index the resulting join table instead.
+- Batch tag/revert code still derives visible-image sets for counter deltas but
+  processes hidden-image taggings in the migration/reversion paths; retain a
+  regression test for that distinction rather than treating the visibility
+  predicate as an index gap.
+- The topic-page ordering concern is a correctness fix: posts bounded by
+  `topic_position` must be ordered ascending by that field. Homepage channel and
+  topic strips must not incur Scrivener count queries.
+- DuplicateReports still has one merge-blocking correctness check: automated
+  report generation currently excludes hidden targets via
+  `hidden_from_users = false`, while the reviewed policy requires those targets
+  to be eligible. Per-image report SQL already has no endpoint-visibility
+  predicate and the template iterates every returned report; verify this with
+  a regression test, but do not treat it as a missed SQL filter or index gap.
+
+No application code or migrations were changed during this reconciliation.

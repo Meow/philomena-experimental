@@ -201,8 +201,8 @@ Query sites inspected: 15
   old route's hard-coded public predicates. Confirm this is the desired
   homepage policy and keep the role-branch tests aligned.
 - Pagination adds count queries for six-row channels and topic strips even
-  though the homepage renders only entries. Consider whether the shared
-  listing APIs should expose a no-count bounded mode; this is a workload/API
+  though the homepage renders only entries. Remove those count queries before
+  merge (for example, use a no-count bounded mode); this is a workload/API
   decision, not evidence for an index.
 - Existing homepage orderings lack stable final tie-breakers: featured images
   use only feature timestamp, channels use live/title, and topics use only

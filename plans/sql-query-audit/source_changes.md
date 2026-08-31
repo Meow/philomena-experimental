@@ -78,5 +78,8 @@ Query sites inspected: 16
 ## Follow-ups
 
 - No index candidate is recommended for this audit. Existing `image_id`, `user_id`, `ip`, and primary-key indexes cover the changed equality/member paths.
-- Two paths merit measurement before any schema change: fingerprint history (no fingerprint index exists) and image/user history pagination ordered by `created_at DESC, id DESC`. The IP subnet query may need a specialized inet GiST/SP-GiST index, but `>>=` requires plan evidence rather than a generic B-tree.
+- Fingerprint history has no equality index, but the focused review defers this
+  infrequent moderation workload to a possible OpenSearch migration. Image/user
+  ordering composites and an inet GiST/SP-GiST alternative remain optional
+  only if workload changes; no schema change is proposed now.
 - The semantic/correctness changes are deliberate: history now has stable timestamp-plus-ID ordering; user count removes an unnecessary aggregate order; identity inputs are normalized and validated before authorization.

@@ -93,7 +93,7 @@ FOR UPDATE` lock query. With no supplied tag name, the `IN` list is empty and
 - Delta: added deterministic `id DESC` tie-breaker to the ordering; query
   construction moved into a form/builder. The default state set is the same as
   master, and pagination/count behavior is unchanged.
-- Index status: needs plan evidence.
+- Index status: reviewed and rejected (human production review).
 - Evidence: `priv/repo/structure.sql:3450-3453` covers `aasm_state`, but
   there is no `created_at` ordering index. A representative local
   `EXPLAIN (FORMAT JSON)` used the state index via a Bitmap Index Scan and
@@ -102,21 +102,21 @@ FOR UPDATE` lock query. With no supplied tag name, the `IN` list is empty and
   a migration without production cardinality/selectivity evidence. A possible
   workload-specific candidate is `artist_links (aasm_state, created_at DESC,
 id DESC)`; the current single-column state index may still be adequate.
-- Confidence: high for the shape delta; low for any index candidate
+- Confidence: high for the shape delta; no index candidate after production review
 
 ### Admin artist-link all-state collection (`list_admin_artist_links/3`, explicit states branch)
 
 - Master: `lib/philomena_web/controllers/admin/artist_link_controller.ex`, old `index/2` `%{"all" => _value}` branch, queried all `artist_links`, ordered by `created_at DESC`, then paginated with the admin preloads.
 - context-logic: `lib/philomena/artist_links/query_builder.ex:35-36`, an empty `states` list emits no state predicate and orders by `created_at DESC, id DESC`; `lib/philomena/artist_links.ex:114-124` paginates and preloads.
 - Delta: the old `all` request branch is replaced by an explicit empty/all-state `states` form branch; ordering gains `id DESC`. The all-state page has no filtering predicate.
-- Index status: needs plan evidence.
+- Index status: reviewed and rejected (human production review).
 - Evidence: no current `created_at`/`id` ordering index is present in
   `priv/repo/structure.sql`; the primary key only covers `id`, not the leading
   `created_at`. The same representative planning check shows the need to sort
   after filtering for the pending branch; no production plan or workload
   evidence supports the added write/storage cost of `(created_at DESC, id
 DESC)`.
-- Confidence: high for the shape delta; low for any index candidate
+- Confidence: high for the shape delta; no index candidate after production review
 
 ### Admin artist-link filtered-state branches (`list_admin_artist_links/3`)
 
@@ -130,12 +130,12 @@ DESC)`.
   branches; the default pending branch is the paired old shape. The current
   text branch also combines this state predicate with the user/URI text OR,
   whereas the master text branch searched every state.
-- Index status: existing state index covers the filter; the added ordering
-  still needs plan evidence for any composite candidate.
+- Index status: existing state index covers the filter; ordering composites
+  reviewed and rejected for this workload.
 - Evidence: `priv/repo/structure.sql:3450-3453` has
   `index_artist_links_on_aasm_state`. No index has `created_at` as a leading
   key, and no representative plan or workload/cardinality data is available.
-- Confidence: high for the branch delta; low for any index recommendation
+- Confidence: high for the branch delta; no index recommendation after review
 
 ### Admin artist-link text search (`list_admin_artist_links/3`, text branch)
 
@@ -228,11 +228,10 @@ JSON)` used that partial index for both source and target tag filters, then
 
 - No application code, migration, schema, or test was changed by this audit.
 - The default/all/filtered admin order changes are index-relevant because they
-  add a stable tie-breaker and paginate by `created_at`; obtain representative
-  production `EXPLAIN (FORMAT JSON)` plans and table/cardinality data before
-  considering `(aasm_state, created_at DESC, id DESC)` or `(created_at DESC,
-id DESC)`. The local plan confirms a post-filter sort but is not sufficient
-  evidence for either candidate.
+  add a stable tie-breaker and paginate by `created_at`, but the focused review
+  rejects both ordering composites because bitmap filtering plus a re-sort is
+  marginally better for multi-state requests; OpenSearch remains the preferred
+  path for high-volume search.
 - The alias conflict query is already covered by the source tag index, primary
   key, and the existing partial unique target index. The local plan uses the
   partial index but materializes the small target side; production cardinality

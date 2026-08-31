@@ -24,8 +24,8 @@ refs. `master` and `context-logic` both have the primary key on `id`, unique
 - Master: `lib/philomena_web/controllers/profile/fp_history_controller.ex:20-25` (`index/2`) selected all rows from `user_fingerprints` with `user_id = ?`, ordered by `updated_at DESC`, preloaded `user`, and issued an unbounded `Repo.all`. The preload issued the usual user-PK lookup.
 - context-logic: `lib/philomena/user_fingerprints.ex:41-45,111-123` (`history_query/1`, `load_user_history/3`) uses `user_id = ?`, `ORDER BY updated_at DESC, id DESC`, then `Repo.paginate`. The page query adds `LIMIT/OFFSET`; Scrivener also issues `count(*)` over the same `user_id` predicate after excluding order/preload. The page-row `user` preload was removed; `cross_references/1` still preloads users for the page's distinct fingerprints.
 - Delta: changed from an unbounded collection to count plus paginated collection; added deterministic `id DESC` tie-breaker; removed the page-row user preload. The cross-reference query remains `fingerprint IN (...) ORDER BY updated_at DESC` with a user preload, but its values are now derived from the current page rather than the entire history.
-- Index status: candidate
-- Evidence: existing `index_user_fingerprints_on_user_id` covers the equality filter and count, but not the requested ordering. A read-only dev `EXPLAIN (FORMAT JSON)` for the representative page shape chose a bitmap scan on that index followed by a sort on `updated_at DESC, id DESC`. Candidate definition: `CREATE INDEX ... ON user_fingerprints (user_id, updated_at DESC, id DESC)`. The dev relation is only 8 KB and has no collected statistics (`reltuples = -1`), so validate with representative cardinality and workload before adding it.
+- Index status: confirmed follow-up candidate (human production review)
+- Evidence: existing `index_user_fingerprints_on_user_id` covers the equality filter and count, but not the requested ordering. A read-only dev `EXPLAIN (FORMAT JSON)` for the representative page shape chose a bitmap scan on that index followed by a sort on `updated_at DESC, id DESC`. The focused production review reports request timeouts on current `master` deployments and confirms `CREATE INDEX ... ON user_fingerprints (user_id, updated_at DESC, id DESC)`. The dev relation is only 8 KB and has no collected statistics (`reltuples = -1`), so the production plan/size evidence should be captured with migration review; this source audit does not claim the dev plan is representative.
 - Confidence: medium
 
 ### Latest fingerprint row (`latest_for_user/2`)
@@ -33,8 +33,8 @@ refs. `master` and `context-logic` both have the primary key on `id`, unique
 - Master: `lib/philomena_web/controllers/profile_controller.ex:249-254` (`set_admin_metadata/2`) used `user_id = ?`, `ORDER BY updated_at DESC`, `LIMIT 1`, and `Repo.one`.
 - context-logic: `lib/philomena/user_fingerprints.ex:41-45,139-145` (`history_query/1`, `latest_for_user/2`) uses `user_id = ?`, `ORDER BY updated_at DESC, id DESC`, `LIMIT 1`, and `Repo.one`, after the context authorization gate.
 - Delta: added the `id DESC` tie-breaker; the query moved into the UserFingerprints context. The same composite candidate as the paginated history query serves this limit-1 access path.
-- Index status: candidate
-- Evidence: the existing `user_id` index supplies the filter but the representative dev plan still sorts; `(user_id, updated_at DESC, id DESC)` matches equality columns followed by ordering/tie-breaker. The same small, unanalyzed dev relation limits plan confidence.
+- Index status: confirmed follow-up candidate (same index as history)
+- Evidence: the existing `user_id` index supplies the filter but the representative dev plan still sorts; `(user_id, updated_at DESC, id DESC)` matches equality columns followed by ordering/tie-breaker. The focused production review confirms this candidate for the latest-row path.
 - Confidence: medium
 
 ### Users-owned fingerprint alias lookup (cross-context finding)
@@ -64,6 +64,6 @@ refs. `master` and `context-logic` both have the primary key on `id`, unique
 
 ## Follow-ups
 
-- Validate the single deduplicated candidate `(user_id, updated_at DESC, id DESC)` with `EXPLAIN (ANALYZE, BUFFERS)` on production-like row counts and realistic user-history cardinalities. The local read-only plan demonstrates the current filter-then-sort path but is not representative due to the empty/unanalyzed dev table.
+- The focused production review confirms `(user_id, updated_at DESC, id DESC)` as a follow-up index for history/latest timeout pressure. Before migration, capture production-sized `EXPLAIN (ANALYZE, BUFFERS)`, index-size, and build/lock timing; the local read-only plan demonstrates the current filter-then-sort path but is not representative due to the empty/unanalyzed dev table.
 - The current profile path intentionally normalizes/validates fingerprints before authorization and authorizes `:identity_metadata` instead of the legacy `:ip_address`; review that behavioral change separately from SQL/index concerns.
 - The fingerprint alias query is a Users-owned shape change and should be linked from the Users report; this report records it only to account for the moved caller and its UserFingerprint index coverage.

@@ -102,12 +102,12 @@ ImageVotes index candidates.
 
 The existing `image_votes_on_user_id (user_id)` index covers the leading
 cleanup filter. The `up` predicate and `image_id` batch ordering are not fully
-covered by a single current index. A possible workload candidate would be
-`(user_id, up, image_id)` to support direction-specific cleanup and ordered
-batch ID extraction, but no `EXPLAIN` or workload/cardinality evidence was
-available in this read-only audit; do **not** add it automatically. The
-existing user index is sufficient evidence to mark the current shape as
-covered pending plan/workload measurement.
+covered by a single current index. A possible candidate is `(user_id, up,
+image_id)` for direction-specific cleanup and ordered batch ID extraction. The
+focused production review instead requests replacing the standalone user
+index with `(user_id, image_id)`, leaving `up` residual; compare both
+definitions with representative plans before migration. Drop the standalone
+index only after repository-wide usage and index-build checks.
 
 ### Interaction migration inserts
 
@@ -149,19 +149,19 @@ ImageVotes SQL site was found.
 
 ## Recommendations
 
-- No automatic index addition. Per-image deletes and conflict handling are
-  covered by the composite unique index; user cleanup is covered at its
-  leading `user_id` predicate by the existing user index.
-- Record `(user_id, up, image_id)` as a conditional candidate only if cleanup
-  is frequent/large and `EXPLAIN` demonstrates that the current user index
-  causes an avoidable filter/sort or heap-read cost. Equality columns precede
-  the batch/order column as shown.
+- Production review confirms a user-cleanup index follow-up. The requested
+  replacement is `(user_id, image_id)`, which covers user equality and batch
+  ordering while leaving `up` residual; compare it with `(user_id, up,
+image_id)` using representative `EXPLAIN (ANALYZE, BUFFERS)` before choosing
+  the definition. Drop the standalone user index only after checking
+  repository-wide usage and write/storage cost.
 - Changed query shapes that need no index action: primary-key image counter
   updates, user-statistic updates, migration `RETURNING`, and the moved
   ImageVotes transaction APIs.
 
 ## Follow-ups
 
-Measure the conditional cleanup candidate with representative plans and
-production-like workload/cardinality before considering any migration; no
-application-code change is part of this audit.
+The cleanup index is confirmed by production review, but compare the requested
+two-column `(user_id, image_id)` replacement with the three-column variant on
+representative plans and capture index size/build/write cost before migration;
+no application-code change is part of this audit.

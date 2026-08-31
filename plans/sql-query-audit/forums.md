@@ -80,6 +80,8 @@ Query sites inspected: 29 normalized sites, including moved controller/plugs, ne
 
 - Reconcile the canonical forum/topic/post lock and visibility shapes with the
   Topics, Posts, and Comments reports in `shared.md`; review the broader staff
-  visibility and forum aggregate behavior as correctness questions.
+  visibility and forum aggregate behavior as correctness questions. Forum
+  topic listings must still exclude `hidden_from_users` topics per focused
+  review policy, even where staff may load hidden topics for direct actions.
 - Validate forum/topic pagination and last-post refresh plans with representative
   production-like data before considering any composite or partial index.
