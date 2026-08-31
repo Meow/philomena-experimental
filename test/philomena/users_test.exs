@@ -215,9 +215,13 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "create_registration/1" do
+  describe "create_registration/2" do
+    test "rejects banned actors" do
+      assert Users.create_registration(actor(nil, ban: @ban), %{}) == {:error, :ban}
+    end
+
     test "requires email and password to be set" do
-      {:error, changeset} = Users.create_registration(%{})
+      {:error, changeset} = Users.create_registration(actor(), %{})
 
       assert %{
                password: ["can't be blank"],
@@ -227,7 +231,7 @@ defmodule Philomena.UsersTest do
 
     test "validates email and password when given" do
       {:error, changeset} =
-        Users.create_registration(%{email: "not valid", password: "not valid"})
+        Users.create_registration(actor(), %{email: "not valid", password: "not valid"})
 
       assert %{
                email: ["must be valid (e.g., user@example.com)"],
@@ -237,7 +241,10 @@ defmodule Philomena.UsersTest do
 
     test "validates maximum values for email and password for security" do
       too_long = String.duplicate("db", 100)
-      {:error, changeset} = Users.create_registration(%{email: too_long, password: too_long})
+
+      {:error, changeset} =
+        Users.create_registration(actor(), %{email: too_long, password: too_long})
+
       assert "should be at most 160 character(s)" in errors_on(changeset).email
       assert "should be at most 80 character(s)" in errors_on(changeset).password
     end
@@ -246,13 +253,17 @@ defmodule Philomena.UsersTest do
       %{email: email} = user_fixture()
 
       {:error, changeset} =
-        Users.create_registration(%{name: email, password: valid_user_password(), email: email})
+        Users.create_registration(actor(), %{
+          name: email,
+          password: valid_user_password(),
+          email: email
+        })
 
       assert "has already been taken" in errors_on(changeset).email
 
       # Now try with the upper cased email too, to check that email case is ignored.
       {:error, changeset} =
-        Users.create_registration(%{
+        Users.create_registration(actor(), %{
           name: String.upcase(email),
           email: String.upcase(email),
           password: valid_user_password()
@@ -265,7 +276,11 @@ defmodule Philomena.UsersTest do
       email = unique_user_email()
 
       {:ok, user} =
-        Users.create_registration(%{name: email, email: email, password: valid_user_password()})
+        Users.create_registration(actor(), %{
+          name: email,
+          email: email,
+          password: valid_user_password()
+        })
 
       assert user.email == email
       assert is_binary(user.hashed_password)
@@ -277,7 +292,11 @@ defmodule Philomena.UsersTest do
       email = unique_user_email()
 
       {:ok, user} =
-        Users.create_registration(%{name: email, email: email, password: valid_user_password()})
+        Users.create_registration(actor(), %{
+          name: email,
+          email: email,
+          password: valid_user_password()
+        })
 
       settings = Repo.get!(Settings, user.id)
       assert settings.user_id == user.id
@@ -290,10 +309,14 @@ defmodule Philomena.UsersTest do
     end
   end
 
-  describe "new_registration/2" do
+  describe "new_registration/3" do
     test "returns a changeset" do
-      assert %Ecto.Changeset{} = changeset = Users.new_registration(%User{})
+      assert {:ok, %Ecto.Changeset{} = changeset} = Users.new_registration(actor(), %User{})
       assert changeset.required == [:password, :email, :name]
+    end
+
+    test "rejects banned actors" do
+      assert Users.new_registration(actor(nil, ban: @ban), %User{}) == {:error, :ban}
     end
   end
 

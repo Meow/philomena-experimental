@@ -18,14 +18,14 @@ defmodule Philomena.UsersConcurrencyTest do
     results =
       concurrently([
         fn ->
-          Users.create_registration(%{
+          Users.create_registration(actor(), %{
             name: "concurrent-registration-one",
             email: email,
             password: valid_user_password()
           })
         end,
         fn ->
-          Users.create_registration(%{
+          Users.create_registration(actor(), %{
             name: "concurrent-registration-two",
             email: email,
             password: valid_user_password()

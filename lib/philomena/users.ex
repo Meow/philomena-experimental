@@ -567,47 +567,61 @@ defmodule Philomena.Users do
 
   @doc group: "Registration"
   @doc """
-  Registers a user.
+  Registers a user on behalf of actor.
 
   ## Examples
 
-      iex> create_registration(%{field: value})
+      iex> create_registration(actor, %{field: value})
       {:ok, %User{}}
 
-      iex> create_registration(%{field: bad_value})
+      iex> create_registration(actor, %{field: bad_value})
       {:error, %Ecto.Changeset{}}
 
+      iex> create_registration(banned_actor, %{field: value})
+      {:error, :ban}
+
   """
-  @spec create_registration(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def create_registration(params) do
-    changeset = User.registration_changeset(%User{}, &password_compromised?/1, params)
+  @spec create_registration(Actor.t(), map()) ::
+          {:ok, User.t()}
+          | {:error, :ban | :unauthorized | Ecto.Changeset.t()}
+  def create_registration(%Actor{} = actor, params) do
+    with :ok <- verify_write_access(actor) do
+      changeset = User.registration_changeset(%User{}, &password_compromised?/1, params)
 
-    Multi.new()
-    |> Multi.insert(:user, changeset)
-    |> put_reindex_user()
-    |> Multi.transact()
-    |> case do
-      {:ok, %{user: %User{} = user}} ->
-        {:ok, user}
+      Multi.new()
+      |> Multi.insert(:user, changeset)
+      |> put_reindex_user()
+      |> Multi.transact()
+      |> case do
+        {:ok, %{user: %User{} = user}} ->
+          {:ok, user}
 
-      {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
-        {:error, changeset}
+        {:error, :user, %Ecto.Changeset{} = changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
   @doc group: "Registration"
   @doc """
-  Returns an `%Ecto.Changeset{}` for tracking user changes.
+  Returns an `%Ecto.Changeset{}` for tracking registration changes on behalf
+  of actor.
 
   ## Examples
 
-      iex> new_registration(user)
-      %Ecto.Changeset{data: %User{}}
+      iex> new_registration(actor, user)
+      {:ok, %Ecto.Changeset{data: %User{}}}
+
+      iex> new_registration(banned_actor, user)
+      {:error, :ban}
 
   """
-  @spec new_registration(User.t(), map()) :: Ecto.Changeset.t()
-  def new_registration(%User{} = user, attrs \\ %{}) do
-    User.registration_changeset(user, &password_compromised?/1, attrs)
+  @spec new_registration(Actor.t(), User.t(), map()) ::
+          {:ok, Ecto.Changeset.t()} | {:error, :ban | :unauthorized}
+  def new_registration(%Actor{} = actor, %User{} = user, attrs \\ %{}) do
+    with :ok <- verify_write_access(actor) do
+      {:ok, User.registration_changeset(user, &password_compromised?/1, attrs)}
+    end
   end
 
   ## Settings

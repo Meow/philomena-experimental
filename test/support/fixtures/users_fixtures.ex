@@ -17,13 +17,14 @@ defmodule Philomena.UsersFixtures do
     email = unique_user_email()
 
     {:ok, user} =
-      attrs
-      |> Enum.into(%{
-        name: email,
-        email: email,
-        password: valid_user_password()
-      })
-      |> Users.create_registration()
+      Users.create_registration(
+        AttributionFixtures.actor(),
+        Enum.into(attrs, %{
+          name: email,
+          email: email,
+          password: valid_user_password()
+        })
+      )
 
     user
   end

@@ -53,10 +53,6 @@ defmodule PhilomenaWeb.Router do
     plug PhilomenaWeb.TorPlug
   end
 
-  pipeline :ensure_not_banned do
-    plug PhilomenaWeb.FilterBannedUsersPlug
-  end
-
   scope "/", PhilomenaWeb do
     pipe_through [:browser, :redirect_if_user_is_authenticated]
 
@@ -75,25 +71,15 @@ defmodule PhilomenaWeb.Router do
   scope "/", PhilomenaWeb do
     pipe_through [
       :browser,
-      :ensure_not_banned,
       :ensure_tor_authorized,
       :redirect_if_user_is_authenticated
     ]
 
-    resources "/reactivations", ReactivationController, only: [:show, :create]
     resources "/registrations", RegistrationController, only: [:new, :create], singleton: true
-  end
-
-  scope "/", PhilomenaWeb do
-    pipe_through [
-      :browser,
-      :ensure_tor_authorized,
-      :redirect_if_user_is_authenticated
-    ]
-
-    resources "/passwords", PasswordController, only: [:new, :create, :edit, :update]
     resources "/confirmations", ConfirmationController, only: [:new, :create]
+    resources "/passwords", PasswordController, only: [:new, :create, :edit, :update]
     resources "/unlocks", UnlockController, only: [:new, :create, :show]
+    resources "/reactivations", ReactivationController, only: [:show, :create]
   end
 
   scope "/", PhilomenaWeb do
