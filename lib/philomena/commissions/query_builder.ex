@@ -99,7 +99,7 @@ defmodule Philomena.Commissions.QueryBuilder do
 
   defp maybe_filter_keywords(query, %QueryForm{} = sq) do
     if sq.keywords do
-      keywords = like_sanitize(sq.keywords)
+      keywords = "%#{like_sanitize(sq.keywords)}%"
 
       from [commission: c] in query,
         where: ilike(c.information, ^keywords) or ilike(c.will_create, ^keywords)
@@ -109,6 +109,6 @@ defmodule Philomena.Commissions.QueryBuilder do
   end
 
   defp like_sanitize(input) do
-    "%" <> String.replace(input, ["\\", "%", "_"], &<<"\\", &1>>) <> "%"
+    String.replace(input, ["\\", "%", "_"], &<<"\\", &1>>)
   end
 end

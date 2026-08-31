@@ -46,6 +46,6 @@ defmodule Philomena.Channels.QueryBuilder do
   end
 
   defp like_sanitize(input) do
-    "%" <> String.replace(input, ["\\", "%", "_"], &<<"\\", &1>>) <> "%"
+    String.replace(input, ["\\", "%", "_"], &<<"\\", &1>>)
   end
 end
