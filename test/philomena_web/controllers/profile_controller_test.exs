@@ -3,10 +3,12 @@ defmodule PhilomenaWeb.ProfileControllerTest do
 
   @moduletag :search
 
+  import Philomena.ArtistLinksFixtures
   import Philomena.CommentsFixtures
   import Philomena.ForumsFixtures
   import Philomena.ImagesFixtures
   import Philomena.PostsFixtures
+  import Philomena.TagsFixtures
   import Philomena.TopicsFixtures
   import Philomena.UserFingerprintsFixtures
   import Philomena.UserIpsFixtures
@@ -205,6 +207,44 @@ defmodule PhilomenaWeb.ProfileControllerTest do
 
       assert response =~ "Source changes"
       assert response =~ ~p"/profiles/#{user}/source_changes"
+    end
+
+    test "discloses artist-link tag watcher counts only to the owner or moderators", %{
+      conn: conn
+    } do
+      owner = confirmed_user_fixture(%{name: "Watched Artist"})
+      tag = tag_fixture(name: "artist:watched-artist")
+      verified_artist_link_fixture(owner, tag)
+
+      watcher = confirmed_user_fixture()
+
+      watcher
+      |> Ecto.Changeset.change(watched_tag_ids: [tag.id])
+      |> Repo.update!()
+
+      anonymous_response = html_response(get(conn, ~p"/profiles/#{owner}"), 200)
+      refute anonymous_response =~ "Watched by 1 user"
+
+      regular_response =
+        html_response(
+          get(log_in_user(conn, confirmed_user_fixture()), ~p"/profiles/#{owner}"),
+          200
+        )
+
+      refute regular_response =~ "Watched by 1 user"
+
+      owner_response =
+        html_response(get(log_in_user(conn, owner), ~p"/profiles/#{owner}"), 200)
+
+      assert owner_response =~ "Watched by 1 user"
+
+      moderator_response =
+        html_response(
+          get(log_in_user(conn, moderator_user_fixture()), ~p"/profiles/#{owner}"),
+          200
+        )
+
+      assert moderator_response =~ "Watched by 1 user"
     end
 
     test "shows recent uploads, comments, and posts", %{conn: conn} do
