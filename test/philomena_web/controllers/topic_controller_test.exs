@@ -42,6 +42,162 @@ defmodule PhilomenaWeb.TopicControllerTest do
       assert html_response(conn, 200) =~ "#{topic.title} - #{forum.name} - Forums - Derpibooru"
     end
 
+    test "renders poll administration tabs only to topic moderators", %{
+      conn: conn,
+      forum: forum
+    } do
+      {poll_topic, _poll} = topic_with_poll_fixture(forum)
+
+      anonymous_response =
+        html_response(get(conn, ~p"/forums/#{forum}/topics/#{poll_topic}"), 200)
+
+      assert anonymous_response =~ "Voting"
+      assert anonymous_response =~ "Option A"
+      refute anonymous_response =~ "Voters"
+      refute anonymous_response =~ "Administrate"
+      refute anonymous_response =~ ~p"/forums/#{forum}/topics/#{poll_topic}/poll/edit"
+
+      moderator_response =
+        html_response(
+          get(
+            log_in_user(conn, moderator_user_fixture()),
+            ~p"/forums/#{forum}/topics/#{poll_topic}"
+          ),
+          200
+        )
+
+      assert moderator_response =~ "Voters"
+      assert moderator_response =~ "Administrate"
+      assert moderator_response =~ ~p"/forums/#{forum}/topics/#{poll_topic}/poll/votes"
+      assert moderator_response =~ ~p"/forums/#{forum}/topics/#{poll_topic}/poll/edit"
+    end
+
+    test "renders locked-topic disclosure and moderation tools by ability", %{
+      conn: conn,
+      forum: forum,
+      topic: topic
+    } do
+      locking_moderator = moderator_user_fixture(%{name: "Locking Topic Moderator"})
+
+      locked_topic =
+        topic
+        |> Ecto.Changeset.change(
+          locked_at: DateTime.utc_now(:second),
+          lock_reason: "No further replies",
+          locked_by_id: locking_moderator.id
+        )
+        |> Repo.update!()
+
+      anonymous_response =
+        html_response(get(conn, ~p"/forums/#{forum}/topics/#{locked_topic}"), 200)
+
+      assert anonymous_response =~ "This topic has been locked to new posts from non-moderators."
+      assert anonymous_response =~ "No further replies"
+      refute anonymous_response =~ "Locking Topic Moderator"
+      refute anonymous_response =~ ~s(name="post[body]")
+      refute anonymous_response =~ "Manage Topic"
+
+      moderator_response =
+        html_response(
+          get(
+            log_in_user(conn, moderator_user_fixture()),
+            ~p"/forums/#{forum}/topics/#{locked_topic}"
+          ),
+          200
+        )
+
+      assert moderator_response =~ "Locking Topic Moderator"
+      assert moderator_response =~ "Manage Topic"
+      assert moderator_response =~ "Unlock"
+      assert moderator_response =~ ~s(name="post[body]")
+    end
+
+    test "renders hidden topic contents only to viewers with topic access", %{
+      conn: conn,
+      forum: forum,
+      topic: topic
+    } do
+      deleter = moderator_user_fixture(%{name: "Topic Deleter"})
+
+      hidden_topic =
+        topic
+        |> Ecto.Changeset.change(
+          hidden_from_users: true,
+          deletion_reason: "Hidden topic reason",
+          deleted_by_id: deleter.id
+        )
+        |> Repo.update!()
+
+      anonymous_conn = get(conn, ~p"/forums/#{forum}/topics/#{hidden_topic}")
+      assert redirected_to(anonymous_conn) == "/"
+
+      regular_conn =
+        get(
+          log_in_user(conn, confirmed_user_fixture()),
+          ~p"/forums/#{forum}/topics/#{hidden_topic}"
+        )
+
+      assert redirected_to(regular_conn) == "/"
+
+      moderator_response =
+        html_response(
+          get(
+            log_in_user(conn, moderator_user_fixture()),
+            ~p"/forums/#{forum}/topics/#{hidden_topic}"
+          ),
+          200
+        )
+
+      assert moderator_response =~ "Hidden topic reason"
+      assert moderator_response =~ "Topic Deleter"
+      assert moderator_response =~ "Restore"
+      assert moderator_response =~ "Test topic body"
+      assert moderator_response =~ "Manage Topic"
+    end
+
+    test "reveals anonymous topic authors only to moderators", %{conn: conn, forum: forum} do
+      author = confirmed_user_fixture(%{name: "Anonymous Topic Author"})
+
+      anonymous_topic =
+        topic_fixture(forum, author, %{
+          "title" => "Anonymous topic attribution",
+          "anonymous" => "true"
+        })
+
+      anonymous_response =
+        html_response(get(conn, ~p"/forums/#{forum}/topics/#{anonymous_topic}"), 200)
+
+      refute anonymous_response =~ "Anonymous Topic Author"
+      assert anonymous_response =~ ~r/Background Pony #[0-9A-F]{4}/
+
+      moderator_response =
+        html_response(
+          get(
+            log_in_user(conn, moderator_user_fixture()),
+            ~p"/forums/#{forum}/topics/#{anonymous_topic}"
+          ),
+          200
+        )
+
+      assert moderator_response =~ "Anonymous Topic Author"
+      assert moderator_response =~ "hidden"
+
+      staff_tools_hidden_response =
+        html_response(
+          get(
+            log_in_user(
+              put_req_cookie(conn, "hide_staff_tools", "true"),
+              moderator_user_fixture()
+            ),
+            ~p"/forums/#{forum}/topics/#{anonymous_topic}"
+          ),
+          200
+        )
+
+      refute staff_tools_hidden_response =~ "Anonymous Topic Author"
+      assert staff_tools_hidden_response =~ ~r/Background Pony #[0-9A-F]{4}/
+    end
+
     test "renders pending-post approval controls for moderators and Topic assistants",
          %{conn: conn, forum: forum, topic: topic} do
       author = confirmed_user_fixture()
