@@ -28,8 +28,8 @@ defmodule PhilomenaWeb.Api.Json.OembedController do
   # A URL with no path at all (e.g. `https://example.com`) parses to a nil path.
   defp try_oembed(%{path: path}, conn) when is_binary(path) do
     case Images.show_api_image(conn.assigns.actor, extract_image_id(path)) do
-      {:ok, image} -> render(conn, "show.json", image: image)
-      {:error, _not_visible_or_missing} -> not_found(conn)
+      {:ok, %{hidden_from_users: false} = image} -> render(conn, "show.json", image: image)
+      _error -> not_found(conn)
     end
   end
 

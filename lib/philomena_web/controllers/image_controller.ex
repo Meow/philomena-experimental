@@ -117,13 +117,13 @@ defmodule PhilomenaWeb.ImageController do
         |> assign(:tag_change_tag_count, image.tag_change_tag_count)
         |> assign(:source_change_count, image.source_change_count)
 
-      {:duplicate_of, image} ->
+      {:duplicate_of, target_image_id} ->
         conn
         |> put_flash(
           :info,
           "The image you were looking for has been marked a duplicate of the image below"
         )
-        |> redirect(to: ~p"/images/#{image.duplicate_id}")
+        |> redirect(to: ~p"/images/#{target_image_id}")
         |> halt()
 
       {:error, _not_visible_or_missing} = error ->

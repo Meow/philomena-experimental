@@ -98,15 +98,18 @@ defmodule PhilomenaWeb.Api.Json.ImageControllerTest do
       assert body["image"]["uploader_id"] == nil
     end
 
-    test "returns 404 for a hidden image", %{conn: conn} do
+    test "returns a limited object for a hidden image", %{conn: conn} do
       image = image_fixture(hidden_from_users: true, deletion_reason: "Rule #0")
 
       conn = get(conn, ~p"/api/v1/json/images/#{image.id}")
 
-      assert json_response(conn, 404) == %{"error" => "Not found"}
+      body = json_response(conn, 200)
+      assert body["image"]["hidden_from_users"] == true
+      assert body["image"]["duplicate_id"] == nil
+      refute Map.has_key?(body["image"], "tags")
     end
 
-    test "returns 404 for a merged image",
+    test "returns a limited object for a merged image",
          %{conn: conn} do
       target = image_fixture()
 
@@ -119,7 +122,10 @@ defmodule PhilomenaWeb.Api.Json.ImageControllerTest do
 
       conn = get(conn, ~p"/api/v1/json/images/#{image.id}")
 
-      assert json_response(conn, 404) == %{"error" => "Not found"}
+      body = json_response(conn, 200)
+      assert body["image"]["hidden_from_users"] == true
+      assert body["image"]["duplicate_of"] == target.id
+      refute Map.has_key?(body["image"], "tags")
     end
 
     test "returns the user's interactions with the image for an API key", %{conn: conn} do

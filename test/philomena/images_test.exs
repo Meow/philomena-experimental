@@ -4395,11 +4395,10 @@ defmodule Philomena.ImagesTest do
       assert loaded.id == image.id
     end
 
-    test "a hidden image is unauthorized for an anonymous viewer" do
+    test "a hidden image is returned to an anonymous viewer" do
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.show_image(actor(), to_string(image.id)) ==
-               {:error, :unauthorized}
+      assert {:ok, %Image{}} = Images.show_image(actor(), to_string(image.id))
     end
 
     test "a hidden duplicate is redirected for an anonymous viewer" do
@@ -4408,11 +4407,10 @@ defmodule Philomena.ImagesTest do
       original = image_fixture()
       duplicate = image_fixture(duplicate_id: original.id, hidden_from_users: true)
 
-      assert {:duplicate_of, loaded} =
+      assert {:duplicate_of, target_id} =
                Images.show_image(actor(), to_string(duplicate.id))
 
-      assert loaded.id == duplicate.id
-      assert loaded.duplicate_id == original.id
+      assert target_id == original.id
     end
 
     test "a non-hidden duplicate is shown to an anonymous viewer" do

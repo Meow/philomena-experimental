@@ -815,8 +815,8 @@ defmodule Philomena.Images do
   Loads an image representation for the JSON API or oEmbed on behalf of
   `actor`.
 
-  The image is loaded before `:show` authorization and carries the associations
-  required by the API renderer. Missing IDs are actor-independent.
+  The image carries the associations required by the API renderer.
+  Missing IDs are actor-independent.
 
   ## Examples
 
@@ -828,9 +828,9 @@ defmodule Philomena.Images do
 
   """
   @spec show_api_image(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :unauthorized | :not_found}
-  def show_api_image(%Actor{} = actor, image_id) do
-    load_image_member(actor, :show, image_id, [:user, :intensity, :sources, tags: :aliases])
+          {:ok, Image.t()} | {:error, :not_found}
+  def show_api_image(%Actor{} = _actor, image_id) do
+    Loader.fetch(Image, image_id, [:user, :intensity, :sources, tags: :aliases])
   end
 
   @doc group: "Browsing and discovery"
@@ -858,11 +858,9 @@ defmodule Philomena.Images do
   Loads the image named by `id` for showing, on behalf of `actor`.
 
   The image carries its preloads plus virtual fields for these counts: distinct
-  tag changes, tags touched by those changes, and source changes. The real
-  image is authorized for `:show`; a forbidden hidden image returns
-  `{:error, :unauthorized}`. However, an image merged into a duplicate is
-  redirected for viewers not permitted to show it, returning
-  `{:duplicate_of, image}` so the caller can act on `image.duplicate_id`. A
+  tag changes, tags touched by those changes, and source changes. An image merged
+  into a duplicate is redirected for non-staff viewers, returning
+  `{:duplicate_of, target_image_id}` so the caller can redirect to the target. A
   malformed or unknown id is `{:error, :not_found}`.
 
   ## Examples
@@ -871,7 +869,7 @@ defmodule Philomena.Images do
       {:ok, %Image{tag_change_count: 2, tag_change_tag_count: 5, source_change_count: 1}}
 
       iex> show_image(actor, "2")
-      {:duplicate_of, %Image{}}
+      {:duplicate_of, 42}
 
       iex> show_image(actor, "bad")
       {:error, :not_found}
@@ -879,8 +877,8 @@ defmodule Philomena.Images do
   """
   @spec show_image(Actor.t(), IntegerId.integer_id()) ::
           {:ok, Image.t()}
-          | {:duplicate_of, Image.t()}
-          | {:error, :unauthorized | :not_found}
+          | {:duplicate_of, IntegerId.integer_id()}
+          | {:error, :not_found}
   def show_image(%Actor{} = actor, id) do
     with {:ok, image} <-
            Image
@@ -895,16 +893,15 @@ defmodule Philomena.Images do
                source_change_count: source_changes.count
            })
            |> Loader.fetch(id) do
-      case authorize(actor, :show, image) do
-        :ok ->
+      cond do
+        authorize(actor, :show, image) == :ok ->
           {:ok, image}
 
-        {:error, :unauthorized} when not is_nil(image.duplicate_id) ->
-          # NOTE: the result contains the *source* image, not the target.
-          {:duplicate_of, image}
+        not is_nil(image.duplicate_id) ->
+          {:duplicate_of, image.duplicate_id}
 
-        {:error, :unauthorized} ->
-          {:error, :unauthorized}
+        true ->
+          {:ok, image}
       end
     end
   end

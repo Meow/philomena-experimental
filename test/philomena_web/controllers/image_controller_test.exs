@@ -115,23 +115,25 @@ defmodule PhilomenaWeb.ImageControllerTest do
       refute response =~ "interaction--downvote"
     end
 
-    test "does not expose a hidden image to an anonymous viewer", %{conn: conn} do
+    test "renders the deleted page for an anonymous viewer", %{conn: conn} do
       image = image_fixture(hidden_from_users: true)
 
       conn = get(conn, ~p"/images/#{image}")
 
-      assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+      response = html_response(conn, 200)
+      assert response =~ "This image has been deleted"
+      refute response =~ "Done by:"
     end
 
-    test "does not expose a hidden image to a regular viewer", %{conn: conn} do
+    test "renders the deleted page for a regular viewer", %{conn: conn} do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
       image = image_fixture(hidden_from_users: true)
 
       conn = get(conn, ~p"/images/#{image}")
 
-      assert redirected_to(conn) == "/"
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+      response = html_response(conn, 200)
+      assert response =~ "This image has been deleted"
+      refute response =~ "Done by:"
     end
 
     test "renders the deleted page for a moderator", %{conn: conn} do
@@ -140,7 +142,9 @@ defmodule PhilomenaWeb.ImageControllerTest do
 
       conn = get(conn, ~p"/images/#{image}")
 
-      assert html_response(conn, 200) =~ "This image has been deleted"
+      response = html_response(conn, 200)
+      assert response =~ "This image has been deleted"
+      assert response =~ "Done by:"
     end
 
     test "redirects a merged duplicate to its target", %{conn: conn} do
