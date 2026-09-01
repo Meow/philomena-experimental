@@ -11,13 +11,14 @@ defmodule Philomena.Users do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1]
+    only: [authorize: 3, permitted?: 3, verify_write_access: 1]
 
   alias Philomena.Multi
   alias Philomena.Repo
   alias Philomena.Tags
 
   alias Philomena.Attribution.Actor
+  alias Philomena.Images.Image
   alias PhilomenaQuery.Search
   alias Philomena.Users
 
@@ -31,7 +32,8 @@ defmodule Philomena.Users do
     Uploader,
     User,
     UserNotifier,
-    UserToken
+    UserToken,
+    ViewerPolicy
   }
 
   alias Philomena.{Forums, Forums.Forum}
@@ -54,6 +56,7 @@ defmodule Philomena.Users do
   alias Philomena.ModerationLogs.Paths
   alias Philomena.IndexWorker
   alias Philomena.Loader
+  alias Philomena.Tags.Tag
   alias Philomena.UserEraseWorker
   alias Philomena.UserRenameWorker
   alias Philomena.UserUnvoteWorker
@@ -261,6 +264,33 @@ defmodule Philomena.Users do
   end
 
   ## Public reads
+
+  @doc group: "Public reads"
+  @doc """
+  Returns the viewer-wide capabilities used by the application shell.
+
+  ## Example
+
+      iex> viewer_policy(actor)
+      %ViewerPolicy{
+        signed_in?: true,
+        can_batch_update_tags?: false,
+        can_hide_images?: false,
+        can_access_staff_settings?: false
+      }
+
+  """
+  @spec viewer_policy(Actor.t()) :: ViewerPolicy.t()
+  def viewer_policy(%Actor{user: user} = actor) do
+    write_access? = verify_write_access(actor) == :ok
+
+    %ViewerPolicy{
+      signed_in?: not is_nil(user),
+      can_batch_update_tags?: write_access? and permitted?(user, :batch_update, Tag),
+      can_hide_images?: permitted?(user, :hide, %Image{}),
+      can_access_staff_settings?: user && user.role != "user"
+    }
+  end
 
   @doc group: "Public reads"
   @doc """

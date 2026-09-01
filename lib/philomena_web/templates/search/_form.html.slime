@@ -185,5 +185,5 @@ h1 Search
     = if present?(@conn.params["hidden"]) do
       = hidden_input f, :hidden, name: "hidden", value: @conn.params["hidden"]
 
-    = if hides_images?(@conn) do
+    = if viewer_policy(@conn).can_hide_images? do
       = select f, :del, sort_hidden, class: "input input--separate-left", name: "del", autocomplete: "off", selected: @conn.params["del"]

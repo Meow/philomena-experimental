@@ -32,8 +32,8 @@ for line in ledger.read_text().splitlines():
         raise SystemExit(f"malformed ledger row: {line}")
     rows.append((fields[1], fields[2], fields[3], fields[4], fields[5], fields[6]))
 
-if len(actual) != 126:
-    raise SystemExit(f"expected 126 can?/3 occurrences, found {len(actual)}")
+if len(actual) != 112:
+    raise SystemExit(f"expected 112 can?/3 occurrences, found {len(actual)}")
 if len(rows) != len(actual):
     raise SystemExit(f"ledger has {len(rows)} rows for {len(actual)} occurrences")
 if [row[0] for row in rows] != [f"{n:03d}" for n in range(1, len(rows) + 1)]:

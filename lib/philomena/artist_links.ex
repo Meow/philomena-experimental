@@ -510,20 +510,20 @@ defmodule Philomena.ArtistLinks do
 
   @doc """
   Counts the number of artist links which are pending moderation action, or
-  nil if the user is not permitted to moderate artist links.
+  nil if the actor is not permitted to moderate artist links.
 
   ## Examples
 
-      iex> count_artist_links(normal_user)
+      iex> count_artist_links(actor)
       nil
 
-      iex> count_artist_links(admin_user)
+      iex> count_artist_links(admin_actor)
       0
 
   """
-  @spec count_artist_links(User.t() | nil) :: non_neg_integer() | nil
-  def count_artist_links(user) do
-    if authorize(user, :index, ArtistLink) == :ok do
+  @spec count_artist_links(Actor.t()) :: non_neg_integer() | nil
+  def count_artist_links(%Actor{} = actor) do
+    if authorize(actor, :index, ArtistLink) == :ok do
       ArtistLink
       |> where([ul], ul.aasm_state in ^["unverified", "link_verified"])
       |> Repo.aggregate(:count)

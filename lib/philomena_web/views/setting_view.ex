@@ -29,8 +29,8 @@ defmodule PhilomenaWeb.SettingView do
     ]
   end
 
-  def staff?(%{role: role}), do: role != "user"
-  def staff?(_), do: false
+  @doc "Whether the viewer may see the staff-only settings controls."
+  def staff_settings?(conn), do: viewer_policy(conn).can_access_staff_settings?
 
   def tab_class(conn, tab_id, opts \\ []) do
     if is_active_tab(conn, tab_id, opts), do: "", else: "hidden"

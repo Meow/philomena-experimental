@@ -6,12 +6,6 @@ defmodule PhilomenaWeb.DuplicateReportViewTest do
 
   alias PhilomenaWeb.DuplicateReportView
 
-  defp viewer_conn(conn, user) do
-    conn
-    |> Plug.Conn.assign(:current_user, user)
-    |> Plug.Conn.fetch_cookies()
-  end
-
   describe "comparison_url/2" do
     test "uses the public thumbnail path for viewers without hidden-image access", %{
       conn: conn

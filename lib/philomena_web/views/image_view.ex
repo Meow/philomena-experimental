@@ -226,7 +226,7 @@ defmodule PhilomenaWeb.ImageView do
   end
 
   def quick_tag(conn) do
-    if can?(conn, :batch_update, Tag) do
+    if viewer_policy(conn).can_batch_update_tags? do
       render(PhilomenaWeb.ImageView, "_quick_tag.html", conn: conn)
     end
   end
@@ -237,7 +237,7 @@ defmodule PhilomenaWeb.ImageView do
   def scaled_value(%{settings: %{scale_large_images: scale}}), do: scale
   def scaled_value(_user), do: "true"
 
-  def hides_images?(conn), do: can?(conn, :hide, %Philomena.Images.Image{})
+  def hides_images?(conn), do: viewer_policy(conn).can_hide_images?
 
   def random_button(conn, params) do
     render(PhilomenaWeb.ImageView, "_random_button.html", conn: conn, params: params)

@@ -4,7 +4,6 @@ defmodule PhilomenaWeb.LayoutView do
   import PhilomenaWeb.Config
   alias PhilomenaWeb.ImageView
   alias Philomena.Config
-  alias Philomena.Users.User
   alias Philomena.Users.Settings
   alias Plug.Conn
 
@@ -56,6 +55,7 @@ defmodule PhilomenaWeb.LayoutView do
     extra = Map.get(conn.assigns, :clientside_data, [])
     interactions = Map.get(conn.assigns, :interactions, [])
     user = conn.assigns.current_user
+    policy = viewer_policy(conn)
     filter = conn.assigns.current_filter
 
     data = [
@@ -68,7 +68,7 @@ defmodule PhilomenaWeb.LayoutView do
       user_name: if(user, do: user.name, else: nil),
       user_slug: if(user, do: user.slug, else: nil),
       user_role: if(user, do: user.role, else: nil),
-      user_is_signed_in: if(user, do: "true", else: "false"),
+      user_is_signed_in: to_string(policy.signed_in?),
       user_can_edit_filter: if(user, do: filter.user_id == user.id, else: "false") |> to_string(),
       spoiler_type: if(user, do: user.settings.spoiler_type, else: "static"),
       watched_tag_list: JSON.encode!(if(user, do: user.watched_tag_ids, else: [])),
@@ -114,45 +114,25 @@ defmodule PhilomenaWeb.LayoutView do
       !is_nil(conn.assigns[:image]) and conn.assigns.image.__meta__.state == :loaded and
         is_list(conn.assigns.image.tags)
 
-  def staff?(conn) do
-    case conn.assigns.current_user do
-      %User{role: role} -> role != "user"
-      _ -> false
-    end
+  @doc "Returns the application-owned navigation result for this request."
+  def admin_navigation(conn) do
+    conn.assigns.admin_navigation
   end
 
-  def hides_images?(conn),
-    do: can?(conn, :hide, %Philomena.Images.Image{})
-
-  def manages_site_notices?(conn),
-    do: can?(conn, :index, Philomena.SiteNotices.SiteNotice)
-
-  def manages_tags?(conn),
-    do: can?(conn, :edit, %Philomena.Tags.Tag{})
-
-  def manages_users?(conn),
-    do: can?(conn, :index, Philomena.Users.User)
-
-  def manages_forums?(conn),
-    do: can?(conn, :edit, Philomena.Forums.Forum)
-
-  def manages_ads?(conn),
-    do: can?(conn, :index, Philomena.Adverts.Advert)
-
-  def manages_badges?(conn),
-    do: can?(conn, :index, Philomena.Badges.Badge)
-
-  def manages_static_pages?(conn),
-    do: can?(conn, :edit, %Philomena.StaticPages.StaticPage{})
-
-  def manages_mod_notes?(conn),
-    do: can?(conn, :index, Philomena.ModNotes.ModNote)
-
-  def manages_bans?(conn),
-    do: can?(conn, :create, Philomena.Bans.User)
-
-  def can_see_moderation_log?(conn),
-    do: can?(conn, :index, Philomena.ModerationLogs.ModerationLog)
+  # Compatibility adapters for callers outside the phase-2 shell. They read
+  # application results only; policy is assembled by the owning contexts.
+  def staff?(conn), do: admin_navigation(conn).show_admin_menu?
+  def hides_images?(conn), do: viewer_policy(conn).can_hide_images?
+  def manages_site_notices?(conn), do: admin_navigation(conn).can_manage_site_notices?
+  def manages_tags?(conn), do: admin_navigation(conn).can_manage_tags?
+  def manages_users?(conn), do: admin_navigation(conn).can_manage_users?
+  def manages_forums?(conn), do: admin_navigation(conn).can_manage_forums?
+  def manages_ads?(conn), do: admin_navigation(conn).can_manage_adverts?
+  def manages_badges?(conn), do: admin_navigation(conn).can_manage_badges?
+  def manages_static_pages?(conn), do: admin_navigation(conn).can_manage_static_pages?
+  def manages_mod_notes?(conn), do: admin_navigation(conn).can_manage_mod_notes?
+  def manages_bans?(conn), do: admin_navigation(conn).can_manage_bans?
+  def can_see_moderation_log?(conn), do: admin_navigation(conn).can_view_moderation_log?
 
   def viewport_meta_tag(conn) do
     ua = get_user_agent(conn)

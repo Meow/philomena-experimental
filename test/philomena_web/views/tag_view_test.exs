@@ -1,18 +1,18 @@
 defmodule PhilomenaWeb.TagViewTest do
   use PhilomenaWeb.ConnCase, async: true
 
-  alias Philomena.Tags.Tag
-  alias Philomena.Users.User
-  alias PhilomenaWeb.TagView
+  import Philomena.UsersFixtures
 
-  defp viewer_conn(conn, user), do: Plug.Conn.assign(conn, :current_user, user)
+  alias Philomena.Tags.Tag
+  alias PhilomenaWeb.TagView
 
   defp tag_fixture do
     alias_tag = %Tag{id: 2, slug: "artist-alias", name: "artist:alias"}
+    artist = confirmed_user_fixture(name: "Hidden Artist")
 
     hidden_link = %Philomena.ArtistLinks.ArtistLink{
       id: 3,
-      user: %User{id: 4, slug: "hidden-artist", name: "Hidden Artist"},
+      user: artist,
       uri: "https://example.com/hidden-artist",
       public: false
     }
@@ -55,7 +55,7 @@ defmodule PhilomenaWeb.TagViewTest do
     test "regular viewers do not receive tag-management, hidden-link, or DNP controls", %{
       conn: conn
     } do
-      response = render_tag_info(conn, %User{role: "user"}, tag_fixture())
+      response = render_tag_info(conn, confirmed_user_fixture(), tag_fixture())
 
       refute response =~ "Edit details"
       refute response =~ "Usage"
@@ -69,7 +69,7 @@ defmodule PhilomenaWeb.TagViewTest do
     test "plain moderators receive tag-management, hidden-link, and DNP controls", %{
       conn: conn
     } do
-      response = render_tag_info(conn, %User{role: "moderator"}, tag_fixture())
+      response = render_tag_info(conn, moderator_user_fixture(), tag_fixture())
 
       assert response =~ "Edit details"
       assert response =~ "Usage"
@@ -81,7 +81,7 @@ defmodule PhilomenaWeb.TagViewTest do
     end
 
     test "Tag-admin role maps enable alias-management links", %{conn: conn} do
-      user = %User{role: "moderator", role_map: %{"Tag" => %{"admin" => true}}}
+      user = role_user_fixture("moderator", [{"admin", "Tag"}])
       response = render_tag_info(conn, user, tag_fixture())
 
       assert response =~ ~p"/tags/artist-alias/alias/edit"

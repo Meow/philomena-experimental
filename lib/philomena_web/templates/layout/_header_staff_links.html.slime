@@ -1,82 +1,83 @@
+- navigation = admin_navigation(@conn)
 .flex.flex--centered.header--secondary__admin-links.stretched-mobile-links.js-staff-action
-  = if staff?(@conn) do
+  = if navigation.show_admin_menu? do
     .dropdown.hide-mobile
       a.header__link title="Admin"
         ' A
         i.fa.fa-caret-down
 
       .dropdown__content.js-burger-links
-        = if manages_site_notices?(@conn) do
+        = if navigation.can_manage_site_notices? do
           = link to: ~p"/admin/site_notices", class: "header__link" do
             i.fa.fa-fw.fa-info-circle>
             ' Site Notices
 
-        = if manages_users?(@conn) do
+        = if navigation.can_manage_users? do
           = link to: ~p"/admin/users", class: "header__link" do
             i.fa.fa-fw.fa-users>
             ' Users
 
-        = if manages_forums?(@conn) do
+        = if navigation.can_manage_forums? do
           = link to: ~p"/admin/forums", class: "header__link" do
             i.fa.fa-fw.fa-paragraph>
             ' Forums
 
-        = if manages_ads?(@conn) do
+        = if navigation.can_manage_adverts? do
           = link to: ~p"/admin/adverts", class: "header__link" do
             i.fa.fa-fw.fa-shopping-bag>
             ' Adverts
 
-        = if manages_badges?(@conn) do
+        = if navigation.can_manage_badges? do
           = link to: ~p"/admin/badges", class: "header__link" do
             i.fa.fa-fw.fa-trophy>
             ' Badges
 
-        = if manages_static_pages?(@conn) do
+        = if navigation.can_manage_static_pages? do
           = link to: ~p"/pages", class: "header__link" do
             i.fa.fa-fw.fa-sticky-note>
             ' Pages
 
-        = if manages_mod_notes?(@conn) do
+        = if navigation.can_manage_mod_notes? do
           = link to: ~p"/admin/mod_notes", class: "header__link" do
             i.fa.fa-fw.fa-clipboard>
             ' Mod Notes
 
-        = if can_see_moderation_log?(@conn) do
+        = if navigation.can_view_moderation_log? do
           = link to: ~p"/moderation_logs", class: "header__link" do
             i.fa.fa-fw.fa-list-alt>
             ' Mod Logs
 
-  = if @pending_approval_count do
+  = if navigation.pending_approval_count do
     = link to: ~p"/admin/approvals", class: "header__link", title: "Approval Queue" do
       ' Q
       span.header__counter__admin
-        = @pending_approval_count
+        = navigation.pending_approval_count
 
-  = if @duplicate_report_count do
+  = if navigation.duplicate_report_count do
     = link to: ~p"/duplicate_reports", class: "header__link", title: "Duplicates" do
       ' D
       span.header__counter__admin
-        = @duplicate_report_count
+        = navigation.duplicate_report_count
 
-  = if @report_count do
+  = if navigation.report_count do
     = link to: ~p"/admin/reports", class: "header__link", title: "Reports" do
       ' R
       span.header__counter__admin
-        = @report_count
+        = navigation.report_count
 
-  = if @artist_link_count do
+  = if navigation.artist_link_count do
     = link to: ~p"/admin/artist_links", class: "header__link", title: "Artist Links" do
       ' L
       span.header__counter__admin
-        = @artist_link_count
+        = navigation.artist_link_count
 
-  = if @dnp_entry_count do
+  = if navigation.dnp_entry_count do
     = link to: ~p"/admin/dnp_entries", class: "header__link", title: "DNP Requests" do
       ' S
       span.header__counter__admin
-        = @dnp_entry_count
+        = navigation.dnp_entry_count
 
-  = if manages_bans?(@conn) do
+  = if navigation.can_manage_bans? do
     .dropdown.hide-mobile
       a.header__link title="Bans"
         ' B

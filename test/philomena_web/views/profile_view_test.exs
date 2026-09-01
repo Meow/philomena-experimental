@@ -1,13 +1,10 @@
 defmodule PhilomenaWeb.ProfileViewTest do
   use PhilomenaWeb.ConnCase, async: true
 
-  alias Philomena.ArtistLinks.ArtistLink
-  alias Philomena.Users.User
-  alias PhilomenaWeb.ProfileView
+  import Philomena.UsersFixtures
 
-  defp viewer_conn(conn, user) do
-    Plug.Conn.assign(conn, :current_user, user)
-  end
+  alias Philomena.ArtistLinks.ArtistLink
+  alias PhilomenaWeb.ProfileView
 
   defp visibility(conn, user, target) do
     conn = viewer_conn(conn, user)
@@ -25,7 +22,7 @@ defmodule PhilomenaWeb.ProfileViewTest do
 
   describe "profile policy helpers" do
     setup do
-      {:ok, target: %User{id: 42}}
+      {:ok, target: confirmed_user_fixture()}
     end
 
     test "anonymous and regular viewers cannot see staff profile tools", %{
@@ -43,14 +40,14 @@ defmodule PhilomenaWeb.ProfileViewTest do
       }
 
       assert visibility(conn, nil, target) == expected
-      assert visibility(conn, %User{id: 7, role: "user"}, target) == expected
+      assert visibility(conn, confirmed_user_fixture(), target) == expected
     end
 
     test "assistants do not receive moderator-only profile disclosures", %{
       conn: conn,
       target: target
     } do
-      assert visibility(conn, %User{id: 8, role: "assistant"}, target) == %{
+      assert visibility(conn, assistant_user_fixture(), target) == %{
                awards: false,
                links: false,
                ban: false,
@@ -65,7 +62,7 @@ defmodule PhilomenaWeb.ProfileViewTest do
       conn: conn,
       target: target
     } do
-      assert visibility(conn, %User{id: 9, role: "moderator"}, target) == %{
+      assert visibility(conn, moderator_user_fixture(), target) == %{
                awards: true,
                links: true,
                ban: true,
@@ -80,7 +77,7 @@ defmodule PhilomenaWeb.ProfileViewTest do
       conn: conn,
       target: target
     } do
-      assert visibility(conn, %User{id: 10, role: "admin"}, target) == %{
+      assert visibility(conn, admin_user_fixture(), target) == %{
                awards: true,
                links: true,
                ban: true,
@@ -94,7 +91,7 @@ defmodule PhilomenaWeb.ProfileViewTest do
 
   describe "should_see_link?/3" do
     setup do
-      {:ok, owner: %User{id: 42}, other: %User{id: 43}}
+      {:ok, owner: confirmed_user_fixture(), other: confirmed_user_fixture()}
     end
 
     test "public links are visible to everyone", %{conn: conn, owner: owner, other: other} do
@@ -103,7 +100,7 @@ defmodule PhilomenaWeb.ProfileViewTest do
       assert ProfileView.should_see_link?(viewer_conn(conn, nil), owner, link)
 
       assert ProfileView.should_see_link?(
-               viewer_conn(conn, %User{id: 7, role: "user"}),
+               viewer_conn(conn, other),
                other,
                link
              )
@@ -123,13 +120,13 @@ defmodule PhilomenaWeb.ProfileViewTest do
       link = %ArtistLink{user_id: owner.id, public: false}
 
       assert ProfileView.should_see_link?(
-               viewer_conn(conn, %User{id: 9, role: "moderator"}),
+               viewer_conn(conn, moderator_user_fixture()),
                owner,
                link
              )
 
       refute ProfileView.should_see_link?(
-               viewer_conn(conn, %User{id: 7, role: "user"}),
+               viewer_conn(conn, confirmed_user_fixture()),
                other,
                link
              )

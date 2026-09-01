@@ -4,20 +4,8 @@ defmodule PhilomenaWeb.ImageViewTest do
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
 
-  alias Philomena.Filters.ImageFilter
   alias Philomena.Repo
   alias PhilomenaWeb.ImageView
-
-  defp viewer_conn(conn, user) do
-    conn
-    |> Plug.Conn.assign(:current_user, user)
-    |> Plug.Conn.assign(:image_filter, %ImageFilter{
-      query: %{match_all: %{}},
-      display_query: %{match_none: %{}},
-      display_tag_ids: []
-    })
-    |> Plug.Conn.fetch_cookies()
-  end
 
   describe "hidden-image disclosure" do
     setup _context do

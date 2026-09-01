@@ -10,6 +10,7 @@ defmodule PhilomenaWeb.UserAttributionPlug do
 
   alias Philomena.Attribution.Actor
   alias Philomena.Bans
+  alias Philomena.Users
   alias Plug.Conn
 
   @doc false
@@ -35,5 +36,6 @@ defmodule PhilomenaWeb.UserAttributionPlug do
     conn
     |> Conn.assign(:actor, actor)
     |> Conn.assign(:current_ban, ban)
+    |> Conn.assign(:viewer_policy, Users.viewer_policy(actor))
   end
 end

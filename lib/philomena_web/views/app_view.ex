@@ -70,6 +70,13 @@ defmodule PhilomenaWeb.AppView do
     end
   end
 
+  @doc "Returns the actor-scoped viewer policy assigned by the application shell."
+  def viewer_policy(conn) do
+    conn.assigns.viewer_policy
+  end
+
+  # Compatibility adapter for policy sites that are migrated in later phases.
+  # New shell code uses viewer_policy/1 or an application-owned result.
   def can?(conn, action, model) do
     Canada.Can.can?(conn.assigns.current_user, action, model)
   end

@@ -1,14 +1,8 @@
 defmodule PhilomenaWeb.LayoutViewTest do
   use PhilomenaWeb.ConnCase, async: true
 
-  alias Philomena.Users.User
+  import Philomena.UsersFixtures
   alias PhilomenaWeb.LayoutView
-
-  defp viewer_conn(conn, user) do
-    conn
-    |> Plug.Conn.assign(:current_user, user)
-    |> Plug.Conn.fetch_cookies()
-  end
 
   defp staff_links(conn, user) do
     Phoenix.View.render_to_string(
@@ -16,12 +10,7 @@ defmodule PhilomenaWeb.LayoutViewTest do
       "_header_staff_links.html",
       %{
         conn: viewer_conn(conn, user),
-        current_user: user,
-        pending_approval_count: nil,
-        duplicate_report_count: nil,
-        report_count: nil,
-        artist_link_count: nil,
-        dnp_entry_count: nil
+        current_user: user
       }
     )
   end
@@ -60,12 +49,14 @@ defmodule PhilomenaWeb.LayoutViewTest do
         moderation_log: false
       }
 
+      user = user_fixture()
       assert tool_visibility(conn, nil) == expected
-      assert tool_visibility(conn, %User{role: "user"}) == expected
+      assert tool_visibility(conn, user) == expected
     end
 
     test "a plain moderator sees core moderation tools only", %{conn: conn} do
-      visibility = tool_visibility(conn, %User{role: "moderator"})
+      moderator = moderator_user_fixture()
+      visibility = tool_visibility(conn, moderator)
 
       assert visibility == %{
                hidden_images: true,
@@ -83,17 +74,15 @@ defmodule PhilomenaWeb.LayoutViewTest do
     end
 
     test "resource role-map grants expose privileged staff tools", %{conn: conn} do
-      privileged_moderator = %User{
-        role: "moderator",
-        role_map: %{
-          "SiteNotice" => %{"admin" => true},
-          "Tag" => %{"admin" => true},
-          "User" => %{"moderator" => true},
-          "Advert" => %{"admin" => true},
-          "Badge" => %{"admin" => true},
-          "StaticPage" => %{"admin" => true}
-        }
-      }
+      privileged_moderator =
+        role_user_fixture("moderator", [
+          {"admin", "SiteNotice"},
+          {"admin", "Tag"},
+          {"moderator", "User"},
+          {"admin", "Advert"},
+          {"admin", "Badge"},
+          {"admin", "StaticPage"}
+        ])
 
       assert tool_visibility(conn, privileged_moderator) == %{
                hidden_images: true,
@@ -111,7 +100,9 @@ defmodule PhilomenaWeb.LayoutViewTest do
     end
 
     test "admins see every staff tool", %{conn: conn} do
-      assert tool_visibility(conn, %User{role: "admin"}) == %{
+      admin = admin_user_fixture()
+
+      assert tool_visibility(conn, admin) == %{
                hidden_images: true,
                site_notices: true,
                tags: true,
@@ -129,7 +120,8 @@ defmodule PhilomenaWeb.LayoutViewTest do
 
   describe "_header_staff_links.html" do
     test "renders only the tools granted to a plain moderator", %{conn: conn} do
-      response = staff_links(conn, %User{role: "moderator"})
+      moderator = moderator_user_fixture()
+      response = staff_links(conn, moderator)
 
       assert response =~ "Users"
       assert response =~ "Mod Notes"
@@ -146,7 +138,8 @@ defmodule PhilomenaWeb.LayoutViewTest do
     end
 
     test "renders all resource-management links for an admin", %{conn: conn} do
-      response = staff_links(conn, %User{role: "admin"})
+      admin = admin_user_fixture()
+      response = staff_links(conn, admin)
 
       for label <- [
             "Site Notices",

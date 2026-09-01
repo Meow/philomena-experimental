@@ -33,7 +33,7 @@ defmodule Philomena.ContextBoundaryCheck do
   # callers migrate to context-owned results. Keep this allowlist anchored to
   # the exact source line so a new web-layer Canada call cannot hide behind it.
   @allowed_web_canada_calls MapSet.new([
-                              {"lib/philomena_web/views/app_view.ex", 74}
+                              {"lib/philomena_web/views/app_view.ex", 81}
                             ])
 
   # These are the phase-0 presentation-policy sites. They are temporary
@@ -49,8 +49,6 @@ defmodule Philomena.ContextBoundaryCheck do
                                        {"lib/philomena_web/views/api/json/profile_view.ex", 37},
                                        {"lib/philomena_web/views/admin/report_view.ex", 25},
                                        {"lib/philomena_web/views/admin/report_view.ex", 26},
-                                       {"lib/philomena_web/templates/layout/_header.html.slime",
-                                        137},
                                        {"lib/philomena_web/templates/message/_message.html.slime",
                                         27},
                                        {"lib/philomena_web/templates/admin/user_ban/index.html.slime",

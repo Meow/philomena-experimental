@@ -38,7 +38,7 @@ header.header
       = if present?(@conn.params["hidden"]) do
         input type="hidden" name="hidden" value=@conn.params["hidden"]
 
-      = if hides_images?(@conn) do
+      = if viewer_policy(@conn).can_hide_images? do
         = select f, :del, [{"-D", ""}, {"+D", 1}, {"*D", "deleted"}, {"DO", "only"}], name: "del", class: "input header__input js-staff-action", autocomplete: "off"
 
       button.header__search__button type="submit" title="Search"
@@ -134,5 +134,5 @@ header.header
 nav.header.header--secondary
   .flex.flex--centered.flex--spaced-out.flex--wrap
     = render PhilomenaWeb.LayoutView, "_header_navigation.html", assigns
-    = if !is_nil(@current_user) and @current_user.role != "user" do
+    = if admin_navigation(@conn).show_admin_menu? do
       = render PhilomenaWeb.LayoutView, "_header_staff_links.html", assigns

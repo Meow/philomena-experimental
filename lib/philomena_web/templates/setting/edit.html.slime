@@ -127,7 +127,7 @@ h1 Content Settings
             => label fs, :scale_large_images
             = error_tag fs, :scale_large_images
 
-          - delay_home_images = if staff?(@conn.assigns.current_user), do: :staff_delay_home_images, else: :delay_home_images
+          - delay_home_images = if staff_settings?(@conn), do: :staff_delay_home_images, else: :delay_home_images
           = field_with_help( \
             "Hide images without thumbnails on the homepage and for the first 3 minutes after upload (to allow for last-minute tag changes)",
             [ \
@@ -341,7 +341,7 @@ h1 Content Settings
               :autocomplete_properties_hidden,
               "Hide properties in auto-completion"
 
-      = if staff?(@conn.assigns.current_user) do
+      = if staff_settings?(@conn) do
         = field_with_help( \
           "Hide most of the staff tools (e.g. IPs, anon names) making your site " <> \
           "appear as if you weren't staff, this is useful when browsing in public.",
