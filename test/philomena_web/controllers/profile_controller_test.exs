@@ -8,6 +8,8 @@ defmodule PhilomenaWeb.ProfileControllerTest do
   import Philomena.ImagesFixtures
   import Philomena.PostsFixtures
   import Philomena.TopicsFixtures
+  import Philomena.UserFingerprintsFixtures
+  import Philomena.UserIpsFixtures
   import Philomena.UsersFixtures
 
   alias PhilomenaQuery.Search
@@ -49,6 +51,149 @@ defmodule PhilomenaWeb.ProfileControllerTest do
 
       assert response =~ "Test Profile User&#39;s profile - Derpibooru"
       assert response =~ "Source changes"
+    end
+
+    test "renders profile edit affordances by ownership and staff role", %{conn: conn} do
+      %{conn: conn, user: owner} = register_and_log_in_user(%{conn: conn})
+
+      owner_response = html_response(get(conn, ~p"/profiles/#{owner}"), 200)
+
+      assert owner_response =~ "Edit Personal Title"
+      assert owner_response =~ ~p"/profiles/#{owner}/description/edit"
+
+      other = confirmed_user_fixture()
+      other_response = html_response(get(conn, ~p"/profiles/#{other}"), 200)
+
+      refute other_response =~ ~p"/profiles/#{other}/description/edit"
+
+      moderator_response =
+        html_response(
+          get(log_in_user(conn, moderator_user_fixture()), ~p"/profiles/#{other}"),
+          200
+        )
+
+      assert moderator_response =~ "Edit Personal Title"
+      assert moderator_response =~ ~p"/profiles/#{other}/description/edit"
+    end
+
+    test "renders the profile admin controls according to role abilities", %{conn: conn} do
+      target = confirmed_user_fixture(%{name: "Admin Target"})
+
+      moderator_response =
+        html_response(
+          get(log_in_user(conn, moderator_user_fixture()), ~p"/profiles/#{target}"),
+          200
+        )
+
+      refute moderator_response =~ ~p"/admin/donations/user/#{target}"
+      refute moderator_response =~ ~p"/admin/users/#{target}/edit"
+      assert moderator_response =~ ~p"/profiles/#{target}/artist_links/new"
+      assert moderator_response =~ ~p"/admin/user_bans/new?#{[user_id: target.id]}"
+      assert moderator_response =~ ~p"/admin/users/#{target}/api_key"
+      assert moderator_response =~ ~p"/admin/users/#{target}/verification"
+      assert moderator_response =~ ~p"/admin/users/#{target}/votes"
+      assert moderator_response =~ ~p"/profiles/#{target}/tag_changes/revert"
+
+      %{conn: role_conn} = register_and_log_in_user_role_moderator(%{conn: conn})
+      role_moderator_response = html_response(get(role_conn, ~p"/profiles/#{target}"), 200)
+
+      assert role_moderator_response =~ ~p"/admin/users/#{target}/edit"
+
+      admin_response =
+        html_response(
+          get(log_in_user(conn, admin_user_fixture()), ~p"/profiles/#{target}"),
+          200
+        )
+
+      assert admin_response =~ ~p"/admin/donations/user/#{target}"
+      assert admin_response =~ ~p"/admin/users/#{target}/edit"
+    end
+
+    test "discloses profile moderation metadata only to staff", %{conn: conn} do
+      target = confirmed_user_fixture()
+      user_ip_fixture(target, "198.51.100.23")
+      user_fingerprint_fixture(target, "cabcdef1234")
+
+      anonymous_response = html_response(get(conn, ~p"/profiles/#{target}"), 200)
+
+      refute anonymous_response =~ "Account created"
+      refute anonymous_response =~ "198.51.100.23"
+      refute anonymous_response =~ "cabcdef"
+
+      regular_response =
+        html_response(
+          get(log_in_user(conn, confirmed_user_fixture()), ~p"/profiles/#{target}"),
+          200
+        )
+
+      refute regular_response =~ "Account created"
+      refute regular_response =~ "198.51.100.23"
+      refute regular_response =~ "cabcdef"
+
+      assistant_response =
+        html_response(
+          get(log_in_user(conn, assistant_user_fixture()), ~p"/profiles/#{target}"),
+          200
+        )
+
+      refute assistant_response =~ "Account created"
+      refute assistant_response =~ "198.51.100.23"
+      refute assistant_response =~ "cabcdef"
+
+      moderator_response =
+        html_response(
+          get(log_in_user(conn, moderator_user_fixture()), ~p"/profiles/#{target}"),
+          200
+        )
+
+      assert moderator_response =~ "Account created"
+      assert moderator_response =~ "198.51.100.23"
+      assert moderator_response =~ "cabcdef"
+    end
+
+    test "renders ban history to the profile owner and ban-index staff", %{conn: conn} do
+      target = banned_user_fixture()
+
+      owner_response =
+        html_response(get(log_in_user(conn, target), ~p"/profiles/#{target}"), 200)
+
+      assert owner_response =~ "Ban History"
+
+      other_response =
+        html_response(
+          get(log_in_user(conn, confirmed_user_fixture()), ~p"/profiles/#{target}"),
+          200
+        )
+
+      refute other_response =~ "Ban History"
+
+      moderator_response =
+        html_response(
+          get(log_in_user(conn, moderator_user_fixture()), ~p"/profiles/#{target}"),
+          200
+        )
+
+      assert moderator_response =~ "Ban History"
+    end
+
+    test "omits recent comments whose images are hidden from the viewer", %{conn: conn} do
+      target = confirmed_user_fixture()
+      visible_image = image_fixture()
+      hidden_image = image_fixture()
+      _visible = comment_fixture(visible_image, target, %{"body" => "Visible profile comment"})
+      _hidden = comment_fixture(hidden_image, target, %{"body" => "Hidden profile comment"})
+
+      hidden_image
+      |> Ecto.Changeset.change(hidden_from_users: true)
+      |> Repo.update!()
+
+      SearchHelpers.reindex_all!(Image)
+      SearchHelpers.reindex_all!(Comment)
+
+      response = html_response(get(conn, ~p"/profiles/#{target}"), 200)
+
+      assert response =~ "Visible profile comment"
+      refute response =~ "Hidden profile comment"
     end
 
     test "shows the source-history link to moderators", %{conn: conn} do
