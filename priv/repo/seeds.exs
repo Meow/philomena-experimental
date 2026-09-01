@@ -53,13 +53,13 @@ for filter_def <- resources["system_filters"] do
 
   %Filter{system: true}
   |> Filter.changeset(
+    nil,
     %{
       name: filter_def["name"],
       description: filter_def["description"],
       spoilered_tag_list: spoilered_tag_list,
       hidden_tag_list: hidden_tag_list
-    },
-    nil
+    }
   )
   |> Repo.insert(on_conflict: :nothing)
   |> case do
@@ -88,7 +88,12 @@ user_def = %{
   "role" => "admin"
 }
 
-{:ok, user} = Users.register_user(user_def)
+initial_actor = %Philomena.Attribution.Actor{
+  ip: {127, 0, 0, 1},
+  fingerprint: "d123456789abcde"
+}
+
+{:ok, user} = Users.create_registration(initial_actor, user_def)
 
 user
 |> Repo.preload([:roles])

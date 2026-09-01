@@ -26,10 +26,15 @@ resources =
   |> File.read!()
   |> JSON.decode!()
 
+initial_actor = %Philomena.Attribution.Actor{
+  ip: {127, 0, 0, 1},
+  fingerprint: "d123456789abcde"
+}
+
 IO.puts("---- Generating users")
 
 for user_def <- resources["users"] do
-  {:ok, user} = Users.register_user(user_def)
+  {:ok, user} = Users.create_registration(initial_actor, user_def)
 
   user
   |> Repo.preload([:roles])
@@ -66,9 +71,8 @@ for image_def <- resources["remote_images"] do
 
   File.write!(file, body)
 
-  upload = %Plug.Upload{
+  upload = %PhilomenaMedia.Upload{
     path: file,
-    content_type: "application/octet-stream",
     filename: "fixtures-#{now}"
   }
 
@@ -76,11 +80,12 @@ for image_def <- resources["remote_images"] do
 
   Images.create_image(
     pleb_actor,
-    Map.merge(image_def, %{"image" => upload})
+    image_def,
+    upload
   )
   |> case do
     {:ok, %{image: image}} ->
-      Images.approve_image(admin_actor, image.id)
+      Images.create_image_approve(admin_actor, image.id)
 
       IO.puts("Created image ##{image.id}")
 
@@ -94,16 +99,16 @@ end
 IO.puts("---- Generating comments for image #1")
 
 for comment_body <- resources["comments"] do
-  image = Images.get_image!(1)
+  image_id = 1
 
   Comments.create_comment(
     pleb_actor,
-    image.id,
+    image_id,
     %{"body" => comment_body}
   )
   |> case do
     {:ok, %Comment{} = comment} ->
-      Comments.approve_comment(admin_actor, image.id, comment.id)
+      Comments.create_comment_approve(admin_actor, image_id, comment.id)
 
     {:error, :comment, changeset, _so_far} ->
       IO.inspect(changeset.errors)
@@ -141,7 +146,7 @@ for %{"forum" => forum_name, "topics" => topics} <- resources["forum_posts"] do
           )
           |> case do
             {:ok, post} ->
-              Posts.approve_post(
+              Posts.create_post_approve(
                 admin_actor,
                 forum.short_name,
                 topic.slug,
