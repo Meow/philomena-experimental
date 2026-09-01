@@ -2,6 +2,10 @@ defmodule PhilomenaWeb.Admin.ApprovalControllerTest do
   use PhilomenaWeb.ConnCase, async: true
 
   import Philomena.ImagesFixtures
+  import Philomena.UsersFixtures
+
+  alias Philomena.Repo
+  alias Philomena.Roles.Role
 
   describe "GET /admin/approvals authorization" do
     test "redirects anonymous users to login", %{conn: conn} do
@@ -13,6 +17,13 @@ defmodule PhilomenaWeb.Admin.ApprovalControllerTest do
     test "rejects a regular user", %{conn: conn} do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
       conn = get(conn, ~p"/admin/approvals")
+      assert redirected_to(conn) == "/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
+    end
+
+    test "rejects an assistant without the Image role-map grant", %{conn: conn} do
+      assistant = assistant_user_fixture()
+      conn = log_in_user(conn, assistant) |> get(~p"/admin/approvals")
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
     end
@@ -54,6 +65,19 @@ defmodule PhilomenaWeb.Admin.ApprovalControllerTest do
       response = html_response(conn, 200)
       assert response =~ ~p"/images/#{unapproved}"
       refute response =~ ~s(/images/#{approved.id}")
+    end
+
+    test "renders approval and delete actions for an Image assistant", %{conn: conn} do
+      assistant = assistant_user_fixture()
+      role = Repo.insert!(%Role{name: "moderator", resource_type: "Image"})
+      Repo.insert_all("users_roles", [%{user_id: assistant.id, role_id: role.id}])
+      image = image_fixture(approved: false)
+
+      conn = log_in_user(conn, assistant) |> get(~p"/admin/approvals")
+      response = html_response(conn, 200)
+
+      assert response =~ ~p"/images/#{image}/approve"
+      assert response =~ ~p"/images/#{image}/delete"
     end
   end
 end

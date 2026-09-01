@@ -74,6 +74,49 @@ defmodule PhilomenaWeb.Admin.UserControllerTest do
       response = html_response(conn, 200)
       assert response =~ "Imbalanced parentheses."
     end
+
+    test "renders email and row actions for an admin", %{conn: conn} do
+      target = confirmed_user_fixture(%{name: "admin-list-target", email: unique_user_email()})
+      SearchHelpers.reindex_all!(User)
+
+      conn = get(conn, ~p"/admin/users?#{[uq: [query: "name:#{target.name}"]]}")
+      response = html_response(conn, 200)
+
+      assert response =~ target.email
+      assert response =~ ~p"/admin/users/#{target}/edit"
+      assert response =~ ~p"/admin/user_bans/new?user_id=#{target.id}"
+      assert response =~ ~p"/profiles/#{target}/artist_links/new"
+    end
+
+    test "a plain moderator sees no email, edit, or artist-link action", %{conn: conn} do
+      target = confirmed_user_fixture(%{name: "admin-list-target", email: unique_user_email()})
+      SearchHelpers.reindex_all!(User)
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+
+      conn = get(conn, ~p"/admin/users?#{[uq: [query: "name:#{target.name}"]]}")
+      response = html_response(conn, 200)
+
+      refute response =~ target.email
+      refute response =~ ~p"/admin/users/#{target}/edit"
+      assert response =~ ~p"/admin/user_bans/new?user_id=#{target.id}"
+      refute response =~ ~p"/profiles/#{target}/artist_links/new"
+    end
+
+    test "a User-moderator role-map grant exposes email and edit but not artist links", %{
+      conn: conn
+    } do
+      target = confirmed_user_fixture(%{name: "admin-list-target", email: unique_user_email()})
+      SearchHelpers.reindex_all!(User)
+      %{conn: conn} = register_and_log_in_user_role_moderator(%{conn: conn})
+
+      conn = get(conn, ~p"/admin/users?#{[uq: [query: "name:#{target.name}"]]}")
+      response = html_response(conn, 200)
+
+      assert response =~ target.email
+      assert response =~ ~p"/admin/users/#{target}/edit"
+      assert response =~ ~p"/admin/user_bans/new?user_id=#{target.id}"
+      refute response =~ ~p"/profiles/#{target}/artist_links/new"
+    end
   end
 
   describe "GET /admin/users/:id/edit (edit)" do

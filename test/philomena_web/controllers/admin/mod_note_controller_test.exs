@@ -80,6 +80,39 @@ defmodule PhilomenaWeb.Admin.ModNoteControllerTest do
       assert response =~ "Orphaned note body"
       assert response =~ "Item permanently deleted"
     end
+
+    test "renders edit and delete actions for the note's moderator", %{conn: conn} do
+      %{conn: conn, user: moderator} = register_and_log_in_moderator(%{conn: conn})
+      note = mod_note_fixture(moderator)
+
+      conn = get(conn, ~p"/admin/mod_notes")
+      response = html_response(conn, 200)
+
+      assert response =~ ~p"/admin/mod_notes/#{note}/edit"
+      assert response =~ ~p"/admin/mod_notes/#{note}"
+    end
+
+    test "renders edit and delete actions for an assistant's own note", %{conn: conn} do
+      assistant = assistant_user_fixture()
+      note = mod_note_fixture(assistant)
+
+      conn = log_in_user(conn, assistant) |> get(~p"/admin/mod_notes")
+      response = html_response(conn, 200)
+
+      assert response =~ ~p"/admin/mod_notes/#{note}/edit"
+      assert response =~ ~p"/admin/mod_notes/#{note}"
+    end
+
+    test "does not render actions for another moderator's note", %{conn: conn} do
+      note = mod_note_fixture(admin_user_fixture())
+      %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
+
+      conn = get(conn, ~p"/admin/mod_notes")
+      response = html_response(conn, 200)
+
+      refute response =~ ~p"/admin/mod_notes/#{note}/edit"
+      refute response =~ ~p"/admin/mod_notes/#{note}"
+    end
   end
 
   describe "GET /admin/mod_notes/new" do
