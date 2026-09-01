@@ -4,12 +4,10 @@ This is the implementation guide for `Philomena` domain contexts and the
 schemas, query modules, controllers, fixtures, and tests that touch their public
 boundary. It turns recurring choices into defaults for future work.
 
-Read this together with the loading and authorization contract in
-[`plans/context-refactor/all-contexts.md`](plans/context-refactor/all-contexts.md)
-and the test rules in [`test/CONVENTIONS.md`](test/CONVENTIONS.md). When older
-code conflicts with this guide, do not copy the older pattern into new work.
-Move the code being changed toward this style without expanding the patch into
-unrelated cleanup.
+Read this together with the testing rules in
+[`test/CONVENTIONS.md`](test/CONVENTIONS.md). When older code conflicts with
+this guide, do not copy the older pattern into new work. Move the code being
+changed toward this style without expanding the patch into unrelated cleanup.
 
 ## The governing idea
 

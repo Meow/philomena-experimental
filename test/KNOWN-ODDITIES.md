@@ -3,9 +3,7 @@
 This register tracks characterized behavior that is surprising enough to need
 an explicit decision. The nearby `# NOTE:` comments in controller and context
 tests remain the executable, fine-grained record; this file lists the issues
-that affect context-boundary design or can produce a server error. The
-[context refactor plan](../plans/context-refactor/all-contexts.md) owns their
-resolution.
+that affect context-boundary design or can produce a server error.
 
 | Area                          | Characterized behavior                                                                                                                                     | Planned resolution                                                                                                                          |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
