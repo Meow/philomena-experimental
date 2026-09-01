@@ -1,11 +1,9 @@
 # Context-owned presentation policy
 
-Status: proposed for review
+Status: approved with revisions
 
-Baseline: `context-policy` and `context-logic-for-review` both point to
-`d2d234ff` (`Move Philomena domain logic to contexts`) at the time this plan was
-written. The inventory below therefore describes the remaining policy work on
-top of that common context-refactor baseline.
+The inventory below describes the remaining policy work on top of the
+context-refactoring baseline.
 
 ## Design principles (review first)
 
@@ -38,9 +36,11 @@ top of that common context-refactor baseline.
 4. **Use explicit, domain-specific result types.** Extend the page structs
    introduced by the context refactor and add small typed entry/projection
    structs for reused collection partials. Name fields after domain outcomes
-   (`can_edit?`, `can_approve?`, `visible_body`, `identity_metadata`) rather than
+   (`can_edit?`, `can_approve?`, `body`, `identity_metadata`) rather than
    exposing a generic `{action, subject}` authorization API to the web layer.
    Do not put viewer-specific virtual fields on persisted Ecto schemas.
+   Use explicit variants for disclosure-sensitive fields (`:destroyed`,
+   `{:redacted, reason}`, `{:visible, post.body}`).
 
 5. **Use an available changeset as the affordance when one already exists.**
    `ImagePage` currently makes an unavailable form `nil`; retain that useful
@@ -116,31 +116,25 @@ illustrative and should be finalized in the first slice):
 
 %CommentEntry{
   comment: comment,
-  visible_body: body_or_nil,
+  body: body_or_redacted_or_destroyed,
   attribution: %Attribution.Disclosure{},
   deleted_by: disclosed_moderator_or_nil,
   policy: %CommentEntry.Policy{can_edit?: false, can_hide?: true, can_delete?: true}
 }
 ```
 
-The application layer should not render Markdown. In practice `visible_body`
-will initially be the raw body or `nil`; the controller renders only non-`nil`
-values. For list entries whose complete record is not sensitive, the wrapper
-may retain the record while sensitive associations/fields are carried only in
-the safe projection.
+The application layer should not render Markdown. For list entries whose
+complete record is not sensitive, the wrapper may retain the record while
+sensitive associations/fields are carried only in the safe projection.
 
-### Decisions to approve before implementation
+### Approved implementation decisions
 
-- Approve explicit typed page/entry policy structs as the default instead of a
-  generic `MapSet` of Canada action atoms. This creates more code but gives the
-  web layer a stable vocabulary independent of Canada and makes disclosures
-  visible in typespecs.
-- Approve omission/redaction as the default disclosure strategy, even where it
+- Omission/redaction is the default disclosure strategy, even where it
   changes controller assigns from raw records to entry structs.
-- Approve a small `Philomena.Administration` read context for the global staff
-  navigation/counter aggregate. The layout is application-wide and does not
-  belong to any one resource context; the aggregate should call the existing
-  owning contexts rather than query their tables itself.
+- A small `Philomena.Administration` read context is required for the global
+  staff navigation/counter aggregate. The layout is application-wide and does
+  not belong to any one resource context; the aggregate should call the
+  existing owning contexts rather than query their tables itself.
 - Keep `hide_staff_tools` as a web preference. It may suppress an already
   authorized control but must never reveal one or suppress disclosure from the
   application result.
@@ -229,10 +223,8 @@ projection plus cosmetic options.
 4. For disclosures, assert absence from the full response or serialized map,
    not merely absence of a label. Search HTML data attributes, inline JSON,
    URLs, raw bodies, IDs, IPs, fingerprints, tokens, and private associations.
-5. Record contradictions as explicit decisions rather than choosing whichever
-   duplicate predicate is easiest to retain. Examples to review include the
-   profile tag-change role branch whose two arms are identical, the mixture of
-   `:show, :ip_address` and `:show, :identity_metadata`, and controls grouped
+5. Return a list of contradictions for review rather than choosing whichever
+   predicate is easiest to retain. These are concentrated in controls grouped
    under broad `:hide`/`:edit` gates even though their write endpoints use more
    specific actions.
 
@@ -241,16 +233,16 @@ result field, and test location in the ledger.
 
 ### Phase 1 — Add policy foundations and guardrails
 
-1. Add `Philomena.Authorization.permitted?/3` (or the agreed name), with the
-   same accepted actor types and tests as `authorize/3`.
+1. Add `Philomena.Authorization.permitted?/3`, with the same accepted actor
+   types and tests as `authorize/3`.
 2. Add the shared attribution and image-media disclosure structs after their
-   first real consumer requires them; do not front-load unused abstractions.
-3. Extend `Philomena.ContextBoundaryCheck` to reject direct Canada calls from
-   all `lib/philomena_web/**/*.ex`, not only domain code. Add a Slime-aware or
-   narrow textual test that rejects `can?(` in templates.
+   first real consumer requires them. Do not front-load unused abstractions.
+3. Extend `Philomena.ContextBoundaryCheck` to reject new direct Canada calls
+   from all `lib/philomena_web/**/*.ex`, not only domain code. Add a textual
+   test that rejects new `can?(` usage in templates.
 4. Once consumers have migrated, also reject calls/imports of the boolean
    authorization helper from controllers, plugs, views, and renderers, and
-   delete `PhilomenaWeb.AppView.can?/3`.
+   deprecate usage of `PhilomenaWeb.AppView.can?/3`.
 5. Add a targeted presentation-policy check for new role/role-map and
    actor/owner comparisons in templates and views. Maintain a small reviewed
    allowlist for fields that are displayed as data rather than used as policy.
@@ -264,7 +256,7 @@ Affected code includes `LayoutView`, `_header.html.slime`,
 `_header_staff_links.html.slime`, `AdminCountersPlug`, `SettingView`, and the
 settings template.
 
-1. Add `Philomena.Administration.load_navigation(actor)` returning explicit
+1. Add `Philomena.Administration.show_navigation(actor)` returning explicit
    management destinations and optional authorized queue counters. It composes
    `Images`, `DuplicateReports`, `Reports`, `ArtistLinks`, and `DnpEntries`
    public count APIs; those contexts retain query ownership.
@@ -279,8 +271,8 @@ settings template.
    queries.
 5. Replace `ImageView`/`SearchView` global batch/hide helpers and the settings
    role checks with viewer-policy fields supplied by their context/page result.
-6. Keep the `hide_staff_tools` cookie in the web layer and combine it only with
-   positive domain capabilities.
+6. Keep the `hide_staff_tools` cookie in the web layer and combine it with
+   positive domain capabilities using boolean operators.
 
 Exit criterion: the shared layout and settings views contain no authorization,
 role-map, or role-category decisions.
@@ -334,16 +326,16 @@ histories, activity/forum/notification strips, and conversation pages.
    anonymous identity representation and includes a linked underlying account
    and identity metadata only when disclosed. The web helper renders this value
    and no longer receives `conn` for policy.
-2. Replace `:reveal_anon`, `:show, :ip_address`, ad hoc anonymity checks, and
-   staff-role badges with the shared disclosure across images, comments, posts,
-   topics, galleries, reports, changes, histories, activity, forums, and
-   notifications.
+2. Replace `:reveal_anon`, `:show, :identity_metadata`, ad hoc anonymity
+   checks, and staff-role badges with the shared disclosure across images,
+   comments, posts, topics, galleries, reports, changes, histories, activity,
+   forums, and notifications.
 3. Add viewer-specific `CommentEntry` and `PostEntry` results containing raw
-   visible body (or `nil`), disclosed deletion reason/deleting moderator,
-   attribution, identity metadata, and explicit approve/edit/hide/unhide/
-   destroy-content actions. Use them in both standalone listings and nested
-   `ImagePage`/`TopicPage` results.
-4. Update controllers to render Markdown only for `visible_body`; never render
+   visible body (or redaction reason, or destruction status), disclosed
+   deleting moderator, attribution, identity metadata, and explicit approve/
+   edit/hide/unhide/destroy-content actions. Use them in both standalone
+   listings and nested `ImagePage`/`TopicPage` results.
+4. Update controllers to render Markdown only for visible bodies; never render
    and then hide a forbidden deleted body in the template. Apply the same rule
    to version/history pages.
 5. Extend `TopicPage` with topic-level capabilities: moderation tools,
@@ -407,16 +399,13 @@ Affected code includes `TagPage`, tag edit/info templates, `TagView`,
    data belongs with each channel/tag association entry.
 2. Add listing policy to tag/source change page results and per-entry disclosed
    attribution/identity metadata. Replace `reverts_tag_changes?/1`,
-   `:show, :ip_address`, and staff-role label derivation with context-owned
-   results.
-3. Standardize the identity permission on the existing
-   `:show, :identity_metadata` domain action; treat `:ip_address` as a legacy
-   presentation alias to remove after behavior comparison.
-4. Extend `DnpEntryPage` so reason and feedback/instructions are absent when not
+   `:show, :identity_metadata`, and staff-role label derivation with
+   context-owned results.
+3. Extend `DnpEntryPage` so reason and feedback/instructions are absent when not
    disclosed. Add explicit edit and allowed-transition results. Prefer an
    allowed transition set derived by the DNP state machine and authorization
    over a broad `can_transition?` followed by a template-owned state table.
-5. Keep optional mod notes as a disclosed page section and attach row-level mod
+4. Keep optional mod notes as a disclosed page section and attach row-level mod
    note actions as described in Phase 8.
 
 Exit criterion: tag/history/DNP templates contain no identity, disclosure, or
