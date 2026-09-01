@@ -74,6 +74,20 @@ defmodule Philomena.UsersFixtures do
   end
 
   @doc """
+  Fixture for an assistant granted the `resource_type` moderator `role_map` entry
+  (e.g. `%{"DuplicateReport" => %{"moderator" => []}}`), the shape the auth pipeline
+  computes from a `users_roles` grant. Use where an ability keys on a resource-specific
+  admin grant rather than the plain moderator role. The `role_map` is set on the
+  returned struct the way a request-loaded actor carries it.
+  """
+  def role_assistant_fixture(resource_type, attrs \\ %{}) do
+    user = assistant_user_fixture(attrs)
+    role = Repo.insert!(%Philomena.Roles.Role{name: "moderator", resource_type: resource_type})
+    Repo.insert_all("users_roles", [%{user_id: user.id, role_id: role.id}])
+    %{user | role_map: %{resource_type => %{"moderator" => []}}}
+  end
+
+  @doc """
   Fixture for a confirmed user that has an avatar set (a bare filename in the
   `avatar` column; no object is actually uploaded).
   """
