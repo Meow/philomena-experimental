@@ -25,7 +25,7 @@ h1 = @conversation.title
       = link "Mark as unread", to: ~p"/conversations/#{@conversation}/read", data: [method: "delete"]
 
 = for {message, body} <- @messages do
-  = render PhilomenaWeb.MessageView, "_message.html", message: message, body: body, conn: @conn
+  = render PhilomenaWeb.MessageView, "_message.html", conversation: @conversation, message: message, body: body, conn: @conn
 
 .block
   .block__header.block__header--light.page__header
