@@ -110,6 +110,28 @@ defmodule Philomena.AuthorizationTest do
     end
   end
 
+  describe "permitted?/3" do
+    test "matches authorize/3 for every representative actor", %{
+      admin: admin,
+      moderator: moderator,
+      user: user
+    } do
+      subject = %Tag{}
+
+      for actor <- [admin, moderator, user, nil], action <- [:edit, :show] do
+        assert Authorization.permitted?(actor, action, subject) ==
+                 (Authorization.authorize(actor, action, subject) == :ok)
+      end
+    end
+
+    test "accepts an Attribution.Actor and uses its wrapped user", %{moderator: moderator} do
+      import Philomena.AttributionFixtures, only: [actor: 0, actor: 1]
+
+      assert Authorization.permitted?(actor(moderator), :edit, %Tag{})
+      refute Authorization.permitted?(actor(), :edit, %Tag{})
+    end
+  end
+
   # A truthy ban value in the shape production passes (the result of
   # Philomena.Bans.find/3); only its presence matters to the verifiers.
   @ban %{

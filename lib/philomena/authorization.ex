@@ -61,6 +61,31 @@ defmodule Philomena.Authorization do
   end
 
   @doc """
+  Returns whether `actor` may perform `action` on `subject`.
+
+  This is the boolean counterpart to `authorize/3`, intended for contexts
+  assembling the affordances of a successful read result. It uses the same
+  actor normalization and Canada rules as `authorize/3`; callers that need an
+  error-producing access gate should continue to use `authorize/3`.
+
+  `actor` accepts the same values as `authorize/3`: an anonymous `nil`, a
+  `%Philomena.Users.User{}`, or a `%Philomena.Attribution.Actor{}`. When an
+  actor carries attribution data, only its wrapped user participates in the
+  permission decision.
+
+  ## Examples
+
+      iex> permitted?(user, :hide, image)
+      true
+
+      iex> permitted?(nil, :hide, image)
+      false
+
+  """
+  @spec permitted?(actor :: actor(), action :: atom(), subject :: any()) :: boolean()
+  def permitted?(actor, action, subject), do: authorize(actor, action, subject) == :ok
+
+  @doc """
   Verifies that `actor` may perform a write.
 
   Decides, in order:

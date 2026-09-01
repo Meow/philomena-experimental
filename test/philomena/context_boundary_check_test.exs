@@ -43,6 +43,50 @@ defmodule Philomena.ContextBoundaryCheckTest do
     end)
   end
 
+  test "reports direct Canada calls from web modules" do
+    with_fixture(fn root ->
+      write_fixture(root, "lib/philomena_web/views/new_view.ex", """
+      defmodule PhilomenaWeb.NewView do
+        def visible?(actor, image), do: Canada.Can.can?(actor, :show, image)
+      end
+      """)
+
+      assert [%{file: "lib/philomena_web/views/new_view.ex", message: message}] =
+               ContextBoundaryCheck.violations(root)
+
+      assert message == "web modules must not call Canada.Can.can?/3"
+    end)
+  end
+
+  test "reports new can?/3 calls in templates" do
+    with_fixture(fn root ->
+      write_fixture(root, "lib/philomena_web/templates/new.html.slime", """
+      = if can?(@conn, :show, @image) do
+        | visible
+      """)
+
+      assert [%{file: "lib/philomena_web/templates/new.html.slime", message: message}] =
+               ContextBoundaryCheck.violations(root)
+
+      assert message == "templates must not call can?/3; use a context-owned result"
+    end)
+  end
+
+  test "reports role and ownership policy in web presentation code" do
+    with_fixture(fn root ->
+      write_fixture(root, "lib/philomena_web/templates/new.html.slime", """
+      = if @current_user.role == "admin" and @image.user_id == @current_user.id do
+        | staff owner controls
+      """)
+
+      assert [%{file: "lib/philomena_web/templates/new.html.slime", message: message}] =
+               ContextBoundaryCheck.violations(root)
+
+      assert message ==
+               "web presentation code must not decide policy from roles, role maps, or actor ownership"
+    end)
+  end
+
   test "accepts documented context functions and actor-scoped controller calls" do
     with_fixture(fn root ->
       write_fixture(root, "lib/philomena/images.ex", """
