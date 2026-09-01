@@ -3,10 +3,16 @@ defmodule Philomena.ContextBoundaryCheckTest do
 
   alias Philomena.ContextBoundaryCheck
 
+  test "all application sources respect context boundaries" do
+    violations = ContextBoundaryCheck.violations(File.cwd!())
+
+    assert violations == [], format_violations(violations)
+  end
+
   test "reports direct Canada calls and undocumented context functions" do
     with_fixture(fn root ->
-      write_fixture(root, "lib/philomena/images.ex", """
-      defmodule Philomena.Images do
+      write_fixture(root, "lib/philomena/new_context.ex", """
+      defmodule Philomena.NewContext do
         def visible?(actor, image), do: Canada.Can.can?(actor, :show, image)
       end
       """)
@@ -73,5 +79,16 @@ defmodule Philomena.ContextBoundaryCheckTest do
     path = Path.join(root, path)
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, contents)
+  end
+
+  defp format_violations([]), do: "Context boundary checks passed"
+
+  defp format_violations(violations) do
+    details =
+      Enum.map_join(violations, "\n", fn violation ->
+        "#{violation.file}:#{violation.line}: #{violation.message}"
+      end)
+
+    "Context boundary violations:\n#{details}"
   end
 end

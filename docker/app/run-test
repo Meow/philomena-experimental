@@ -8,7 +8,6 @@ export MIX_ENV=test
 
 # Run formatting check
 mix format --check-formatted
-mix philomena.context_boundaries
 
 # Sleep to allow OpenSearch to finish initializing
 # if it's not done doing whatever it does yet

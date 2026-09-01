@@ -4,20 +4,29 @@ defmodule Philomena.ContextBoundaryCheck do
 
   The check deliberately uses the Elixir AST instead of text matching so
   comments, documentation examples, and similarly named modules do not create
-  false positives. It is run by `mix philomena.context_boundaries` in the
-  repository test script.
+  false positives. It is used by the context-boundary test in the repository
+  test suite.
   """
 
-  @context_files ~w(
-    activities adverts artist_links authorization autocomplete badges bans
-    channels comments commissions conversations dnp_entries donations
-    duplicate_reports filters forums galleries image_faves image_hides
-    image_intensities image_votes images interactions loader mod_notes
-    moderation_logs notifications poll_options poll_votes polls posts profiles
-    rate_limiter reports rules site_notices source_changes static_pages
-    subscriptions tag_changes tags topics user_fingerprints user_ips
-    user_name_changes user_statistics users versions
-  )
+  @excluded_modules [
+    Philomena.Application,
+    Philomena.Attribution,
+    Philomena.Config,
+    Philomena.ExqSupervisor,
+    Philomena.IntegerId,
+    Philomena.Mailer,
+    Philomena.Maintenance,
+    Philomena.Markdown,
+    Philomena.Multi,
+    Philomena.Native,
+    Philomena.Release,
+    Philomena.Repo,
+    Philomena.SearchIndexer,
+    Philomena.SearchMigrator,
+    Philomena.SearchPolicy,
+    Philomena.SiteStatistics,
+    Philomena.Slug
+  ]
 
   @type violation :: %{
           file: String.t(),
@@ -28,9 +37,10 @@ defmodule Philomena.ContextBoundaryCheck do
   @doc """
   Returns context-boundary violations beneath `root`.
 
-  The inventory covers the contexts named by the refactor plan, every
-  `Philomena` domain source for direct Canada calls, and every controller for
-  persistence and request-path bang-loader calls.
+  The check covers every top-level `Philomena` domain module except the
+  explicitly excluded infrastructure modules, every `Philomena` domain source
+  for direct Canada calls, and every controller for persistence and request-path
+  bang-loader calls.
 
   ## Examples
 
@@ -47,9 +57,10 @@ defmodule Philomena.ContextBoundaryCheck do
 
   defp checks(root) do
     context_paths =
-      @context_files
-      |> Enum.map(&Path.join([root, "lib/philomena", &1 <> ".ex"]))
-      |> Enum.filter(&File.regular?/1)
+      root
+      |> Path.join("lib/philomena/*.ex")
+      |> Path.wildcard()
+      |> Enum.reject(&excluded_module?/1)
 
     domain_paths = Path.wildcard(Path.join(root, "lib/philomena/**/*.ex"))
     controller_paths = Path.wildcard(Path.join(root, "lib/philomena_web/controllers/**/*.ex"))
@@ -66,6 +77,16 @@ defmodule Philomena.ContextBoundaryCheck do
       |> module_bodies()
       |> Enum.flat_map(&undocumented_definitions(&1, relative(path, root)))
     end)
+  end
+
+  defp excluded_module?(path) do
+    module =
+      path
+      |> Path.basename(".ex")
+      |> Macro.camelize()
+      |> then(&Module.concat(Philomena, &1))
+
+    module in @excluded_modules
   end
 
   defp undocumented_definitions(body, file) do
@@ -175,7 +196,7 @@ defmodule Philomena.ContextBoundaryCheck do
   end
 
   # Paths come only from the fixed context inventory and repository-root
-  # wildcards assembled by this offline Mix task, never from request input.
+  # wildcards assembled by this offline test, never from request input.
   # sobelow_skip ["Traversal.FileModule"]
   defp parse!(path) do
     path
