@@ -52,12 +52,15 @@ for filter_def <- resources["system_filters"] do
   hidden_tag_list = Enum.join(filter_def["hidden"], ",")
 
   %Filter{system: true}
-  |> Filter.changeset(%{
-    name: filter_def["name"],
-    description: filter_def["description"],
-    spoilered_tag_list: spoilered_tag_list,
-    hidden_tag_list: hidden_tag_list
-  })
+  |> Filter.changeset(
+    %{
+      name: filter_def["name"],
+      description: filter_def["description"],
+      spoilered_tag_list: spoilered_tag_list,
+      hidden_tag_list: hidden_tag_list
+    },
+    nil
+  )
   |> Repo.insert(on_conflict: :nothing)
   |> case do
     {:ok, filter} ->
