@@ -20,18 +20,19 @@ enough to understand in one pass. Extract domain rules and reusable
 composition; do not hide a one-off workflow behind layers of functions and
 structs that only rename its steps.
 
-| Concern                                                    | Preferred home                                                                                  |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| HTTP parameter-envelope extraction and rendering           | Controller                                                                                      |
-| Request orchestration and result contract                  | Public context function                                                                         |
-| Safe record loading and parent scoping                     | Small private context loader using `Philomena.Loader`                                           |
-| Casting, input validation, and state-transition rules      | Schema changeset                                                                                |
-| Non-trivial search input                                   | Embedded `QueryForm`                                                                            |
-| Ecto/OpenSearch query construction                         | `QueryBuilder`                                                                                  |
-| Multi-step database workflow                               | `Philomena.Multi` pipeline                                                                      |
-| Reusable transaction step owned by another context         | A `put_*` function that accepts and returns `Philomena.Multi`                                   |
-| Indexing, object storage, jobs, and other post-commit work | `Multi.on_commit/2` callback or an explicit success-path action                                 |
-| Independently assembled page data                          | A typed page/index/form struct, but only when the schema or changeset cannot carry it naturally |
+| Concern                                                    | Preferred home                                                                |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| HTTP parameter-envelope extraction and rendering           | Controller                                                                    |
+| Request orchestration and result contract                  | Public context function                                                       |
+| Safe record loading and parent scoping                     | Small private context loader using `Philomena.Loader`                         |
+| Actor-specific fields, disclosure, and affordances         | Reusable resource `Display` projection assembled by its owning context        |
+| Casting, input validation, and state-transition rules      | Schema changeset                                                              |
+| Non-trivial search input                                   | Embedded `QueryForm`                                                          |
+| Ecto/OpenSearch query construction                         | `QueryBuilder`                                                                |
+| Multi-step database workflow                               | `Philomena.Multi` pipeline                                                    |
+| Reusable transaction step owned by another context         | A `put_*` function that accepts and returns `Philomena.Multi`                 |
+| Indexing, object storage, jobs, and other post-commit work | `Multi.on_commit/2` callback or an explicit success-path action               |
+| Independently assembled page data                          | A typed page/index/form struct composed from safe resource displays and forms |
 
 ## Public context boundaries
 
@@ -55,18 +56,80 @@ structs that only rename its steps.
   rendering, or bypass options merely to serve one caller. If any one caller
   requires a specific preload, load it for all callers and add it to the result
   contract.
+- An actor-facing read performs its resource loading, access authorization,
+  disclosure, and affordance assembly in one public operation. Accept a route
+  locator rather than requiring a controller to load a raw schema first. Do not
+  return a record and expose public `policy`, `attribution`, `media`, or
+  `decorate` helpers for the controller to call afterwards.
 - User-supplied values are cast and validated. A structurally impossible call
   from trusted application code does not need broad normalization solely to
   avoid a function-clause or `Ecto.Changeset.cast/4` error.
-- Return the record that was created, updated, or deleted. Do not return a
-  parent record merely because a controller needs it for a redirect; preload or
-  attach the parent association to the changed record instead.
+- A trusted system mutation workflow may return the record it created, updated,
+  or deleted. An actor-facing mutation returns a safe locator, the updated
+  resource display, or a typed result containing that display and any required
+  form state; it does not expose a raw schema merely so a controller can render
+  or decorate it. Do not return a parent merely because a controller needs it
+  for a redirect; include the safe locator or projected association appropriate
+  to the result contract.
 
-Controllers remain thin consumers of this API. They may destructure a
-changeset's data and preloaded associations to render or redirect. Handle the
-specific result shapes the controller owns, then pass everything else to the
-fallback as `error -> error`; avoid catch-all patterns that pretend every error
-has already been normalized.
+Controllers remain thin consumers of this API. They may inspect a safe
+changeset's data and preloaded associations for form mechanics or redirects;
+actor-sensitive operations instead provide the safe form/display result
+described below. Controllers must not pass a raw actor-sensitive schema into
+presentation as a substitute for a display result. Handle the specific result
+shapes the controller owns, then pass everything else to the fallback as
+`error -> error`; avoid catch-all patterns that pretend every error has already
+been normalized.
+
+## Actor-specific reads and safe display results
+
+Persisted schemas model storage and domain writes. They are not automatically
+safe read contracts. If a resource contains any actor-sensitive field,
+association, locator, attribution, moderation detail, or deleted value, its
+public actor-facing read returns a fully projected resource display rather than
+nesting the raw Ecto schema in a wrapper.
+
+- Define one general display projection per domain resource, such as
+  `%Images.ImageDisplay{}`. It contains every safe resource field needed across
+  show pages, cards, queues, APIs, and related-resource pages, together with
+  named `actions`, disclosure, and safe locator fields. Do not define
+  caller-specific approval/search/profile projections that represent the same
+  resource differently merely because their current templates use a subset.
+- Compose displays into typed page and form results. A show operation returns a
+  page containing a resource display; a listing operation returns a page whose
+  entries are displays. Do not return raw entries plus parallel policy, media,
+  or attribution maps for a controller to join.
+- The public context operation that returns a resource owns the projection. A
+  containing context may compose another context's reusable display while
+  building its result, but the controller receives the completed graph and
+  does not call contexts again to decorate it.
+- Keep projection builders private unless another application context needs a
+  documented composition API. Such an API exists for context-to-context
+  composition, not as an escape hatch for controller orchestration.
+- Model disclosure states as tagged tuples with typed payloads, for example
+  `{:visible, body}`, `{:redacted, reason}`, or
+  `{:anonymous, %Attribution.Anonymous{display_name: name}}`. Attribution
+  consumers pattern-match named variants such as `:named`, `:anonymous`,
+  `:anonymous_revealed`, and `:unregistered`; they do not infer a variant from
+  nullable user/IP/fingerprint combinations or call helpers with the raw
+  resource to finish the disclosure.
+- Include all data needed to render a disclosure variant in its safe payload.
+  If a profile link, awards, anonymous display name, IP address, or fingerprint
+  is allowed, project it explicitly. If it is forbidden, it must be absent from
+  the returned graph, not paired with a rendering boolean.
+- A changeset is part of the returned graph. If `changeset.data` is a sensitive
+  persisted schema, use a safe embedded/input form schema or a typed form result
+  instead. Form presence may serve as an affordance, but it must not reintroduce
+  the raw resource behind the display boundary.
+- Keep HTTP details and presentation formatting out of these structs. A
+  controller may render Markdown for an explicitly visible body and may flatten
+  a page into assigns mechanically. It may not query additional policy,
+  reconstruct a display, or choose disclosure based on `%Plug.Conn{}`.
+
+This projection requirement is an intentional exception to the preference for
+returning an existing schema, association, changeset, or small tuple. Reuse is
+valuable only when the reused shape cannot expose data outside the actor's
+contract.
 
 ## Context APIs are not web APIs
 
@@ -87,15 +150,18 @@ context API's contract.
   fields in the context when a cast, validation, virtual field, or named
   changeset helper can express the same rule. Route locators and deliberately
   raw search syntax remain separate inputs with their own parsers/loaders.
-- Return `%Ecto.Changeset{}` for expected invalid attributes whenever it
-  contains the data a caller needs: normally `{:error, changeset}` rather than
-  a bespoke error tuple. The changeset is equally useful to a controller
-  rendering errors and to a non-web caller inspecting `errors`, `changes`, or
-  normalized data.
+- Return `%Ecto.Changeset{}` for expected invalid attributes whenever its full
+  data is safe for the operation's callers: normally `{:error, changeset}`
+  rather than a bespoke error tuple. The changeset is equally useful to a
+  controller rendering errors and to a non-web caller inspecting `errors`,
+  `changes`, or normalized data. If the persisted schema is actor-sensitive,
+  return a safe embedded form changeset or a typed failure result containing
+  that form and the resource display.
 - Keep atom errors for non-validation outcomes such as authorization, a missing
-  resource, a ban, or a rate limit. Add a tuple or typed form result only when
-  it carries independent data that cannot naturally live in `changeset.data` or
-  its associations.
+  resource, a ban, or a rate limit. Add a tuple or typed form result when it
+  carries independent data that cannot naturally live in safe `changeset.data`
+  or associations, or when it is needed to keep a sensitive persisted schema
+  behind the actor-facing display boundary.
 - A trusted non-web workflow may have a narrower, explicitly named service API
   with loaded records or a system principal. Do not make the normal
   controller-facing API less reusable by adding a controller-only bypass.
@@ -308,7 +374,7 @@ to one table are scattered across otherwise unrelated contexts.
   `{:error, _step, reason, _changes}` branch unless the public contract truly
   treats every transaction failure identically.
 
-## Result types: reuse domain data before adding wrappers
+## Result types: reuse domain data unless disclosure requires projection
 
 Before defining a `SomethingForm`, `SomethingPage`, or `SomethingCreated`
 struct, ask whether the same contract can be represented by:
@@ -322,12 +388,18 @@ struct, ask whether the same contract can be represented by:
 Prefer those existing shapes. For example, a created child can carry its
 preloaded parent, and a message can carry a conversation with its calculated
 message count. Do not introduce a struct that only renames those two values.
+This preference applies only when the complete reused value is safe for every
+caller of that operation. An actor-specific resource display is not a needless
+wrapper: it replaces the raw schema and makes disclosure and affordances part
+of the read contract.
 
 A dedicated result struct is appropriate when it assembles independent data
 that does not naturally belong to one schema, such as a paginated page with
 interactions, a search form with current-user state, or a form with an
-independent collection of selectable records. Keep such structs typed and
-specific to one boundary.
+independent collection of selectable records. It is also required when a raw
+schema contains fields or associations the actor-facing caller must not
+receive. Keep page structs typed and specific to one operation, while reusing
+the same domain resource display across pages and callers.
 
 ## Documentation and naming
 
@@ -366,8 +438,11 @@ work. For implementation and refactor tests:
   public creation path where the fixture convention calls for it. Where direct
   persistence is an established exception, keep it in the fixture module and
   build it through the schema changeset.
-- Assert that validation failures preserve the loaded record and associations
-  the controller needs, rather than asserting a custom wrapper exists.
+- For trusted workflows, assert that validation failures preserve the loaded
+  record and associations the caller needs. For actor-facing resources with a
+  display boundary, assert instead that the safe form retains submitted values
+  and errors and that the typed failure result retains the resource display
+  needed to render it.
 - Update context, controller, and controller/context tests together when a
   result contract changes.
 
@@ -383,16 +458,27 @@ Before considering a context change complete, check:
   from caller attributes?
 - Does the changeset own casting, validation, and transition rules?
 - Does the controller pass domain attrs rather than its whole parameter tree?
+- Does each actor-facing read load and return its complete safe display in one
+  context call, without controller-side decoration or parallel projection maps?
+- Does any actor-facing result contain a raw schema with fields or associations
+  outside its disclosure contract?
+- Does any changeset in an actor-facing result reintroduce such a schema through
+  `changeset.data`?
+- Are resource displays reused across show, list, queue, and API callers rather
+  than split into caller-specific projections?
+- Do disclosure consumers pattern-match named variants whose payloads are
+  already complete for rendering?
 - Are IDs loaded safely and nested children constrained by their parents before
   authorization?
 - Are related database changes and audit records in one `Philomena.Multi`?
 - When current state, counters, or cache pointers can race, are the required
   rows locked in a stable order and the invariant covered by a concurrency test?
 - Are external side effects guaranteed to happen only after commit?
-- Does an expected validation failure return the actual changeset without
-  losing loaded data?
-- Is every new result struct carrying information that a schema, association,
-  changeset, calculated field, or tuple cannot carry naturally?
+- Does an expected validation failure return the actual safe changeset without
+  losing required form or display data?
+- Is every new result struct carrying information that a safe schema,
+  association, changeset, calculated field, or tuple cannot carry naturally,
+  or enforcing an actor-specific disclosure boundary?
 - Does invalid search input remain visible instead of becoming an unfiltered
   query?
 - Do the specs, docs, controller patterns, and tests match the final result

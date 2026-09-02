@@ -1,17 +1,21 @@
 # Context-owned presentation policy
 
-Status: approved with revisions
+Status: approved with Phase 3 architectural revisions
 
 The inventory below describes the remaining policy work on top of the
 context-refactoring baseline.
 
 ## Design principles (review first)
 
-1. **A context result is already safe and useful for its actor.** A controller,
-   view, JSON renderer, worker, or other caller must not have to reconstruct
-   whether a field may be disclosed or an action may be offered. Public context
-   reads accept `%Philomena.Attribution.Actor{}` and return viewer-specific
-   results.
+1. **A context operation returns a complete safe result for its actor.** A
+   controller, view, JSON renderer, worker, or other caller must not have to
+   call back into the resource context to decorate a record, reconstruct
+   disclosure, or discover whether an action may be offered. Public
+   actor-facing reads accept `%Philomena.Attribution.Actor{}` and a locator or
+   domain input, perform their own loading and policy assembly, and return the
+   viewer-specific result in one call. An actor-facing mutation whose result is
+   rendered must likewise return the updated safe result rather than a raw
+   record that the controller then decorates.
 
 2. **Treat access, disclosure, and affordances as separate decisions.**
 
@@ -26,28 +30,38 @@ context-refactoring baseline.
      drive links, buttons, forms, tabs, and staff navigation, but they do not
      authorize the eventual request.
 
-3. **Protect data by construction, not only with a rendering boolean.** Prefer
-   omitting a sensitive section, setting a typed optional field to `nil`, or
-   returning a redacted projection over returning the raw value plus
-   `show_value?: false`. A forgotten template condition must not disclose the
-   value. A boolean is appropriate when the underlying data is not sensitive,
-   such as whether an Edit link is available.
+3. **Protect data by construction, not only with a rendering boolean.** A
+   persisted Ecto schema is a storage representation, not a safe display
+   result. When any field or association on a resource is disclosure-sensitive,
+   project every field needed by actor-facing callers into a display struct and
+   do not include the raw schema in that struct. Omit a sensitive section, use
+   a typed redacted variant, or set a genuinely optional safe value to `nil`.
+   A forgotten template condition or a future caller inspecting an unrelated
+   schema field must not disclose the value. A boolean is appropriate only for
+   an affordance whose underlying data is not itself sensitive.
 
-4. **Use explicit, domain-specific result types.** Extend the page structs
-   introduced by the context refactor and add small typed entry/projection
-   structs for reused collection partials. Name fields after domain outcomes
+4. **Use one reusable display projection per domain resource.** Prefer a
+   general `%ImageDisplay{}`, `%CommentDisplay{}`, or equivalent that carries
+   the resource's projected fields, actions, disclosures, and safe locators
+   everywhere that resource is shown. Page and form results compose those
+   display structs with pagination, forms, and related resource displays; they
+   do not create caller-specific approval/search/profile variants or parallel
+   maps of policies and disclosures. Name fields after domain outcomes
    (`can_edit?`, `can_approve?`, `body`, `identity_metadata`) rather than
    exposing a generic `{action, subject}` authorization API to the web layer.
-   Do not put viewer-specific virtual fields on persisted Ecto schemas.
-   Use explicit variants for disclosure-sensitive fields (`:destroyed`,
+   Do not put viewer-specific virtual fields on persisted Ecto schemas. Use
+   explicit variants for disclosure-sensitive fields (`:destroyed`,
    `{:redacted, reason}`, `{:visible, post.body}`).
 
-5. **Use an available changeset as the affordance when one already exists.**
+5. **Use an available safe form as the affordance when one already exists.**
    `ImagePage` currently makes an unavailable form `nil`; retain that useful
    contract. Do not add a second `can_edit_metadata?` flag when the sole
-   consumer is `tag_changeset != nil`. Add an explicit capability for links,
-   method buttons, alternative transitions, and disclosures that have no
-   changeset.
+   consumer is form presence. A changeset may cross the actor-facing boundary
+   only when its `data` and submitted values are themselves safe to disclose.
+   When the persisted schema is sensitive, use an embedded/input form schema or
+   typed safe form result rather than smuggling the raw resource through
+   `changeset.data`. Add an explicit capability for links, method buttons,
+   alternative transitions, and disclosures that have no form.
 
 6. **Keep Canada behind the application boundary.**
    `Philomena.Users.Ability` remains the canonical ruleset during this refactor,
@@ -69,17 +83,21 @@ context-refactoring baseline.
    Templates may still combine capabilities with genuinely presentational
    preferences such as the `hide_staff_tools` cookie.
 
-9. **Decorate collections in batches.** A page that renders comments, posts,
-   images, filters, users, reports, or notes returns entries paired with their
-   disclosure/action projection. Policy calculation must use the actor and
-   already loaded records and must not introduce per-entry queries. Shared
-   partials consume the decorated entry rather than `@conn`.
+9. **Project collections before returning them.** A public operation that
+   returns comments, posts, images, filters, users, reports, or notes returns a
+   page/list whose entries are the reusable display projections themselves.
+   It must not return raw entries for a controller to zip with or look up in
+   separately constructed policy, media, or attribution maps. Projection must
+   use the actor and batch-loaded records and must not introduce per-entry
+   queries. Shared partials consume one display entry rather than `@conn`.
 
 10. **Keep HTTP and rendering concerns out of policy.** Context results contain
-    records, safe values, and domain decisions, never `%Plug.Conn{}`, cookies,
+    safe projected values and domain decisions, never `%Plug.Conn{}`, cookies,
     routes, HTML, rendered Markdown, CSS classes, or button labels. Controllers
     remain responsible for Markdown rendering and adapting result fields to
-    template assigns.
+    template assigns, but adaptation must be mechanical: it may not query a
+    context for additional disclosure or affordances or rebuild a resource
+    display from separate values.
 
 11. **Apply the same disclosure contract to every output format.** HTML, JSON,
     RSS, oEmbed, client-side datastore values, previews, notifications, and
@@ -97,40 +115,70 @@ context-refactoring baseline.
 
 ### Proposed result shape
 
-Use page-specific policy structs where a page has several decisions, and small
-entry structs where a partial is shared across pages. For example (names are
-illustrative and should be finalized in the first slice):
+Use a reusable display struct for each resource and compose it into page and
+form results. The display struct is the actor-facing replacement for the Ecto
+schema, not a wrapper around it. For example (names remain illustrative):
 
 ```elixir
 %ImagePage{
-  image: image,
-  comments: %Scrivener.Page{entries: [%CommentEntry{}]},
-  policy: %ImagePage.Policy{
-    can_hide?: true,
-    can_approve?: false,
-    can_destroy?: false,
-    identity_metadata: %Attribution.IdentityMetadata{ip: ip, fingerprint: fp}
+  image: %ImageDisplay{
+    id: 42,
+    tags: [%TagDisplay{}],
+    description: "...",
+    state: :visible,
+    actions: %ImageDisplay.Actions{
+      can_hide?: true,
+      can_approve?: false,
+      can_destroy?: false
+    },
+    media_urls: %ImageDisplay.MediaUrls{},
+    attribution:
+      {:anonymous_revealed,
+       %Attribution.AnonymousRevealed{
+         display_name: "Background Pony #1234",
+         profile: %UserDisplay{},
+         identity_metadata: %Attribution.IdentityMetadata{}
+       }}
   },
-  file_changeset: changeset_or_nil
+  comments: %Scrivener.Page{entries: [%CommentDisplay{}]},
+  forms: %ImagePage.Forms{file: safe_file_form_changeset_or_nil}
 }
 
-%CommentEntry{
-  comment: comment,
+%CommentDisplay{
+  id: 99,
   body: body_or_redacted_or_destroyed,
-  attribution: %Attribution.Disclosure{},
-  deleted_by: disclosed_moderator_or_nil,
-  policy: %CommentEntry.Policy{can_edit?: false, can_hide?: true, can_delete?: true}
+  attribution: {:anonymous, %Attribution.Anonymous{display_name: "..."}},
+  deleted_by: disclosed_moderator_display_or_nil,
+  actions: %CommentDisplay.Actions{can_edit?: false, can_hide?: true, can_delete?: true}
 }
 ```
 
-The application layer should not render Markdown. For list entries whose
-complete record is not sensitive, the wrapper may retain the record while
-sensitive associations/fields are carried only in the safe projection.
+Attribution disclosure is a tagged tuple whose payload contains everything
+needed to render that variant. Expected variants include `:named`,
+`:anonymous`, `:anonymous_revealed`, and `:unregistered`; the exact payload
+structs may vary with the domain. Consumers must pattern-match a variant and
+must not infer it from combinations such as `user == nil`, `anonymous == true`,
+or `ip != nil`. Anonymous display names, safe profile data, awards, and optional
+identity metadata are calculated before the value crosses the context
+boundary. Presentation code must never call an anonymous-name helper with the
+raw resource to finish disclosure.
+
+The application layer should not render Markdown. It returns a visible body or
+a redaction/destruction variant, and the controller renders only the visible
+variant. A raw schema may still be used inside contexts, write pipelines, and
+explicitly trusted system operations, but it is not nested in a public
+actor-specific display result—directly or through a changeset—merely because
+its current fields appear safe.
 
 ### Approved implementation decisions
 
-- Omission/redaction is the default disclosure strategy, even where it
-  changes controller assigns from raw records to entry structs.
+- Omission/redaction is the default disclosure strategy, even where it changes
+  controller assigns from raw records to display structs.
+- Public resource reads return their complete display projection directly.
+  Standalone public helpers that expose policy, attribution, media, or
+  decoration for controllers to assemble are not an acceptable migration
+  boundary; those builders remain private implementation details or are
+  composed by another context before its result is returned.
 - A small `Philomena.Administration` read context is required for the global
   staff navigation/counter aggregate. The layout is application-wide and does
   not belong to any one resource context; the aggregate should call the
@@ -187,24 +235,27 @@ reused inside the owning context.
 
 Create shared types only for genuinely shared domain concepts:
 
-- `Philomena.Attribution.Disclosure` for public identity, anonymous display,
-  optionally revealed account identity, and optionally disclosed IP/fingerprint;
+- a tagged `Philomena.Attribution.Disclosure` union for public identity,
+  anonymous display, revealed account identity, and disclosed IP/fingerprint;
 - an image-media projection owned by `Philomena.Images` for the versions/URIs
   an actor may receive; and
 - a viewer/session policy used by application shell data.
 
 Keep DNP details, profile moderation data, deleted communication bodies, and
-similar concepts in their owning page/entry types. Do not build one universal
-presentation DTO.
+similar concepts in their owning resource display or page types. Do not build
+one universal presentation DTO.
 
 ### Controller and template contract
 
-Controllers may flatten page structs into assigns during migration, but they
-must pass the policy/projection field through unchanged. Views may answer
-formatting questions from that value (for example a CSS class for a redacted
-entry); they may not accept `conn` or `current_user` to answer authorization or
-disclosure questions. Reusable partials should eventually receive one entry
-projection plus cosmetic options.
+Controllers may flatten page structs into assigns during migration, but only
+mechanically. They may not call a resource context again to obtain policy,
+media, attribution, or a decorated entry, nor join raw entries to parallel
+projection maps. Views may answer formatting questions from a display value
+(for example a CSS class for a redacted entry); they may not accept `conn` or
+`current_user` to answer authorization or disclosure questions. Reusable
+partials receive one display projection plus cosmetic options. A context that
+owns a containing page may compose display projections from another context,
+but that composition is complete before the page crosses the public boundary.
 
 ## Migration plan
 
@@ -283,37 +334,68 @@ Affected code includes `ImagePage`, image show/deleted templates, image
 partials, `ImageView`, `DuplicateReportView`, `SearchView`, approval pages, and
 every gallery/tag/profile/activity/search surface that renders an image card.
 
-1. Extend `ImagePage` with a typed policy and safe media/attribution
-   projections. Consolidate the existing `can_interact` and nil changeset
-   conventions rather than duplicating them.
-2. Calculate all image-page affordances in `Images.show_image_page/3`:
+Phase 3 is not complete until the current WIP's controller-side composition is
+replaced. Do not extend the pattern of returning `%Image{}` and then calling
+public `image_policy`, `image_attribution`, `image_entry`, or decoration helpers
+from controllers.
+
+1. Introduce one reusable `%Images.ImageDisplay{}` as the actor-facing image
+   contract. Project every image field and association used by HTML, JSON,
+   client data, links, titles, filters, and partials into it; do not retain an
+   `%Image{}` field. Give it named `actions`, `media_urls`, and `attribution`
+   fields so all image consumers receive the same safe vocabulary.
+2. Make `Images.show_image_page/3` accept the actor, image locator, and page
+   input, then perform loading, access authorization, disclosure, and
+   affordance assembly itself. It returns `%ImagePage{image: %ImageDisplay{}}`
+   in one call. The controller must not first load an image or decorate the page
+   result afterwards.
+3. Make each image-returning read operation—including search/listing,
+   navigation, related/random results, duplicate-report rows, and
+   `list_approval_queue`—return an `ImageDisplay` or a page of `ImageDisplay`
+   entries directly. A containing context such as Galleries, Tags, or Profiles
+   composes those displays before returning its page. Remove parallel maps
+   keyed by image ID and public decoration helpers whose purpose is to let a
+   controller recreate this contract.
+4. Calculate the complete reusable set of image affordances in the display's
+   `actions` value:
    edit description/metadata, view staff tools, hide/unhide, approve, destroy,
    replace file, feature, repair, clear hash, lock/unlock comments/description/
    tags, edit uploader/anonymity/scratchpad, report, subscribe, vote/fave/hide,
    and gallery membership actions. Include ban and write-access prerequisites
    for controls whose endpoints require them.
-3. Return only media versions/URIs the actor may receive. Replace calls where
+5. Return only media versions/URIs the actor may receive. Replace calls where
    `thumb_urls/2` or `thumb_url/3` is passed `can?(:show/:hide, image)`, including
    hidden image data attributes and duplicate-report thumbnails. Verify that
    hidden originals and derivative URLs cannot enter HTML, JSON, oEmbed, or
    client-side datastore output for a forbidden actor.
-4. Carry image uploader attribution and optional identity metadata through the
-   shared attribution disclosure. Do not pass raw IP/fingerprint merely because
-   a template is expected to hide it.
-5. Introduce a reusable image entry/projection for image grids and lists.
-   Update image search/list APIs, `TagPage`, `GalleryPage`, `ProfilePage`, front
-   page results, related/random/navigation results, duplicate reports, and the
-   approval queue to return or attach it without per-image queries.
-6. Make templates branch on result fields or changeset presence only. Resource
-   state may still choose the label/verb (Lock versus Unlock) after the context
-   has said that management action is available.
-7. Keep every image write endpoint’s context authorization intact and add
+6. Build uploader attribution as a tagged disclosure tuple with complete safe
+   payloads. Image partials and approval rows must pattern-match `:named`,
+   `:anonymous`, `:anonymous_revealed`, or `:unregistered` rather than branch on
+   nullable `user`/`ip`/`fingerprint` fields. Do not pass raw IP/fingerprint,
+   raw user records, or the raw image merely because a template is expected to
+   hide or transform them.
+7. Make templates branch on display fields, attribution variants, or safe form
+   presence only. Resource state may still choose the label/verb (Lock versus
+   Unlock) after the context has said that management action is available.
+8. For image mutations that return a fragment, make the mutation result include
+   the updated `ImageDisplay` and any safe form result required to render that
+   fragment. Image form changesets must not expose `%Image{}` through
+   `changeset.data`. Do not have description, source, subscription, tag, or
+   uploader controllers call back to `Images` for policy or attribution after
+   the write.
+9. Keep every image write endpoint’s context authorization intact and add
    parity tests between page affordances and write eligibility for stable
-   state, plus stale-state tests showing the write still rejects changes.
+   state, plus stale-state tests showing the write still rejects changes. Add
+   exact-shape tests proving `ImagePage` and collection pages contain
+   `ImageDisplay` values but no nested `%Image{}`, attribution is one named
+   variant, and forbidden media and identity values are absent rather than
+   gated by booleans.
 
-Exit criterion: no image renderer computes visibility or action availability
-from actor, role, ban, or Canada, and forbidden media locators are absent from
-all outputs.
+Exit criterion: every public actor-facing image operation returns an
+`ImageDisplay` (alone or inside its page/result), no controller assembles one
+from multiple calls or raw records, no image renderer computes visibility or
+action availability from actor, role, ban, or Canada, and forbidden schema
+fields and media locators are absent from all outputs.
 
 ### Phase 4 — Attribution, comments, posts, topics, and messages
 
@@ -321,20 +403,22 @@ Affected code includes `UserAttributionView`, comment/post/message partials,
 `CommentView`, `PostView`, `TopicPage`, topic/poll templates, comment/post
 histories, activity/forum/notification strips, and conversation pages.
 
-1. Add `Attribution.disclose(actor, object)` as an application-layer operation
-   (with a batch form if it needs loaded users/awards). It returns the public or
-   anonymous identity representation and includes a linked underlying account
-   and identity metadata only when disclosed. The web helper renders this value
-   and no longer receives `conn` for policy.
+1. Add attribution projection as an application-layer operation (with a batch
+   form if it needs loaded users/awards). It returns tagged disclosure tuples
+   with complete payloads for named, anonymous, revealed-anonymous, and
+   unregistered attribution. A linked underlying account and identity metadata
+   exist only in variants allowed to disclose them. The web helper
+   pattern-matches this value and no longer receives `conn` or the raw attributed
+   object to calculate names or policy.
 2. Replace `:reveal_anon`, `:show, :identity_metadata`, ad hoc anonymity
    checks, and staff-role badges with the shared disclosure across images,
    comments, posts, topics, galleries, reports, changes, histories, activity,
    forums, and notifications.
-3. Add viewer-specific `CommentEntry` and `PostEntry` results containing raw
-   visible body (or redaction reason, or destruction status), disclosed
-   deleting moderator, attribution, identity metadata, and explicit approve/
-   edit/hide/unhide/destroy-content actions. Use them in both standalone
-   listings and nested `ImagePage`/`TopicPage` results.
+3. Add reusable viewer-specific `CommentDisplay` and `PostDisplay` results
+   containing a visible source body (or redaction reason, or destruction
+   status), disclosed deleting moderator, attribution, identity metadata, and
+   explicit approve/edit/hide/unhide/destroy-content actions. Use them in both
+   standalone listings and nested `ImagePage`/`TopicPage` results.
 4. Update controllers to render Markdown only for visible bodies; never render
    and then hide a forbidden deleted body in the template. Apply the same rule
    to version/history pages.
@@ -343,10 +427,10 @@ histories, activity/forum/notification strips, and conversation pages.
    poll vote/list/delete actions, and subscription state. The reply decision
    includes authentication, ban/write access, hidden/locked state, and the
    200,000-post cap now combined in the template.
-6. Add a message entry/result that discloses a pending message body only to its
-   sender or an approver and exposes `can_approve?`. Remove the template’s
-   direct sender-ID comparison.
-7. Keep notification records minimal: if a notification partial needs only a
+6. Add a reusable `MessageDisplay` that discloses a pending message body only
+   to its sender or an approver and exposes `can_approve?`. Remove the
+   template’s direct sender-ID comparison.
+7. Keep notification displays minimal: if a notification partial needs only a
    safe display attribution, return that projection instead of a fully loaded
    anonymous object.
 
@@ -462,9 +546,10 @@ separate context-owned decisions with endpoint parity tests.
 1. Inventory renderer clauses that redact from raw schema state even without
    Canada calls: hidden images/topics/posts/comments, anonymous uploader/author,
    private artist links, galleries, filters, and profiles.
-2. Make API context operations return explicit public projections or the same
-   safe entry projections used by HTML. JSON views should serialize their input
-   and perform formatting only; they must not decide whether a field exists.
+2. Make API context operations return the same safe resource display
+   projections used by HTML unless the API contract intentionally requires a
+   separately named projection. JSON views should serialize their input and
+   perform formatting only; they must not decide whether a field exists.
 3. Define separate, explicit projections for RSS, oEmbed, and firehose where
    their audience differs. In particular, remove the implicit security meaning
    of calling `ImageView.render` with versus without `conn`.
@@ -475,8 +560,9 @@ separate context-owned decisions with endpoint parity tests.
    first pass is behavior-preserving, but any correction to unsafe historical
    disclosure must be documented as an API change.
 
-Exit criterion: output renderers contain no actor-sensitive branching; choosing
-the correct application projection is the controller/context caller’s job.
+Exit criterion: output renderers contain no actor-sensitive branching; the
+public context operation chooses and returns the correct application
+projection before control reaches a controller or renderer.
 
 ### Phase 10 — Remove compatibility paths and document the rule
 
@@ -489,9 +575,10 @@ the correct application projection is the controller/context caller’s job.
    sensitive-state predicates in views/templates. Classify and remove any that
    still decide disclosure or actions; leave only authentication layout,
    preferences, displayed state, and formatting.
-4. Update `CONTEXT_STYLE.md` with the access/disclosure/affordance distinction,
-   safe-by-construction guidance, collection-entry rule, and examples from the
-   completed image and profile slices.
+4. Recheck `CONTEXT_STYLE.md` against the completed image and profile slices.
+   Its safe-display exception to raw-schema reuse, single-call context rule,
+   collection projection rule, and tagged-disclosure guidance are established
+   before Phase 3 and must remain aligned with the final examples.
 5. Update page/result moduledocs and public context specs so each optional
    sensitive field and action capability has a precise contract.
 
@@ -500,24 +587,24 @@ documentation makes context-owned presentation policy the default for new work.
 
 ## Domain migration ledger
 
-| Area                      | Current presentation-policy sites                                                             | Target context/result                                                 |
-| ------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Global layout/admin links | `layout_view.ex`, layout header/staff partials, `AdminCountersPlug`                           | `Administration.Navigation` plus `Users.ViewerPolicy`                 |
-| Images/media              | image templates, `image_view.ex`, `search_view.ex`, `duplicate_report_view.ex`, approval rows | `Images.ImagePage` plus reusable `Images.ImageEntry`/media disclosure |
-| Attribution/identity      | `user_attribution/_anon_user`, image/comment/post/change templates                            | `Attribution.Disclosure` and optional identity metadata               |
-| Comments                  | comment partials and comment/profile/activity listings                                        | `Comments.CommentEntry` returned by comment page/list APIs            |
-| Posts/topics/polls        | post partials, `topic/show`, poll display, histories                                          | `Topics.TopicPage`, `Posts.PostEntry`, topic policy                   |
-| Messages                  | `message/_message`, conversation show                                                         | conversation/message page entry policy                                |
-| Profiles/users            | `profile_view.ex`, profile templates, registration edit, admin user list                      | expanded `Profiles.ProfilePage`, user/list entry policies             |
-| Artist links/awards       | profile link/award blocks and admin artist-link pages                                         | actor-filtered link/award entry projections                           |
-| Filters                   | filter show/list partials                                                                     | expanded `Filters.FilterPage` and filter entries                      |
-| Galleries/commissions     | gallery show, commission sidebar/items/directory                                              | expanded gallery/directory/listing results                            |
-| Tags                      | `tag_view.ex`, tag edit/info templates                                                        | expanded `Tags.TagPage` and edit result policy                        |
-| Tag/source changes        | their views/index templates                                                                   | expanded page plus safe change entries                                |
-| DNP                       | `dnp_entry/show`                                                                              | expanded `DnpEntryPage` with optional details/transitions             |
-| Channels/rules/pages      | channel boxes/index, rule index/row, page show                                                | decorated list/show results from owning contexts                      |
-| Moderation queues         | approvals, duplicates, reports, notes, bans                                                   | typed per-row action projections plus administration aggregate        |
-| APIs/feeds/broadcasts     | API JSON views, RSS, oEmbed, firehose render calls                                            | explicit audience-specific safe projections                           |
+| Area                      | Current presentation-policy sites                                                             | Target context/result                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Global layout/admin links | `layout_view.ex`, layout header/staff partials, `AdminCountersPlug`                           | `Administration.Navigation` plus `Users.ViewerPolicy`                             |
+| Images/media              | image templates, `image_view.ex`, `search_view.ex`, `duplicate_report_view.ex`, approval rows | reusable `Images.ImageDisplay` composed into `Images.ImagePage` and listing pages |
+| Attribution/identity      | `user_attribution/_anon_user`, image/comment/post/change templates                            | tagged `Attribution.Disclosure` variants with complete safe payloads              |
+| Comments                  | comment partials and comment/profile/activity listings                                        | reusable `Comments.CommentDisplay` returned by comment page/list APIs             |
+| Posts/topics/polls        | post partials, `topic/show`, poll display, histories                                          | `Topics.TopicPage` composed from reusable `Posts.PostDisplay` values              |
+| Messages                  | `message/_message`, conversation show                                                         | reusable message displays composed into conversation results                      |
+| Profiles/users            | `profile_view.ex`, profile templates, registration edit, admin user list                      | profile/user displays composed into `Profiles.ProfilePage` and lists              |
+| Artist links/awards       | profile link/award blocks and admin artist-link pages                                         | reusable actor-filtered link and award displays                                   |
+| Filters                   | filter show/list partials                                                                     | reusable filter displays composed into `Filters.FilterPage` and lists             |
+| Galleries/commissions     | gallery show, commission sidebar/items/directory                                              | reusable gallery, commission, and listing displays                                |
+| Tags                      | `tag_view.ex`, tag edit/info templates                                                        | reusable tag displays composed into `Tags.TagPage`                                |
+| Tag/source changes        | their views/index templates                                                                   | reusable safe change displays composed into listing pages                         |
+| DNP                       | `dnp_entry/show`                                                                              | expanded `DnpEntryPage` with optional details/transitions                         |
+| Channels/rules/pages      | channel boxes/index, rule index/row, page show                                                | reusable resource displays returned by owning contexts                            |
+| Moderation queues         | approvals, duplicates, reports, notes, bans                                                   | resource displays with exact row actions plus administration aggregate            |
+| APIs/feeds/broadcasts     | API JSON views, RSS, oEmbed, firehose render calls                                            | explicit audience-specific safe projections                                       |
 
 ## Testing and verification strategy
 
@@ -558,7 +645,11 @@ actor comparison deciding disclosure or actions is not.
 ## Completion criteria
 
 - All request-facing contexts remain independently usable without Phoenix and
-  return actor-specific safe data and affordances.
+  return complete actor-specific safe data and affordances in one operation.
+- Actor-facing display results do not contain raw Ecto schemas when the
+  resource has disclosure-sensitive fields or associations.
+- No controller calls a resource context again to decorate a returned record
+  or assembles displays from parallel policy, media, and attribution maps.
 - No controller, plug, view, template, JSON/RSS renderer, or shared web helper
   invokes Canada or a generic authorization predicate.
 - No sensitive value is passed to presentation code unless that caller may
@@ -567,8 +658,8 @@ actor comparison deciding disclosure or actions is not.
 - No presentation code derives an available domain action from role, role-map,
   ownership, ban, or resource state.
 - Every mutation still authorizes and validates at execution time.
-- Shared list partials consume typed decorated entries without N+1 policy
-  queries.
+- Shared list partials consume reusable typed display entries returned by their
+  page/list operation without N+1 policy queries.
 - HTML, API, feed, oEmbed, client data, notification, and broadcast contracts
   use explicit safe projections.
 - The architecture check and `CONTEXT_STYLE.md` prevent the old pattern from
