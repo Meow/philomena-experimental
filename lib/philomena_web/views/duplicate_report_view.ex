@@ -5,7 +5,7 @@ defmodule PhilomenaWeb.DuplicateReportView do
   alias PhilomenaWeb.ImageView
 
   def comparison_url(conn, image),
-    do: ImageView.thumb_url(image, can?(conn, :show, image), :full)
+    do: Map.get(ImageView.media_for(conn, image).thumb_urls, :full)
 
   defdelegate largest_dimensions(images), to: Comparison
 

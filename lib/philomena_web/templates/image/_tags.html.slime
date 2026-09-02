@@ -6,7 +6,7 @@
 
 .js-tagsauce#image_tags_and_source
   .js-imageform class=form_class
-    = if @changeset && can?(@conn, :edit_metadata, @image) && !@conn.assigns.current_ban do
+    = if @changeset do
 
       = if Enum.any?(@image.locked_tags) do
         .block.block--fixed.block--warning

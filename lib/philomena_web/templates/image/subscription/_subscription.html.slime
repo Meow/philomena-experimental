@@ -5,7 +5,7 @@ elixir:
   unwatch_path = ~p"/images/#{@image}/subscription"
   unwatch_class = if @watching, do: "", else: "hidden"
 
-= if @conn.assigns.current_user do
+= if @policy.can_subscribe? do
   span.js-subscription-target
     a.js-subscription-link href=watch_path class=watch_class data-remote="true" data-method="post"
       i.fa.fa-bell>

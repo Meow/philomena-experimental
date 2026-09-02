@@ -26,7 +26,8 @@ defmodule PhilomenaWeb.Image.TagController do
           tag_change_count: tag_change_count,
           tag_change_tag_count: tag_change_tag_count,
           image: image,
-          changeset: changeset
+          changeset: changeset,
+          policy: Images.image_policy(conn.assigns.actor, image)
         )
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -37,7 +38,8 @@ defmodule PhilomenaWeb.Image.TagController do
           tag_change_count: 0,
           tag_change_tag_count: 0,
           image: changeset.data,
-          changeset: changeset
+          changeset: changeset,
+          policy: Images.image_policy(conn.assigns.actor, changeset.data)
         )
 
       {:error, :rate_limited} ->

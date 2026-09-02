@@ -3,7 +3,9 @@ defmodule PhilomenaWeb.ImageView do
 
   alias Philomena.Tags.Tag
   alias Philomena.Images
+  alias Philomena.Images.Media
   alias Philomena.Images.Thumbnailer
+  alias PhilomenaWeb.UserAttributionView
 
   def show_vote_counts?(%{settings: %{hide_vote_counts: true}}), do: false
   def show_vote_counts?(_user), do: true
@@ -18,7 +20,7 @@ defmodule PhilomenaWeb.ImageView do
   def render_intent(_conn, %{thumbnails_generated: false}, _size), do: :not_rendered
 
   def render_intent(conn, image, size) do
-    uris = thumb_urls(image, can?(conn, :show, image))
+    uris = media_for(conn, image).thumb_urls
     vid? = image.image_mime_type == "video/webm"
     gif? = image.image_mime_type == "image/gif"
     alt = title_text(image)
@@ -29,6 +31,9 @@ defmodule PhilomenaWeb.ImageView do
     filtered? = filter_or_spoiler_hits?(conn, image)
 
     cond do
+      map_size(uris) == 0 ->
+        :not_rendered
+
       filtered? and vid? ->
         {:filtered_video, alt}
 
@@ -47,16 +52,7 @@ defmodule PhilomenaWeb.ImageView do
   end
 
   def thumb_urls(image, show_hidden) do
-    Thumbnailer.thumbnail_versions()
-    |> Map.new(fn {name, {width, height}} ->
-      if image.image_width > width or image.image_height > height do
-        {name, thumb_url(image, show_hidden, name)}
-      else
-        {name, thumb_url(image, show_hidden, :full)}
-      end
-    end)
-    |> append_full_url(image, show_hidden)
-    |> append_gif_urls(image, show_hidden)
+    Media.thumb_urls(image, show_hidden)
   end
 
   def select_version(image, version_name) do
@@ -70,29 +66,6 @@ defmodule PhilomenaWeb.ImageView do
     end)
     |> Map.get(version_name, :full)
   end
-
-  defp append_full_url(urls, %{hidden_from_users: false} = image, _show_hidden),
-    do: Map.put(urls, :full, pretty_url(image, true, false))
-
-  defp append_full_url(urls, %{hidden_from_users: true} = image, true),
-    do: Map.put(urls, :full, thumb_url(image, true, :full))
-
-  defp append_full_url(urls, _image, _show_hidden),
-    do: urls
-
-  defp append_gif_urls(urls, %{image_mime_type: "image/gif"} = image, show_hidden) do
-    full_url = thumb_url(image, show_hidden, :full)
-
-    Map.merge(
-      urls,
-      %{
-        webm: String.replace(full_url, ".gif", ".webm"),
-        mp4: String.replace(full_url, ".gif", ".mp4")
-      }
-    )
-  end
-
-  defp append_gif_urls(urls, _image, _show_hidden), do: urls
 
   def thumb_url_size(
         %{image_aspect_ratio: ar, image_width: w, image_height: h} = image,
@@ -115,55 +88,11 @@ defmodule PhilomenaWeb.ImageView do
     do: {floor(h * ar), h}
 
   def thumb_url(image, show_hidden, name) do
-    %{year: year, month: month, day: day} = image.created_at
-    deleted = image.hidden_from_users
-    root = image_url_root()
-
-    format =
-      image.image_format
-      |> to_string()
-      |> String.downcase()
-      |> thumb_format(name, false)
-
-    id_fragment =
-      if deleted and show_hidden do
-        "#{image.id}-#{image.hidden_image_key}"
-      else
-        "#{image.id}"
-      end
-
-    "#{root}/#{year}/#{month}/#{day}/#{id_fragment}/#{name}.#{format}"
+    Media.thumb_url(image, show_hidden, name)
   end
 
   def pretty_url(image, short, download) do
-    %{year: year, month: month, day: day} = image.created_at
-    root = image_url_root()
-
-    view = if download, do: "download", else: "view"
-    filename = if short, do: image.id, else: verbose_file_name(image)
-
-    format =
-      image.image_format
-      |> to_string()
-      |> String.downcase()
-      |> thumb_format(nil, download)
-
-    "#{root}/#{view}/#{year}/#{month}/#{day}/#{filename}.#{format}"
-  end
-
-  defp verbose_file_name(image) do
-    # Truncate filename to 150 characters, making room for the path + filename on Windows
-    # https://stackoverflow.com/questions/265769/maximum-filename-length-in-ntfs-windows-xp-and-windows-vista
-    file_name_slug_fragment =
-      image.tags
-      |> display_order()
-      |> Enum.map_join("_", & &1.slug)
-      |> String.to_charlist()
-      |> Enum.filter(&(&1 in ?a..?z or &1 in ~c"0123456789_-+"))
-      |> List.to_string()
-      |> String.slice(0..150)
-
-    "#{image.id}__#{file_name_slug_fragment}"
+    Media.pretty_url(image, short, download)
   end
 
   def image_url_root do
@@ -186,7 +115,7 @@ defmodule PhilomenaWeb.ImageView do
       source_url:
         if(Enum.count(image.sources) > 0, do: Enum.at(image.sources, 0).source, else: ""),
       source_urls: JSON.encode!(Enum.map(image.sources, & &1.source)),
-      uris: JSON.encode!(thumb_urls(image, can?(conn, :show, image))),
+      uris: JSON.encode!(media_for(conn, image).thumb_urls),
       width: image.image_width,
       height: image.image_height,
       aspect_ratio: image.image_aspect_ratio,
@@ -201,12 +130,38 @@ defmodule PhilomenaWeb.ImageView do
     )
   end
 
+  @doc "Returns the image media projection supplied by a context result."
+  def media_for(conn, image) do
+    case conn.assigns[:image_media] do
+      %Media{} = media ->
+        media
+
+      _ ->
+        case conn.assigns[:viewer_policy] do
+          %{can_hide_images?: true} ->
+            Media.disclose(image, true)
+
+          _ ->
+            %Media{
+              thumb_urls: Media.legacy_thumb_urls(image),
+              view_url: nil,
+              view_short_url: nil,
+              download_url: nil,
+              download_short_url: nil
+            }
+        end
+    end
+  end
+
   def display_order(tags) do
     Tag.display_order(tags)
   end
 
   def username(%{name: name}), do: name
   def username(_user), do: nil
+
+  defdelegate anonymous_name(object), to: UserAttributionView
+  defdelegate anonymous_name(object, reveal_anon?), to: UserAttributionView
 
   def scope(conn), do: PhilomenaWeb.ImageScope.scope(conn)
 
@@ -262,10 +217,6 @@ defmodule PhilomenaWeb.ImageView do
       )
     end
   end
-
-  defp thumb_format("svg", _name, false), do: "png"
-  defp thumb_format(_, :rendered, _download), do: "png"
-  defp thumb_format(format, _name, _download), do: format
 
   def filter_or_spoiler_hits?(conn, image) do
     Images.filter_or_spoiler_hits?(image, conn.assigns.image_filter)

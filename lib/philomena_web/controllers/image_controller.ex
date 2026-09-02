@@ -47,6 +47,7 @@ defmodule PhilomenaWeb.ImageController do
     # The page load clears the image notification, so the header ticker must
     # be re-read afterwards.
     conn = NotificationCountPlug.call(conn)
+    conn = Plug.Conn.assign(conn, :image_media, page.media)
 
     rendered = MarkdownRenderer.render_collection(page.comments.entries, conn)
     comments = %{page.comments | entries: Enum.zip(page.comments.entries, rendered)}
@@ -55,6 +56,9 @@ defmodule PhilomenaWeb.ImageController do
 
     assigns = [
       image: image,
+      media: page.media,
+      attribution: page.attribution,
+      policy: page.policy,
       comments: comments,
       comment_changeset: page.comment_changeset,
       description_changeset: page.description_changeset,

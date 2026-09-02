@@ -17,7 +17,8 @@ defmodule PhilomenaWeb.Image.DescriptionController do
           layout: false,
           image: image,
           body: body,
-          changeset: Images.change_image(image)
+          changeset: Images.change_image(image),
+          policy: Images.image_policy(conn.assigns.actor, image)
         )
 
       {:error, %Ecto.Changeset{} = changeset} ->

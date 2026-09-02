@@ -5,13 +5,23 @@ defmodule Philomena.Images.ImagePage do
   the viewer's galleries paired with whether they already contain the image,
   and changesets for each action available on the page.
 
+  `media`, `attribution`, and `policy` are actor-specific projections. Hidden
+  media locators and identity metadata are omitted from those projections when
+  the actor cannot disclose them.
+
   Comment and description bodies are carried in their raw form.
   """
 
   alias Philomena.Images.Image
+  alias Philomena.Images.ImagePage.Policy
+  alias Philomena.Images.Media
+  alias Philomena.Attribution.Disclosure
 
   @enforce_keys [
     :image,
+    :media,
+    :attribution,
+    :policy,
     :comments,
     :watching,
     :can_interact,
@@ -30,6 +40,9 @@ defmodule Philomena.Images.ImagePage do
   ]
   defstruct [
     :image,
+    :media,
+    :attribution,
+    :policy,
     :comments,
     :watching,
     :can_interact,
@@ -49,6 +62,9 @@ defmodule Philomena.Images.ImagePage do
 
   @type t :: %__MODULE__{
           image: Image.t(),
+          media: Media.t(),
+          attribution: Disclosure.t(),
+          policy: Policy.t(),
           comments: Scrivener.Page.t(),
           watching: boolean(),
           can_interact: boolean(),

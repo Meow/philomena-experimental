@@ -8,7 +8,12 @@ defmodule PhilomenaWeb.Image.SubscriptionController do
   def create(conn, params) do
     case Images.create_image_subscription(conn.assigns.actor, params["image_id"]) do
       {:ok, image} ->
-        render(conn, "_subscription.html", image: image, watching: true, layout: false)
+        render(conn, "_subscription.html",
+          image: image,
+          watching: true,
+          policy: Images.image_policy(conn.assigns.actor, image),
+          layout: false
+        )
 
       {:error, %Ecto.Changeset{}} ->
         render(conn, "_error.html", layout: false)
@@ -20,7 +25,12 @@ defmodule PhilomenaWeb.Image.SubscriptionController do
 
   def delete(conn, params) do
     with {:ok, image} <- Images.delete_image_subscription(conn.assigns.actor, params["image_id"]) do
-      render(conn, "_subscription.html", image: image, watching: false, layout: false)
+      render(conn, "_subscription.html",
+        image: image,
+        watching: false,
+        policy: Images.image_policy(conn.assigns.actor, image),
+        layout: false
+      )
     end
   end
 end

@@ -10,7 +10,7 @@ defmodule Philomena.Images do
   import Ecto.Query, warn: false
 
   import Philomena.Authorization,
-    only: [authorize: 3, verify_write_access: 1]
+    only: [authorize: 3, permitted?: 3, verify_write_access: 1]
 
   require Logger
 
@@ -59,6 +59,10 @@ defmodule Philomena.Images do
   alias Philomena.Comments
   alias Philomena.Galleries
   alias Philomena.Images.ImagePage
+  alias Philomena.Images.ImagePage.Policy
+  alias Philomena.Images.ImageEntry
+  alias Philomena.Images.Media
+  alias Philomena.Attribution.Disclosure
   alias Philomena.Images.Query, as: ImageQuery
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
@@ -937,9 +941,15 @@ defmodule Philomena.Images do
     {:ok, gallery_choices} = Galleries.gallery_choices_for_image(actor, image)
 
     can_interact = image_interaction_allowed?(actor, image)
+    policy = image_policy(actor, image, can_interact)
+    media = Media.disclose(image, permitted?(actor, :show, image))
+    attribution = image_attribution(actor, image, policy.can_view_identity_metadata?)
 
     %ImagePage{
       image: image,
+      media: media,
+      attribution: attribution,
+      policy: policy,
       comments: Comments.list_image_comments(actor, image, comment_pagination),
       watching: subscribed?(image, user),
       can_interact: can_interact,
@@ -957,6 +967,82 @@ defmodule Philomena.Images do
       uploader_changeset: uploader_changeset_for(actor, image)
     }
   end
+
+  @doc group: "Browsing and discovery"
+  @doc "Returns the actor-specific capabilities for an already loaded image."
+  @spec image_policy(Actor.t(), Image.t()) :: Policy.t()
+  def image_policy(%Actor{} = actor, %Image{} = image) do
+    image_policy(actor, image, image_interaction_allowed?(actor, image))
+  end
+
+  @doc group: "Browsing and discovery"
+  @doc "Returns uploader attribution with identity metadata disclosed only to eligible actors."
+  @spec image_attribution(Actor.t(), Image.t()) :: Disclosure.t()
+  def image_attribution(%Actor{} = actor, %Image{} = image) do
+    image_attribution(actor, image, permitted?(actor, :show, :identity_metadata))
+  end
+
+  @doc group: "Browsing and discovery"
+  @doc "Decorates an image with the media locators this actor may receive."
+  @spec image_entry(Actor.t(), Image.t()) :: ImageEntry.t()
+  def image_entry(%Actor{} = actor, %Image{} = image) do
+    %ImageEntry{image: image, media: Media.disclose(image, permitted?(actor, :show, image))}
+  end
+
+  @doc group: "Browsing and discovery"
+  @doc "Decorates a collection of already loaded images without issuing policy queries."
+  @spec decorate_image_entries(Actor.t(), Enumerable.t()) :: [ImageEntry.t()]
+  def decorate_image_entries(%Actor{} = actor, images) do
+    Enum.map(images, &image_entry(actor, &1))
+  end
+
+  defp image_policy(actor, image, can_interact) do
+    %Policy{
+      can_interact?: can_interact,
+      can_manage?: write_capability?(actor, :hide, image),
+      can_hide?: write_capability?(actor, :hide, image),
+      can_unhide?: write_capability?(actor, :unhide, image),
+      can_approve?: write_capability?(actor, :approve, image),
+      can_destroy?: write_capability?(actor, :destroy, image),
+      can_replace_file?: write_capability?(actor, :replace_file, image),
+      can_feature?: write_capability?(actor, :feature, image),
+      can_repair?: write_capability?(actor, :repair, image),
+      can_clear_hash?: write_capability?(actor, :remove_hash, image),
+      can_edit_uploader?: write_capability?(actor, :update_uploader, image),
+      can_view_identity_metadata?: permitted?(actor, :show, :identity_metadata),
+      can_lock_comments?: write_capability?(actor, :lock_comments, image),
+      can_lock_description?: write_capability?(actor, :lock_description, image),
+      can_lock_tags?: write_capability?(actor, :lock_tags, image),
+      can_edit_scratchpad?: write_capability?(actor, :edit_scratchpad, image),
+      can_remove_source_history?: write_capability?(actor, :remove_source_history, image),
+      can_report?:
+        verify_write_access(actor) == :ok and
+          permitted?(actor, :show, image),
+      can_subscribe?:
+        permitted?(actor, :subscribe, image) or permitted?(actor, :unsubscribe, image),
+      can_manage_galleries?:
+        verify_write_access(actor) == :ok and
+          permitted?(actor, :select_for_image, Philomena.Galleries.Gallery)
+    }
+  end
+
+  defp write_capability?(actor, action, image) do
+    verify_write_access(actor) == :ok and permitted?(actor, action, image)
+  end
+
+  defp image_attribution(_actor, image, disclose_identity?) do
+    user = loaded_user(image.user)
+
+    %Disclosure{
+      user: if(image.anonymous and not disclose_identity?, do: nil, else: user),
+      anonymous: image.anonymous,
+      ip: if(disclose_identity?, do: image.ip, else: nil),
+      fingerprint: if(disclose_identity?, do: image.fingerprint, else: nil)
+    }
+  end
+
+  defp loaded_user(%Ecto.Association.NotLoaded{}), do: nil
+  defp loaded_user(user), do: user
 
   @doc group: "Browsing and discovery"
   @doc """

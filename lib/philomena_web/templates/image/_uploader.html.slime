@@ -1,19 +1,31 @@
 span.image_uploader
   ' by
-  => render PhilomenaWeb.UserAttributionView, "_anon_user.html", object: @image, awards: true, conn: @conn
+  = cond do
+    - @attribution.user && not @attribution.anonymous ->
+      strong<>
+        = link(@attribution.user.name, to: ~p"/profiles/#{@attribution.user}")
+      = render PhilomenaWeb.ProfileView, "_awards.html", awards: @attribution.user.awards
 
-  = if can?(@conn, :show, :identity_metadata) and not hide_staff_tools?(@conn) do
-    => link_to_ip(@conn, @image.ip)
-    => link_to_fingerprint(@conn, @image.fingerprint)
-    a#edit-uploader href="#" data-click-hide=".image_uploader" data-click-show="#uploader-form"
-      i.fas.fa-edit
-    a#edit-anonymous href="#" data-click-toggle=".image-anonymous"
-      i.fas.fa-eye
+    - @attribution.user ->
+      strong<>
+        = link(anonymous_name(@image, true), to: ~p"/profiles/#{@attribution.user}")
 
-= if can?(@conn, :show, :identity_metadata) do
+    - true ->
+      strong = anonymous_name(@image)
+
+  = if @policy.can_view_identity_metadata? and not hide_staff_tools?(@conn) do
+    => link_to_ip(@conn, @attribution.ip)
+    => link_to_fingerprint(@conn, @attribution.fingerprint)
+    = if @policy.can_edit_uploader? do
+      a#edit-uploader href="#" data-click-hide=".image_uploader" data-click-show="#uploader-form"
+        i.fas.fa-edit
+      a#edit-anonymous href="#" data-click-toggle=".image-anonymous"
+        i.fas.fa-eye
+
+= if @changeset do
   = form_for @changeset, ~p"/images/#{@image}/uploader", [class: "block__content hidden", id: "uploader-form", data: [remote: "true", method: "put"]], fn f ->
     => label f, :username, "Uploader"
-    => text_input f, :username, value: username(@image.user), class: "input input--short input--small"
+    => text_input f, :username, value: username(@attribution.user), class: "input input--short input--small"
 
     = submit "Save Changes", class: "button button--small", data: [disable_with: raw("Saving&hellip;")]
 

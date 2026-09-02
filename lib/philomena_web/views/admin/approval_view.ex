@@ -2,14 +2,17 @@ defmodule PhilomenaWeb.Admin.ApprovalView do
   use PhilomenaWeb, :view
 
   alias PhilomenaWeb.Admin.ReportView
+  alias PhilomenaWeb.UserAttributionView
 
   def truncated_ip_link(ip), do: ReportView.truncated_ip_link(ip)
+  defdelegate anonymous_name(object), to: UserAttributionView
+  defdelegate anonymous_name(object, reveal_anon?), to: UserAttributionView
 
-  def image_thumb(conn, image) do
+  def image_thumb(conn, image, media) do
     render(PhilomenaWeb.ImageView, "_image_container.html",
       image: image,
       size: :thumb_tiny,
-      conn: conn
+      conn: Plug.Conn.assign(conn, :image_media, media)
     )
   end
 

@@ -2,7 +2,7 @@
 .js-sourcesauce
   - has_sources = Enum.any?(@image.sources)
   = form_for changeset, ~p"/images/#{@image}/sources", [method: "put", class: "hidden", id: "source-form", data: [remote: "true"]], fn f ->
-    = if @changeset && can?(@conn, :edit_metadata, @image) && !@conn.assigns.current_ban do
+    = if @changeset do
       = if changeset.action do
         .alert.alert-danger
           p Oops, something went wrong! Please check the errors below.
@@ -62,7 +62,7 @@
             | (
             = @source_change_count
             | )
-        = if can?(@conn, :hide, @image) and not hide_staff_tools?(@conn) do
+        = if @policy.can_remove_source_history? and not hide_staff_tools?(@conn) do
           a.button.button--state-danger.button--inline href=~p"/images/#{@image}/source_history" data-method="delete" data-confirm="Are you really, really sure?" title="Wipe sources"
             i.fas.fa-eraser>
             ' Wipe

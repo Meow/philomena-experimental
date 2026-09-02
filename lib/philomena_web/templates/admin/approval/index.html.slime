@@ -8,7 +8,7 @@ h1 Approval Queue
     .page__pagination = pagination
 
   = if Enum.any?(@images) do
-    = render PhilomenaWeb.Admin.ApprovalView, "_approvals.html", images: @images, conn: @conn
+    = render PhilomenaWeb.Admin.ApprovalView, "_approvals.html", images: @images, image_policies: @image_policies, image_media: @image_media, image_attributions: @image_attributions, conn: @conn
   - else
     ' No images are pending approval. Good job!
 

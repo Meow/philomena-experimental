@@ -1,4 +1,4 @@
-- display_mod_tools? = can?(@conn, :hide, @image)
+- display_mod_tools? = @policy.can_manage?
 
 #image_options_area
   .block__header.block__header--js-tabbed
@@ -29,7 +29,7 @@
   .block__tab.hidden data-tab="sharing"
     #embed_options
       - source_link = if image_has_sources(@image), do: " - [url=#{image_first_source(@image)}]Original source[/url]", else: " (Original source unknown at time of posting)"
-      - medium_url = thumb_url(@image, false, select_version(@image, :medium))
+      - medium_url = Map.get(media_for(@conn, @image).thumb_urls, select_version(@image, :medium))
       h5 Derpibooru
       p
         strong> Small thumbnail
@@ -146,7 +146,7 @@
       br
       .flex.flex--spaced-out
         = link "Lock specific tags", to: ~p"/images/#{@image}/tag_lock", class: "button"
-        = if not @image.approved and can?(@conn, :approve, @image) do
+        = if not @image.approved and @policy.can_approve? do
           = button_to "Approve image", ~p"/images/#{@image}/approve", method: "post", class: "button button--state-success", data: [confirm: "Are you sure?"]
-        = if @image.hidden_from_users and can?(@conn, :destroy, @image) do
+        = if @image.hidden_from_users and @policy.can_destroy? do
           = button_to "Destroy image", ~p"/images/#{@image}/destroy", method: "post", class: "button button--state-danger", data: [confirm: "This action is IRREVERSIBLE. Are you sure?"]

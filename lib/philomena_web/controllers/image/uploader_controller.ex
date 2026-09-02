@@ -12,7 +12,13 @@ defmodule PhilomenaWeb.Image.UploaderController do
 
         conn
         |> put_view(PhilomenaWeb.ImageView)
-        |> render("_uploader.html", layout: false, image: image, changeset: changeset)
+        |> render("_uploader.html",
+          layout: false,
+          image: image,
+          changeset: changeset,
+          attribution: Images.image_attribution(conn.assigns.actor, image),
+          policy: Images.image_policy(conn.assigns.actor, image)
+        )
 
       {:error, %Ecto.Changeset{}} ->
         update_failed(conn)

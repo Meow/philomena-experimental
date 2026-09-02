@@ -31,7 +31,7 @@
                     = gallery.title
 
         .block__list
-          = if @conn.assigns.current_user do
+          = if @policy.can_manage_galleries? do
             a.block__list__link.primary href=~p"/galleries/new?#{[with_image: @image.id]}"
               i.fa.fa-plus>
               span.hide-limited-desktop.hide-mobile Create a gallery
