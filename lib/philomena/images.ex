@@ -17,6 +17,10 @@ defmodule Philomena.Images do
   alias Philomena.Multi
   alias Philomena.Repo
 
+  alias Philomena.Images.Display.{
+    AnonymousForm
+  }
+
   alias PhilomenaQuery.Search
   alias Philomena.Workers.ThumbnailJob
   alias Philomena.Workers.ImagePurgeJob
@@ -2723,25 +2727,30 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_image_anonymous(moderator, "42", true)
+      iex> update_anonymous(moderator, "42", %{anonymous: true})
       {:ok, %Image{}}
 
-      iex> update_image_anonymous(user, "42", true)
+      iex> update_anonymous(user, "42", %{anonymous: true})
       {:error, :unauthorized}
 
   """
-  @spec update_anonymous(Actor.t(), IntegerId.integer_id(), boolean()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def update_anonymous(%Actor{} = actor, image_id, anonymous?) do
+  @spec update_anonymous(Actor.t(), IntegerId.integer_id(), map()) ::
+          {:ok, AnonymousForm.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(AnonymousForm.t())}
+  def update_anonymous(%Actor{} = actor, image_id, params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :update_anonymous, image_id) do
-      log_type = if anonymous?, do: "Image.Anonymous:create", else: "Image.Anonymous:delete"
+         {:ok, image} <- load_image_member(actor, :update_anonymous, image_id),
+         {:ok, form} <-
+           %AnonymousForm{}
+           |> AnonymousForm.changeset(params)
+           |> Ecto.Changeset.apply_action(:update) do
+      log_type = if form.anonymous, do: "Image.Anonymous:create", else: "Image.Anonymous:delete"
 
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
-        Image.anonymous_changeset(image, %{anonymous: anonymous?})
+        Image.anonymous_changeset(image, %{anonymous: form.anonymous})
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {log_type, Paths.image_path(image), "Updated anonymity of image #{image.id}"}
@@ -2749,8 +2758,8 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+        {:ok, _changes} ->
+          {:ok, form}
       end
     end
   end

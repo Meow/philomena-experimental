@@ -2348,13 +2348,14 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_image_anonymous/3" do
+  describe "update_anonymous/3" do
     test "a moderator sets anonymity, flagging the image anonymous" do
       moderator = moderator_user_fixture()
       image = image_fixture(anonymous: false)
 
-      assert {:ok, updated} = Images.update_anonymous(actor(moderator), to_string(image.id), true)
-      assert updated.id == image.id
+      assert {:ok, updated} =
+               Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: true})
+
       assert updated.anonymous
       assert Repo.reload!(image).anonymous
     end
@@ -2363,7 +2364,9 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(anonymous: false)
 
-      assert {:ok, _} = Images.update_anonymous(actor(admin), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_anonymous(actor(admin), to_string(image.id), %{anonymous: true})
+
       assert Repo.reload!(image).anonymous
     end
 
@@ -2372,9 +2375,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(anonymous: true)
 
       assert {:ok, updated} =
-               Images.update_anonymous(actor(moderator), to_string(image.id), false)
+               Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: false})
 
-      assert updated.id == image.id
       refute updated.anonymous
       refute Repo.reload!(image).anonymous
     end
@@ -2383,7 +2385,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(anonymous: false)
 
-      assert {:ok, _} = Images.update_anonymous(actor(moderator), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: true})
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -2396,7 +2399,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(anonymous: true)
 
-      assert {:ok, _} = Images.update_anonymous(actor(moderator), to_string(image.id), false)
+      assert {:ok, _} =
+               Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: false})
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -2409,8 +2413,10 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(anonymous: false)
 
-      assert {:ok, updated} = Images.update_anonymous(actor(moderator), image.id, true)
-      assert updated.id == image.id
+      assert {:ok, updated} =
+               Images.update_anonymous(actor(moderator), image.id, %{anonymous: true})
+
+      assert updated.anonymous == true
       assert Repo.reload!(image).anonymous
     end
 
@@ -2420,7 +2426,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(anonymous: false)
 
-      assert Images.update_anonymous(actor(user), to_string(image.id), true) ==
+      assert Images.update_anonymous(actor(user), to_string(image.id), %{anonymous: true}) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(image).anonymous
@@ -2432,14 +2438,16 @@ defmodule Philomena.ImagesTest do
       # never reaches the not-found path for an unprivileged actor.
       user = confirmed_user_fixture()
 
-      assert Images.update_anonymous(actor(user), "not-a-number", true) == {:error, :unauthorized}
+      assert Images.update_anonymous(actor(user), "not-a-number", %{anonymous: true}) ==
+               {:error, :unauthorized}
+
       assert moderation_log_count() == 0
     end
 
     test "an anonymous actor is unauthorized on a real image" do
       image = image_fixture(anonymous: false)
 
-      assert Images.update_anonymous(actor(), to_string(image.id), true) ==
+      assert Images.update_anonymous(actor(), to_string(image.id), %{anonymous: true}) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(image).anonymous
@@ -2447,7 +2455,9 @@ defmodule Philomena.ImagesTest do
     end
 
     test "an anonymous actor with a garbage id is still unauthorized" do
-      assert Images.update_anonymous(actor(), "not-a-number", true) == {:error, :unauthorized}
+      assert Images.update_anonymous(actor(), "not-a-number", %{anonymous: true}) ==
+               {:error, :unauthorized}
+
       assert moderation_log_count() == 0
     end
 
@@ -2456,21 +2466,23 @@ defmodule Philomena.ImagesTest do
       # missing image is a plain not-found rather than unauthorized.
       moderator = moderator_user_fixture()
 
-      assert Images.update_anonymous(actor(moderator), "2147483647", true) == {:error, :not_found}
+      assert Images.update_anonymous(actor(moderator), "2147483647", %{anonymous: true}) ==
+               {:error, :not_found}
+
       assert moderation_log_count() == 0
     end
 
     test "a moderator with a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_anonymous(actor(moderator), "not-a-number", true) ==
+      assert Images.update_anonymous(actor(moderator), "not-a-number", %{anonymous: true}) ==
                {:error, :not_found}
     end
 
     test "a moderator with an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_anonymous(actor(moderator), "99999999999999999999", true) ==
+      assert Images.update_anonymous(actor(moderator), "99999999999999999999", %{anonymous: true}) ==
                {:error, :not_found}
     end
   end
