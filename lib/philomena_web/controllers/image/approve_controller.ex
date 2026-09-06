@@ -5,8 +5,8 @@ defmodule PhilomenaWeb.Image.ApproveController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, params) do
-    case Images.create_image_approve(conn.assigns.actor, params["image_id"]) do
+  def create(conn, %{"image_id" => image_id}) do
+    case Images.create_image_approval(conn.assigns.actor, image_id) do
       {:ok, _image} ->
         conn
         |> put_flash(:info, "Image has been approved.")

@@ -18,8 +18,11 @@ defmodule Philomena.Images do
   alias Philomena.Repo
 
   alias Philomena.Images.Display.{
-    AnonymousForm
+    AnonymousForm,
+    ApprovalForm
   }
+
+  alias Philomena.Forms
 
   alias PhilomenaQuery.Search
   alias Philomena.Workers.ThumbnailJob
@@ -1509,20 +1512,22 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> create_image_approve(moderator, "42")
+      iex> create_image_approval(moderator, "42")
       {:ok, %Image{}}
 
-      iex> create_image_approve(user, "42")
+      iex> create_image_approval(user, "42")
       {:error, :unauthorized}
 
   """
-  @spec create_image_approve(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()}
-          | {:error, Ecto.Changeset.t()}
+  @spec create_image_approval(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, ApprovalForm.t()}
+          | {:error, Ecto.Changeset.t(ApprovalForm.t())}
           | {:error, :ban | :unauthorized | :not_found}
-  def create_image_approve(%Actor{} = actor, image_id) do
+  def create_image_approval(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :approve, image_id) do
+      approval_form = %ApprovalForm{}
+
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} -> Image.approve_changeset(image) end)
@@ -1533,11 +1538,11 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+        {:ok, _changes} ->
+          {:ok, approval_form}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, Forms.copy_errors(changeset, approval_form)}
 
         error ->
           error
