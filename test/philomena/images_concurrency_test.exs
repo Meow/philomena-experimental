@@ -26,7 +26,7 @@ defmodule Philomena.ImagesConcurrencyTest do
         fn -> Images.create_image_approval(actor(moderator), image.id) end
       ])
 
-    assert Enum.count(results, &match?({:ok, %Image{}}, &1)) == 1
+    assert Enum.count(results, &match?({:ok, %{}}, &1)) == 1
 
     assert Enum.count(
              results,
