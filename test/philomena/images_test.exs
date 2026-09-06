@@ -1350,14 +1350,14 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "create_image_approve/2" do
+  describe "create_image_approval/2" do
     test "a moderator approves an unapproved image and gets the image" do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, approved} = Images.create_image_approve(actor(moderator), to_string(image.id))
-      assert approved.id == image.id
-      assert approved.approved
+      assert {:ok, _approval} =
+               Images.create_image_approval(actor(moderator), to_string(image.id))
+
       assert Repo.reload!(image).approved
     end
 
@@ -1365,7 +1365,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, _} = Images.create_image_approve(actor(admin), to_string(image.id))
+      assert {:ok, _approval} = Images.create_image_approval(actor(admin), to_string(image.id))
       assert Repo.reload!(image).approved
     end
 
@@ -1375,7 +1375,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(approved: false, user_id: uploader.id)
       assert Repo.reload!(uploader).images_count == 0
 
-      assert {:ok, _} = Images.create_image_approve(actor(moderator), to_string(image.id))
+      assert {:ok, _approval} =
+               Images.create_image_approval(actor(moderator), to_string(image.id))
+
       assert Repo.reload!(uploader).images_count == 1
     end
 
@@ -1383,7 +1385,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, _} = Images.create_image_approve(actor(moderator), to_string(image.id))
+      assert {:ok, _approval} =
+               Images.create_image_approval(actor(moderator), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1396,8 +1399,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(approved: false)
 
-      assert {:ok, approved} = Images.create_image_approve(actor(moderator), image.id)
-      assert approved.id == image.id
+      assert {:ok, _approval} = Images.create_image_approval(actor(moderator), image.id)
+      assert Repo.reload!(image).approved == true
     end
 
     test "suggests verification when approval reaches the uploader's fifth image" do
@@ -1411,8 +1414,7 @@ defmodule Philomena.ImagesTest do
 
       image = image_fixture(approved: false, user_id: uploader.id)
 
-      assert {:ok, approved} = Images.create_image_approve(actor(moderator), image.id)
-      assert approved.approved
+      assert {:ok, _approval} = Images.create_image_approval(actor(moderator), image.id)
       assert Repo.reload!(uploader).images_count == 5
 
       assert %Report{reported_user_id: uploader_id, reason: reason, system: true} =
@@ -1429,7 +1431,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(approved: true)
 
       assert {:error, %{errors: [approved: {"must be false", []}]}} =
-               Images.create_image_approve(actor(moderator), to_string(image.id))
+               Images.create_image_approval(actor(moderator), to_string(image.id))
 
       assert Repo.reload!(image).approved
       assert moderation_log_count() == 0
@@ -1441,7 +1443,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(approved: true)
 
-      assert Images.create_image_approve(actor(user), to_string(image.id)) ==
+      assert Images.create_image_approval(actor(user), to_string(image.id)) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -1451,7 +1453,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(approved: false)
 
-      assert Images.create_image_approve(actor(user), to_string(image.id)) ==
+      assert Images.create_image_approval(actor(user), to_string(image.id)) ==
                {:error, :unauthorized}
 
       refute Repo.reload!(image).approved
@@ -1461,7 +1463,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot approve an unapproved image" do
       image = image_fixture(approved: false)
 
-      assert Images.create_image_approve(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_approval(actor(), to_string(image.id)) == {:error, :unauthorized}
       refute Repo.reload!(image).approved
       assert moderation_log_count() == 0
     end
@@ -1470,7 +1472,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.create_image_approve(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.create_image_approval(actor(moderator), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
@@ -1478,20 +1480,21 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.create_image_approve(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.create_image_approval(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.create_image_approve(actor(moderator), "not-a-number") == {:error, :not_found}
+      assert Images.create_image_approval(actor(moderator), "not-a-number") ==
+               {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.create_image_approve(actor(moderator), "99999999999999999999") ==
+      assert Images.create_image_approval(actor(moderator), "99999999999999999999") ==
                {:error, :not_found}
     end
   end

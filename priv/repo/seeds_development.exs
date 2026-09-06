@@ -85,7 +85,7 @@ for image_def <- resources["remote_images"] do
   )
   |> case do
     {:ok, %{image: image}} ->
-      Images.create_image_approve(admin_actor, image.id)
+      Images.create_image_approval(admin_actor, image.id)
 
       IO.puts("Created image ##{image.id}")
 
