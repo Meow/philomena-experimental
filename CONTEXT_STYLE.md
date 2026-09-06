@@ -31,6 +31,41 @@ structs that only rename its steps.
 | Indexing, object storage, jobs, and other post-commit work | `Multi.on_commit/2` callback or an explicit success-path action                                 |
 | Independently assembled page data                          | A typed page/index/form struct, but only when the schema or changeset cannot carry it naturally |
 
+## Worse is better: choose the smallest sufficient design
+
+For context code, treat complexity as a cost that must earn its keep. Prefer a
+small implementation with explicit assumptions and an obvious failure mode to
+general defensive machinery for inputs, states, or scale that the domain does
+not admit. This is a maintainability rule, not permission to weaken a caller's
+validation, authorization, transaction, or persistence guarantees.
+
+- Once a boundary has established an input or output contract, trust that
+  contract in the next layer. Do not re-verify, normalize, or wrap values again
+  merely to make a trusted path handle cases that its contract excludes.
+- Do not add branches for structurally impossible shapes or states when only
+  trusted application code can produce them. Let a function-clause error, a
+  changeset error, or a database constraint expose a violated internal
+  assumption. Handle the case when an external caller, persisted data, or a
+  documented public contract can actually produce it.
+- For small, bounded operations, prefer the clearest direct traversal or query
+  over indexing, caching, generalized dispatch, or an asymptotically faster
+  design. Complexity and optimization should follow a real requirement or
+  measured evidence.
+- Do not add options, wrappers, fallback paths, protocols, result structs, or
+  abstractions for a hypothetical caller or a one-off variation. Extract a
+  concept when it is reused, enforces a real invariant, or makes the workflow
+  easier to understand.
+- Keep failures local and legible. A narrow operation that fails loudly at its
+  violated assumption is preferable to a broad recovery path that silently
+  changes semantics or obscures the original bug.
+
+When deciding whether to add defensive code, name the concrete requirement it
+serves: an untrusted boundary, a persisted-data invariant, a concurrency or
+rollback guarantee, a documented caller contract, or a demonstrated scale
+problem. If there is no such requirement, leave the simpler design in place and
+record a short assumption comment only when the reason would otherwise be easy
+to lose.
+
 ## Public context boundaries
 
 - Accept `%Philomena.Attribution.Actor{}` first for request-facing operations.
@@ -393,6 +428,8 @@ Before considering a context change complete, check:
   changeset, calculated field, or tuple cannot carry naturally?
 - Does invalid search input remain visible instead of becoming an unfiltered
   query?
+- Does each defensive branch, abstraction, and optimization serve a concrete
+  trust boundary, invariant, contract, or demonstrated scale requirement?
 - Do the specs, docs, controller patterns, and tests match the final result
   contract exactly?
 
