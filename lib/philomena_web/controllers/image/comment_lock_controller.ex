@@ -5,21 +5,23 @@ defmodule PhilomenaWeb.Image.CommentLockController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, params) do
-    with {:ok, image} <-
-           Images.update_image_comment_lock(conn.assigns.actor, params["image_id"], true) do
+  def create(conn, %{"image_id" => image_id}) do
+    with {:ok, _comment_lock_form} <-
+           Images.update_image_comment_lock(conn.assigns.actor, image_id, %{comments_locked: true}) do
       conn
       |> put_flash(:info, "Successfully locked comments.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 
-  def delete(conn, params) do
-    with {:ok, image} <-
-           Images.update_image_comment_lock(conn.assigns.actor, params["image_id"], false) do
+  def delete(conn, %{"image_id" => image_id}) do
+    with {:ok, _comment_lock_form} <-
+           Images.update_image_comment_lock(conn.assigns.actor, image_id, %{
+             comments_locked: false
+           }) do
       conn
       |> put_flash(:info, "Successfully unlocked comments.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 end

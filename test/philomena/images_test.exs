@@ -1504,11 +1504,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, locked} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), true)
+      assert {:ok, comment_lock_form} =
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+                 comments_locked: true
+               })
 
-      assert locked.id == image.id
-      refute locked.commenting_allowed
+      assert comment_lock_form.comments_locked
       refute Repo.reload!(image).commenting_allowed
     end
 
@@ -1516,7 +1517,11 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, _} = Images.update_image_comment_lock(actor(admin), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_image_comment_lock(actor(admin), to_string(image.id), %{
+                 comments_locked: true
+               })
+
       refute Repo.reload!(image).commenting_allowed
     end
 
@@ -1524,11 +1529,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: false)
 
-      assert {:ok, unlocked} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), false)
+      assert {:ok, comment_lock_form} =
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+                 comments_locked: false
+               })
 
-      assert unlocked.id == image.id
-      assert unlocked.commenting_allowed
+      refute comment_lock_form.comments_locked
       assert Repo.reload!(image).commenting_allowed
     end
 
@@ -1537,7 +1543,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: true)
 
       assert {:ok, _} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), true)
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+                 comments_locked: true
+               })
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1551,7 +1559,9 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: false)
 
       assert {:ok, _} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), false)
+               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+                 comments_locked: false
+               })
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1564,15 +1574,22 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, locked} = Images.update_image_comment_lock(actor(moderator), image.id, true)
-      assert locked.id == image.id
+      assert {:ok, comment_lock_form} =
+               Images.update_image_comment_lock(actor(moderator), image.id, %{
+                 comments_locked: true
+               })
+
+      assert comment_lock_form.comments_locked
+      refute Repo.reload!(image).commenting_allowed
     end
 
     test "a regular user cannot lock comments and the flag stays set" do
       user = confirmed_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert Images.update_image_comment_lock(actor(user), to_string(image.id), true) ==
+      assert Images.update_image_comment_lock(actor(user), to_string(image.id), %{
+               comments_locked: true
+             }) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).commenting_allowed
@@ -1582,7 +1599,9 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot lock comments and the flag stays set" do
       image = image_fixture(commenting_allowed: true)
 
-      assert Images.update_image_comment_lock(actor(), to_string(image.id), true) ==
+      assert Images.update_image_comment_lock(actor(), to_string(image.id), %{
+               comments_locked: true
+             }) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).commenting_allowed
@@ -1593,7 +1612,9 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(moderator), "2147483647", true) ==
+      assert Images.update_image_comment_lock(actor(moderator), "2147483647", %{
+               comments_locked: true
+             }) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1603,7 +1624,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(admin), "2147483647", true) ==
+      assert Images.update_image_comment_lock(actor(admin), "2147483647", %{comments_locked: true}) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1612,14 +1633,18 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(moderator), "not-a-number", true) ==
+      assert Images.update_image_comment_lock(actor(moderator), "not-a-number", %{
+               comments_locked: true
+             }) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(moderator), "99999999999999999999", true) ==
+      assert Images.update_image_comment_lock(actor(moderator), "99999999999999999999", %{
+               comments_locked: true
+             }) ==
                {:error, :not_found}
     end
   end
