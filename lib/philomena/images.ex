@@ -247,134 +247,6 @@ defmodule Philomena.Images do
     end
   end
 
-  defp update_loaded_sources(%Image{} = image, %Actor{} = actor, %SourceInputForm{} = form) do
-    %{added: added_sources, removed: removed_sources} =
-      SourceDiffer.diff_inputs(form.old_sources, form.sources)
-
-    Multi.new()
-    |> Multi.reserve_action(
-      fn -> RateLimiter.record_action(actor, :source_update, @source_update_window) end,
-      fn -> RateLimiter.rollback_action(actor, :source_update) end
-    )
-    |> put_lock_image(actor, image.id, :edit_metadata, [:sources])
-    |> Multi.run(:image, fn repo, %{locked_image: image} ->
-      changeset = Image.source_changeset(image, added_sources, removed_sources)
-
-      if Image.meaningful_source_update?(changeset) do
-        repo.update(changeset)
-      else
-        {:error, :no_change}
-      end
-    end)
-    |> SourceChanges.put_record_image_changes(actor)
-    |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
-    |> put_reindex_image(:image)
-    |> Multi.on_commit(fn %{image: %{added_sources: added, removed_sources: removed} = image} ->
-      image = Repo.preload(image, [:user, :sources, tags: :aliases])
-      broadcast_source_update(image, added, removed)
-    end)
-    |> Multi.transact()
-    |> case do
-      {:error, :action_reservation, :rate_limited, _changes} ->
-        {:error, :rate_limited}
-
-      {:ok, %{image: %Image{} = image}} ->
-        {:ok, image}
-
-      {:error, :image, :no_change, _changes} ->
-        {:error, :no_change}
-
-      {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-        {:error, changeset}
-
-      error ->
-        map_lock_errors(error)
-    end
-  end
-
-  defp update_loaded_tags(%Image{} = image, %Actor{} = actor, %TagInputForm{} = form) do
-    %{added: added_tag_names, removed: removed_tag_names} =
-      TagDiffer.diff_inputs(
-        form.old_tag_input,
-        form.tag_input
-      )
-
-    Multi.new()
-    |> Multi.reserve_action(
-      fn -> RateLimiter.record_action(actor, :tag_update, @tag_update_window) end,
-      fn -> RateLimiter.rollback_action(actor, :tag_update) end
-    )
-    |> put_lock_image(actor, image.id, :edit_metadata, [:tags, :locked_tags])
-    |> Tags.put_canonicalize_tag_name_sets([
-      {:removed_tags, removed_tag_names, []},
-      {:added_tags, added_tag_names, allow_insert_new?: true, expand_implications?: true}
-    ])
-    |> Multi.run(:image, fn
-      repo,
-      %{
-        locked_image: image,
-        canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}
-      } ->
-        changeset = Image.tag_changeset(image, added_tags, removed_tags, image.locked_tags)
-
-        if Image.meaningful_tag_update?(changeset) do
-          repo.update(changeset)
-        else
-          {:error, :no_change}
-        end
-    end)
-    |> Multi.run(:check_limits, fn _repo, %{image: image} ->
-      record_tag_change_limits(image, actor)
-    end)
-    |> Multi.on_rollback(fn
-      %{check_limits: {tag_changed_count, rating_changed_count}} ->
-        %Actor{ip: ip, user: user} = actor
-        Limits.rollback_action(user, ip, tag_changed_count, rating_changed_count)
-
-      _ ->
-        :ok
-    end)
-    |> TagChanges.put_tag_change(actor)
-    |> Tags.put_image_tag_count_changes()
-    |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
-    |> put_reindex_image(:image)
-    |> IndexJob.put_enqueue("Comments", :image_id, fn %{image: image} -> [image.id] end)
-    |> Multi.on_commit(fn %{image: %{added_tags: added, removed_tags: removed} = image} ->
-      image = Repo.preload(image, [:user, :sources, tags: :aliases])
-      broadcast_tag_update(image, added, removed)
-    end)
-    |> Multi.transact_with_automatic_retry()
-    |> case do
-      {:error, :action_reservation, :rate_limited, _changes} ->
-        {:error, :rate_limited}
-
-      {:ok, %{image: %Image{} = image}} ->
-        {:ok, image}
-
-      {:error, :image, :no_change, _changes} ->
-        {:error, :no_change}
-
-      {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-        {:error, changeset}
-
-      {:error, :check_limits, _reason, _changes} ->
-        {:error, :rate_limited}
-
-      error ->
-        map_lock_errors(error)
-    end
-  end
-
-  defp record_tag_change_limits(image, %Actor{ip: ip, user: user}) do
-    tag_changed_count = length(image.added_tags) + length(image.removed_tags)
-    rating_changed_count = if(image.ratings_changed, do: 1, else: 0)
-
-    case Limits.record_action(user, ip, tag_changed_count, rating_changed_count) do
-      :ok -> {:ok, {tag_changed_count, rating_changed_count}}
-      error -> error
-    end
-  end
-
   ## Forms and uploads
 
   defp image_interaction_allowed?(%Actor{user: nil}, _image), do: false
@@ -2495,26 +2367,55 @@ defmodule Philomena.Images do
            %SourceInputForm{}
            |> SourceInputForm.changeset(attrs)
            |> SourceInputForm.apply(image) do
-      case update_loaded_sources(image, actor, source_input_form) do
-        {:ok, %Image{} = image} ->
+      %{added: added_sources, removed: removed_sources} =
+        SourceDiffer.diff_inputs(source_input_form.old_sources, source_input_form.sources)
+
+      Multi.new()
+      |> Multi.reserve_action(
+        fn -> RateLimiter.record_action(actor, :source_update, @source_update_window) end,
+        fn -> RateLimiter.rollback_action(actor, :source_update) end
+      )
+      |> put_lock_image(actor, image.id, :edit_metadata, [:sources])
+      |> Multi.run(:image, fn repo, %{locked_image: image} ->
+        changeset = Image.source_changeset(image, added_sources, removed_sources)
+
+        if Image.meaningful_source_update?(changeset) do
+          repo.update(changeset)
+        else
+          {:error, :no_change}
+        end
+      end)
+      |> SourceChanges.put_record_image_changes(actor)
+      |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
+      |> put_reindex_image(:image)
+      |> Multi.on_commit(fn %{image: %{added_sources: added, removed_sources: removed} = image} ->
+        image = Repo.preload(image, [:user, :sources, tags: :aliases])
+        broadcast_source_update(image, added, removed)
+      end)
+      |> Multi.transact()
+      |> case do
+        {:error, :action_reservation, :rate_limited, _changes} ->
+          {:error, :rate_limited}
+
+        {:ok, %{image: %Image{} = image}} ->
           {:ok,
            %{
              image: image,
              source_change_count: SourceChanges.count_for_image(image)
            }}
 
-        {:error, :no_change} ->
+        {:error, :image, :no_change, _changes} ->
           {:ok,
            %{
              image: image,
              source_change_count: SourceChanges.count_for_image(image)
            }}
 
-        {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
         error ->
-          error
+          map_lock_errors(error)
       end
     end
   end
@@ -2635,42 +2536,101 @@ defmodule Philomena.Images do
              | :not_found
              | :rate_limited
              | Ecto.Changeset.t()}
-  def update_image_tags(%Actor{} = actor, image_id, attrs) do
+  def update_image_tags(%Actor{user: user, ip: ip} = actor, image_id, attrs) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_metadata, image_id),
          {:ok, tag_input_form} <-
            %TagInputForm{}
            |> TagInputForm.changeset(attrs)
            |> TagInputForm.apply(image) do
-      case update_loaded_tags(image, actor, tag_input_form) do
-        {:ok, %Image{} = image} ->
-          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
+      %{added: added_tag_names, removed: removed_tag_names} =
+        TagDiffer.diff_inputs(
+          tag_input_form.old_tag_input,
+          tag_input_form.tag_input
+        )
 
-          {:ok,
-           %{
-             image: image,
-             tag_change_count: tag_change_count,
-             tag_change_tag_count: tag_change_tag_count
-           }}
+      Multi.new()
+      |> Multi.reserve_action(
+        fn -> RateLimiter.record_action(actor, :tag_update, @tag_update_window) end,
+        fn -> RateLimiter.rollback_action(actor, :tag_update) end
+      )
+      |> put_lock_image(actor, image.id, :edit_metadata, [:tags, :locked_tags])
+      |> Tags.put_canonicalize_tag_name_sets([
+        {:removed_tags, removed_tag_names, []},
+        {:added_tags, added_tag_names, allow_insert_new?: true, expand_implications?: true}
+      ])
+      |> Multi.run(:image, fn
+        repo,
+        %{
+          locked_image: image,
+          canonical_tags: %{added_tags: added_tags, removed_tags: removed_tags}
+        } ->
+          changeset = Image.tag_changeset(image, added_tags, removed_tags, image.locked_tags)
 
-        {:error, :no_change} ->
-          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
+          if Image.meaningful_tag_update?(changeset) do
+            repo.update(changeset)
+          else
+            {:error, :no_change}
+          end
+      end)
+      |> Multi.run(:check_limits, fn _repo, %{image: image} ->
+        tag_changed_count = length(image.added_tags) + length(image.removed_tags)
+        rating_changed_count = if(image.ratings_changed, do: 1, else: 0)
 
-          {:ok,
-           %{
-             image: image,
-             tag_change_count: tag_change_count,
-             tag_change_tag_count: tag_change_tag_count
-           }}
+        with :ok <- Limits.record_action(user, ip, tag_changed_count, rating_changed_count) do
+          {:ok, {tag_changed_count, rating_changed_count}}
+        end
+      end)
+      |> Multi.on_rollback(fn
+        %{check_limits: {tag_changed_count, rating_changed_count}} ->
+          %Actor{ip: ip, user: user} = actor
+          Limits.rollback_action(user, ip, tag_changed_count, rating_changed_count)
 
-        {:error, :rate_limited} ->
+        _ ->
+          :ok
+      end)
+      |> TagChanges.put_tag_change(actor)
+      |> Tags.put_image_tag_count_changes()
+      |> UserStatistics.put_increment(actor.user, :metadata_updates_count)
+      |> put_reindex_image(:image)
+      |> IndexJob.put_enqueue("Comments", :image_id, fn %{image: image} -> [image.id] end)
+      |> Multi.on_commit(fn %{image: %{added_tags: added, removed_tags: removed} = image} ->
+        image = Repo.preload(image, [:user, :sources, tags: :aliases])
+        broadcast_tag_update(image, added, removed)
+      end)
+      |> Multi.transact_with_automatic_retry()
+      |> case do
+        {:error, :action_reservation, :rate_limited, _changes} ->
           {:error, :rate_limited}
 
-        {:error, %Ecto.Changeset{} = changeset} ->
+        {:ok, %{image: %Image{} = image}} ->
+          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
+
+          {:ok,
+           %{
+             image: image,
+             tag_change_count: tag_change_count,
+             tag_change_tag_count: tag_change_tag_count
+           }}
+
+        {:error, :image, :no_change, _changes} ->
+          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
+
+          {:ok,
+           %{
+             image: image,
+             tag_change_count: tag_change_count,
+             tag_change_tag_count: tag_change_tag_count
+           }}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
 
+        {:error, :check_limits, _reason, _changes} ->
+          {:error, :rate_limited}
+
         error ->
-          error
+          map_lock_errors(error)
       end
     end
   end
