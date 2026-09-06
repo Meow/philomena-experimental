@@ -5,21 +5,21 @@ defmodule PhilomenaWeb.Image.AnonymousController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, params) do
-    with {:ok, image} <-
-           Images.update_anonymous(conn.assigns.actor, params["image_id"], true) do
+  def create(conn, %{"image_id" => image_id}) do
+    with {:ok, _anonymous} <-
+           Images.update_anonymous(conn.assigns.actor, image_id, %{anonymous: true}) do
       conn
       |> put_flash(:info, "Successfully updated anonymity.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 
-  def delete(conn, params) do
-    with {:ok, image} <-
-           Images.update_anonymous(conn.assigns.actor, params["image_id"], false) do
+  def delete(conn, %{"image_id" => image_id}) do
+    with {:ok, _anonymous} <-
+           Images.update_anonymous(conn.assigns.actor, image_id, %{anonymous: false}) do
       conn
       |> put_flash(:info, "Successfully updated anonymity.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 end
