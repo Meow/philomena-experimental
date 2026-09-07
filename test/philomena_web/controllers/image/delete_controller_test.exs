@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
       image = image_fixture()
 
       conn =
-        post(conn, ~p"/images/#{image}/delete", %{"image" => %{"deletion_reason" => "Spam"}})
+        post(conn, ~p"/images/#{image}/delete", %{"hide" => %{"deletion_reason" => "Spam"}})
 
       assert redirected_to(conn) == ~p"/sessions/new"
       refute Repo.reload!(image).hidden_from_users
@@ -24,7 +24,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
       image = image_fixture()
 
       conn =
-        post(conn, ~p"/images/#{image}/delete", %{"image" => %{"deletion_reason" => "Spam"}})
+        post(conn, ~p"/images/#{image}/delete", %{"hide" => %{"deletion_reason" => "Spam"}})
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
@@ -37,7 +37,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
 
       conn =
         post(conn, ~p"/images/#{image}/delete", %{
-          "image" => %{"deletion_reason" => "Rule violation"}
+          "hide" => %{"deletion_reason" => "Rule violation"}
         })
 
       assert redirected_to(conn) == ~p"/images/#{image}"
@@ -54,7 +54,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
       image = image_fixture()
 
       conn =
-        post(conn, ~p"/images/#{image}/delete", %{"image" => %{"deletion_reason" => ""}})
+        post(conn, ~p"/images/#{image}/delete", %{"hide" => %{"deletion_reason" => ""}})
 
       assert redirected_to(conn) == ~p"/images/#{image}"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Failed to delete image."
@@ -65,7 +65,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn =
-        post(conn, ~p"/images/999999999/delete", %{"image" => %{"deletion_reason" => "Spam"}})
+        post(conn, ~p"/images/999999999/delete", %{"hide" => %{"deletion_reason" => "Spam"}})
 
       assert redirected_to(conn) == "/"
 
@@ -81,7 +81,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
 
       conn =
         patch(conn, ~p"/images/#{image}/delete", %{
-          "image" => %{"deletion_reason" => "Updated reason"}
+          "hide" => %{"deletion_reason" => "Updated reason"}
         })
 
       assert redirected_to(conn) == ~p"/images/#{image}"
@@ -95,7 +95,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
 
       conn =
         put(conn, ~p"/images/#{image}/delete", %{
-          "image" => %{"deletion_reason" => "PUT reason"}
+          "hide" => %{"deletion_reason" => "PUT reason"}
         })
 
       assert redirected_to(conn) == ~p"/images/#{image}"
@@ -109,7 +109,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
 
       conn =
         patch(conn, ~p"/images/#{image}/delete", %{
-          "image" => %{"deletion_reason" => "Whatever"}
+          "hide" => %{"deletion_reason" => "Whatever"}
         })
 
       assert redirected_to(conn) == ~p"/images/#{image}"
@@ -124,7 +124,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
       image = image_fixture(hidden_from_users: true, deletion_reason: "Original reason")
 
       conn =
-        patch(conn, ~p"/images/#{image}/delete", %{"image" => %{"deletion_reason" => ""}})
+        patch(conn, ~p"/images/#{image}/delete", %{"hide" => %{"deletion_reason" => ""}})
 
       assert redirected_to(conn) == ~p"/images/#{image}"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Couldn't update deletion reason."
@@ -137,7 +137,7 @@ defmodule PhilomenaWeb.Image.DeleteControllerTest do
 
       conn =
         patch(conn, ~p"/images/#{image}/delete", %{
-          "image" => %{"deletion_reason" => "Updated reason"}
+          "hide" => %{"deletion_reason" => "Updated reason"}
         })
 
       assert redirected_to(conn) == "/"

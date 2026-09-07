@@ -8,51 +8,51 @@ defmodule PhilomenaWeb.Image.DeleteController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def create(conn, %{"image" => image_params} = params) do
-    case Images.create_image_hide(conn.assigns.actor, params["image_id"], image_params) do
+  def create(conn, %{"image_id" => image_id} = params) do
+    case Images.create_image_hide(conn.assigns.actor, image_id, params["hide"]) do
       {:ok, _image} ->
         conn
         |> put_flash(:info, "Image successfully deleted.")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
+        |> redirect(to: ~p"/images/#{image_id}")
 
       {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Failed to delete image.")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
+        |> redirect(to: ~p"/images/#{image_id}")
 
       error ->
         error
     end
   end
 
-  def update(conn, %{"image" => image_params} = params) do
-    case Images.update_image_hide(conn.assigns.actor, params["image_id"], image_params) do
+  def update(conn, %{"image_id" => image_id} = params) do
+    case Images.update_image_hide(conn.assigns.actor, image_id, params["hide"]) do
       {:ok, _image} ->
         conn
         |> put_flash(:info, "Deletion reason updated.")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
+        |> redirect(to: ~p"/images/#{image_id}")
 
       {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Couldn't update deletion reason.")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
+        |> redirect(to: ~p"/images/#{image_id}")
 
       error ->
         error
     end
   end
 
-  def delete(conn, params) do
-    case Images.delete_image_hide(conn.assigns.actor, params["image_id"]) do
+  def delete(conn, %{"image_id" => image_id}) do
+    case Images.delete_image_hide(conn.assigns.actor, image_id) do
       {:ok, _image} ->
         conn
         |> put_flash(:info, "Image successfully restored.")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
+        |> redirect(to: ~p"/images/#{image_id}")
 
       {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Failed to restore image.")
-        |> redirect(to: ~p"/images/#{params["image_id"]}")
+        |> redirect(to: ~p"/images/#{image_id}")
 
       error ->
         error
