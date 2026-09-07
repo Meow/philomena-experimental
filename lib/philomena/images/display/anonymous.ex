@@ -2,51 +2,37 @@ defmodule Philomena.Images.Display.Anonymous do
   @moduledoc """
   Presentation data for an image's anonymity control.
 
-  Contains a changeset and the `anonymous?` value.
+  Contains the `anonymous` value.
 
   Omitted when the control is unavailable to the actor.
   """
 
+  use Ecto.Schema
+
   import Philomena.Images.Display.Authorization
+  import Ecto.Changeset
 
   alias Philomena.Attribution.Actor
   alias Philomena.Images.Image
-  alias Philomena.Forms
 
-  defmodule Form do
-    use Ecto.Schema
-    import Ecto.Changeset
+  @type t :: %__MODULE__{}
+  @primary_key false
 
-    @type t :: %__MODULE__{}
-
-    embedded_schema do
-      field :anonymous, :boolean
-    end
-
-    @doc false
-    def changeset(anonymous_form, attrs \\ %{}) do
-      anonymous_form
-      |> cast(attrs, [:anonymous])
-      |> validate_required(:anonymous)
-    end
+  embedded_schema do
+    field :anonymous, :boolean
   end
 
-  @enforce_keys [:changeset, :anonymous?]
-  defstruct @enforce_keys
-
-  @type t :: %__MODULE__{
-          changeset: Ecto.Changeset.t(Form.t()),
-          anonymous?: boolean()
-        }
+  @doc false
+  def changeset(anonymous, attrs \\ %{}) do
+    anonymous
+    |> cast(attrs, [:anonymous])
+    |> validate_required(:anonymous)
+  end
 
   @doc false
-  @spec render(Actor.t(), Image.t()) :: t() | nil
   def render(%Actor{} = actor, %Image{} = image) do
     if image_permitted?(actor, :update_anonymous, image) do
-      %__MODULE__{
-        changeset: Forms.change(Form, %{anonymous: image.anonymous}),
-        anonymous?: image.anonymous
-      }
+      %__MODULE__{anonymous: image.anonymous}
     end
   end
 end

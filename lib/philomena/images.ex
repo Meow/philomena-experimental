@@ -834,13 +834,13 @@ defmodule Philomena.Images do
       can_interact: can_interact,
       user_galleries: gallery_choices,
       interactions: Interactions.user_interactions(actor, [image]),
-      description: Description.render(actor, image),
-      hide: Hide.render(actor, image),
+      description: image.description,
+      description_changeset: Forms.change(Description.render(actor, image)),
       comment_changeset: comment_changeset_for(actor, image),
       tag_changeset: image_changeset_for(actor, image, :edit_metadata),
       source_changeset: image_changeset_for(actor, image, :edit_metadata),
       file_changeset: image_changeset_for(actor, image, :replace_file),
-      hide_changeset: image_changeset_for(actor, image, :hide),
+      hide_changeset: Forms.change(Hide.render(actor, image)),
       feature_changeset: image_changeset_for(actor, image, :feature),
       repair_changeset: image_changeset_for(actor, image, :repair),
       hash_changeset: image_changeset_for(actor, image, :remove_hash),
@@ -1516,26 +1516,25 @@ defmodule Philomena.Images do
   to `actor`. Approval at the uploader's fifth approved image also creates a
   verification report in the same transaction.
 
-  Returns `{:ok, nil}` when approval succeeds (the approval control is no longer
-  available).
+  Returns `{:ok, approval}` when approval succeeds.
 
   ## Examples
 
       iex> create_image_approval(moderator, "42")
-      {:ok, nil}
+      {:ok, %Approval{}}
 
       iex> create_image_approval(user, "42")
       {:error, :unauthorized}
 
   """
   @spec create_image_approval(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, nil}
-          | {:error, Ecto.Changeset.t(Approval.Form.t())}
+          {:ok, Approval.t()}
+          | {:error, Ecto.Changeset.t(Approval.t())}
           | {:error, :ban | :unauthorized | :not_found}
   def create_image_approval(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :approve, image_id),
-         {:ok, approval_form} <- Forms.create(Approval.Form, %{}) do
+         {:ok, approval_form} <- Forms.create(Approval, %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} -> Image.approve_changeset(image) end)
@@ -1546,8 +1545,8 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, Approval.render(actor, image)}
+        {:ok, _changes} ->
+          {:ok, approval_form}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, Forms.copy_errors(changeset, approval_form)}
@@ -1634,25 +1633,25 @@ defmodule Philomena.Images do
   returns a changeset error and is left untouched. On success the file and thumbnails
   are purged and a moderation log is written attributing the destruction to `actor`.
 
-  Returns `{:ok, nil}` when destruction succeeds (the destruction control is no longer
-  available), or `{:error, %Ecto.Changeset{}}` if the operation is rejected.
+  Returns `{:ok, destruction}` when destruction succeeds, or
+  `{:error, %Ecto.Changeset{}}` if the operation is rejected.
 
   ## Examples
 
       iex> create_image_destruction(admin, "42")
-      {:ok, nil}
+      {:ok, %Destruction{}}
 
       iex> create_image_destruction(moderator, "42")
       {:error, :unauthorized}
 
   """
   @spec create_image_destruction(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, nil}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Destruction.Form.t())}
+          {:ok, Destruction.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Destruction.t())}
   def create_image_destruction(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :destroy, image_id),
-         {:ok, destruction_form} <- Forms.update(Destruction.Form, %{}) do
+         {:ok, destruction_form} <- Forms.update(Destruction, %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -1668,7 +1667,7 @@ defmodule Philomena.Images do
           purge_files(image, image.hidden_image_key)
           Thumbnailer.destroy_thumbnails(image)
 
-          {:ok, Destruction.render(actor, image)}
+          {:ok, destruction_form}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, Forms.copy_errors(changeset, destruction_form)}
@@ -1697,11 +1696,11 @@ defmodule Philomena.Images do
   """
   @spec update_image_comment_lock(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, CommentLock.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(CommentLock.Form.t())}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(CommentLock.t())}
   def update_image_comment_lock(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_comments, image_id),
-         {:ok, comment_lock_form} <- Forms.update(CommentLock.Form, params) do
+         {:ok, comment_lock_form} <- Forms.update(CommentLock, params) do
       {log_type, log_body} =
         if comment_lock_form.comments_locked do
           {"Image.CommentLock:create", "Locked comments on image #{image.id}"}
@@ -1720,8 +1719,8 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, CommentLock.render(actor, image)}
+        {:ok, _changes} ->
+          {:ok, comment_lock_form}
       end
     end
   end
@@ -1748,12 +1747,11 @@ defmodule Philomena.Images do
   """
   @spec update_image_description_lock(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, DescriptionLock.t()}
-          | {:error,
-             :ban | :unauthorized | :not_found | Ecto.Changeset.t(DescriptionLock.Form.t())}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(DescriptionLock.t())}
   def update_image_description_lock(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_description, image_id),
-         {:ok, description_lock_form} <- Forms.update(DescriptionLock.Form, params) do
+         {:ok, description_lock_form} <- Forms.update(DescriptionLock, params) do
       {log_type, log_body} =
         if description_lock_form.description_locked do
           {"Image.DescriptionLock:create", "Locked description editing on image #{image.id}"}
@@ -1772,8 +1770,8 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, DescriptionLock.render(actor, image)}
+        {:ok, _changes} ->
+          {:ok, description_lock_form}
       end
     end
   end
@@ -1932,11 +1930,11 @@ defmodule Philomena.Images do
   """
   @spec create_image_hide(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Hide.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Hide.Form.t())}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Hide.t())}
   def create_image_hide(%Actor{user: user} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :hide, image_id),
-         {:ok, hide_form} <- Forms.create(Hide.Form, params) do
+         {:ok, hide_form} <- Forms.create(Hide, params) do
       changeset_fun =
         fn %{locked_image: image} ->
           Image.hide_changeset(image, %{deletion_reason: hide_form.deletion_reason}, user)
@@ -1956,8 +1954,8 @@ defmodule Philomena.Images do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, Hide.render(actor, image)}
+        {:ok, _changes} ->
+          {:ok, hide_form}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, Forms.copy_errors(changeset, hide_form)}
@@ -2151,7 +2149,8 @@ defmodule Philomena.Images do
           {:ok, Hash.t()} | {:error, :ban | :unauthorized | :not_found}
   def delete_image_hash(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :remove_hash, image_id) do
+         {:ok, image} <- load_image_member(actor, :remove_hash, image_id),
+         {:ok, hash_form} <- Forms.update(Hash, %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} -> Image.remove_hash_changeset(image) end)
@@ -2161,8 +2160,8 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, Hash.render(actor, image)}
+        {:ok, _changes} ->
+          {:ok, hash_form}
       end
     end
   end
@@ -2290,11 +2289,11 @@ defmodule Philomena.Images do
   """
   @spec update_image_file(Actor.t(), IntegerId.integer_id(), PhilomenaMedia.Upload.t() | nil) ::
           {:ok, File.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(File.Form.t())}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(File.t())}
   def update_image_file(%Actor{} = actor, image_id, upload) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :replace_file, image_id),
-         {:ok, file_form} <- Forms.update(File.Form, %{}) do
+         {:ok, file_form} <- Forms.update(File, %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2313,7 +2312,7 @@ defmodule Philomena.Images do
           repair_image(image)
           purge_files(image, image.hidden_image_key)
 
-          {:ok, File.render(actor, image)}
+          {:ok, file_form}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, Forms.copy_errors(changeset, file_form)}
@@ -2347,11 +2346,11 @@ defmodule Philomena.Images do
   """
   @spec update_image_description(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Description.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Description.Form.t())}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Description.t())}
   def update_image_description(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image_id} <- Loader.parse_id(image_id),
-         {:ok, description_form} <- Forms.update(Description.Form, params) do
+         {:ok, description_form} <- Forms.update(Description, params) do
       Multi.new()
       |> put_lock_image(actor, image_id, :edit_description, [:user, :sources, tags: :aliases])
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2363,7 +2362,7 @@ defmodule Philomena.Images do
         {:ok, %{locked_image: %Image{} = old_image, image: %Image{} = image}} ->
           broadcast_description_update(image, old_image.description)
 
-          {:ok, Description.render(actor, image)}
+          {:ok, description_form}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, Forms.copy_errors(changeset, description_form)}
@@ -2781,12 +2780,12 @@ defmodule Philomena.Images do
   """
   @spec update_anonymous(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Anonymous.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Anonymous.Form.t())}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Anonymous.t())}
   def update_anonymous(%Actor{} = actor, image_id, params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_anonymous, image_id),
-         {:ok, anonymous_form} <- Forms.update(Anonymous.Form, params) do
+         {:ok, anonymous_form} <- Forms.update(Anonymous, params) do
       log_type =
         if anonymous_form.anonymous, do: "Image.Anonymous:create", else: "Image.Anonymous:delete"
 
@@ -2801,8 +2800,8 @@ defmodule Philomena.Images do
       |> put_reindex_image(:image)
       |> Multi.transact()
       |> case do
-        {:ok, %{image: %Image{} = image}} ->
-          {:ok, Anonymous.render(actor, image)}
+        {:ok, _changes} ->
+          {:ok, anonymous_form}
       end
     end
   end

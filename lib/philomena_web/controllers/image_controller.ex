@@ -51,18 +51,19 @@ defmodule PhilomenaWeb.ImageController do
     rendered = MarkdownRenderer.render_collection(page.comments.entries, conn)
     comments = %{page.comments | entries: Enum.zip(page.comments.entries, rendered)}
 
-    description_body = MarkdownRenderer.render_one(%{body: image.description}, conn)
+    description_body = MarkdownRenderer.render_one(%{body: page.description}, conn)
 
     assigns = [
       image: image,
       comments: comments,
       description: page.description,
       description_body: description_body,
-      hide: page.hide,
+      description_changeset: page.description_changeset,
       comment_changeset: page.comment_changeset,
       tag_changeset: page.tag_changeset,
       source_changeset: page.source_changeset,
       file_changeset: page.file_changeset,
+      hide_changeset: page.hide_changeset,
       feature_changeset: page.feature_changeset,
       repair_changeset: page.repair_changeset,
       hash_changeset: page.hash_changeset,

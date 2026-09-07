@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.ApproveController do
 
   def create(conn, %{"image_id" => image_id}) do
     case Images.create_image_approval(conn.assigns.actor, image_id) do
-      {:ok, nil} ->
+      {:ok, _approval} ->
         conn
         |> put_flash(:info, "Image has been approved.")
         |> redirect(to: ~p"/admin/approvals")

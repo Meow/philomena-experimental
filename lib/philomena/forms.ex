@@ -2,7 +2,7 @@ defmodule Philomena.Forms do
   @moduledoc """
   Helpers for building and applying changesets for form schemas.
 
-  Form schemas are modules that expose a `changeset/2` function. `change/2`
+  Form schemas are modules that expose a `changeset/2` function. `change/1`
   builds a changeset for display, while `create/2` and `update/2` apply the
   corresponding Ecto action. `copy_errors/2` transfers validation errors to a
   separate form changeset.
@@ -34,27 +34,28 @@ defmodule Philomena.Forms do
   end
 
   @doc """
-  Builds a changeset for `schema` using `attrs`.
+  Builds a changeset for an optional `schema` using `attrs`.
 
-  The schema module must provide a `changeset/2` function. The changeset is
-  suitable for rendering or for passing to `create/2` or `update/2`.
+  The schema module must provide a `changeset/2` function.
 
   ## Examples
 
-      iex> changeset = change(Form, %{description: "A description"})
-      iex> changeset.changes
-      %{description: "A description"}
+      iex> changeset = change(%Form{description: "A description"})
+      iex> changeset.data
+      %Form{description: "A description"}
 
   """
-  @spec change(module(), map()) :: struct()
-  def change(schema, attrs \\ %{}) do
-    schema
-    |> struct!()
-    |> schema.changeset(attrs)
+  @spec change(source | nil) :: Ecto.Changeset.t(source) | nil when source: struct()
+  def change(source) do
+    if source do
+      source.__struct__.changeset(source, %{})
+    end
   end
 
   @doc """
   Validates `attrs` with `schema` and applies the `:create` action.
+
+  The schema module must provide a `changeset/2` function.
 
   Returns `{:ok, struct}` when the form is valid, or `{:error, changeset}`
   when validation fails.
@@ -73,6 +74,8 @@ defmodule Philomena.Forms do
 
   @doc """
   Validates `attrs` with `schema` and applies the `:update` action.
+
+  The schema module must provide a `changeset/2` function.
 
   Returns `{:ok, struct}` when the form is valid, or `{:error, changeset}`
   when validation fails.
@@ -93,7 +96,8 @@ defmodule Philomena.Forms do
           {:ok, struct()} | {:error, Ecto.Changeset.t(struct())}
   defp apply_attrs(schema, attrs, action) do
     schema
-    |> change(attrs)
+    |> struct!()
+    |> schema.changeset(attrs)
     |> Ecto.Changeset.apply_action(action)
   end
 end
