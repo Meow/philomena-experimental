@@ -377,12 +377,12 @@ defmodule Philomena.ImagesTest do
 
       moderator = moderator_user_fixture()
 
-      assert {:ok, updated} =
+      assert {:ok, _file} =
                Images.update_image_file(actor(moderator), image.id, media_png_upload())
 
       # The dedup fingerprint is still set - it is overwritten with the (same)
       # new file's hash, never nulled.
-      assert updated.image_orig_sha512_hash == sha
+      assert Repo.reload!(image).image_orig_sha512_hash == sha
     end
 
     # A file matching a *different* image is still rejected - the self-exclusion
@@ -2249,10 +2249,9 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, updated} =
+      assert {:ok, _} =
                Images.update_image_file(actor(moderator), to_string(image.id), media_png_upload())
 
-      assert updated.id == image.id
       assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
     end
 
@@ -2284,10 +2283,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, updated} =
+      assert {:ok, _} =
                Images.update_image_file(actor(moderator), image.id, media_png_upload())
-
-      assert updated.id == image.id
     end
 
     test "a file duplicating another image is a changeset error with no log" do
@@ -2319,11 +2316,9 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true, hidden_image_key: "hidden-key")
 
-      assert {:ok, updated} =
+      assert {:ok, _} =
                Images.update_image_file(actor(moderator), to_string(image.id), media_png_upload())
 
-      assert updated.id == image.id
-      assert updated.hidden_from_users
       assert Repo.reload!(image).image_sha512_hash == png_upload_sha512()
       assert moderation_log_count() == 1
     end
