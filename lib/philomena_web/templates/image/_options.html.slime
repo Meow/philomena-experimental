@@ -140,13 +140,13 @@
           = button_to "Unlock description editing", ~p"/images/#{@image}/description_lock", method: "delete", class: "button"
 
         = if @image.tag_editing_allowed do
-          = button_to "Lock tag editing", ~p"/images/#{@image}/tag_lock", method: "post", class: "button"
+          = button_to "Lock tag editing", ~p"/images/#{@image}/tags_lock", method: "post", class: "button"
         - else
-          = button_to "Unlock tag editing", ~p"/images/#{@image}/tag_lock", method: "delete", class: "button"
+          = button_to "Unlock tag editing", ~p"/images/#{@image}/tags_lock", method: "delete", class: "button"
 
       br
       .flex.flex--spaced-out
-        = link "Lock specific tags", to: ~p"/images/#{@image}/tag_lock/edit", class: "button"
+        = link "Lock specific tags", to: ~p"/images/#{@image}/locked_tags/edit", class: "button"
         = if not @image.approved and can?(@conn, :approve, @image) do
           = button_to "Approve image", ~p"/images/#{@image}/approve", method: "post", class: "button button--state-success", data: [confirm: "Are you sure?"]
         = if @image.hidden_from_users and can?(@conn, :destroy, @image) do
