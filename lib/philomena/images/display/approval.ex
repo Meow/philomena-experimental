@@ -2,46 +2,32 @@ defmodule Philomena.Images.Display.Approval do
   @moduledoc """
   Presentation data for an image's approval control.
 
-  Contains a changeset.
-
   Omitted when the control is unavailable to the actor.
   """
 
+  use Ecto.Schema
+
   import Philomena.Images.Display.Authorization
+  import Ecto.Changeset
 
   alias Philomena.Attribution.Actor
   alias Philomena.Images.Image
-  alias Philomena.Forms
 
-  defmodule Form do
-    use Ecto.Schema
-    import Ecto.Changeset
+  @type t :: %__MODULE__{}
+  @primary_key false
 
-    @type t :: %__MODULE__{}
-
-    embedded_schema do
-    end
-
-    @doc false
-    def changeset(approval_form, attrs \\ %{}) do
-      cast(approval_form, attrs, [])
-    end
+  embedded_schema do
   end
 
-  @enforce_keys [:changeset]
-  defstruct @enforce_keys
-
-  @type t :: %__MODULE__{
-          changeset: Ecto.Changeset.t(Form.t())
-        }
+  @doc false
+  def changeset(approval, attrs \\ %{}) do
+    cast(approval, attrs, [])
+  end
 
   @doc false
-  @spec render(Actor.t(), Image.t()) :: t() | nil
   def render(%Actor{} = actor, %Image{} = image) do
     if image_permitted?(actor, :approve, image) and not image.approved do
-      %__MODULE__{
-        changeset: Forms.change(Form, %{})
-      }
+      %__MODULE__{}
     end
   end
 end

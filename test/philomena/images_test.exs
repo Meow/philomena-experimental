@@ -1506,7 +1506,7 @@ defmodule Philomena.ImagesTest do
                  comments_locked: true
                })
 
-      assert comment_lock.comments_locked?
+      assert comment_lock.comments_locked
       refute Repo.reload!(image).commenting_allowed
     end
 
@@ -1531,7 +1531,7 @@ defmodule Philomena.ImagesTest do
                  comments_locked: false
                })
 
-      refute comment_lock.comments_locked?
+      refute comment_lock.comments_locked
       assert Repo.reload!(image).commenting_allowed
     end
 
@@ -1576,7 +1576,7 @@ defmodule Philomena.ImagesTest do
                  comments_locked: true
                })
 
-      assert comment_lock.comments_locked?
+      assert comment_lock.comments_locked
       refute Repo.reload!(image).commenting_allowed
     end
 
@@ -1656,7 +1656,7 @@ defmodule Philomena.ImagesTest do
                  description_locked: true
                })
 
-      assert description_lock.description_locked?
+      assert description_lock.description_locked
       refute Repo.reload!(image).description_editing_allowed
     end
 
@@ -1681,7 +1681,7 @@ defmodule Philomena.ImagesTest do
                  description_locked: false
                })
 
-      refute description_lock.description_locked?
+      refute description_lock.description_locked
       assert Repo.reload!(image).description_editing_allowed
     end
 
@@ -2398,7 +2398,7 @@ defmodule Philomena.ImagesTest do
       assert {:ok, updated} =
                Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: true})
 
-      assert updated.anonymous?
+      assert updated.anonymous
       assert Repo.reload!(image).anonymous
     end
 
@@ -2419,7 +2419,7 @@ defmodule Philomena.ImagesTest do
       assert {:ok, updated} =
                Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: false})
 
-      refute updated.anonymous?
+      refute updated.anonymous
       refute Repo.reload!(image).anonymous
     end
 
@@ -2458,7 +2458,7 @@ defmodule Philomena.ImagesTest do
       assert {:ok, updated} =
                Images.update_anonymous(actor(moderator), image.id, %{anonymous: true})
 
-      assert updated.anonymous?
+      assert updated.anonymous
       assert Repo.reload!(image).anonymous
     end
 
@@ -4509,7 +4509,7 @@ defmodule Philomena.ImagesTest do
       assert %Ecto.Changeset{} = page.comment_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
-      assert page.description == nil
+      refute page.description_changeset
       refute page.hide_changeset
       refute page.file_changeset
       refute page.feature_changeset
@@ -4539,7 +4539,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.description == nil
+      assert page.description_changeset == nil
       assert page.tag_changeset == nil
       assert page.source_changeset == nil
       assert page.file_changeset == nil
@@ -4561,7 +4561,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.description == nil
+      assert page.description_changeset == nil
       assert page.tag_changeset == nil
       assert page.source_changeset == nil
       assert page.file_changeset == nil
@@ -4581,7 +4581,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert %Ecto.Changeset{} = page.description.changeset
+      assert %Ecto.Changeset{} = page.description_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
       assert %Ecto.Changeset{} = page.file_changeset
@@ -4598,7 +4598,7 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(uploader), image, page: 1, page_size: 25)
 
-      assert %Ecto.Changeset{} = page.description.changeset
+      assert %Ecto.Changeset{} = page.description_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
       refute page.hide_changeset
@@ -4610,7 +4610,7 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(staff), image, page: 1, page_size: 25)
 
-      assert %Ecto.Changeset{} = page.description.changeset
+      assert %Ecto.Changeset{} = page.description_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
       assert %Ecto.Changeset{} = page.file_changeset

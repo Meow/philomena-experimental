@@ -7,7 +7,7 @@ defmodule PhilomenaWeb.Image.DestroyController do
 
   def create(conn, %{"image_id" => image_id}) do
     case Images.create_image_destruction(conn.assigns.actor, image_id) do
-      {:ok, nil} ->
+      {:ok, _destruction} ->
         conn
         |> put_flash(:info, "Image contents destroyed.")
         |> redirect(to: ~p"/images/#{image_id}")
