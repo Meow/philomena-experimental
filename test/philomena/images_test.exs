@@ -4511,7 +4511,7 @@ defmodule Philomena.ImagesTest do
       assert %Ecto.Changeset{} = page.comment_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
-      refute page.description.editable?
+      assert page.description == nil
       refute page.hide_changeset
       refute page.file_changeset
       refute page.feature_changeset
@@ -4541,7 +4541,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      refute page.description.editable?
+      assert page.description == nil
       assert page.tag_changeset == nil
       assert page.source_changeset == nil
       assert page.file_changeset == nil
@@ -4563,7 +4563,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      refute page.description.editable?
+      assert page.description == nil
       assert page.tag_changeset == nil
       assert page.source_changeset == nil
       assert page.file_changeset == nil
@@ -4583,7 +4583,6 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.description.editable?
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
@@ -4601,7 +4600,6 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(uploader), image, page: 1, page_size: 25)
 
-      assert page.description.editable?
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
@@ -4614,7 +4612,6 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(staff), image, page: 1, page_size: 25)
 
-      assert page.description.editable?
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
