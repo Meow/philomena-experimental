@@ -34,20 +34,24 @@ defmodule Philomena.Forms do
   end
 
   @doc """
-  Builds a changeset for an optional `schema` using `attrs`.
+  Builds a changeset for a source when `condition` is true.
+
+  This is used for rendering optional affordances.
 
   The schema module must provide a `changeset/2` function.
 
   ## Examples
 
-      iex> changeset = change(%Form{description: "A description"})
+      iex> changeset = change_if(fn -> %Form{description: "A description"} end, true)
       iex> changeset.data
       %Form{description: "A description"}
 
   """
-  @spec change(source | nil) :: Ecto.Changeset.t(source) | nil when source: struct()
-  def change(source) do
-    if source do
+  @spec change_if((-> source), boolean()) :: Ecto.Changeset.t(source) | nil
+        when source: struct()
+  def change_if(source, condition) do
+    if condition do
+      source = source.()
       source.__struct__.changeset(source, %{})
     end
   end

@@ -3,16 +3,12 @@ defmodule Philomena.Images.Display.Anonymous do
   Presentation data for an image's anonymity control.
 
   Contains the `anonymous` value.
-
-  Omitted when the control is unavailable to the actor.
   """
 
   use Ecto.Schema
 
-  import Philomena.Images.Display.Authorization
   import Ecto.Changeset
 
-  alias Philomena.Attribution.Actor
   alias Philomena.Images.Image
 
   @type t :: %__MODULE__{}
@@ -30,9 +26,7 @@ defmodule Philomena.Images.Display.Anonymous do
   end
 
   @doc false
-  def render(%Actor{} = actor, %Image{} = image) do
-    if image_permitted?(actor, :update_anonymous, image) do
-      %__MODULE__{anonymous: image.anonymous}
-    end
+  def render(%Image{} = image) do
+    %__MODULE__{anonymous: image.anonymous}
   end
 end
