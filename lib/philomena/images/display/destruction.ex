@@ -36,6 +36,7 @@ defmodule Philomena.Images.Display.Destruction do
           destroyable?: boolean()
         }
 
+  @doc false
   def render(%Actor{} = actor, %Image{} = image) do
     if image_permitted?(actor, :destroy, image) do
       %__MODULE__{

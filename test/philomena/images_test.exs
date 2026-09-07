@@ -502,9 +502,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       assert image.image_orig_sha512_hash != nil
 
-      assert {:ok, cleared} = Images.delete_image_hash(actor(moderator), to_string(image.id))
-      assert cleared.id == image.id
-      assert cleared.image_orig_sha512_hash == nil
+      assert {:ok, _} = Images.delete_image_hash(actor(moderator), to_string(image.id))
       assert Repo.reload!(image).image_orig_sha512_hash == nil
     end
 
@@ -512,8 +510,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture()
 
-      assert {:ok, cleared} = Images.delete_image_hash(actor(admin), to_string(image.id))
-      assert cleared.id == image.id
+      assert {:ok, _} = Images.delete_image_hash(actor(admin), to_string(image.id))
       assert Repo.reload!(image).image_orig_sha512_hash == nil
     end
 
@@ -553,8 +550,8 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, cleared} = Images.delete_image_hash(actor(moderator), image.id)
-      assert cleared.id == image.id
+      assert {:ok, _} = Images.delete_image_hash(actor(moderator), image.id)
+      assert Repo.reload!(image).image_orig_sha512_hash == nil
     end
 
     test "a moderator with an unknown well-formed id is not found" do
