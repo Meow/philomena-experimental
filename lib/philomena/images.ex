@@ -27,6 +27,7 @@ defmodule Philomena.Images do
     Hash,
     Hide,
     LockedTags,
+    Scratchpad,
     TagsLock
   }
 
@@ -2161,33 +2162,63 @@ defmodule Philomena.Images do
 
   @doc group: "Metadata editing"
   @doc """
+  Loads the moderation scratchpad on the image named by `image_id` for editing,
+  on behalf of `actor`.
+
+  The image is loaded by id and authorized for `:edit_scratchpad`. On success,
+  returns a changeset for the scratchpad display.
+
+  ## Examples
+
+      iex> edit_image_scratchpad(moderator, "42")
+      {:ok, %Ecto.Changeset{}}
+
+      iex> edit_image_scratchpad(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec edit_image_scratchpad(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Ecto.Changeset.t(Scratchpad.t())} | {:error, :ban | :unauthorized | :not_found}
+  def edit_image_scratchpad(%Actor{} = actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :edit_scratchpad, image_id) do
+      scratchpad = Scratchpad.render(image)
+
+      {:ok, Scratchpad.changeset(scratchpad)}
+    end
+  end
+
+  @doc group: "Metadata editing"
+  @doc """
   Updates the moderation notes on the image named by `image_id`, on behalf of
-  `actor`, from `attrs` (a map with a `"scratchpad"` key).
+  `actor`, from `params` (a map with a `"scratchpad"` key).
 
   The image is loaded by id and authorized for `:edit_scratchpad`. On success the notes are
   updated, the image is reindexed, and a moderation log is written attributing the
   change to `actor`.
 
-  Returns `{:ok, image}` with the updated image.
+  Returns `{:ok, scratchpad}` with the updated scratchpad display.
 
   ## Examples
 
       iex> update_image_scratchpad(moderator, "42", %{"scratchpad" => "watch closely"})
-      {:ok, %Image{}}
+      {:ok, %Scratchpad{}}
 
       iex> update_image_scratchpad(user, "42", %{"scratchpad" => "watch closely"})
       {:error, :unauthorized}
 
   """
   @spec update_image_scratchpad(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_image_scratchpad(%Actor{} = actor, image_id, attrs) do
+          {:ok, Scratchpad.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Scratchpad.t())}
+  def update_image_scratchpad(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :edit_scratchpad, image_id) do
+         {:ok, image} <- load_image_member(actor, :edit_scratchpad, image_id),
+         {:ok, scratchpad} <- Forms.update(Scratchpad, params) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
-        Image.scratchpad_changeset(image, attrs)
+        Image.scratchpad_changeset(image, %{scratchpad: scratchpad.scratchpad})
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {
@@ -2200,10 +2231,10 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+          {:ok, Scratchpad.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, Forms.copy_errors(changeset, scratchpad)}
       end
     end
   end

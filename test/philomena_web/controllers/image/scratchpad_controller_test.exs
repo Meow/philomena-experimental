@@ -76,7 +76,7 @@ defmodule PhilomenaWeb.Image.ScratchpadControllerTest do
       image = image_fixture()
 
       conn =
-        put(conn, ~p"/images/#{image}/scratchpad", %{"image" => %{"scratchpad" => "notes"}})
+        put(conn, ~p"/images/#{image}/scratchpad", %{"scratchpad" => %{"scratchpad" => "notes"}})
 
       assert redirected_to(conn) == ~p"/sessions/new"
       assert scratchpad(image) == nil
@@ -87,7 +87,7 @@ defmodule PhilomenaWeb.Image.ScratchpadControllerTest do
       image = image_fixture()
 
       conn =
-        put(conn, ~p"/images/#{image}/scratchpad", %{"image" => %{"scratchpad" => "notes"}})
+        put(conn, ~p"/images/#{image}/scratchpad", %{"scratchpad" => %{"scratchpad" => "notes"}})
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
@@ -100,7 +100,7 @@ defmodule PhilomenaWeb.Image.ScratchpadControllerTest do
 
       conn =
         put(conn, ~p"/images/#{image}/scratchpad", %{
-          "image" => %{"scratchpad" => "spammer, watch closely"}
+          "scratchpad" => %{"scratchpad" => "spammer, watch closely"}
         })
 
       assert redirected_to(conn) == ~p"/images/#{image}"
@@ -116,7 +116,7 @@ defmodule PhilomenaWeb.Image.ScratchpadControllerTest do
       image = image_fixture()
 
       conn =
-        put(conn, ~p"/images/#{image}/scratchpad", %{"image" => %{"scratchpad" => "seen"}})
+        put(conn, ~p"/images/#{image}/scratchpad", %{"scratchpad" => %{"scratchpad" => "seen"}})
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
                "Successfully updated moderation notes."
@@ -131,7 +131,7 @@ defmodule PhilomenaWeb.Image.ScratchpadControllerTest do
       image = image_fixture(scratchpad: "old notes")
 
       conn =
-        put(conn, ~p"/images/#{image}/scratchpad", %{"image" => %{"scratchpad" => ""}})
+        put(conn, ~p"/images/#{image}/scratchpad", %{"scratchpad" => %{"scratchpad" => ""}})
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
                "Successfully updated moderation notes."
@@ -143,7 +143,7 @@ defmodule PhilomenaWeb.Image.ScratchpadControllerTest do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn =
-        put(conn, ~p"/images/999999999/scratchpad", %{"image" => %{"scratchpad" => "notes"}})
+        put(conn, ~p"/images/999999999/scratchpad", %{"scratchpad" => %{"scratchpad" => "notes"}})
 
       assert redirected_to(conn) == "/"
 
@@ -157,7 +157,9 @@ defmodule PhilomenaWeb.Image.ScratchpadControllerTest do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn =
-        put(conn, ~p"/images/not-a-number/scratchpad", %{"image" => %{"scratchpad" => "notes"}})
+        put(conn, ~p"/images/not-a-number/scratchpad", %{
+          "scratchpad" => %{"scratchpad" => "notes"}
+        })
 
       assert redirected_to(conn) == "/"
 

@@ -1035,18 +1035,88 @@ defmodule Philomena.ImagesTest do
     end
   end
 
+  describe "edit_image_scratchpad/2" do
+    test "a moderator receives the changeset" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, %Ecto.Changeset{}} =
+               Images.edit_image_scratchpad(actor(moderator), to_string(image.id))
+    end
+
+    test "an admin receives the changeset" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, %Ecto.Changeset{}} =
+               Images.edit_image_scratchpad(actor(admin), to_string(image.id))
+    end
+
+    test "accepts an integer id" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, _} =
+               Images.edit_image_scratchpad(actor(moderator), image.id)
+    end
+
+    test "a regular user cannot edit the scratchpad" do
+      user = confirmed_user_fixture()
+      image = image_fixture(scratchpad: "existing note")
+
+      assert Images.edit_image_scratchpad(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor cannot edit the scratchpad" do
+      image = image_fixture(scratchpad: "existing note")
+
+      assert Images.edit_image_scratchpad(actor(), to_string(image.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator with an unknown well-formed id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.edit_image_scratchpad(actor(moderator), "2147483647") ==
+               {:error, :not_found}
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      admin = admin_user_fixture()
+
+      assert Images.edit_image_scratchpad(actor(admin), "2147483647") ==
+               {:error, :not_found}
+
+      assert moderation_log_count() == 0
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.edit_image_scratchpad(actor(moderator), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.edit_image_scratchpad(actor(moderator), "99999999999999999999") ==
+               {:error, :not_found}
+    end
+  end
+
   describe "update_image_scratchpad/3" do
     test "a moderator stores the scratchpad and gets the image" do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, updated} =
+      assert {:ok, scratchpad} =
                Images.update_image_scratchpad(actor(moderator), to_string(image.id), %{
                  "scratchpad" => "watch closely"
                })
 
-      assert updated.id == image.id
-      assert updated.scratchpad == "watch closely"
+      assert scratchpad.scratchpad == "watch closely"
       assert Repo.reload!(image).scratchpad == "watch closely"
     end
 
@@ -1054,7 +1124,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _updated} =
+      assert {:ok, _} =
                Images.update_image_scratchpad(actor(admin), to_string(image.id), %{
                  "scratchpad" => "noted"
                })
@@ -1066,12 +1136,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(scratchpad: "existing note")
 
-      assert {:ok, updated} =
+      assert {:ok, scratchpad} =
                Images.update_image_scratchpad(actor(moderator), to_string(image.id), %{
                  "scratchpad" => ""
                })
 
-      assert updated.scratchpad == nil
+      assert scratchpad.scratchpad == nil
       assert Repo.reload!(image).scratchpad == nil
     end
 
@@ -1108,12 +1178,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, updated} =
+      assert {:ok, _} =
                Images.update_image_scratchpad(actor(moderator), image.id, %{
                  "scratchpad" => "noted"
                })
 
-      assert updated.scratchpad == "noted"
+      assert Repo.reload!(image).scratchpad == "noted"
     end
 
     test "a regular user cannot update and the scratchpad and log stay untouched" do
