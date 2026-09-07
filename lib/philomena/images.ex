@@ -23,7 +23,8 @@ defmodule Philomena.Images do
     CommentLock,
     Description,
     DescriptionLock,
-    Destruction
+    Destruction,
+    File
   }
 
   alias Philomena.Forms
@@ -2265,25 +2266,26 @@ defmodule Philomena.Images do
   path, old files are purged, the image is reindexed, and a moderation log is
   written attributing the change to `actor`.
 
-  Returns `{:ok, image}` with the updated image, or
+  Returns `{:ok, file}` with the updated file display, or
   `{:error, %Ecto.Changeset{}}` when the replacement is rejected (e.g. no file,
   or a file already uploaded as another image), leaving the image untouched.
 
   ## Examples
 
       iex> update_image_file(moderator, "42", upload)
-      {:ok, %Image{}}
+      {:ok, %File{}}
 
       iex> update_image_file(user, "42", upload)
       {:error, :unauthorized}
 
   """
   @spec update_image_file(Actor.t(), IntegerId.integer_id(), PhilomenaMedia.Upload.t() | nil) ::
-          {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
+          {:ok, File.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(File.Form.t())}
   def update_image_file(%Actor{} = actor, image_id, upload) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :replace_file, image_id) do
+         {:ok, image} <- load_image_member(actor, :replace_file, image_id),
+         {:ok, file_form} <- Forms.update(File.Form, %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2302,10 +2304,10 @@ defmodule Philomena.Images do
           repair_image(image)
           purge_files(image, image.hidden_image_key)
 
-          {:ok, image}
+          {:ok, File.render(actor, image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, Forms.copy_errors(changeset, file_form)}
       end
     end
   end
