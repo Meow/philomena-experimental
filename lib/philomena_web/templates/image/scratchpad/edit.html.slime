@@ -1,8 +1,8 @@
 h1
   ' Editing moderation notes for image
-  = link "##{@image.id}", to: ~p"/images/#{@image}"
+  = link "##{@image_id}", to: ~p"/images/#{@image_id}"
 
-= form_for @changeset, ~p"/images/#{@image}/scratchpad", fn f ->
+= form_for @changeset, ~p"/images/#{@image_id}/scratchpad", fn f ->
   .field
     = textarea f, :scratchpad, placeholder: "Scratchpad contents", class: "input input--wide"
 

@@ -19,8 +19,8 @@ defmodule Philomena.Images.Display.TagsLock do
   end
 
   @doc false
-  def changeset(tags_lock_form, attrs \\ %{}) do
-    tags_lock_form
+  def changeset(tags_lock, attrs \\ %{}) do
+    tags_lock
     |> cast(attrs, [:tags_locked])
     |> validate_required([:tags_locked])
   end
