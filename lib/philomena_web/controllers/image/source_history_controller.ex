@@ -5,12 +5,12 @@ defmodule PhilomenaWeb.Image.SourceHistoryController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def delete(conn, params) do
-    with {:ok, image} <-
-           Images.delete_image_source_history(conn.assigns.actor, params["image_id"]) do
+  def delete(conn, %{"image_id" => image_id}) do
+    with {:ok, _source_history} <-
+           Images.delete_image_source_history(conn.assigns.actor, image_id) do
       conn
       |> put_flash(:info, "Successfully deleted source history.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 end

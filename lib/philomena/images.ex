@@ -28,6 +28,7 @@ defmodule Philomena.Images do
     Hide,
     LockedTags,
     Scratchpad,
+    SourceHistory,
     TagsLock,
     Uploader
   }
@@ -2242,27 +2243,32 @@ defmodule Philomena.Images do
   is removed, the image is reindexed, and a moderation log is written attributing
   the deletion to `actor`.
 
-  Returns `{:ok, image}` with the updated image.
+  Returns `{:ok, source_history}` with the source history display.
 
   ## Examples
 
       iex> delete_image_source_history(moderator, "42")
-      {:ok, %Image{}}
+      {:ok, %SourceHistory{}}
 
       iex> delete_image_source_history(user, "42")
       {:error, :unauthorized}
 
   """
   @spec delete_image_source_history(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, SourceHistory.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(SourceHistory.t())}
   def delete_image_source_history(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <-
-           load_image_member(actor, :remove_source_history, image_id, [:source_changes]) do
-      query = Image |> where(id: ^image.id) |> preload(:source_changes)
+           load_image_member(actor, :remove_source_history, image_id, [:source_changes]),
+         {:ok, _source_history} <- Forms.update(SourceHistory, %{}) do
+      image_query =
+        Image
+        |> where(id: ^image.id)
+        |> preload(:source_changes)
 
       Multi.new()
-      |> Multi.lock_one(:locked_image, query)
+      |> Multi.lock_one(:locked_image, image_query)
       |> Multi.update(:image, fn %{locked_image: image} ->
         Image.remove_source_history_changeset(image)
       end)
@@ -2277,7 +2283,7 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+          {:ok, SourceHistory.render(image)}
       end
     end
   end
