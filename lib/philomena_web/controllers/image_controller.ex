@@ -51,7 +51,7 @@ defmodule PhilomenaWeb.ImageController do
     rendered = MarkdownRenderer.render_collection(page.comments.entries, conn)
     comments = %{page.comments | entries: Enum.zip(page.comments.entries, rendered)}
 
-    description_body = MarkdownRenderer.render_one(%{body: page.description.description}, conn)
+    description_body = MarkdownRenderer.render_one(%{body: image.description}, conn)
 
     assigns = [
       image: image,

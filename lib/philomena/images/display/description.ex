@@ -1,9 +1,10 @@
 defmodule Philomena.Images.Display.Description do
   @moduledoc """
-  Presentation data for an image description.
+  Presentation data for an image description edit control.
 
-  Contains a changeset, the raw description, and an `editable?` flag indicating
-  whether the actor may edit the description.
+  Contains a changeset and the raw description.
+
+  Omitted when the control is unavailable to the actor.
   """
 
   import Philomena.Images.Display.Authorization
@@ -28,22 +29,22 @@ defmodule Philomena.Images.Display.Description do
     end
   end
 
-  @enforce_keys [:changeset, :description, :editable?]
+  @enforce_keys [:changeset, :description]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           changeset: Ecto.Changeset.t(Form.t()),
-          description: String.t(),
-          editable?: boolean()
+          description: String.t()
         }
 
   @doc false
-  @spec render(Actor.t(), Image.t()) :: t()
+  @spec render(Actor.t(), Image.t()) :: t() | nil
   def render(%Actor{} = actor, %Image{} = image) do
-    %__MODULE__{
-      changeset: Forms.change(Form, %{description: image.description}),
-      description: image.description,
-      editable?: image_permitted?(actor, :edit_description, image)
-    }
+    if image_permitted?(actor, :edit_description, image) do
+      %__MODULE__{
+        changeset: Forms.change(Form, %{description: image.description}),
+        description: image.description
+      }
+    end
   end
 end

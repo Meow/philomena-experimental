@@ -3,14 +3,14 @@
     span.block__header__title
       i.fas.fa-file-lines>
       ' Description
-    = if @description.editable? do
+    = if @editable? do
       .block__header__buttons
         a.button.button--inline#edit-description href="#" data-click-focus="#description" data-click-hide=".image-description" data-click-show="#description-form" title="Edit description" accessKey="d"
           i.fas.fa-edit>
           ' Edit
   .block__content
     p
-      = if String.length(@description.description) > 0 do
+      = if String.length(@description) > 0 do
         = @body
       - else
         em No description provided.

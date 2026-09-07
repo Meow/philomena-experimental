@@ -15,8 +15,9 @@ defmodule PhilomenaWeb.Image.DescriptionController do
         |> put_view(PhilomenaWeb.ImageView)
         |> render("_description.html",
           layout: false,
-          description: description,
-          body: body
+          description: description.description,
+          body: body,
+          editable?: true
         )
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -26,7 +27,7 @@ defmodule PhilomenaWeb.Image.DescriptionController do
           action: ~p"/images/#{image_id}/description"
         )
 
-      {:error, _} = error ->
+      error ->
         error
     end
   end
