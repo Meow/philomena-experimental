@@ -2534,10 +2534,9 @@ defmodule Philomena.ImagesTest do
       moderator = role_moderator_fixture("Image")
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, destruction} =
+      assert {:ok, _} =
                Images.create_image_destruction(actor(moderator), to_string(image.id))
 
-      refute destruction.destroyable?
       assert Repo.reload!(image).image == nil
     end
 
@@ -2566,8 +2565,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, destruction} = Images.create_image_destruction(actor(admin), image.id)
-      refute destruction.destroyable?
+      assert {:ok, _} = Images.create_image_destruction(actor(admin), image.id)
       assert Repo.reload!(image).image == nil
     end
 

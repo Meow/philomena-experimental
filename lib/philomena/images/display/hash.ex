@@ -36,6 +36,7 @@ defmodule Philomena.Images.Display.Hash do
         }
 
   @doc false
+  @spec render(Actor.t(), Image.t()) :: t() | nil
   def render(%Actor{} = actor, %Image{} = image) do
     if image_permitted?(actor, :remove_hash, image) do
       %__MODULE__{
