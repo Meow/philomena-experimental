@@ -17,8 +17,8 @@ defmodule Philomena.Images.ImagePage do
     :can_interact,
     :user_galleries,
     :interactions,
+    :description,
     :comment_changeset,
-    :description_changeset,
     :tag_changeset,
     :source_changeset,
     :file_changeset,
@@ -28,24 +28,7 @@ defmodule Philomena.Images.ImagePage do
     :hash_changeset,
     :uploader_changeset
   ]
-  defstruct [
-    :image,
-    :comments,
-    :watching,
-    :can_interact,
-    :user_galleries,
-    :interactions,
-    :comment_changeset,
-    :description_changeset,
-    :tag_changeset,
-    :source_changeset,
-    :file_changeset,
-    :hide_changeset,
-    :feature_changeset,
-    :repair_changeset,
-    :hash_changeset,
-    :uploader_changeset
-  ]
+  defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           image: Image.t(),
@@ -54,8 +37,8 @@ defmodule Philomena.Images.ImagePage do
           can_interact: boolean(),
           user_galleries: [{Philomena.Galleries.Gallery.t(), boolean()}],
           interactions: list(),
+          description: Philomena.Images.Display.Description.t(),
           comment_changeset: Ecto.Changeset.t() | nil,
-          description_changeset: Ecto.Changeset.t() | nil,
           tag_changeset: Ecto.Changeset.t() | nil,
           source_changeset: Ecto.Changeset.t() | nil,
           file_changeset: Ecto.Changeset.t() | nil,

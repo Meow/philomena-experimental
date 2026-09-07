@@ -7,8 +7,8 @@
     = render PhilomenaWeb.AdvertView, "_box.html", advert: @conn.assigns.advert, conn: @conn
 
   .image-description
-    = render PhilomenaWeb.ImageView, "_description.html", image: @image, body: @description, changeset: @description_changeset, conn: @conn
-  = render PhilomenaWeb.Image.DescriptionView, "_form.html", image: @image, changeset: @description_changeset, conn: @conn
+    = render PhilomenaWeb.ImageView, "_description.html", description: @description, body: @description_body
+  = render PhilomenaWeb.Image.DescriptionView, "_form.html", changeset: @description.changeset, conn: @conn, action: ~p"/images/#{@image}/description"
 
   = render PhilomenaWeb.ImageView, "_tags.html", image: @image, tag_change_count: @tag_change_count, tag_change_tag_count: @tag_change_tag_count, changeset: @tag_changeset, conn: @conn
   = render PhilomenaWeb.ImageView, "_source.html", image: @image, source_change_count: @source_change_count, changeset: @source_changeset, conn: @conn
