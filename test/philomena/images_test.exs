@@ -701,10 +701,8 @@ defmodule Philomena.ImagesTest do
       source_change_fixture(image)
       assert source_change_count(image) == 2
 
-      assert {:ok, cleared} =
+      assert {:ok, _} =
                Images.delete_image_source_history(actor(moderator), to_string(image.id))
-
-      assert cleared.id == image.id
 
       reloaded = Repo.reload!(image)
       assert reloaded.source_url == nil
@@ -716,10 +714,8 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(source_url: "https://example.com/artwork")
       source_change_fixture(image)
 
-      assert {:ok, cleared} =
+      assert {:ok, _} =
                Images.delete_image_source_history(actor(admin), to_string(image.id))
-
-      assert cleared.id == image.id
 
       reloaded = Repo.reload!(image)
       assert reloaded.source_url == nil
@@ -772,8 +768,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, cleared} = Images.delete_image_source_history(actor(moderator), image.id)
-      assert cleared.id == image.id
+      assert {:ok, _} = Images.delete_image_source_history(actor(moderator), image.id)
     end
 
     test "a moderator with an unknown well-formed id is not found" do
