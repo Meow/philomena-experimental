@@ -24,7 +24,8 @@ defmodule Philomena.Images do
     Description,
     DescriptionLock,
     Destruction,
-    File
+    File,
+    Hash
   }
 
   alias Philomena.Forms
@@ -2127,19 +2128,19 @@ defmodule Philomena.Images do
   cleared, the image is reindexed, and a moderation log is written attributing the
   change to `actor`.
 
-  Returns `{:ok, image}` with the updated image.
+  Returns `{:ok, hash}` with the hash display.
 
   ## Examples
 
       iex> delete_image_hash(moderator, "42")
-      {:ok, %Image{}}
+      {:ok, %Hash{}}
 
       iex> delete_image_hash(user, "42")
       {:error, :unauthorized}
 
   """
   @spec delete_image_hash(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
+          {:ok, Hash.t()} | {:error, :ban | :unauthorized | :not_found}
   def delete_image_hash(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :remove_hash, image_id) do
@@ -2153,7 +2154,7 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+          {:ok, Hash.render(actor, image)}
       end
     end
   end

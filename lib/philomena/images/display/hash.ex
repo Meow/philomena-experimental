@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.File do
+defmodule Philomena.Images.Display.Hash do
   @moduledoc """
-  Presentation data for an image file replacement control.
+  Presentation data for an image hash removal control.
 
   Contains a changeset.
 
@@ -23,8 +23,8 @@ defmodule Philomena.Images.Display.File do
     end
 
     @doc false
-    def changeset(file_form, attrs \\ %{}) do
-      cast(file_form, attrs, [])
+    def changeset(hash_form, attrs \\ %{}) do
+      cast(hash_form, attrs, [])
     end
   end
 
@@ -37,7 +37,7 @@ defmodule Philomena.Images.Display.File do
 
   @doc false
   def render(%Actor{} = actor, %Image{} = image) do
-    if image_permitted?(actor, :replace_file, image) do
+    if image_permitted?(actor, :remove_hash, image) do
       %__MODULE__{
         changeset: Forms.change(Form, %{})
       }
