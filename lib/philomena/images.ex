@@ -22,7 +22,8 @@ defmodule Philomena.Images do
     Approval,
     CommentLock,
     Description,
-    DescriptionLock
+    DescriptionLock,
+    Destruction
   }
 
   alias Philomena.Forms
@@ -1625,27 +1626,28 @@ defmodule Philomena.Images do
 
   The image is loaded by id and authorized for `:destroy`. Only an already-deleted
   image (hidden from users) may be destroyed; a still-visible image is
-  `{:error, :not_deleted}`, left untouched. On success the file and thumbnails are
-  purged and a moderation log is written attributing the destruction to `actor`.
+  returns a changeset error and is left untouched. On success the file and thumbnails
+  are purged and a moderation log is written attributing the destruction to `actor`.
 
-  Returns `{:ok, image}` with the destroyed image, or
-  `{:error, %Ecto.Changeset{}}` if the destruction is rejected.
+  Returns `{:ok, destruction}` with the destruction display, or
+  `{:error, %Ecto.Changeset{}}` if the operation is rejected.
 
   ## Examples
 
       iex> create_image_destroy(admin, "42")
-      {:ok, %Image{}}
+      {:ok, %Destruction{}}
 
       iex> create_image_destroy(moderator, "42")
       {:error, :unauthorized}
 
   """
-  @spec create_image_destroy(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def create_image_destroy(%Actor{} = actor, image_id) do
+  @spec create_image_destruction(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Destruction.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Destruction.Form.t())}
+  def create_image_destruction(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :destroy, image_id) do
+         {:ok, image} <- load_image_member(actor, :destroy, image_id),
+         {:ok, destruction_form} <- Forms.update(Destruction.Form, %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -1661,10 +1663,10 @@ defmodule Philomena.Images do
           purge_files(image, image.hidden_image_key)
           Thumbnailer.destroy_thumbnails(image)
 
-          {:ok, image}
+          {:ok, Destruction.render(actor, image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, Forms.copy_errors(changeset, destruction_form)}
       end
     end
   end

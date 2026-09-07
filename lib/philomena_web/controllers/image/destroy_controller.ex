@@ -6,11 +6,11 @@ defmodule PhilomenaWeb.Image.DestroyController do
   action_fallback PhilomenaWeb.FallbackController
 
   def create(conn, %{"image_id" => image_id}) do
-    case Images.create_image_destroy(conn.assigns.actor, image_id) do
-      {:ok, image} ->
+    case Images.create_image_destruction(conn.assigns.actor, image_id) do
+      {:ok, _destruction} ->
         conn
         |> put_flash(:info, "Image contents destroyed.")
-        |> redirect(to: ~p"/images/#{image}")
+        |> redirect(to: ~p"/images/#{image_id}")
 
       {:error, %Ecto.Changeset{}} ->
         conn

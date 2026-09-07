@@ -2537,13 +2537,15 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "create_image_destroy/2" do
+  describe "create_image_destruction/2" do
     test "an Image-admin role_map moderator destroys a hidden image, nulling the file" do
       moderator = role_moderator_fixture("Image")
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, destroyed} = Images.create_image_destroy(actor(moderator), to_string(image.id))
-      assert destroyed.id == image.id
+      assert {:ok, destruction} =
+               Images.create_image_destruction(actor(moderator), to_string(image.id))
+
+      refute destruction.destroyable?
       assert Repo.reload!(image).image == nil
     end
 
@@ -2551,7 +2553,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, _} = Images.create_image_destroy(actor(admin), to_string(image.id))
+      assert {:ok, _} = Images.create_image_destruction(actor(admin), to_string(image.id))
       assert Repo.reload!(image).image == nil
     end
 
@@ -2559,7 +2561,7 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, _} = Images.create_image_destroy(actor(admin), to_string(image.id))
+      assert {:ok, _} = Images.create_image_destruction(actor(admin), to_string(image.id))
 
       log = only_moderation_log!()
       assert log.user_id == admin.id
@@ -2572,8 +2574,8 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert {:ok, destroyed} = Images.create_image_destroy(actor(admin), image.id)
-      assert destroyed.id == image.id
+      assert {:ok, destruction} = Images.create_image_destruction(actor(admin), image.id)
+      refute destruction.destroyable?
       assert Repo.reload!(image).image == nil
     end
 
@@ -2584,7 +2586,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(hidden_from_users: false)
 
       assert {:error, %Ecto.Changeset{}} =
-               Images.create_image_destroy(actor(admin), to_string(image.id))
+               Images.create_image_destruction(actor(admin), to_string(image.id))
 
       assert Repo.reload!(image).image == image.image
       assert moderation_log_count() == 0
@@ -2596,20 +2598,20 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.create_image_destroy(actor(moderator), to_string(image.id)) ==
+      assert Images.create_image_destruction(actor(moderator), to_string(image.id)) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).image == image.image
       assert moderation_log_count() == 0
     end
 
-    test "a plain moderator on a visible image is unauthorized, not not_deleted" do
+    test "a plain moderator on a visible image is unauthorized" do
       # Authorization runs before the hidden-state check, so a plain moderator
-      # fails :destroy and never reaches the not_deleted branch.
+      # fails :destroy and never reaches the changeset rejection branch.
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: false)
 
-      assert Images.create_image_destroy(actor(moderator), to_string(image.id)) ==
+      assert Images.create_image_destruction(actor(moderator), to_string(image.id)) ==
                {:error, :unauthorized}
 
       assert moderation_log_count() == 0
@@ -2619,7 +2621,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.create_image_destroy(actor(user), to_string(image.id)) ==
+      assert Images.create_image_destruction(actor(user), to_string(image.id)) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).image == image.image
@@ -2629,7 +2631,9 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot destroy a hidden image" do
       image = image_fixture(hidden_from_users: true)
 
-      assert Images.create_image_destroy(actor(), to_string(image.id)) == {:error, :unauthorized}
+      assert Images.create_image_destruction(actor(), to_string(image.id)) ==
+               {:error, :unauthorized}
+
       assert Repo.reload!(image).image == image.image
       assert moderation_log_count() == 0
     end
@@ -2638,7 +2642,9 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = role_moderator_fixture("Image")
 
-      assert Images.create_image_destroy(actor(moderator), "2147483647") == {:error, :not_found}
+      assert Images.create_image_destruction(actor(moderator), "2147483647") ==
+               {:error, :not_found}
+
       assert moderation_log_count() == 0
     end
 
@@ -2646,20 +2652,20 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.create_image_destroy(actor(admin), "2147483647") == {:error, :not_found}
+      assert Images.create_image_destruction(actor(admin), "2147483647") == {:error, :not_found}
       assert moderation_log_count() == 0
     end
 
     test "a non-castable id is not found" do
       admin = admin_user_fixture()
 
-      assert Images.create_image_destroy(actor(admin), "not-a-number") == {:error, :not_found}
+      assert Images.create_image_destruction(actor(admin), "not-a-number") == {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       admin = admin_user_fixture()
 
-      assert Images.create_image_destroy(actor(admin), "99999999999999999999") ==
+      assert Images.create_image_destruction(actor(admin), "99999999999999999999") ==
                {:error, :not_found}
     end
   end
