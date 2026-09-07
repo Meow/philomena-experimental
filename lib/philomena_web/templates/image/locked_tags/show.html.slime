@@ -2,7 +2,7 @@ h1
   | Editing locked tags on image #
   = @image_id
 
-= form_for @changeset, ~p"/images/#{@image_id}/tag_lock", [method: :put], fn f ->
+= form_for @changeset, ~p"/images/#{@image_id}/locked_tags", [method: :put], fn f ->
   .field
     = render PhilomenaWeb.TagView, "_tag_editor.html", f: f, name: :tag_input, type: :edit
     = error_tag f, :tag_input
