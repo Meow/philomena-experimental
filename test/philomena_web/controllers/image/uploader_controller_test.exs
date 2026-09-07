@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
       image = image_fixture()
 
       conn =
-        put(conn, ~p"/images/#{image}/uploader", %{"image" => %{"username" => "somebody"}})
+        put(conn, ~p"/images/#{image}/uploader", %{"uploader" => %{"username" => "somebody"}})
 
       assert redirected_to(conn) == ~p"/sessions/new"
     end
@@ -25,23 +25,24 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
       image = image_fixture()
 
       conn =
-        put(conn, ~p"/images/#{image}/uploader", %{"image" => %{"username" => "somebody"}})
+        put(conn, ~p"/images/#{image}/uploader", %{"uploader" => %{"username" => "somebody"}})
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
     end
 
-    test "as a moderator reassigns the uploader and renders the partial", %{conn: conn} do
+    test "as a moderator reassigns the uploader and redirects to the image page", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       new_uploader = user_fixture()
       image = image_fixture()
 
       conn =
         put(conn, ~p"/images/#{image}/uploader", %{
-          "image" => %{"username" => new_uploader.name}
+          "uploader" => %{"username" => new_uploader.name}
         })
 
-      assert html_response(conn, 200) =~ new_uploader.name
+      assert redirected_to(conn, 302) == ~p"/images/#{image}"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully updated uploader."
       assert uploader_id(image) == new_uploader.id
     end
 
@@ -52,10 +53,11 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
 
       conn =
         put(conn, ~p"/images/#{image}/uploader", %{
-          "image" => %{"username" => new_uploader.name}
+          "uploader" => %{"username" => new_uploader.name}
         })
 
-      assert response(conn, 200)
+      assert redirected_to(conn, 302) == ~p"/images/#{image}"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully updated uploader."
       assert uploader_id(image) == new_uploader.id
     end
 
@@ -66,31 +68,29 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
       original = user_fixture()
       image = image_fixture(user_id: original.id)
 
-      conn = put(conn, ~p"/images/#{image}/uploader", %{"image" => %{"username" => ""}})
+      conn = put(conn, ~p"/images/#{image}/uploader", %{"uploader" => %{"username" => ""}})
 
-      assert response(conn, 200)
+      assert redirected_to(conn, 302) == ~p"/images/#{image}"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully updated uploader."
       assert uploader_id(image) == nil
     end
 
-    # NOTE: an unknown username now adds a changeset error, and the controller
-    # answers 300 (:multiple_choices, the AJAX convention) with a flash rather
-    # than raising. The image's uploader is left unchanged.
-    test "an unknown username answers 300 with the failure flash", %{conn: conn} do
+    test "an unknown username redirects with the failure flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       original = user_fixture()
       image = image_fixture(user_id: original.id)
 
       conn =
         put(conn, ~p"/images/#{image}/uploader", %{
-          "image" => %{"username" => "no-such-user-#{System.unique_integer([:positive])}"}
+          "uploader" => %{"username" => "no-such-user-#{System.unique_integer([:positive])}"}
         })
 
-      assert response(conn, 300) == ""
+      assert redirected_to(conn, 302) == ~p"/images/#{image}"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Failed to update uploader!"
       assert uploader_id(image) == original.id
     end
 
-    test "a missing image param raises", %{conn: conn} do
+    test "a missing uploader param raises", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
@@ -106,7 +106,7 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn =
-        put(conn, ~p"/images/999999999/uploader", %{"image" => %{"username" => "somebody"}})
+        put(conn, ~p"/images/999999999/uploader", %{"uploader" => %{"username" => "somebody"}})
 
       assert redirected_to(conn) == "/"
 
@@ -120,7 +120,7 @@ defmodule PhilomenaWeb.Image.UploaderControllerTest do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn =
-        put(conn, ~p"/images/not-a-number/uploader", %{"image" => %{"username" => "somebody"}})
+        put(conn, ~p"/images/not-a-number/uploader", %{"uploader" => %{"username" => "somebody"}})
 
       assert redirected_to(conn) == "/"
 

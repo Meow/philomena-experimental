@@ -68,6 +68,7 @@ defmodule PhilomenaWeb.ImageController do
       repair_changeset: page.repair_changeset,
       hash_changeset: page.hash_changeset,
       uploader_changeset: page.uploader_changeset,
+      anonymous_changeset: page.anonymous_changeset,
       user_galleries: page.user_galleries,
       interactions: page.interactions,
       watching: page.watching,

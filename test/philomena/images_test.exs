@@ -3153,23 +3153,19 @@ defmodule Philomena.ImagesTest do
   end
 
   describe "update_image_uploader/3" do
-    test "a moderator reassigns the uploader, preloading the new user with awards" do
+    test "a moderator reassigns the uploader" do
       moderator = moderator_user_fixture()
       owner = confirmed_user_fixture()
       new_owner = confirmed_user_fixture()
       image = image_fixture(user_id: owner.id)
 
-      assert {:ok, updated} =
+      assert {:ok, uploader} =
                Images.update_image_uploader(actor(moderator), to_string(image.id), %{
                  "username" => new_owner.name
                })
 
-      assert updated.id == image.id
+      assert uploader.username == new_owner.name
       assert Repo.reload!(image).user_id == new_owner.id
-
-      assert Ecto.assoc_loaded?(updated.user)
-      assert updated.user.id == new_owner.id
-      assert Ecto.assoc_loaded?(updated.user.awards)
     end
 
     test "an admin reassigns the uploader" do
@@ -3191,12 +3187,11 @@ defmodule Philomena.ImagesTest do
       owner = confirmed_user_fixture()
       image = image_fixture(user_id: owner.id)
 
-      assert {:ok, updated} =
+      assert {:ok, _} =
                Images.update_image_uploader(actor(moderator), to_string(image.id), %{
                  "username" => ""
                })
 
-      assert updated.id == image.id
       assert Repo.reload!(image).user_id == nil
     end
 
@@ -3238,12 +3233,11 @@ defmodule Philomena.ImagesTest do
       new_owner = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, updated} =
+      assert {:ok, _} =
                Images.update_image_uploader(actor(moderator), image.id, %{
                  "username" => new_owner.name
                })
 
-      assert updated.id == image.id
       assert Repo.reload!(image).user_id == new_owner.id
     end
 
