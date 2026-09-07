@@ -21,7 +21,8 @@ defmodule Philomena.Images do
     Anonymous,
     Approval,
     CommentLock,
-    Description
+    Description,
+    DescriptionLock
   }
 
   alias Philomena.Forms
@@ -1720,31 +1721,34 @@ defmodule Philomena.Images do
 
   @doc group: "Moderation and lifecycle"
   @doc """
-  Locks (`locked?` true) or unlocks (`locked?` false) description editing on the
-  image named by `image_id`, on behalf of `actor`.
+  Locks or unlocks description editing on the image named by `image_id`,
+  on behalf of `actor`.
 
   The image is loaded by id and authorized for `:lock_description`. On success description
   editing is toggled, the image is reindexed, and a moderation log is written
   attributing the change to `actor`.
 
-  Returns `{:ok, image}` with the updated image.
+  Returns `{:ok, description_lock}` with the description lock display.
 
   ## Examples
 
-      iex> update_image_description_lock(moderator, "42", true)
-      {:ok, %Image{}}
+      iex> update_image_description_lock(moderator, "42", %{description_locked: true})
+      {:ok, %DescriptionLock{}}
 
-      iex> update_image_description_lock(user, "42", true)
+      iex> update_image_description_lock(user, "42", %{description_locked: true})
       {:error, :unauthorized}
 
   """
-  @spec update_image_description_lock(Actor.t(), IntegerId.integer_id(), boolean()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found}
-  def update_image_description_lock(%Actor{} = actor, image_id, locked?) do
+  @spec update_image_description_lock(Actor.t(), IntegerId.integer_id(), map()) ::
+          {:ok, DescriptionLock.t()}
+          | {:error,
+             :ban | :unauthorized | :not_found | Ecto.Changeset.t(DescriptionLock.Form.t())}
+  def update_image_description_lock(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :lock_description, image_id) do
+         {:ok, image} <- load_image_member(actor, :lock_description, image_id),
+         {:ok, description_lock_form} <- Forms.update(DescriptionLock.Form, params) do
       {log_type, log_body} =
-        if locked? do
+        if description_lock_form.description_locked do
           {"Image.DescriptionLock:create", "Locked description editing on image #{image.id}"}
         else
           {"Image.DescriptionLock:delete", "Unlocked description editing on image #{image.id}"}
@@ -1753,7 +1757,7 @@ defmodule Philomena.Images do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
-        Image.lock_description_changeset(image, locked?)
+        Image.lock_description_changeset(image, description_lock_form.description_locked)
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {log_type, Paths.image_path(image), log_body}
@@ -1762,7 +1766,7 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+          {:ok, DescriptionLock.render(actor, image)}
       end
     end
   end
