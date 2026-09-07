@@ -1798,16 +1798,17 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_image_tag_lock/3" do
+  describe "update_image_tags_lock/3" do
     test "a moderator locks tags, clearing tag_editing_allowed" do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, locked} =
-               Images.update_image_tag_lock(actor(moderator), to_string(image.id), true)
+      assert {:ok, tags_lock} =
+               Images.update_image_tags_lock(actor(moderator), to_string(image.id), %{
+                 tags_locked: true
+               })
 
-      assert locked.id == image.id
-      refute locked.tag_editing_allowed
+      assert tags_lock.tags_locked
       refute Repo.reload!(image).tag_editing_allowed
     end
 
@@ -1815,7 +1816,11 @@ defmodule Philomena.ImagesTest do
       admin = admin_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, _} = Images.update_image_tag_lock(actor(admin), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_image_tags_lock(actor(admin), to_string(image.id), %{
+                 tags_locked: true
+               })
+
       refute Repo.reload!(image).tag_editing_allowed
     end
 
@@ -1823,11 +1828,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: false)
 
-      assert {:ok, unlocked} =
-               Images.update_image_tag_lock(actor(moderator), to_string(image.id), false)
+      assert {:ok, tags_lock} =
+               Images.update_image_tags_lock(actor(moderator), to_string(image.id), %{
+                 tags_locked: false
+               })
 
-      assert unlocked.id == image.id
-      assert unlocked.tag_editing_allowed
+      refute tags_lock.tags_locked
       assert Repo.reload!(image).tag_editing_allowed
     end
 
@@ -1835,7 +1841,10 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, _} = Images.update_image_tag_lock(actor(moderator), to_string(image.id), true)
+      assert {:ok, _} =
+               Images.update_image_tags_lock(actor(moderator), to_string(image.id), %{
+                 tags_locked: true
+               })
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1848,7 +1857,10 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: false)
 
-      assert {:ok, _} = Images.update_image_tag_lock(actor(moderator), to_string(image.id), false)
+      assert {:ok, _} =
+               Images.update_image_tags_lock(actor(moderator), to_string(image.id), %{
+                 tags_locked: false
+               })
 
       log = only_moderation_log!()
       assert log.user_id == moderator.id
@@ -1861,15 +1873,17 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert {:ok, locked} = Images.update_image_tag_lock(actor(moderator), image.id, true)
-      assert locked.id == image.id
+      assert {:ok, _} =
+               Images.update_image_tags_lock(actor(moderator), image.id, %{tags_locked: true})
+
+      refute Repo.reload!(image).tag_editing_allowed
     end
 
     test "a regular user cannot lock tags and the flag stays set" do
       user = confirmed_user_fixture()
       image = image_fixture(tag_editing_allowed: true)
 
-      assert Images.update_image_tag_lock(actor(user), to_string(image.id), true) ==
+      assert Images.update_image_tags_lock(actor(user), to_string(image.id), %{tags_locked: true}) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).tag_editing_allowed
@@ -1879,7 +1893,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot lock tags and the flag stays set" do
       image = image_fixture(tag_editing_allowed: true)
 
-      assert Images.update_image_tag_lock(actor(), to_string(image.id), true) ==
+      assert Images.update_image_tags_lock(actor(), to_string(image.id), %{tags_locked: true}) ==
                {:error, :unauthorized}
 
       assert Repo.reload!(image).tag_editing_allowed
@@ -1890,7 +1904,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_tag_lock(actor(moderator), "2147483647", true) ==
+      assert Images.update_image_tags_lock(actor(moderator), "2147483647", %{tags_locked: true}) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1900,7 +1914,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.update_image_tag_lock(actor(admin), "2147483647", true) ==
+      assert Images.update_image_tags_lock(actor(admin), "2147483647", %{tags_locked: true}) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1909,14 +1923,16 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_tag_lock(actor(moderator), "not-a-number", true) ==
+      assert Images.update_image_tags_lock(actor(moderator), "not-a-number", %{tags_locked: true}) ==
                {:error, :not_found}
     end
 
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_tag_lock(actor(moderator), "99999999999999999999", true) ==
+      assert Images.update_image_tags_lock(actor(moderator), "99999999999999999999", %{
+               tags_locked: true
+             }) ==
                {:error, :not_found}
     end
   end

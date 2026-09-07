@@ -25,20 +25,20 @@ defmodule PhilomenaWeb.Image.TagLockController do
   end
 
   def create(conn, %{"image_id" => image_id}) do
-    with {:ok, image} <-
-           Images.update_image_tag_lock(conn.assigns.actor, image_id, true) do
+    with {:ok, _tags_lock} <-
+           Images.update_image_tags_lock(conn.assigns.actor, image_id, %{tags_locked: true}) do
       conn
       |> put_flash(:info, "Successfully locked tags.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 
   def delete(conn, %{"image_id" => image_id}) do
-    with {:ok, image} <-
-           Images.update_image_tag_lock(conn.assigns.actor, image_id, false) do
+    with {:ok, _tags_lock} <-
+           Images.update_image_tags_lock(conn.assigns.actor, image_id, %{tags_locked: false}) do
       conn
       |> put_flash(:info, "Successfully unlocked tags.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 end
