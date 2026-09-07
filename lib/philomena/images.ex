@@ -1514,19 +1514,20 @@ defmodule Philomena.Images do
   to `actor`. Approval at the uploader's fifth approved image also creates a
   verification report in the same transaction.
 
-  Returns `{:ok, approval}` with the approval display.
+  Returns `{:ok, nil}` when approval succeeds (the approval control is no longer
+  available).
 
   ## Examples
 
       iex> create_image_approval(moderator, "42")
-      {:ok, %Approval{}}
+      {:ok, nil}
 
       iex> create_image_approval(user, "42")
       {:error, :unauthorized}
 
   """
   @spec create_image_approval(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Approval.t()}
+          {:ok, nil}
           | {:error, Ecto.Changeset.t(Approval.Form.t())}
           | {:error, :ban | :unauthorized | :not_found}
   def create_image_approval(%Actor{} = actor, image_id) do
@@ -1631,20 +1632,20 @@ defmodule Philomena.Images do
   returns a changeset error and is left untouched. On success the file and thumbnails
   are purged and a moderation log is written attributing the destruction to `actor`.
 
-  Returns `{:ok, destruction}` with the destruction display, or
-  `{:error, %Ecto.Changeset{}}` if the operation is rejected.
+  Returns `{:ok, nil}` when destruction succeeds (the destruction control is no longer
+  available), or `{:error, %Ecto.Changeset{}}` if the operation is rejected.
 
   ## Examples
 
-      iex> create_image_destroy(admin, "42")
-      {:ok, %Destruction{}}
+      iex> create_image_destruction(admin, "42")
+      {:ok, nil}
 
-      iex> create_image_destroy(moderator, "42")
+      iex> create_image_destruction(moderator, "42")
       {:error, :unauthorized}
 
   """
   @spec create_image_destruction(Actor.t(), IntegerId.integer_id()) ::
-          {:ok, Destruction.t()}
+          {:ok, nil}
           | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Destruction.Form.t())}
   def create_image_destruction(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),

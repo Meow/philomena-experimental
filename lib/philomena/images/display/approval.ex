@@ -1,8 +1,8 @@
 defmodule Philomena.Images.Display.Approval do
   @moduledoc """
-  Presentation data for an image approval control.
+  Presentation data for an image's approval control.
 
-  Contains a changeset and the image's current `approved?` state.
+  Contains a changeset.
 
   Omitted when the control is unavailable to the actor.
   """
@@ -28,21 +28,19 @@ defmodule Philomena.Images.Display.Approval do
     end
   end
 
-  @enforce_keys [:changeset, :approved?]
+  @enforce_keys [:changeset]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          changeset: Ecto.Changeset.t(Form.t()),
-          approved?: boolean()
+          changeset: Ecto.Changeset.t(Form.t())
         }
 
   @doc false
   @spec render(Actor.t(), Image.t()) :: t() | nil
   def render(%Actor{} = actor, %Image{} = image) do
-    if image_permitted?(actor, :approve, image) do
+    if image_permitted?(actor, :approve, image) and not image.approved do
       %__MODULE__{
-        changeset: Forms.change(Form, %{}),
-        approved?: image.approved
+        changeset: Forms.change(Form, %{})
       }
     end
   end
