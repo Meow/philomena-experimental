@@ -127,7 +127,7 @@
 [x] DELETE /images/:image_id/comment_lock                                   Image.CommentLockController :delete
 [x] POST   /images/:image_id/description_lock                               Image.DescriptionLockController :create
 [x] DELETE /images/:image_id/description_lock                               Image.DescriptionLockController :delete
-[x] GET    /images/:image_id/tag_lock                                       Image.TagLockController :show
+[x] GET    /images/:image_id/tag_lock/edit                                  Image.TagLockController :edit
 [x] POST   /images/:image_id/tag_lock                                       Image.TagLockController :create
 [x] PATCH  /images/:image_id/tag_lock                                       Image.TagLockController :update
 [x] PUT    /images/:image_id/tag_lock                                       Image.TagLockController :update

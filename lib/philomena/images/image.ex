@@ -251,9 +251,9 @@ defmodule Philomena.Images.Image do
     not (Enum.empty?(added) and Enum.empty?(removed))
   end
 
-  def locked_tags_changeset(image, attrs, locked_tags) do
+  def locked_tags_changeset(image, locked_tags) do
     image
-    |> cast(attrs, [])
+    |> change()
     |> put_assoc(:locked_tags, locked_tags)
   end
 

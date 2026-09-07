@@ -13,6 +13,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.ImageHides.ImageHide
   alias Philomena.Galleries.Interaction
   alias Philomena.Images
+  alias Philomena.Images.Display.LockedTags
   alias Philomena.ImageVotes
   alias Philomena.ImageVotes.ImageVote
   alias Philomena.ModerationLogs.ModerationLog
@@ -1961,7 +1962,8 @@ defmodule Philomena.ImagesTest do
                  "tag_input" => "safe, cute"
                })
 
-      assert updated.id == image.id
+      assert updated.tag_input =~ "cute"
+      assert updated.tag_input =~ "safe"
       assert locked_tag_names(image) == ["cute", "safe"]
     end
 
@@ -2044,7 +2046,7 @@ defmodule Philomena.ImagesTest do
                  "tag_input" => "safe"
                })
 
-      assert updated.id == image.id
+      assert updated.tag_input =~ "safe"
       assert locked_tag_names(image) == ["safe"]
     end
 
@@ -2122,6 +2124,75 @@ defmodule Philomena.ImagesTest do
       assert Images.update_image_locked_tags(actor(moderator), "99999999999999999999", %{
                "tag_input" => "safe"
              }) ==
+               {:error, :not_found}
+    end
+  end
+
+  describe "edit_image_locked_tags/2" do
+    test "a moderator gets the current locked-tags display" do
+      moderator = moderator_user_fixture()
+      image = image_fixture()
+      tag_fixture(name: "cute")
+
+      assert {:ok, _} =
+               Images.update_image_locked_tags(actor(moderator), image.id, %{
+                 "tag_input" => "safe, cute"
+               })
+
+      assert {:ok, %{data: %LockedTags{tag_input: tag_input}}} =
+               Images.edit_image_locked_tags(actor(moderator), to_string(image.id))
+
+      assert tag_input =~ "cute"
+      assert tag_input =~ "safe"
+    end
+
+    test "an admin gets the current locked-tags display" do
+      admin = admin_user_fixture()
+      image = image_fixture()
+
+      assert {:ok, %{data: %LockedTags{tag_input: ""}}} =
+               Images.edit_image_locked_tags(actor(admin), image.id)
+    end
+
+    test "a regular user cannot edit locked tags" do
+      user = confirmed_user_fixture()
+      image = image_fixture()
+
+      assert Images.edit_image_locked_tags(actor(user), to_string(image.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "an anonymous actor cannot edit locked tags" do
+      image = image_fixture()
+
+      assert Images.edit_image_locked_tags(actor(), to_string(image.id)) ==
+               {:error, :unauthorized}
+    end
+
+    test "a moderator with an unknown well-formed id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.edit_image_locked_tags(actor(moderator), "2147483647") ==
+               {:error, :not_found}
+    end
+
+    test "an admin with an unknown well-formed id is not found" do
+      admin = admin_user_fixture()
+
+      assert Images.edit_image_locked_tags(actor(admin), "2147483647") == {:error, :not_found}
+    end
+
+    test "a non-castable id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.edit_image_locked_tags(actor(moderator), "not-a-number") ==
+               {:error, :not_found}
+    end
+
+    test "an out-of-range id is not found" do
+      moderator = moderator_user_fixture()
+
+      assert Images.edit_image_locked_tags(actor(moderator), "99999999999999999999") ==
                {:error, :not_found}
     end
   end

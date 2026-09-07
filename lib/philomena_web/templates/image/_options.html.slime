@@ -146,7 +146,7 @@
 
       br
       .flex.flex--spaced-out
-        = link "Lock specific tags", to: ~p"/images/#{@image}/tag_lock", class: "button"
+        = link "Lock specific tags", to: ~p"/images/#{@image}/tag_lock/edit", class: "button"
         = if not @image.approved and can?(@conn, :approve, @image) do
           = button_to "Approve image", ~p"/images/#{@image}/approve", method: "post", class: "button button--state-success", data: [confirm: "Are you sure?"]
         = if @image.hidden_from_users and can?(@conn, :destroy, @image) do
