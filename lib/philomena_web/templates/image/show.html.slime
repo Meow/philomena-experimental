@@ -13,7 +13,7 @@
 
   = render PhilomenaWeb.ImageView, "_tags.html", image: @image, tag_change_count: @tag_change_count, tag_change_tag_count: @tag_change_tag_count, changeset: @tag_changeset, conn: @conn
   = render PhilomenaWeb.ImageView, "_source.html", image: @image, source_change_count: @source_change_count, changeset: @source_changeset, conn: @conn
-  = render PhilomenaWeb.ImageView, "_options.html", image: @image, file_changeset: @file_changeset, hide_changeset: @hide_changeset, feature_changeset: @feature_changeset, repair_changeset: @repair_changeset, hash_changeset: @hash_changeset, conn: @conn
+  = render PhilomenaWeb.ImageView, "_options.html", image: @image, hide: @hide, file_changeset: @file_changeset, feature_changeset: @feature_changeset, repair_changeset: @repair_changeset, hash_changeset: @hash_changeset, conn: @conn
 
   h4 Comments
   = cond do

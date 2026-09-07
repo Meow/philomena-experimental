@@ -94,18 +94,19 @@
         - else
           em No mod notes present
 
-      = if not @image.hidden_from_users do
-        = form_for @hide_changeset, ~p"/images/#{@image}/delete", [method: "post"], fn f ->
-          = label f, :deletion_reason, "Deletion reason (cannot be empty)"
-          .field.field--inline
-            = text_input f, :deletion_reason, class: "input input--wide", placeholder: "Rule violation", required: true
-            = submit "Delete", class: "button button--state-danger button--separate-left"
-      - else
-        = form_for @hide_changeset, ~p"/images/#{@image}/delete", [method: "put"], fn f ->
-          = label f, :deletion_reason, "Deletion reason (cannot be empty)"
-          .field.field--inline
-            = text_input f, :deletion_reason, class: "input input--wide", placeholder: "Rule violation", required: true
-            = submit "Change deletion reason", class: "button button--state-danger button--separate-left"
+      = if @hide do
+        = if @hide.present? do
+          = form_for @hide.changeset, ~p"/images/#{@image}/delete", [as: :hide, method: "put"], fn f ->
+            = label f, :deletion_reason, "Deletion reason (cannot be empty)"
+            .field.field--inline
+              = text_input f, :deletion_reason, class: "input input--wide", placeholder: "Rule violation", required: true
+              = submit "Change deletion reason", class: "button button--state-danger button--separate-left"
+        - else
+          = form_for @hide.changeset, ~p"/images/#{@image}/delete", [as: :hide, method: "post"], fn f ->
+            = label f, :deletion_reason, "Deletion reason (cannot be empty)"
+            .field.field--inline
+              = text_input f, :deletion_reason, class: "input input--wide", placeholder: "Rule violation", required: true
+              = submit "Delete", class: "button button--state-danger button--separate-left"
 
       .flex.flex--spaced-out.flex--wrap
         = if not @image.hidden_from_users do

@@ -213,12 +213,12 @@ defmodule Philomena.ImagesTest do
     image = image_fixture()
     moderator = moderator_user_fixture()
 
-    {:ok, hidden} =
+    {:ok, _hide} =
       Images.create_image_hide(actor(moderator), image.id, %{"deletion_reason" => reason})
 
     Repo.delete_all(ModerationLog)
 
-    hidden
+    Repo.reload!(image)
   end
 
   defp feature_row_count(image) do
@@ -266,7 +266,7 @@ defmodule Philomena.ImagesTest do
       gallery = gallery_fixture(user_fixture())
       gallery_image_fixture(gallery, image)
 
-      assert {:ok, _hidden} =
+      assert {:ok, _hide} =
                Images.create_image_hide(actor(moderator), image.id, %{
                  "deletion_reason" => "Rule violation"
                })
@@ -279,7 +279,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, _hidden} =
+      assert {:ok, _hide} =
                Images.create_image_hide(actor(moderator), image.id, %{
                  "deletion_reason" => "Rule violation"
                })
@@ -3536,13 +3536,10 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, hidden} =
+      assert {:ok, _} =
                Images.create_image_hide(actor(moderator), to_string(image.id), %{
                  "deletion_reason" => "Rule #0"
                })
-
-      assert hidden.id == image.id
-      assert hidden.hidden_from_users
 
       reloaded = Repo.reload!(image)
       assert reloaded.hidden_from_users
@@ -3581,12 +3578,13 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture()
 
-      assert {:ok, hidden} =
+      assert {:ok, _} =
                Images.create_image_hide(actor(moderator), image.id, %{
                  "deletion_reason" => "Rule #0"
                })
 
-      assert hidden.id == image.id
+      assert Repo.reload!(image).deletion_reason == "Rule #0"
+      assert Repo.reload!(image).hidden_from_users
     end
 
     test "a blank reason fails with the image left visible and no log" do

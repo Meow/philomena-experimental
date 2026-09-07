@@ -25,7 +25,8 @@ defmodule Philomena.Images do
     DescriptionLock,
     Destruction,
     File,
-    Hash
+    Hash,
+    Hide
   }
 
   alias Philomena.Forms
@@ -834,6 +835,7 @@ defmodule Philomena.Images do
       user_galleries: gallery_choices,
       interactions: Interactions.user_interactions(actor, [image]),
       description: Description.render(actor, image),
+      hide: Hide.render(actor, image),
       comment_changeset: comment_changeset_for(actor, image),
       tag_changeset: image_changeset_for(actor, image, :edit_metadata),
       source_changeset: image_changeset_for(actor, image, :edit_metadata),
@@ -1916,24 +1918,29 @@ defmodule Philomena.Images do
   thumbnails purged, everything reindexed) and a moderation log is written attributing
   the deletion to `actor`.
 
-  Returns `{:ok, image}` with the hidden image, or `{:error, changeset}` when
+  Returns `{:ok, hide}` with the hide display, or `{:error, changeset}` when
   the hide is rejected (e.g. a blank deletion reason), leaving the image visible.
 
   ## Examples
 
       iex> create_image_hide(moderator, "42", %{"deletion_reason" => "Rule violation"})
-      {:ok, %Image{}}
+      {:ok, %Hide{}}
 
       iex> create_image_hide(user, "42", %{"deletion_reason" => "Rule violation"})
       {:error, :unauthorized}
 
   """
   @spec create_image_hide(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def create_image_hide(%Actor{user: user} = actor, image_id, attrs) do
+          {:ok, Hide.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Hide.Form.t())}
+  def create_image_hide(%Actor{user: user} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
-         {:ok, image} <- load_image_member(actor, :hide, image_id) do
-      changeset_fun = fn %{locked_image: image} -> Image.hide_changeset(image, attrs, user) end
+         {:ok, image} <- load_image_member(actor, :hide, image_id),
+         {:ok, hide_form} <- Forms.create(Hide.Form, params) do
+      changeset_fun =
+        fn %{locked_image: image} ->
+          Image.hide_changeset(image, %{deletion_reason: hide_form.deletion_reason}, user)
+        end
 
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
@@ -1950,10 +1957,10 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+          {:ok, Hide.render(actor, image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, Forms.copy_errors(changeset, hide_form)}
       end
     end
   end
