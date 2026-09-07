@@ -25,7 +25,8 @@ defmodule Philomena.Images do
     Destruction,
     File,
     Hash,
-    Hide
+    Hide,
+    LockedTags
   }
 
   alias Philomena.Forms
@@ -2460,8 +2461,37 @@ defmodule Philomena.Images do
 
   @doc group: "Metadata editing"
   @doc """
+  Loads the locked tag list of the image named by `image_id` for editing, on
+  behalf of `actor`.
+
+  The image is loaded by id and authorized for `:lock_tags`, with its locked
+  tags preloaded for rendering. On success, returns a changeset for the locked
+  tags display.
+
+  ## Examples
+
+      iex> edit_image_locked_tags(moderator, "42")
+      {:ok, %Ecto.Changeset{}}
+
+      iex> edit_image_locked_tags(user, "42")
+      {:error, :unauthorized}
+
+  """
+  @spec edit_image_locked_tags(Actor.t(), IntegerId.integer_id()) ::
+          {:ok, Ecto.Changeset.t(LockedTags.t())} | {:error, :ban | :unauthorized | :not_found}
+  def edit_image_locked_tags(%Actor{} = actor, image_id) do
+    with :ok <- verify_write_access(actor),
+         {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]) do
+      locked_tags = LockedTags.render(image)
+
+      {:ok, LockedTags.changeset(locked_tags)}
+    end
+  end
+
+  @doc group: "Metadata editing"
+  @doc """
   Updates the locked tag list of the image named by `image_id`, on behalf of
-  `actor`, from `attrs` (a map with a `"tag_input"` key).
+  `actor`, from `params` (a map with a `"tag_input"` key).
 
   The image is loaded by id and authorized for `:lock_tags`. A blank `tag_input` clears
   the list. On success the locked tags are replaced, the image is reindexed, and a
@@ -2469,12 +2499,12 @@ defmodule Philomena.Images do
   are considered; aliases resolve to their canonical tags and implications are not
   expanded.
 
-  Returns `{:ok, image}` with the updated image.
+  Returns `{:ok, locked_tags}` with the updated locked tags display.
 
   ## Examples
 
       iex> update_image_locked_tags(moderator, "42", %{"tag_input" => "safe, solo"})
-      {:ok, %Image{}}
+      {:ok, %LockedTags{}}
 
       iex> update_image_locked_tags(user, "42", %{"tag_input" => "safe, solo"})
       {:error, :unauthorized}
@@ -2482,14 +2512,11 @@ defmodule Philomena.Images do
   """
   @spec update_image_locked_tags(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok, Image.t()} | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_image_locked_tags(%Actor{} = actor, image_id, attrs) do
+  def update_image_locked_tags(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]),
-         {:ok, tag_input_form} <-
-           %TagInputForm{}
-           |> TagInputForm.changeset(attrs)
-           |> TagInputForm.apply(image) do
-      tag_names = Tag.parse_tag_list(tag_input_form.tag_input)
+         {:ok, locked_tags} <- Forms.update(LockedTags, params) do
+      tag_names = Tag.parse_tag_list(locked_tags.tag_input)
 
       image_query =
         Image
@@ -2500,7 +2527,7 @@ defmodule Philomena.Images do
       |> Multi.lock_one(:locked_image, image_query)
       |> Tags.put_canonicalize_tag_name_sets([{:tags, tag_names, []}])
       |> Multi.update(:image, fn %{locked_image: image, canonical_tags: %{tags: tags}} ->
-        Image.locked_tags_changeset(image, attrs, tags)
+        Image.locked_tags_changeset(image, tags)
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {
@@ -2513,10 +2540,10 @@ defmodule Philomena.Images do
       |> Multi.transact_with_automatic_retry()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, image}
+          {:ok, LockedTags.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, Forms.copy_errors(changeset, locked_tags)}
       end
     end
   end

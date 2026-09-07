@@ -18,11 +18,11 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     |> Enum.sort()
   end
 
-  describe "GET /images/:image_id/tag_lock" do
+  describe "GET /images/:image_id/tag_lock/edit" do
     test "redirects anonymous users to login", %{conn: conn} do
       image = image_fixture()
 
-      conn = get(conn, ~p"/images/#{image}/tag_lock")
+      conn = get(conn, ~p"/images/#{image}/tag_lock/edit")
 
       assert redirected_to(conn) == ~p"/sessions/new"
     end
@@ -31,7 +31,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
       image = image_fixture()
 
-      conn = get(conn, ~p"/images/#{image}/tag_lock")
+      conn = get(conn, ~p"/images/#{image}/tag_lock/edit")
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
@@ -41,7 +41,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
       image = image_fixture()
 
-      conn = get(conn, ~p"/images/#{image}/tag_lock")
+      conn = get(conn, ~p"/images/#{image}/tag_lock/edit")
       response = html_response(conn, 200)
 
       assert response =~ "Locking image tags - Derpibooru"
@@ -52,7 +52,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       %{conn: conn} = register_and_log_in_admin(%{conn: conn})
       image = image_fixture()
 
-      conn = get(conn, ~p"/images/#{image}/tag_lock")
+      conn = get(conn, ~p"/images/#{image}/tag_lock/edit")
 
       assert html_response(conn, 200) =~ "Editing locked tags on image ##{image.id}"
     end
@@ -60,7 +60,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     test "for an unknown image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
-      conn = get(conn, ~p"/images/999999999/tag_lock")
+      conn = get(conn, ~p"/images/999999999/tag_lock/edit")
 
       assert redirected_to(conn) == "/"
 
@@ -75,7 +75,7 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
-      conn = get(conn, ~p"/images/not-a-number/tag_lock")
+      conn = get(conn, ~p"/images/not-a-number/tag_lock/edit")
 
       assert redirected_to(conn) == "/"
 
@@ -157,7 +157,8 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     test "redirects anonymous users to login", %{conn: conn} do
       image = image_fixture()
 
-      conn = put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "safe"}})
+      conn =
+        put(conn, ~p"/images/#{image}/tag_lock", %{"locked_tags" => %{"tag_input" => "safe"}})
 
       assert redirected_to(conn) == ~p"/sessions/new"
       assert locked_tag_names(image) == []
@@ -167,7 +168,8 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
       image = image_fixture()
 
-      conn = put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "safe"}})
+      conn =
+        put(conn, ~p"/images/#{image}/tag_lock", %{"locked_tags" => %{"tag_input" => "safe"}})
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "You can't access that page."
@@ -180,7 +182,9 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       tag_fixture(name: "solo")
 
       conn =
-        put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "safe, solo"}})
+        put(conn, ~p"/images/#{image}/tag_lock", %{
+          "locked_tags" => %{"tag_input" => "safe, solo"}
+        })
 
       assert redirected_to(conn) == ~p"/images/#{image}"
 
@@ -195,7 +199,8 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       image = image_fixture()
       tag_fixture(name: "solo")
 
-      conn = put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "solo"}})
+      conn =
+        put(conn, ~p"/images/#{image}/tag_lock", %{"locked_tags" => %{"tag_input" => "solo"}})
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
                "Successfully updated list of locked tags."
@@ -211,10 +216,14 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       tag_fixture(name: "solo")
 
       # Lock some tags first.
-      put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => "safe, solo"}})
+      put(conn, ~p"/images/#{image}/tag_lock", %{
+        "locked_tags" => %{"tag_input" => "safe, solo"}
+      })
+
       assert locked_tag_names(image) == ["safe", "solo"]
 
-      conn = put(conn, ~p"/images/#{image}/tag_lock", %{"image" => %{"tag_input" => ""}})
+      conn =
+        put(conn, ~p"/images/#{image}/tag_lock", %{"locked_tags" => %{"tag_input" => ""}})
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
                "Successfully updated list of locked tags."
@@ -226,7 +235,9 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
       conn =
-        put(conn, ~p"/images/999999999/tag_lock", %{"image" => %{"tag_input" => "safe"}})
+        put(conn, ~p"/images/999999999/tag_lock", %{
+          "locked_tags" => %{"tag_input" => "safe"}
+        })
 
       assert redirected_to(conn) == "/"
 
@@ -241,7 +252,10 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
     test "for a non-integer image_id redirects with the not-found flash", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
 
-      conn = put(conn, ~p"/images/not-a-number/tag_lock", %{"image" => %{"tag_input" => "safe"}})
+      conn =
+        put(conn, ~p"/images/not-a-number/tag_lock", %{
+          "locked_tags" => %{"tag_input" => "safe"}
+        })
 
       assert redirected_to(conn) == "/"
 

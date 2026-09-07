@@ -232,7 +232,7 @@ defmodule PhilomenaWeb.Router do
         singleton: true
 
       resources "/tag_lock", Image.TagLockController,
-        only: [:show, :update, :create, :delete],
+        only: [:create, :edit, :update, :delete],
         singleton: true
     end
 

@@ -5,37 +5,37 @@ defmodule PhilomenaWeb.Image.TagLockController do
 
   action_fallback PhilomenaWeb.FallbackController
 
-  def show(conn, params) do
-    with {:ok, image} <-
-           Images.load_hidable_image(conn.assigns.actor, params["image_id"],
-             preload: :locked_tags
-           ) do
-      changeset = Images.change_image(image)
-      render(conn, "show.html", title: "Locking image tags", image: image, changeset: changeset)
+  def edit(conn, %{"image_id" => image_id}) do
+    with {:ok, changeset} <- Images.edit_image_locked_tags(conn.assigns.actor, image_id) do
+      render(conn, "show.html",
+        title: "Locking image tags",
+        image_id: image_id,
+        changeset: changeset
+      )
     end
   end
 
-  def update(conn, %{"image" => image_attrs} = params) do
-    with {:ok, image} <-
-           Images.update_image_locked_tags(conn.assigns.actor, params["image_id"], image_attrs) do
+  def update(conn, %{"image_id" => image_id} = params) do
+    with {:ok, _locked_tags} <-
+           Images.update_image_locked_tags(conn.assigns.actor, image_id, params["locked_tags"]) do
       conn
       |> put_flash(:info, "Successfully updated list of locked tags.")
-      |> redirect(to: ~p"/images/#{image}")
+      |> redirect(to: ~p"/images/#{image_id}")
     end
   end
 
-  def create(conn, params) do
+  def create(conn, %{"image_id" => image_id}) do
     with {:ok, image} <-
-           Images.update_image_tag_lock(conn.assigns.actor, params["image_id"], true) do
+           Images.update_image_tag_lock(conn.assigns.actor, image_id, true) do
       conn
       |> put_flash(:info, "Successfully locked tags.")
       |> redirect(to: ~p"/images/#{image}")
     end
   end
 
-  def delete(conn, params) do
+  def delete(conn, %{"image_id" => image_id}) do
     with {:ok, image} <-
-           Images.update_image_tag_lock(conn.assigns.actor, params["image_id"], false) do
+           Images.update_image_tag_lock(conn.assigns.actor, image_id, false) do
       conn
       |> put_flash(:info, "Successfully unlocked tags.")
       |> redirect(to: ~p"/images/#{image}")
