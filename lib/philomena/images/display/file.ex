@@ -1,6 +1,6 @@
 defmodule Philomena.Images.Display.File do
   @moduledoc """
-  Presentation data for an image file replacement control.
+  Presentation data for an image's file replacement control.
 
   Contains a changeset.
 

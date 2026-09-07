@@ -1,6 +1,6 @@
 defmodule Philomena.Images.Display.Hash do
   @moduledoc """
-  Presentation data for an image hash removal control.
+  Presentation data for an image's hash removal control.
 
   Contains a changeset.
 

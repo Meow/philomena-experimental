@@ -1,6 +1,6 @@
 defmodule Philomena.Images.Display.Destruction do
   @moduledoc """
-  Presentation data for an image destruction control.
+  Presentation data for an image's destruction control.
 
   Contains a changeset.
 

@@ -1,6 +1,6 @@
 defmodule Philomena.Images.Display.Description do
   @moduledoc """
-  Presentation data for an image description edit control.
+  Presentation data for an image's description edit control.
 
   Contains a changeset and the raw description.
 
