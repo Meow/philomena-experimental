@@ -27,7 +27,8 @@ defmodule Philomena.Images.ImagePage do
     :feature_changeset,
     :repair_changeset,
     :hash_changeset,
-    :uploader_changeset
+    :uploader_changeset,
+    :anonymous_changeset
   ]
   defstruct @enforce_keys
 
@@ -48,6 +49,7 @@ defmodule Philomena.Images.ImagePage do
           feature_changeset: Ecto.Changeset.t() | nil,
           repair_changeset: Ecto.Changeset.t() | nil,
           hash_changeset: Ecto.Changeset.t() | nil,
-          uploader_changeset: Ecto.Changeset.t() | nil
+          uploader_changeset: Ecto.Changeset.t(Philomena.Images.Display.Uploader.t()) | nil,
+          anonymous_changeset: Ecto.Changeset.t(Philomena.Images.Display.Anonymous.t()) | nil
         }
 end

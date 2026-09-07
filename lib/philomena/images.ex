@@ -28,7 +28,8 @@ defmodule Philomena.Images do
     Hide,
     LockedTags,
     Scratchpad,
-    TagsLock
+    TagsLock,
+    Uploader
   }
 
   alias Philomena.Forms
@@ -40,7 +41,6 @@ defmodule Philomena.Images do
   alias Philomena.DnpEntries
   alias Philomena.Images.Image
   alias Philomena.Images.Filtering
-  alias Philomena.Images.Uploader
   alias Philomena.Images.Tagging
   alias Philomena.Images.Thumbnailer
   alias Philomena.Images.Source
@@ -312,16 +312,6 @@ defmodule Philomena.Images do
     end
   end
 
-  defp uploader_changeset_for(actor, image) do
-    case authorize(actor, :show, :identity_metadata) do
-      :ok ->
-        image_changeset_for(actor, image, :update_uploader)
-
-      _error ->
-        nil
-    end
-  end
-
   defp sources_for_edit([]), do: [%Source{}]
   defp sources_for_edit(sources), do: sources
 
@@ -351,7 +341,7 @@ defmodule Philomena.Images do
 
   defp try_upload(image, retry_count) when retry_count < 100 do
     try do
-      Uploader.persist_upload(image)
+      Images.Uploader.persist_upload(image)
       repair_image(image)
     rescue
       e ->
@@ -834,6 +824,9 @@ defmodule Philomena.Images do
   """
   @spec show_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: ImagePage.t()
   def show_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
+    # TODO: remove this
+    image = Repo.preload(image, :user)
+
     clear_image_notification(image, user)
 
     comment_pagination = maybe_jump_to_last_page(actor, image, comment_pagination)
@@ -858,7 +851,8 @@ defmodule Philomena.Images do
       feature_changeset: image_changeset_for(actor, image, :feature),
       repair_changeset: image_changeset_for(actor, image, :repair),
       hash_changeset: image_changeset_for(actor, image, :remove_hash),
-      uploader_changeset: uploader_changeset_for(actor, image)
+      uploader_changeset: control_for(actor, :update_uploader, image, Uploader),
+      anonymous_changeset: control_for(actor, :update_anonymous, image, Anonymous)
     }
   end
 
@@ -1421,7 +1415,7 @@ defmodule Philomena.Images do
       image_changeset =
         %Image{}
         |> Image.creation_changeset(params, actor)
-        |> Uploader.analyze_upload(upload)
+        |> Images.Uploader.analyze_upload(upload)
         |> maybe_approve_image(user)
 
       Multi.new()
@@ -2323,7 +2317,7 @@ defmodule Philomena.Images do
       |> Multi.update(:image, fn %{locked_image: image} ->
         image
         |> Image.changeset(%{})
-        |> Uploader.analyze_upload(upload)
+        |> Images.Uploader.analyze_upload(upload)
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {"Image.File:update", Paths.image_path(image), "Updated file of image #{image.id}"}
@@ -2332,7 +2326,7 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          Uploader.persist_upload(image)
+          Images.Uploader.persist_upload(image)
           repair_image(image)
           purge_files(image, image.hidden_image_key)
 
@@ -2737,9 +2731,9 @@ defmodule Philomena.Images do
   @doc group: "Metadata editing"
   @doc """
   Reassigns the uploader of the image named by `image_id`, on behalf of `actor`,
-  from `image_params`.
+  from `params`.
 
-  `image_params` is a map with a `"username"` key. A blank username clears the
+  `params` is a map with a `"username"` key. A blank username clears the
   uploader, anonymizing it.
 
   Authorization requires both `:show` on `:identity_metadata` and
@@ -2748,45 +2742,39 @@ defmodule Philomena.Images do
   On success the uploader is reassigned, the image is
   reindexed, and a moderation log is written attributing the change to `actor`.
 
-  Returns `{:ok, image}` with the updated image (its new uploader and their awards
-  preloaded), `{:error, :invalid_params}` when `image_params` is not
-  a map, or `{:error, %Ecto.Changeset{}}` when the username names no user, both
-  leaving the image untouched.
+  Returns `{:ok, uploader}` with the updated uploader display, or
+  `{:error, %Ecto.Changeset{}}` when the username names no user, leaving the
+  image untouched.
 
   ## Examples
 
       iex> update_image_uploader(moderator, "42", %{"username" => "Admin"})
-      {:ok, %Image{}}
+      {:ok, %Uploader{}}
 
       iex> update_image_uploader(user, "42", %{"username" => "Admin"})
       {:error, :unauthorized}
 
   """
   @spec update_image_uploader(Actor.t(), IntegerId.integer_id(), any()) ::
-          {:ok, Image.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t()}
-  def update_image_uploader(%Actor{} = actor, image_id, image_params) do
+          {:ok, Uploader.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Uploader.t())}
+  def update_image_uploader(%Actor{} = actor, image_id, params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_uploader, image_id),
-         {:ok, image} <-
-           image
-           |> Image.username_changeset(image_params)
-           |> Ecto.Changeset.apply_action(:update) do
-      username = image.username
-
-      uploader =
-        if username do
-          case Users.load_active_user_by_name(actor, username) do
-            {:ok, user} -> user
-            _error -> nil
-          end
-        end
+         {:ok, uploader} <- Forms.update(Uploader, params) do
+      username = uploader.username
 
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
-      |> Multi.update(:image, fn %{locked_image: image} ->
-        Image.uploader_changeset(image, username, uploader)
+      |> Multi.run(:uploader_user, fn _repo, _changes ->
+        case Users.load_active_user_by_name(actor, username) do
+          {:ok, user} -> {:ok, user}
+          _error -> {:ok, nil}
+        end
+      end)
+      |> Multi.update(:image, fn %{locked_image: image, uploader_user: uploader_user} ->
+        Image.uploader_changeset(image, username, uploader_user)
       end)
       |> ModerationLogs.put_log(:moderation_log, actor, fn %{image: image} ->
         {
@@ -2799,10 +2787,13 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, Repo.preload(image, user: [awards: :badge])}
+          {:ok,
+           image
+           |> Repo.preload(:user)
+           |> Uploader.render()}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, Forms.copy_errors(changeset, uploader)}
       end
     end
   end
