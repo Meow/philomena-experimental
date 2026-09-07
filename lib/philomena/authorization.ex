@@ -61,6 +61,31 @@ defmodule Philomena.Authorization do
   end
 
   @doc """
+  Returns whether `actor` may perform `action` on `subject`, for
+  disclosures and affordances. For authorization, use `authorize/3` instead.
+
+  Returns `true` when Canada permits the action, otherwise `false`.
+
+  ## Examples
+
+      iex> permitted?(user, :hide, image)
+      false
+
+      iex> permitted?(nil, :hide, image)
+      false
+
+      iex> permitted?(%Actor{user: moderator, ip: ip}, :revert, TagChange)
+      true
+
+  """
+  @spec permitted?(actor :: actor(), action :: atom(), subject :: any()) :: boolean()
+  def permitted?(%Actor{user: user}, action, subject), do: permitted?(user, action, subject)
+
+  def permitted?(actor, action, subject) do
+    Canada.Can.can?(actor, action, subject)
+  end
+
+  @doc """
   Verifies that `actor` may perform a write.
 
   Decides, in order:
@@ -90,4 +115,36 @@ defmodule Philomena.Authorization do
   def verify_write_access(%Actor{ban: ban}) when not is_nil(ban), do: {:error, :ban}
   def verify_write_access(%Actor{fingerprint: nil}), do: {:error, :unauthorized}
   def verify_write_access(%Actor{}), do: :ok
+
+  @doc """
+  Returns whether `actor` may perform a write, for affordances.
+  For authorization, use `verify_write_access/1` instead.
+
+  Decides, in order:
+
+    * `false` when the actor carries an active ban;
+    * `false` when the actor has no fingerprint;
+    * `true` otherwise.
+
+  The fingerprint requirement applies regardless of whether a user is signed in.
+
+  ## Deliberate exceptions
+
+  These personal preference actions intentionally permit banned users:
+
+  - Switching the current filter
+  - Clearing recent filters
+  - Changing the active spoiler type
+  - Clearing notifications
+  - Updating user settings
+  - Watching/unwatching tags
+  - Creating/deleting subscriptions
+
+  The actions still perform their own authentication and resource
+  authorization checks.
+  """
+  @spec write_access?(actor :: Actor.t()) :: boolean()
+  def write_access?(%Actor{ban: ban}) when not is_nil(ban), do: false
+  def write_access?(%Actor{fingerprint: nil}), do: false
+  def write_access?(%Actor{}), do: true
 end

@@ -13,7 +13,7 @@ defmodule PhilomenaWeb.Image.DescriptionControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/description", %{
-        "image" => %{"description" => "An updated description"}
+        "description" => %{"description" => "An updated description"}
       })
 
     response = html_response(conn, 200)
@@ -29,7 +29,7 @@ defmodule PhilomenaWeb.Image.DescriptionControllerTest do
 
     conn =
       put(conn, ~p"/images/#{image}/description", %{
-        "image" => %{"description" => "A PUT description"}
+        "description" => %{"description" => "A PUT description"}
       })
 
     assert html_response(conn, 200) =~ "A PUT description"
@@ -42,7 +42,7 @@ defmodule PhilomenaWeb.Image.DescriptionControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/description", %{
-        "image" => %{"description" => String.duplicate("a", 50_001)}
+        "description" => %{"description" => String.duplicate("a", 50_001)}
       })
 
     assert html_response(conn, 200)
@@ -55,7 +55,7 @@ defmodule PhilomenaWeb.Image.DescriptionControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/description", %{
-        "image" => %{"description" => "Vandalism"}
+        "description" => %{"description" => "Vandalism"}
       })
 
     assert redirected_to(conn) == "/"
@@ -67,7 +67,7 @@ defmodule PhilomenaWeb.Image.DescriptionControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/description", %{
-        "image" => %{"description" => "Vandalism"}
+        "description" => %{"description" => "Vandalism"}
       })
 
     assert redirected_to(conn) == "/"
@@ -80,7 +80,7 @@ defmodule PhilomenaWeb.Image.DescriptionControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/description", %{
-        "image" => %{"description" => "Moderator edit"}
+        "description" => %{"description" => "Moderator edit"}
       })
 
     assert html_response(conn, 200) =~ "Moderator edit"

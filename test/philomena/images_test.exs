@@ -1504,12 +1504,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, comment_lock_form} =
+      assert {:ok, comment_lock} =
                Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
                  comments_locked: true
                })
 
-      assert comment_lock_form.comments_locked
+      assert comment_lock.comments_locked?
       refute Repo.reload!(image).commenting_allowed
     end
 
@@ -1529,12 +1529,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: false)
 
-      assert {:ok, comment_lock_form} =
+      assert {:ok, comment_lock} =
                Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
                  comments_locked: false
                })
 
-      refute comment_lock_form.comments_locked
+      refute comment_lock.comments_locked?
       assert Repo.reload!(image).commenting_allowed
     end
 
@@ -1574,12 +1574,12 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert {:ok, comment_lock_form} =
+      assert {:ok, comment_lock} =
                Images.update_image_comment_lock(actor(moderator), image.id, %{
                  comments_locked: true
                })
 
-      assert comment_lock_form.comments_locked
+      assert comment_lock.comments_locked?
       refute Repo.reload!(image).commenting_allowed
     end
 
@@ -2384,7 +2384,7 @@ defmodule Philomena.ImagesTest do
       assert {:ok, updated} =
                Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: true})
 
-      assert updated.anonymous
+      assert updated.anonymous?
       assert Repo.reload!(image).anonymous
     end
 
@@ -2405,7 +2405,7 @@ defmodule Philomena.ImagesTest do
       assert {:ok, updated} =
                Images.update_anonymous(actor(moderator), to_string(image.id), %{anonymous: false})
 
-      refute updated.anonymous
+      refute updated.anonymous?
       refute Repo.reload!(image).anonymous
     end
 
@@ -2444,7 +2444,7 @@ defmodule Philomena.ImagesTest do
       assert {:ok, updated} =
                Images.update_anonymous(actor(moderator), image.id, %{anonymous: true})
 
-      assert updated.anonymous == true
+      assert updated.anonymous?
       assert Repo.reload!(image).anonymous
     end
 
@@ -2648,7 +2648,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: uploader.id, description: "Old")
       :ok = Endpoint.subscribe("firehose")
 
-      assert {:ok, {_image, "Old"}} =
+      assert {:ok, _updated} =
                Images.update_image_description(actor(uploader), image.id, %{
                  "description" => "New"
                })
@@ -2666,31 +2666,14 @@ defmodule Philomena.ImagesTest do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id)
 
-      assert {:ok, {updated, old_description}} =
+      assert {:ok, updated} =
                Images.update_image_description(actor(uploader), to_string(image.id), %{
                  "description" => "A fresh description"
                })
 
-      assert updated.id == image.id
       assert updated.description == "A fresh description"
       assert Repo.reload!(image).description == "A fresh description"
-      # NOTE: a never-described image carries the column default "", so the
-      # returned prior value is the empty string, not nil.
-      assert old_description == ""
       assert moderation_log_count() == 0
-    end
-
-    test "old_description carries the exact pre-update value" do
-      uploader = confirmed_user_fixture()
-      image = image_fixture(user_id: uploader.id, description: "Original text")
-
-      assert {:ok, {_updated, old_description}} =
-               Images.update_image_description(actor(uploader), to_string(image.id), %{
-                 "description" => "Replacement text"
-               })
-
-      assert old_description == "Original text"
-      assert Repo.reload!(image).description == "Replacement text"
     end
 
     test "a moderator edits another user's image" do
@@ -2698,7 +2681,7 @@ defmodule Philomena.ImagesTest do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id)
 
-      assert {:ok, {updated, _old}} =
+      assert {:ok, updated} =
                Images.update_image_description(actor(moderator), to_string(image.id), %{
                  "description" => "Moderator edit"
                })
@@ -2711,7 +2694,7 @@ defmodule Philomena.ImagesTest do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id)
 
-      assert {:ok, {updated, _old}} =
+      assert {:ok, updated} =
                Images.update_image_description(actor(uploader), image.id, %{
                  "description" => "Via int"
                })
@@ -4510,7 +4493,7 @@ defmodule Philomena.ImagesTest do
       assert %Ecto.Changeset{} = page.comment_changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
-      refute page.description_changeset
+      refute page.description.editable?
       refute page.hide_changeset
       refute page.file_changeset
       refute page.feature_changeset
@@ -4540,7 +4523,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.description_changeset == nil
+      refute page.description.editable?
       assert page.tag_changeset == nil
       assert page.source_changeset == nil
       assert page.file_changeset == nil
@@ -4562,7 +4545,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.description_changeset == nil
+      refute page.description.editable?
       assert page.tag_changeset == nil
       assert page.source_changeset == nil
       assert page.file_changeset == nil
@@ -4582,7 +4565,8 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert %Ecto.Changeset{} = page.description_changeset
+      assert page.description.editable?
+      assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
       assert %Ecto.Changeset{} = page.file_changeset
@@ -4599,7 +4583,8 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(uploader), image, page: 1, page_size: 25)
 
-      assert %Ecto.Changeset{} = page.description_changeset
+      assert page.description.editable?
+      assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
       refute page.hide_changeset
@@ -4611,7 +4596,8 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(staff), image, page: 1, page_size: 25)
 
-      assert %Ecto.Changeset{} = page.description_changeset
+      assert page.description.editable?
+      assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tag_changeset
       assert %Ecto.Changeset{} = page.source_changeset
       assert %Ecto.Changeset{} = page.file_changeset
