@@ -36,6 +36,7 @@ defmodule Philomena.Images.Display.File do
         }
 
   @doc false
+  @spec render(Actor.t(), Image.t()) :: t() | nil
   def render(%Actor{} = actor, %Image{} = image) do
     if image_permitted?(actor, :replace_file, image) do
       %__MODULE__{

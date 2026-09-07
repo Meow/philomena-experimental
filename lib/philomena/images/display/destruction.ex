@@ -2,7 +2,7 @@ defmodule Philomena.Images.Display.Destruction do
   @moduledoc """
   Presentation data for an image destruction control.
 
-  Contains a changeset and the image's current `destroyable?` state.
+  Contains a changeset.
 
   Omitted when the control is unavailable to the actor.
   """
@@ -28,20 +28,20 @@ defmodule Philomena.Images.Display.Destruction do
     end
   end
 
-  @enforce_keys [:changeset, :destroyable?]
+  @enforce_keys [:changeset]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          changeset: Ecto.Changeset.t(Form.t()),
-          destroyable?: boolean()
+          changeset: Ecto.Changeset.t(Form.t())
         }
 
   @doc false
+  @spec render(Actor.t(), Image.t()) :: t() | nil
   def render(%Actor{} = actor, %Image{} = image) do
-    if image_permitted?(actor, :destroy, image) do
+    if image_permitted?(actor, :destroy, image) and image.hidden_from_users and
+         not image.destroyed_content do
       %__MODULE__{
-        changeset: Forms.change(Form, %{}),
-        destroyable?: image.hidden_from_users and not image.destroyed_content
+        changeset: Forms.change(Form, %{})
       }
     end
   end
