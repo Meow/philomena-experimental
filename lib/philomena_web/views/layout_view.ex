@@ -48,7 +48,13 @@ defmodule PhilomenaWeb.LayoutView do
   defp ignored_tag_list(nil), do: []
   defp ignored_tag_list([]), do: []
   defp ignored_tag_list([{tag, _body, _dnp_entries}]), do: [tag.id]
-  defp ignored_tag_list(tags), do: Enum.map(tags, & &1.id)
+
+  defp ignored_tag_list(%{search_query: search_query, tags: tags})
+       when is_binary(search_query),
+       do: ignored_tag_list(tags)
+
+  defp ignored_tag_list(tags) when is_list(tags), do: Enum.map(tags, & &1.id)
+  defp ignored_tag_list(_assigns), do: []
 
   def clientside_data(conn) do
     conn = Conn.fetch_cookies(conn)
@@ -77,7 +83,7 @@ defmodule PhilomenaWeb.LayoutView do
       fancy_tag_upload:
         if(user, do: user.settings.fancy_tag_field_on_upload, else: "true") |> to_string(),
       interactions: JSON.encode!(interactions),
-      ignored_tag_list: JSON.encode!(ignored_tag_list(conn.assigns[:tags])),
+      ignored_tag_list: JSON.encode!(ignored_tag_list(conn.assigns)),
       hide_staff_tools: conn.cookies["hide_staff_tools"] |> to_string()
     ]
 
