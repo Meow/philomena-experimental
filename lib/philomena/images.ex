@@ -16,6 +16,8 @@ defmodule Philomena.Images do
   alias Philomena.Multi
   alias Philomena.Repo
 
+  alias Philomena.Images.Display
+
   alias Philomena.Images.Display.{
     Anonymous,
     Approval,
@@ -29,6 +31,7 @@ defmodule Philomena.Images do
     LockedTags,
     Scratchpad,
     SourceHistory,
+    TagInput,
     TagsLock,
     Uploader
   }
@@ -261,6 +264,38 @@ defmodule Philomena.Images do
 
       {:error, :authorize, :unauthorized, _changes} ->
         {:error, :unauthorized}
+    end
+  end
+
+  defp tags_control(%Image{} = image) do
+    image = Repo.preload(image, [:tags, :locked_tags])
+    {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
+
+    Display.Tags.render(image, tag_change_count, tag_change_tag_count)
+  end
+
+  defp tag_update_success(%Image{} = image, %TagInput{} = tag_input) do
+    %{
+      tag_input: tag_input,
+      tags: tags_control(image),
+      changeset: TagInput.changeset(tag_input)
+    }
+  end
+
+  defp tag_update_failure(%Image{} = image, %Ecto.Changeset{} = changeset) do
+    %{
+      tags: tags_control(image),
+      changeset: changeset
+    }
+  end
+
+  defp update_tag_input(%Image{} = image, params) do
+    case Forms.update(TagInput, params) do
+      {:ok, tag_input} ->
+        {:ok, tag_input}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        tag_update_failure(image, changeset)
     end
   end
 
@@ -826,7 +861,7 @@ defmodule Philomena.Images do
   @spec show_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: ImagePage.t()
   def show_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
     # TODO: remove this
-    image = Repo.preload(image, :user)
+    image = Repo.preload(image, [:user, :tags, :locked_tags])
 
     clear_image_notification(image, user)
 
@@ -834,6 +869,9 @@ defmodule Philomena.Images do
     {:ok, gallery_choices} = Galleries.gallery_choices_for_image(actor, image)
 
     can_interact = image_interaction_allowed?(actor, image)
+
+    # TODO: remove lateral
+    tags = Display.Tags.render(image, image.tag_change_count, image.tag_change_tag_count)
 
     %ImagePage{
       image: image,
@@ -843,9 +881,10 @@ defmodule Philomena.Images do
       user_galleries: gallery_choices,
       interactions: Interactions.user_interactions(actor, [image]),
       description: image.description,
+      tags: tags,
       description_changeset: control_for(actor, :edit_description, image, Description),
       comment_changeset: comment_changeset_for(actor, image),
-      tag_changeset: image_changeset_for(actor, image, :edit_metadata),
+      tag_input_changeset: control_for(actor, :edit_metadata, image, TagInput),
       source_changeset: image_changeset_for(actor, image, :edit_metadata),
       file_changeset: image_changeset_for(actor, image, :replace_file),
       hide_changeset: control_for(actor, :hide, image, Hide),
@@ -2585,23 +2624,20 @@ defmodule Philomena.Images do
   @doc group: "Metadata editing"
   @doc """
   Updates the tags of the image named by `image_id`, on behalf of `actor`, from
-  `attrs` (`"old_tag_input"`/`"tag_input"`), recording tag
-  change records attributed to the actor.
+  `params` (`"old_tag_input"`/`"tag_input"`), recording tag change records
+  attributed to the actor.
 
   Banned actors are rejected first with `{:error, :ban}` (a write with no
   fingerprint is `{:error, :unauthorized}`), before the image is loaded. A
   non-exempt actor who has updated metadata within the last 5 seconds gets
   `{:error, :rate_limited}` from the transaction reservation. The image is
   loaded by id (with its author, locked tags, sources, and tags preloaded) and
-  authorized for `:edit_metadata` before that reservation - editable on a
-  non-hidden image whose tag editing is allowed by anyone (anonymous
-  included), so an image with tag editing disabled is
-  `{:error, :unauthorized}`. On success the tags are updated and attributed,
-  the image, its comments, and the affected tags are reindexed, and the
-  actor's metadata-update stat is incremented when tags actually changed.
+  authorized for `:edit_metadata` before that reservation. An image with tag
+  editing disabled is `{:error, :unauthorized}`.
 
-  On success, returns `{:ok, %{image: image, tag_change_count: count,
-  tag_change_tag_count: tag_count}}`. The context broadcasts the tag and image
+  On success, the tags are updated and attributed, the image, its comments,
+  and the affected tags are reindexed, and the actor's metadata-update stat
+  is incremented if tags actually changed. The context broadcasts the image
   updates after persistence.
 
   ## Failure shapes
@@ -2619,34 +2655,29 @@ defmodule Philomena.Images do
   ## Examples
 
       iex> update_image_tags(actor, "42", %{"old_tag_input" => "safe", "tag_input" => "safe, cute"})
-      {:ok, %{image: %Image{}, tag_change_count: 1, tag_change_tag_count: 1}}
+      {:ok,
+       %{
+        tag_input: %TagInput{},
+        tags: %Tags{},
+        changeset: %Ecto.Changeset{}
+       }}
 
   """
   @spec update_image_tags(Actor.t(), IntegerId.integer_id(), map()) ::
           {:ok,
            %{
-             image: Image.t(),
-             tag_change_count: non_neg_integer(),
-             tag_change_tag_count: non_neg_integer()
+             tag_input: TagInput.t(),
+             tags: Display.Tags.t(),
+             changeset: Ecto.Changeset.t(TagInput.t())
            }}
-          | {:error,
-             :ban
-             | :unauthorized
-             | :not_found
-             | :rate_limited
-             | Ecto.Changeset.t()}
-  def update_image_tags(%Actor{user: user, ip: ip} = actor, image_id, attrs) do
+          | {:error, %{tags: Display.Tags.t(), changeset: Ecto.Changeset.t(TagInput.t())}}
+          | {:error, :ban | :unauthorized | :not_found | :rate_limited}
+  def update_image_tags(%Actor{user: user, ip: ip} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_metadata, image_id),
-         {:ok, tag_input_form} <-
-           %TagInputForm{}
-           |> TagInputForm.changeset(attrs)
-           |> TagInputForm.apply(image) do
+         {:ok, tag_input} <- update_tag_input(image, params) do
       %{added: added_tag_names, removed: removed_tag_names} =
-        TagDiffer.diff_inputs(
-          tag_input_form.old_tag_input,
-          tag_input_form.tag_input
-        )
+        TagDiffer.diff_inputs(tag_input.old_tag_input, tag_input.tag_input)
 
       Multi.new()
       |> Multi.reserve_action(
@@ -2703,27 +2734,13 @@ defmodule Philomena.Images do
           {:error, :rate_limited}
 
         {:ok, %{image: %Image{} = image}} ->
-          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
-
-          {:ok,
-           %{
-             image: image,
-             tag_change_count: tag_change_count,
-             tag_change_tag_count: tag_change_tag_count
-           }}
+          {:ok, tag_update_success(image, tag_input)}
 
         {:error, :image, :no_change, _changes} ->
-          {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
-
-          {:ok,
-           %{
-             image: image,
-             tag_change_count: tag_change_count,
-             tag_change_tag_count: tag_change_tag_count
-           }}
+          {:ok, tag_update_success(image, tag_input)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, tag_update_failure(image, Forms.copy_errors(changeset, tag_input))}
 
         {:error, :check_limits, _reason, _changes} ->
           {:error, :rate_limited}

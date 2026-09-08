@@ -51,7 +51,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/tags", %{
-        "image" => %{
+        "tag_input" => %{
           "old_tag_input" => "safe",
           "tag_input" => "safe, added test tag, other added tag"
         }
@@ -86,7 +86,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/tags", %{
-        "image" => %{
+        "tag_input" => %{
           "old_tag_input" => "safe, #{source_tag.name}, #{implied_tag.name}",
           "tag_input" => "safe, #{source_tag.name}, replacement tag"
         }
@@ -103,7 +103,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/tags", %{
-        "image" => %{
+        "tag_input" => %{
           "old_tag_input" => "safe",
           "tag_input" => "safe, #{oc_tag.name}:test character"
         }
@@ -119,7 +119,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
 
     conn =
       put(conn, ~p"/images/#{image}/tags", %{
-        "image" => %{
+        "tag_input" => %{
           "old_tag_input" => "safe",
           "tag_input" => "safe, added test tag, other added tag"
         }
@@ -135,7 +135,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
       conn
       |> put_unique_ip()
       |> patch(~p"/images/#{image}/tags", %{
-        "image" => %{
+        "tag_input" => %{
           "old_tag_input" => "safe",
           "tag_input" => "safe, added test tag, other added tag"
         }
@@ -156,7 +156,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/tags", %{
-        "image" => %{"old_tag_input" => "safe", "tag_input" => "safe, one more"}
+        "tag_input" => %{"old_tag_input" => "safe", "tag_input" => "safe, one more"}
       })
 
     assert html_response(conn, 200)
@@ -171,7 +171,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/tags", %{
-        "image" => %{"old_tag_input" => "safe", "tag_input" => "safe, a, b"}
+        "tag_input" => %{"old_tag_input" => "safe", "tag_input" => "safe, a, b"}
       })
 
     assert redirected_to(conn) == "/"
@@ -187,7 +187,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
       conn
       |> put_req_header("referer", ~p"/images/#{image}")
       |> patch(~p"/images/#{image}/tags", %{
-        "image" => %{
+        "tag_input" => %{
           "old_tag_input" => "safe",
           "tag_input" => "safe, added test tag, other added tag"
         }
@@ -211,7 +211,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
       conn
       |> put_req_header("x-requested-with", "XMLHttpRequest")
       |> patch(~p"/images/#{image}/tags", %{
-        "image" => %{
+        "tag_input" => %{
           "old_tag_input" => "safe",
           "tag_input" => "safe, added test tag, other added tag"
         }
@@ -228,7 +228,7 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
   test "PATCH as a banned user redirects with the ban flash", %{conn: conn} do
     %{conn: conn} = register_and_log_in_banned_user(%{conn: conn})
 
-    conn = patch(conn, ~p"/images/999999999/tags", %{"image" => %{}})
+    conn = patch(conn, ~p"/images/999999999/tags", %{"tag_input" => %{}})
 
     assert redirected_to(conn) == "/"
     assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You are currently banned"

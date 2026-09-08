@@ -1,21 +1,19 @@
-- changeset = @changeset || Ecto.Changeset.change(@image)
-- form_class = if changeset.action, do: "", else: "hidden"
-- tags_class = if changeset.action, do: "hidden", else: ""
-- tags = display_order(@image.tags)
+- form_class = if @changeset && @changeset.action, do: "", else: "hidden"
+- tags_class = if @changeset && @changeset.action, do: "hidden", else: ""
+- tags = display_order(@tags.tags)
 - tag_input = Enum.map_join(tags, ", ", & &1.name)
 
 .js-tagsauce#image_tags_and_source
   .js-imageform class=form_class
-    = if @changeset && can?(@conn, :edit_metadata, @image) && !@conn.assigns.current_ban do
-
-      = if Enum.any?(@image.locked_tags) do
+    = if @changeset do
+      = if Enum.any?(@tags.locked_tags) do
         .block.block--fixed.block--warning
           i.fa.fa-lock>
           ' The following tags have been restricted on this image:
-          code= Enum.map_join(@image.locked_tags, ", ", & &1.name)
+          code= Enum.map_join(@tags.locked_tags, ", ", & &1.name)
 
-      = form_for changeset, ~p"/images/#{@image}/tags", [id: "tags-form", method: "put", data: [remote: "true"]], fn f ->
-        = if changeset.action do
+      = form_for @changeset, ~p"/images/#{@image_id}/tags", [id: "tags-form", method: "put", data: [remote: "true"]], fn f ->
+        = if @changeset.action do
           .alert.alert-danger
             p Oops, something went wrong! Please check the errors below.
 
@@ -68,16 +66,16 @@
           a.button.button--inline.js-tag-sauce-toggle#edit-tags data-click-toggle=".tagsauce, .js-imageform" data-click-focus=".js-taginput-plain:not(.hidden), .js-taginput-input" title="Edit tags" accessKey="t"
             i.fas.fa-edit>
             ' Edit
-        = if @tag_change_count > 0 do
-          a.button.button--link.button--inline href=~p"/images/#{@image}/tag_changes" title="Tag history"
+        = if @tags.tag_change_count > 0 do
+          a.button.button--link.button--inline href=~p"/images/#{@image_id}/tag_changes" title="Tag history"
             i.fa.fa-history>
             span.hide-mobile> History
             | (
-            => @tag_change_count
-            = pluralize("change", "changes", @tag_change_count)
+            => @tags.tag_change_count
+            = pluralize("change", "changes", @tags.tag_change_count)
             ' ,
-            => @tag_change_tag_count
-            = pluralize("tag", "tags", @tag_change_tag_count)
+            => @tags.tag_change_tag_count
+            = pluralize("tag", "tags", @tags.tag_change_tag_count)
             | )
     .block__content
       = render PhilomenaWeb.TagView, "_tag_list.html", tags: tags, conn: @conn

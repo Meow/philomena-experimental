@@ -56,11 +56,12 @@ defmodule PhilomenaWeb.ImageController do
     assigns = [
       image: image,
       comments: comments,
+      tags: page.tags,
       description: page.description,
       description_body: description_body,
       description_changeset: page.description_changeset,
       comment_changeset: page.comment_changeset,
-      tag_changeset: page.tag_changeset,
+      tag_input_changeset: page.tag_input_changeset,
       source_changeset: page.source_changeset,
       file_changeset: page.file_changeset,
       hide_changeset: page.hide_changeset,
