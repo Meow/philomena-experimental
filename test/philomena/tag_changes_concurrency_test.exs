@@ -52,14 +52,12 @@ defmodule Philomena.TagChangesConcurrencyTest do
 
     arrangement_actor = actor(%{user | bypass_rate_limits: true})
 
-    assert {:ok, result} =
+    assert {:ok, _} =
              Images.update_image_tags(
                arrangement_actor,
                image.id,
                %{"old_tag_input" => old_tag_input, "tag_input" => new_tag_input}
              )
-
-    assert result.image.id == image.id
 
     Repo.one!(
       from tag_change in TagChange,

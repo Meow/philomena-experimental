@@ -60,7 +60,7 @@ defmodule Philomena.TagChangesTest do
           actor(%{user | bypass_rate_limits: true})
       end
 
-    {:ok, result} =
+    {:ok, _} =
       Images.update_image_tags(
         arrangement_actor,
         image.id,
@@ -70,7 +70,6 @@ defmodule Philomena.TagChangesTest do
         }
       )
 
-    assert result.image.id == image.id
     {image, Repo.one!(from tc in TagChange, where: tc.image_id == ^image.id)}
   end
 

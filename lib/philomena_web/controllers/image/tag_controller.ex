@@ -9,35 +9,26 @@ defmodule PhilomenaWeb.Image.TagController do
   plug PhilomenaWeb.CaptchaPlug
   plug PhilomenaWeb.CheckCaptchaPlug
 
-  def update(conn, %{"image" => image_params} = params) do
-    case Images.update_image_tags(conn.assigns.actor, params["image_id"], image_params) do
-      {:ok,
-       %{
-         image: image,
-         tag_change_count: tag_change_count,
-         tag_change_tag_count: tag_change_tag_count
-       }} ->
-        changeset = Images.change_image(image)
-
+  def update(conn, %{"image_id" => image_id} = params) do
+    case Images.update_image_tags(conn.assigns.actor, image_id, params["tag_input"]) do
+      {:ok, %{tags: tags, changeset: changeset}} ->
         conn
         |> put_view(PhilomenaWeb.ImageView)
         |> render("_tags.html",
           layout: false,
-          tag_change_count: tag_change_count,
-          tag_change_tag_count: tag_change_tag_count,
-          image: image,
-          changeset: changeset
+          image_id: image_id,
+          changeset: changeset,
+          tags: tags
         )
 
-      {:error, %Ecto.Changeset{} = changeset} ->
+      {:error, %{tags: tags, changeset: changeset}} ->
         conn
         |> put_view(PhilomenaWeb.ImageView)
         |> render("_tags.html",
           layout: false,
-          tag_change_count: 0,
-          tag_change_tag_count: 0,
-          image: changeset.data,
-          changeset: changeset
+          image_id: image_id,
+          changeset: changeset,
+          tags: tags
         )
 
       {:error, :rate_limited} ->
