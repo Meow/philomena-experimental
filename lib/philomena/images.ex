@@ -31,6 +31,7 @@ defmodule Philomena.Images do
     LockedTags,
     Scratchpad,
     SourceHistory,
+    SourceInput,
     TagInput,
     TagsLock,
     Uploader
@@ -267,25 +268,55 @@ defmodule Philomena.Images do
     end
   end
 
-  defp tags_control(%Image{} = image) do
+  defp sources_control(%Image{} = image, %Ecto.Changeset{} = source_input_changeset) do
+    image = Repo.preload(image, [:sources])
+    source_change_count = SourceChanges.count_for_image(image)
+
+    Display.Sources.render(image, source_change_count, source_input_changeset)
+  end
+
+  defp source_update_success(%Image{} = image, %SourceInput{} = source_input) do
+    %{
+      source_input: source_input,
+      sources: sources_control(image, SourceInput.changeset(source_input))
+    }
+  end
+
+  defp source_update_failure(%Image{} = image, %Ecto.Changeset{} = changeset) do
+    %{
+      changeset: changeset,
+      sources: sources_control(image, changeset)
+    }
+  end
+
+  defp update_source_input(%Image{} = image, params) do
+    case Forms.update(SourceInput, params) do
+      {:ok, source_input} ->
+        {:ok, source_input}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, source_update_failure(image, changeset)}
+    end
+  end
+
+  defp tags_control(%Image{} = image, %Ecto.Changeset{} = tag_input_changeset) do
     image = Repo.preload(image, [:tags, :locked_tags])
     {tag_change_count, tag_change_tag_count} = TagChanges.count_for_image(image)
 
-    Display.Tags.render(image, tag_change_count, tag_change_tag_count)
+    Display.Tags.render(image, tag_change_count, tag_change_tag_count, tag_input_changeset)
   end
 
   defp tag_update_success(%Image{} = image, %TagInput{} = tag_input) do
     %{
       tag_input: tag_input,
-      tags: tags_control(image),
-      changeset: TagInput.changeset(tag_input)
+      tags: tags_control(image, TagInput.changeset(tag_input))
     }
   end
 
   defp tag_update_failure(%Image{} = image, %Ecto.Changeset{} = changeset) do
     %{
-      tags: tags_control(image),
-      changeset: changeset
+      changeset: changeset,
+      tags: tags_control(image, changeset)
     }
   end
 
@@ -295,7 +326,7 @@ defmodule Philomena.Images do
         {:ok, tag_input}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        tag_update_failure(image, changeset)
+        {:error, tag_update_failure(image, changeset)}
     end
   end
 
@@ -870,8 +901,19 @@ defmodule Philomena.Images do
 
     can_interact = image_interaction_allowed?(actor, image)
 
+    tag_input_changeset = control_for(actor, :edit_metadata, image, TagInput)
+    source_input_changeset = control_for(actor, :edit_metadata, image, SourceInput)
+
     # TODO: remove lateral
-    tags = Display.Tags.render(image, image.tag_change_count, image.tag_change_tag_count)
+    tags =
+      Display.Tags.render(
+        image,
+        image.tag_change_count,
+        image.tag_change_tag_count,
+        tag_input_changeset
+      )
+
+    sources = Display.Sources.render(image, image.source_change_count, source_input_changeset)
 
     %ImagePage{
       image: image,
@@ -882,15 +924,15 @@ defmodule Philomena.Images do
       interactions: Interactions.user_interactions(actor, [image]),
       description: image.description,
       tags: tags,
+      sources: sources,
       description_changeset: control_for(actor, :edit_description, image, Description),
       comment_changeset: comment_changeset_for(actor, image),
-      tag_input_changeset: control_for(actor, :edit_metadata, image, TagInput),
-      source_changeset: image_changeset_for(actor, image, :edit_metadata),
       file_changeset: image_changeset_for(actor, image, :replace_file),
       hide_changeset: control_for(actor, :hide, image, Hide),
       feature_changeset: image_changeset_for(actor, image, :feature),
       repair_changeset: image_changeset_for(actor, image, :repair),
       hash_changeset: image_changeset_for(actor, image, :remove_hash),
+      source_history_changeset: control_for(actor, :remove_source_history, image, SourceHistory),
       uploader_changeset: control_for(actor, :update_uploader, image, Uploader),
       anonymous_changeset: control_for(actor, :update_anonymous, image, Anonymous)
     }
@@ -2452,34 +2494,27 @@ defmodule Philomena.Images do
   updated and attributed, the actor's metadata-update stat is incremented when
   sources actually changed, and the image is reindexed.
 
-  Returns `{:ok, %{image: image, source_change_count: count}}`. The context
-  broadcasts the source and image updates after persistence. Returns
-  `{:error, %Ecto.Changeset{}}` when
-  the update is rejected (e.g. more than the allowed number of sources), leaving
-  the image untouched.
+  The context broadcasts the source and image updates after persistence. When
+  the update is rejected (e.g. more than the allowed number of sources), the
+  image is left untouched.
 
   ## Examples
 
       iex> update_image_sources(actor, "42", %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => "http://example.com"}}})
-      {:ok, %{image: %Image{}, source_change_count: 1}}
+      {:ok, %{source_input: %SourceInput{}, sources: %Sources{}}}
 
   """
   @spec update_image_sources(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok,
-           %{
-             image: Image.t(),
-             source_change_count: non_neg_integer()
-           }}
-          | {:error, :ban | :unauthorized | :not_found | :rate_limited | Ecto.Changeset.t()}
-  def update_image_sources(%Actor{} = actor, image_id, attrs) do
+          {:ok, %{source_input: SourceInput.t(), sources: Display.Sources.t()}}
+          | {:error,
+             %{changeset: Ecto.Changeset.t(SourceInput.t()), sources: Display.Sources.t()}}
+          | {:error, :ban | :unauthorized | :not_found | :rate_limited}
+  def update_image_sources(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_metadata, image_id, [:sources]),
-         {:ok, source_input_form} <-
-           %SourceInputForm{}
-           |> SourceInputForm.changeset(attrs)
-           |> SourceInputForm.apply(image) do
+         {:ok, source_input} <- update_source_input(image, params) do
       %{added: added_sources, removed: removed_sources} =
-        SourceDiffer.diff_inputs(source_input_form.old_sources, source_input_form.sources)
+        SourceDiffer.diff_inputs(source_input.old_sources, source_input.sources)
 
       Multi.new()
       |> Multi.reserve_action(
@@ -2509,21 +2544,13 @@ defmodule Philomena.Images do
           {:error, :rate_limited}
 
         {:ok, %{image: %Image{} = image}} ->
-          {:ok,
-           %{
-             image: image,
-             source_change_count: SourceChanges.count_for_image(image)
-           }}
+          {:ok, source_update_success(image, source_input)}
 
         {:error, :image, :no_change, _changes} ->
-          {:ok,
-           %{
-             image: image,
-             source_change_count: SourceChanges.count_for_image(image)
-           }}
+          {:ok, source_update_success(image, source_input)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, changeset}
+          {:error, source_update_failure(image, Forms.copy_errors(changeset, source_input))}
 
         error ->
           map_lock_errors(error)
@@ -2664,13 +2691,8 @@ defmodule Philomena.Images do
 
   """
   @spec update_image_tags(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok,
-           %{
-             tag_input: TagInput.t(),
-             tags: Display.Tags.t(),
-             changeset: Ecto.Changeset.t(TagInput.t())
-           }}
-          | {:error, %{tags: Display.Tags.t(), changeset: Ecto.Changeset.t(TagInput.t())}}
+          {:ok, %{tag_input: TagInput.t(), tags: Display.Tags.t()}}
+          | {:error, %{changeset: Ecto.Changeset.t(TagInput.t()), tags: Display.Tags.t()}}
           | {:error, :ban | :unauthorized | :not_found | :rate_limited}
   def update_image_tags(%Actor{user: user, ip: ip} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),

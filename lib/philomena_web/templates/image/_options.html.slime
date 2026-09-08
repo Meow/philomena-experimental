@@ -151,3 +151,10 @@
           = button_to "Approve image", ~p"/images/#{@image}/approve", method: "post", class: "button button--state-success", data: [confirm: "Are you sure?"]
         = if @image.hidden_from_users and can?(@conn, :destroy, @image) do
           = button_to "Destroy image", ~p"/images/#{@image}/destroy", method: "post", class: "button button--state-danger", data: [confirm: "This action is IRREVERSIBLE. Are you sure?"]
+
+      br
+      .flex.flex--spaced-out
+        = if @source_history_changeset do
+          = form_for @source_history_changeset, ~p"/images/#{@image}/source_history", [method: "delete"], fn _f ->
+            .field
+              = submit "Wipe source history", data: [confirm: "Are you really, really sure?"], class: "button button--state-danger"

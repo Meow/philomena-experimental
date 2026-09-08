@@ -20,14 +20,14 @@ defmodule Philomena.Images.ImagePage do
     :description,
     :description_changeset,
     :tags,
+    :sources,
     :comment_changeset,
-    :tag_input_changeset,
-    :source_changeset,
     :file_changeset,
     :hide_changeset,
     :feature_changeset,
     :repair_changeset,
     :hash_changeset,
+    :source_history_changeset,
     :uploader_changeset,
     :anonymous_changeset
   ]
@@ -42,15 +42,16 @@ defmodule Philomena.Images.ImagePage do
           interactions: list(),
           description: String.t(),
           tags: Philomena.Images.Display.Tags.t(),
+          sources: Philomena.Images.Display.Sources.t(),
           description_changeset: Ecto.Changeset.t(Philomena.Images.Display.Description.t()) | nil,
           comment_changeset: Ecto.Changeset.t() | nil,
-          tag_input_changeset: Ecto.Changeset.t(Philomena.Images.Display.TagInput.t()) | nil,
-          source_changeset: Ecto.Changeset.t() | nil,
           file_changeset: Ecto.Changeset.t() | nil,
           hide_changeset: Ecto.Changeset.t(Philomena.Images.Display.Hide.t()) | nil,
           feature_changeset: Ecto.Changeset.t() | nil,
           repair_changeset: Ecto.Changeset.t() | nil,
           hash_changeset: Ecto.Changeset.t() | nil,
+          source_history_changeset:
+            Ecto.Changeset.t(Philomena.Images.Display.SourceHistory.t()) | nil,
           uploader_changeset: Ecto.Changeset.t(Philomena.Images.Display.Uploader.t()) | nil,
           anonymous_changeset: Ecto.Changeset.t(Philomena.Images.Display.Anonymous.t()) | nil
         }
