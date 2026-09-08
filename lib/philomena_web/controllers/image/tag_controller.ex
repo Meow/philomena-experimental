@@ -11,23 +11,21 @@ defmodule PhilomenaWeb.Image.TagController do
 
   def update(conn, %{"image_id" => image_id} = params) do
     case Images.update_image_tags(conn.assigns.actor, image_id, params["tag_input"]) do
-      {:ok, %{tags: tags, changeset: changeset}} ->
+      {:ok, %{tags: tags}} ->
         conn
         |> put_view(PhilomenaWeb.ImageView)
         |> render("_tags.html",
           layout: false,
           image_id: image_id,
-          changeset: changeset,
           tags: tags
         )
 
-      {:error, %{tags: tags, changeset: changeset}} ->
+      {:error, %{tags: tags}} ->
         conn
         |> put_view(PhilomenaWeb.ImageView)
         |> render("_tags.html",
           layout: false,
           image_id: image_id,
-          changeset: changeset,
           tags: tags
         )
 

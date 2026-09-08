@@ -1,9 +1,7 @@
-- changeset = @changeset || Ecto.Changeset.change(@image)
 .js-sourcesauce
-  - has_sources = Enum.any?(@image.sources)
-  = form_for changeset, ~p"/images/#{@image}/sources", [method: "put", class: "hidden", id: "source-form", data: [remote: "true"]], fn f ->
-    = if @changeset && can?(@conn, :edit_metadata, @image) && !@conn.assigns.current_ban do
-      = if changeset.action do
+  = if @sources.changeset do
+    = form_for @sources.changeset, ~p"/images/#{@image_id}/sources", [method: "put", class: "hidden", id: "source-form", data: [remote: "true"]], fn f ->
+      = if @sources.changeset.action do
         .alert.alert-danger
           p Oops, something went wrong! Please check the errors below.
 
@@ -12,7 +10,7 @@
         span.js-max-source-count> 15
         ' source URLs. Leave any sources you don't want to use blank.
 
-      = inputs_for f, :sources, [as: "image[old_sources]", skip_hidden: true], fn fs ->
+      = inputs_for f, :old_sources, [as: "source_input[old_sources]", skip_hidden: true], fn fs ->
         = hidden_input fs, :source
       = inputs_for f, :sources, [skip_hidden: true], fn fs ->
         .field.js-image-source.field--inline.flex--no-wrap.flex--centered
@@ -34,42 +32,39 @@
 
       = render PhilomenaWeb.CaptchaView, "_captcha.html", name: "source", conn: @conn
 
-    - else
-      p
-        ' You can't edit the source on this image.
+  - else
+    p
+      ' You can't edit the source on this image.
 
+  - has_sources = Enum.any?(@sources.sources)
   .block#image-source
     .block__header.flex
       span.block__header__title
         i.fas.fa-link>
-        = if !has_sources || length(@image.sources) == 1 do
+        = if !has_sources || length(@sources.sources) == 1 do
           ' Source
         - else
           ' Sources
 
       .block__header__buttons
-        = if @changeset do
+        = if @sources.changeset do
           a.button.button--inline#edit-source data-click-focus=".js-image-source" data-click-hide="#image-source" data-click-show="#source-form" title="Edit source" accessKey="s"
             i.fas.fa-edit
             = if has_sources do
               ' Add/Edit
             - else
               ' Add
-        = if @source_change_count > 0 do
-          a.button.button--link.button--inline href=~p"/images/#{@image}/source_changes" title="Source history"
+        = if @sources.source_change_count > 0 do
+          a.button.button--link.button--inline href=~p"/images/#{@image_id}/source_changes" title="Source history"
             i.fa.fa-history>
             span.hide-mobile> History
             | (
-            = @source_change_count
+            = @sources.source_change_count
             | )
-        = if can?(@conn, :hide, @image) and not hide_staff_tools?(@conn) do
-          a.button.button--state-danger.button--inline href=~p"/images/#{@image}/source_history" data-method="delete" data-confirm="Are you really, really sure?" title="Wipe sources"
-            i.fas.fa-eraser>
-            ' Wipe
     .block__content.flex.flex--wrap.flex--column
       .image_sources
         = if has_sources do
-          - [first_source | sources] = @image.sources
+          - [first_source | sources] = @sources.sources
           .image_source__icon
             i class=image_source_icon(first_source.source)
           .image_source__link

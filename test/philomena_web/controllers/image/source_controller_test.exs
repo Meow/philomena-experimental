@@ -14,7 +14,7 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/sources", %{
-        "image" => %{
+        "source_input" => %{
           "old_sources" => %{},
           "sources" => %{"0" => %{"source" => "https://example.com/new-source"}}
         }
@@ -37,7 +37,7 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
 
     conn =
       put(conn, ~p"/images/#{image}/sources", %{
-        "image" => %{
+        "source_input" => %{
           "old_sources" => %{},
           "sources" => %{"0" => %{"source" => "https://example.com/put-source"}}
         }
@@ -52,7 +52,7 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/sources", %{
-        "image" => %{
+        "source_input" => %{
           "old_sources" => %{},
           "sources" => %{"0" => %{"source" => "not-a-url"}}
         }
@@ -73,7 +73,7 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
       conn
       |> put_unique_ip()
       |> patch(~p"/images/#{image}/sources", %{
-        "image" => %{
+        "source_input" => %{
           "old_sources" => %{},
           "sources" => %{"0" => %{"source" => "https://example.com/anon-source"}}
         }
@@ -97,7 +97,7 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/sources", %{
-        "image" => %{"old_sources" => %{}, "sources" => sources}
+        "source_input" => %{"old_sources" => %{}, "sources" => sources}
       })
 
     assert html_response(conn, 200)
@@ -110,7 +110,7 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
 
     conn =
       patch(conn, ~p"/images/#{image}/sources", %{
-        "image" => %{
+        "source_input" => %{
           "old_sources" => %{},
           "sources" => %{"0" => %{"source" => "https://example.com/new-source"}}
         }
@@ -123,7 +123,7 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
   test "PATCH as a banned user redirects with the ban flash", %{conn: conn} do
     %{conn: conn} = register_and_log_in_banned_user(%{conn: conn})
 
-    conn = patch(conn, ~p"/images/999999999/sources", %{"image" => %{}})
+    conn = patch(conn, ~p"/images/999999999/sources", %{"source_input" => %{}})
 
     assert redirected_to(conn) == "/"
     assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "You are currently banned"

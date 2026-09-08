@@ -4054,15 +4054,14 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, result} =
+      assert {:ok, %{sources: sources}} =
                Images.update_image_sources(
                  actor(user),
                  to_string(image.id),
                  add_source_attrs("https://example.com/art")
                )
 
-      assert result.image.id == image.id
-      assert result.source_change_count == 1
+      assert sources.source_change_count == 1
 
       change = Repo.one(from s in SourceChange, where: s.image_id == ^image.id)
       assert change.source_url == "https://example.com/art"
@@ -4091,14 +4090,12 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, result} =
+      assert {:ok, _} =
                Images.update_image_sources(
                  actor(user),
                  image.id,
                  add_source_attrs("https://example.com/i")
                )
-
-      assert result.image.id == image.id
     end
 
     test "a banned actor is rejected before any loading, even with a garbage id" do
@@ -4142,7 +4139,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:error, %Ecto.Changeset{}} =
+      assert {:error, %{changeset: %Ecto.Changeset{}}} =
                Images.update_image_sources(
                  actor(user),
                  to_string(image.id),
@@ -4156,7 +4153,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(sources: ["https://example.com/existing"])
 
-      assert {:error, %Ecto.Changeset{data: %Image{} = changeset_image} = changeset} =
+      assert {:error, %{changeset: %Ecto.Changeset{} = changeset}} =
                Images.update_image_sources(
                  actor(user),
                  image.id,
@@ -4166,7 +4163,6 @@ defmodule Philomena.ImagesTest do
                  }
                )
 
-      assert changeset_image.id == image.id
       source_changeset = Enum.find(get_change(changeset, :sources), &(not &1.valid?))
       assert %Ecto.Changeset{} = source_changeset
       assert "has invalid format" in errors_on(source_changeset).source
@@ -4650,8 +4646,8 @@ defmodule Philomena.ImagesTest do
       assert is_list(page.user_galleries)
       assert is_list(page.interactions)
       assert %Ecto.Changeset{} = page.comment_changeset
-      assert %Ecto.Changeset{} = page.tag_input_changeset
-      assert %Ecto.Changeset{} = page.source_changeset
+      assert %Ecto.Changeset{} = page.tags.changeset
+      assert %Ecto.Changeset{} = page.sources.changeset
       refute page.description_changeset
       refute page.hide_changeset
       refute page.file_changeset
@@ -4683,8 +4679,8 @@ defmodule Philomena.ImagesTest do
       assert page.interactions == []
       assert page.comment_changeset == nil
       assert page.description_changeset == nil
-      assert page.tag_input_changeset == nil
-      assert page.source_changeset == nil
+      assert page.tags.changeset == nil
+      assert page.sources.changeset == nil
       assert page.file_changeset == nil
       assert page.hide_changeset == nil
       assert page.feature_changeset == nil
@@ -4705,8 +4701,8 @@ defmodule Philomena.ImagesTest do
       assert page.interactions == []
       assert page.comment_changeset == nil
       assert page.description_changeset == nil
-      assert page.tag_input_changeset == nil
-      assert page.source_changeset == nil
+      assert page.tags.changeset == nil
+      assert page.sources.changeset == nil
       assert page.file_changeset == nil
       assert page.hide_changeset == nil
       assert page.feature_changeset == nil
@@ -4725,8 +4721,8 @@ defmodule Philomena.ImagesTest do
       assert page.interactions == []
       assert page.comment_changeset == nil
       assert %Ecto.Changeset{} = page.description_changeset
-      assert %Ecto.Changeset{} = page.tag_input_changeset
-      assert %Ecto.Changeset{} = page.source_changeset
+      assert %Ecto.Changeset{} = page.tags.changeset
+      assert %Ecto.Changeset{} = page.sources.changeset
       assert %Ecto.Changeset{} = page.file_changeset
       assert %Ecto.Changeset{} = page.hide_changeset
       assert %Ecto.Changeset{} = page.feature_changeset
@@ -4742,8 +4738,8 @@ defmodule Philomena.ImagesTest do
       page = Images.show_image_page(actor(uploader), image, page: 1, page_size: 25)
 
       assert %Ecto.Changeset{} = page.description_changeset
-      assert %Ecto.Changeset{} = page.tag_input_changeset
-      assert %Ecto.Changeset{} = page.source_changeset
+      assert %Ecto.Changeset{} = page.tags.changeset
+      assert %Ecto.Changeset{} = page.sources.changeset
       refute page.hide_changeset
     end
 
@@ -4754,8 +4750,8 @@ defmodule Philomena.ImagesTest do
       page = Images.show_image_page(actor(staff), image, page: 1, page_size: 25)
 
       assert %Ecto.Changeset{} = page.description_changeset
-      assert %Ecto.Changeset{} = page.tag_input_changeset
-      assert %Ecto.Changeset{} = page.source_changeset
+      assert %Ecto.Changeset{} = page.tags.changeset
+      assert %Ecto.Changeset{} = page.sources.changeset
       assert %Ecto.Changeset{} = page.file_changeset
       assert %Ecto.Changeset{} = page.hide_changeset
       assert %Ecto.Changeset{} = page.feature_changeset
