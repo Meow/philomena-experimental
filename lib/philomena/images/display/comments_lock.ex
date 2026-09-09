@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.CommentLock do
+defmodule Philomena.Images.Display.CommentsLock do
   @moduledoc """
-  Presentation data for an image's comment lock control.
+  Presentation data for an image's comments lock control.
 
   Contains whether comments are currently locked.
   """

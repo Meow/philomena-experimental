@@ -1,36 +1,18 @@
 defmodule Philomena.Images.Display.Uploader do
   @moduledoc """
-  Presentation data for an image's uploader control.
+  Presentation data for an image's uploader.
 
-  Contains the username of the current uploader, including the name of
-  anonymously-attributed uploaders, or `nil` if the upload was not created
-  by any user.
+  Contains the attribution of the image's uploader.
   """
 
-  use Ecto.Schema
+  alias Philomena.Attribution.Display.Attribution
+  alias Philomena.Attribution.Display.IdentityMetadata
 
-  import Ecto.Changeset
+  @enforce_keys [:identity_metadata, :uploader]
+  defstruct @enforce_keys
 
-  alias Philomena.Images.Image
-
-  @type t :: %__MODULE__{}
-  @primary_key false
-
-  embedded_schema do
-    field :username, :string
-  end
-
-  @doc false
-  def changeset(uploader, attrs \\ %{}) do
-    cast(uploader, attrs, [:username])
-  end
-
-  @doc false
-  def render(%Image{user: user}) do
-    if user do
-      %__MODULE__{username: user.name}
-    else
-      %__MODULE__{username: nil}
-    end
-  end
+  @type t :: %__MODULE__{
+          identity_metadata: IdentityMetadata.t() | nil,
+          uploader: Attribution.t()
+        }
 end

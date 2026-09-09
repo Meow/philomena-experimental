@@ -66,16 +66,16 @@
           a.button.button--inline.js-tag-sauce-toggle#edit-tags data-click-toggle=".tagsauce, .js-imageform" data-click-focus=".js-taginput-plain:not(.hidden), .js-taginput-input" title="Edit tags" accessKey="t"
             i.fas.fa-edit>
             ' Edit
-        = if @tags.tag_change_count > 0 do
+        = if @tags.tag_changes_count > 0 do
           a.button.button--link.button--inline href=~p"/images/#{@image_id}/tag_changes" title="Tag history"
             i.fa.fa-history>
             span.hide-mobile> History
             | (
-            => @tags.tag_change_count
-            = pluralize("change", "changes", @tags.tag_change_count)
+            => @tags.tag_changes_count
+            = pluralize("change", "changes", @tags.tag_changes_count)
             ' ,
-            => @tags.tag_change_tag_count
-            = pluralize("tag", "tags", @tags.tag_change_tag_count)
+            => @tags.tag_change_tags_count
+            = pluralize("tag", "tags", @tags.tag_change_tags_count)
             | )
     .block__content
       = render PhilomenaWeb.TagView, "_tag_list.html", tags: tags, conn: @conn

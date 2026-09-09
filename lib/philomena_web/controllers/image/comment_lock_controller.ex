@@ -7,7 +7,9 @@ defmodule PhilomenaWeb.Image.CommentLockController do
 
   def create(conn, %{"image_id" => image_id}) do
     with {:ok, _comment_lock_form} <-
-           Images.update_image_comment_lock(conn.assigns.actor, image_id, %{comments_locked: true}) do
+           Images.update_image_comments_lock(conn.assigns.actor, image_id, %{
+             comments_locked: true
+           }) do
       conn
       |> put_flash(:info, "Successfully locked comments.")
       |> redirect(to: ~p"/images/#{image_id}")
@@ -16,7 +18,7 @@ defmodule PhilomenaWeb.Image.CommentLockController do
 
   def delete(conn, %{"image_id" => image_id}) do
     with {:ok, _comment_lock_form} <-
-           Images.update_image_comment_lock(conn.assigns.actor, image_id, %{
+           Images.update_image_comments_lock(conn.assigns.actor, image_id, %{
              comments_locked: false
            }) do
       conn
