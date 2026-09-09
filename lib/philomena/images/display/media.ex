@@ -1,6 +1,6 @@
 defmodule Philomena.Images.Display.Media do
   @moduledoc """
-  Presentation data for an image's media paths.
+  Presentation data for an image's media URIs.
   """
 
   alias Philomena.Images.Thumbnailer
@@ -8,9 +8,9 @@ defmodule Philomena.Images.Display.Media do
   alias Philomena.Tags.Tag
 
   @enforce_keys [
-    :view_paths,
-    :download_paths,
-    :supplemental_paths,
+    :view_uris,
+    :download_uris,
+    :supplemental_uris,
     :thumbnails,
     :rendered?,
     :optimized?,
@@ -21,67 +21,67 @@ defmodule Philomena.Images.Display.Media do
   @type omitted ::
           :not_rendered | :not_available | :destroyed
 
-  @type thumbnail :: %{
+  @type version :: %{
           width: pos_integer(),
           height: pos_integer(),
-          path: String.t()
+          uri: String.t()
         }
 
   @type thumbnails :: %{
-          full: thumbnail(),
-          tall: thumbnail(),
-          large: thumbnail(),
-          medium: thumbnail(),
-          small: thumbnail(),
-          thumb: thumbnail(),
-          thumb_small: thumbnail(),
-          thumb_tiny: thumbnail()
+          full: version(),
+          tall: version(),
+          large: version(),
+          medium: version(),
+          small: version(),
+          thumb: version(),
+          thumb_small: version(),
+          thumb_tiny: version()
         }
 
   @type video_previews :: %{
-          thumb: thumbnail(),
-          thumb_small: thumbnail(),
-          thumb_tiny: thumbnail()
+          thumb: version(),
+          thumb_small: version(),
+          thumb_tiny: version()
         }
 
-  @type gif_supplemental_paths :: %{
+  @type gif_supplemental_uris :: %{
           static_preview: String.t(),
           mp4: String.t(),
           webm: String.t()
         }
 
-  @type svg_supplemental_paths :: %{
+  @type svg_supplemental_uris :: %{
           static_preview: String.t(),
           svg: String.t()
         }
 
-  @type webm_supplemental_paths :: %{
+  @type webm_supplemental_uris :: %{
           gif_previews: video_previews(),
           static_preview: String.t(),
           mp4: String.t()
         }
 
-  @type mp4_supplemental_paths :: %{
+  @type mp4_supplemental_uris :: %{
           gif_previews: video_previews(),
           static_preview: String.t(),
           webm: String.t()
         }
 
-  @type file_paths :: %{
+  @type file_uris :: %{
           short: String.t(),
           long: String.t()
         }
 
   @type t :: %__MODULE__{
-          view_paths: omitted() | {:file_paths, file_paths()},
-          download_paths: omitted() | {:file_paths, file_paths()},
-          supplemental_paths:
+          view_uris: omitted() | {:file_uris, file_uris()},
+          download_uris: omitted() | {:file_uris, file_uris()},
+          supplemental_uris:
             omitted()
             | :none
-            | {:gif, gif_supplemental_paths()}
-            | {:svg, svg_supplemental_paths()}
-            | {:webm, webm_supplemental_paths()}
-            | {:mp4, mp4_supplemental_paths()},
+            | {:gif, gif_supplemental_uris()}
+            | {:svg, svg_supplemental_uris()}
+            | {:webm, webm_supplemental_uris()}
+            | {:mp4, mp4_supplemental_uris()},
           thumbnails: omitted() | {:thumbnails, thumbnails()},
           rendered?: boolean(),
           optimized?: boolean(),
@@ -94,13 +94,12 @@ defmodule Philomena.Images.Display.Media do
     image_format = normalized_format(image)
 
     %__MODULE__{
-      view_paths:
-        guarded_versions(image, may_reveal_hidden?, &file_paths(&1, image_format, false)),
-      download_paths:
-        guarded_versions(image, may_reveal_hidden?, &file_paths(&1, image_format, true)),
-      supplemental_paths:
-        guarded_versions(image, may_reveal_hidden?, &supplemental_paths(&1, image_format)),
-      thumbnails: guarded_versions(image, may_reveal_hidden?, &thumbnail_paths(&1, image_format)),
+      view_uris: guarded_versions(image, may_reveal_hidden?, &file_uris(&1, image_format, false)),
+      download_uris:
+        guarded_versions(image, may_reveal_hidden?, &file_uris(&1, image_format, true)),
+      supplemental_uris:
+        guarded_versions(image, may_reveal_hidden?, &supplemental_uris(&1, image_format)),
+      thumbnails: guarded_versions(image, may_reveal_hidden?, &thumbnail_uris(&1, image_format)),
       rendered?: image.thumbnails_generated,
       optimized?: image.processed,
       duplication_checked?: image.duplication_checked
@@ -111,7 +110,7 @@ defmodule Philomena.Images.Display.Media do
        when is_function(callback, 1) do
     cond do
       not image.thumbnails_generated ->
-        # File paths are useless before thumbnails are generated
+        # File URIs are useless before thumbnails are generated
         :not_rendered
 
       (image.hidden_from_users or image.destroyed_content) and not may_reveal_hidden? ->
@@ -127,28 +126,28 @@ defmodule Philomena.Images.Display.Media do
     end
   end
 
-  defp file_paths(%Image{} = image, image_format, download?) do
+  defp file_uris(%Image{} = image, image_format, download?) do
     image_format = version_format(image_format, download?)
 
-    file_paths =
+    file_uris =
       %{
-        short: file_path(image, image_format, true, download?),
-        long: file_path(image, image_format, false, download?)
+        short: file_uri(image, image_format, true, download?),
+        long: file_uri(image, image_format, false, download?)
       }
 
-    {:file_paths, file_paths}
+    {:file_uris, file_uris}
   end
 
-  defp thumbnail_paths(%Image{} = image, image_format) do
+  defp thumbnail_uris(%Image{} = image, image_format) do
     image_format = version_format(image_format, false)
 
     thumbnails =
       Thumbnailer.thumbnail_versions()
       |> Map.new(fn {version_name, _} = version ->
-        {version_name, version_path(image, image_format, version)}
+        {version_name, version_uri(image, image_format, version)}
       end)
       |> Map.put(:full, %{
-        path: file_path(image, image_format, true, false),
+        uri: file_uri(image, image_format, true, false),
         width: image.image_width,
         height: image.image_height
       })
@@ -156,17 +155,17 @@ defmodule Philomena.Images.Display.Media do
     {:thumbnails, thumbnails}
   end
 
-  defp video_preview_paths(%Image{} = image) do
+  defp video_preview_uris(%Image{} = image) do
     Thumbnailer.thumbnail_versions()
     |> Enum.filter(fn {version_name, _} ->
       version_name in [:thumb, :thumb_small, :thumb_tiny]
     end)
     |> Map.new(fn {version_name, _} = version ->
-      {version_name, version_path(image, "gif", version)}
+      {version_name, version_uri(image, "gif", version)}
     end)
   end
 
-  defp version_path(
+  defp version_uri(
          %Image{image_aspect_ratio: aspect_ratio, image_width: width, image_height: height} =
            image,
          image_format,
@@ -177,12 +176,12 @@ defmodule Philomena.Images.Display.Media do
         constrained_dimensions(aspect_ratio, max_width, max_height)
 
       %{
-        path: exact_version_path(image, image_format, version_name),
+        uri: exact_version_uri(image, image_format, version_name),
         width: thumbnail_width,
         height: thumbnail_height
       }
     else
-      %{path: file_path(image, image_format, true, false), width: width, height: height}
+      %{uri: file_uri(image, image_format, true, false), width: width, height: height}
     end
   end
 
@@ -192,7 +191,7 @@ defmodule Philomena.Images.Display.Media do
   defp constrained_dimensions(ar, _w, h),
     do: {floor(h * ar), h}
 
-  def exact_version_path(%Image{} = image, image_format, version_name) do
+  def exact_version_uri(%Image{} = image, image_format, version_name) do
     %{year: year, month: month, day: day} = image.created_at
 
     id_fragment =
@@ -205,10 +204,10 @@ defmodule Philomena.Images.Display.Media do
     "#{image_url_root()}/#{year}/#{month}/#{day}/#{id_fragment}/#{version_name}.#{image_format}"
   end
 
-  defp file_path(%Image{} = image, image_format, short?, download?) do
+  defp file_uri(%Image{} = image, image_format, short?, download?) do
     if image.hidden_from_users do
       # Hidden images don't support the view/download routes
-      exact_version_path(image, image_format, :full)
+      exact_version_uri(image, image_format, :full)
     else
       %{year: year, month: month, day: day} = image.created_at
 
@@ -219,29 +218,29 @@ defmodule Philomena.Images.Display.Media do
     end
   end
 
-  defp supplemental_paths(%Image{} = image, image_format) do
+  defp supplemental_uris(%Image{} = image, image_format) do
     case image_format do
       "svg" ->
         {:svg,
          %{
-           static_preview: file_path(image, "png", true, false),
-           svg: file_path(image, "svg", true, false)
+           static_preview: file_uri(image, "png", true, false),
+           svg: file_uri(image, "svg", true, false)
          }}
 
       "gif" ->
         {:gif,
          %{
-           static_preview: exact_version_path(image, "png", :rendered),
-           webm: file_path(image, "webm", true, false),
-           mp4: file_path(image, "mp4", true, false)
+           static_preview: exact_version_uri(image, "png", :rendered),
+           webm: file_uri(image, "webm", true, false),
+           mp4: file_uri(image, "mp4", true, false)
          }}
 
       "webm" ->
         {:webm,
          %{
-           gif_previews: video_preview_paths(image),
-           static_preview: exact_version_path(image, "png", :rendered),
-           mp4: file_path(image, "mp4", true, false)
+           gif_previews: video_preview_uris(image),
+           static_preview: exact_version_uri(image, "png", :rendered),
+           mp4: file_uri(image, "mp4", true, false)
          }}
 
       _ ->
