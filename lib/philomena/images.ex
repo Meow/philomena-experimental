@@ -21,8 +21,9 @@ defmodule Philomena.Images do
   alias Philomena.Images.Display.{
     Anonymous,
     Approval,
-    CommentLock,
+    CommentsLock,
     Description,
+    DescriptionInput,
     DescriptionLock,
     Destruction,
     File,
@@ -34,7 +35,7 @@ defmodule Philomena.Images do
     SourceInput,
     TagInput,
     TagsLock,
-    Uploader
+    UploaderInput
   }
 
   alias Philomena.Forms
@@ -903,6 +904,7 @@ defmodule Philomena.Images do
 
     tag_input_changeset = control_for(actor, :edit_metadata, image, TagInput)
     source_input_changeset = control_for(actor, :edit_metadata, image, SourceInput)
+    description_input_changeset = control_for(actor, :edit_description, image, DescriptionInput)
 
     # TODO: remove lateral
     tags =
@@ -914,6 +916,7 @@ defmodule Philomena.Images do
       )
 
     sources = Display.Sources.render(image, image.source_change_count, source_input_changeset)
+    description = Description.render(image, description_input_changeset)
 
     %ImagePage{
       image: image,
@@ -922,10 +925,9 @@ defmodule Philomena.Images do
       can_interact: can_interact,
       user_galleries: gallery_choices,
       interactions: Interactions.user_interactions(actor, [image]),
-      description: image.description,
+      description: description,
       tags: tags,
       sources: sources,
-      description_changeset: control_for(actor, :edit_description, image, Description),
       comment_changeset: comment_changeset_for(actor, image),
       file_changeset: image_changeset_for(actor, image, :replace_file),
       hide_changeset: control_for(actor, :hide, image, Hide),
@@ -933,7 +935,7 @@ defmodule Philomena.Images do
       repair_changeset: image_changeset_for(actor, image, :repair),
       hash_changeset: image_changeset_for(actor, image, :remove_hash),
       source_history_changeset: control_for(actor, :remove_source_history, image, SourceHistory),
-      uploader_changeset: control_for(actor, :update_uploader, image, Uploader),
+      uploader_changeset: control_for(actor, :update_uploader, image, UploaderInput),
       anonymous_changeset: control_for(actor, :update_anonymous, image, Anonymous)
     }
   end
@@ -1777,20 +1779,20 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> update_image_comment_lock(moderator, "42", %{comments_locked: true})
-      {:ok, %CommentLock{}}
+      iex> update_image_comments_lock(moderator, "42", %{comments_locked: true})
+      {:ok, %CommentsLock{}}
 
-      iex> update_image_comment_lock(user, "42", %{comments_locked: false})
+      iex> update_image_comments_lock(user, "42", %{comments_locked: false})
       {:error, :unauthorized}
 
   """
-  @spec update_image_comment_lock(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, CommentLock.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(CommentLock.t())}
-  def update_image_comment_lock(%Actor{} = actor, image_id, params) do
+  @spec update_image_comments_lock(Actor.t(), IntegerId.integer_id(), map()) ::
+          {:ok, CommentsLock.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(CommentsLock.t())}
+  def update_image_comments_lock(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_comments, image_id),
-         {:ok, comment_lock} <- Forms.update(CommentLock, params) do
+         {:ok, comment_lock} <- Forms.update(CommentsLock, params) do
       {log_type, log_body} =
         if comment_lock.comments_locked do
           {"Image.CommentLock:create", "Locked comments on image #{image.id}"}
@@ -1810,7 +1812,7 @@ defmodule Philomena.Images do
       |> Multi.transact()
       |> case do
         {:ok, %{image: %Image{} = image}} ->
-          {:ok, CommentLock.render(image)}
+          {:ok, CommentsLock.render(image)}
       end
     end
   end
@@ -2435,31 +2437,33 @@ defmodule Philomena.Images do
   authorized for `:edit_description`. The uploader may edit a non-hidden image
   whose description editing is allowed, and staff may edit any image.
 
-  Returns `{:ok, description}` with the updated description display. The
-  context broadcasts the description and image updates after persistence.
-  Returns `{:error, %Ecto.Changeset{}}` when the new description is rejected
-  (e.g. too long), leaving the image untouched.
+  Returns `{:ok, %{description_input: description_input}}` with the updated
+  description input display. The context broadcasts the description and image
+  updates after persistence. Returns `{:error, %Ecto.Changeset{}}` when the new
+  description is rejected (e.g. too long), leaving the image untouched.
 
   ## Examples
 
       iex> update_image_description(actor, "42", %{"description" => "New description"})
-      {:ok, %Description{}}
+      {:ok, %{description_input: %DescriptionInput{}, description: %Description{}}}
 
       iex> update_image_description(actor, "42", %{"description" => "..."})
       {:error, :unauthorized}
 
   """
   @spec update_image_description(Actor.t(), IntegerId.integer_id(), map()) ::
-          {:ok, Description.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Description.t())}
+          {:ok, %{description_input: DescriptionInput.t(), description: Description.t()}}
+          | {:error,
+             %{changeset: Ecto.Changeset.t(DescriptionInput.t()), description: Description.t()}}
+          | {:error, :ban | :unauthorized | :not_found}
   def update_image_description(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image_id} <- Loader.parse_id(image_id),
-         {:ok, description} <- Forms.update(Description, params) do
+         {:ok, description_input} <- Forms.update(DescriptionInput, params) do
       Multi.new()
       |> put_lock_image(actor, image_id, :edit_description, [:user, :sources, tags: :aliases])
       |> Multi.update(:image, fn %{locked_image: image} ->
-        Image.description_changeset(image, %{description: description.description})
+        Image.description_changeset(image, %{description: description_input.description})
       end)
       |> put_reindex_image(:image)
       |> Multi.transact()
@@ -2467,10 +2471,16 @@ defmodule Philomena.Images do
         {:ok, %{locked_image: %Image{} = old_image, image: %Image{} = image}} ->
           broadcast_description_update(image, old_image.description)
 
-          {:ok, Description.render(image)}
+          description =
+            Description.render(image, DescriptionInput.changeset(description_input))
 
-        {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, description)}
+          {:ok, %{description_input: description_input, description: description}}
+
+        {:error, :image, %Ecto.Changeset{} = changeset, %{locked_image: %Image{} = image}} ->
+          changeset = Forms.copy_errors(changeset, description_input)
+          description = Description.render(image, changeset)
+
+          {:error, %{changeset: changeset, description: description}}
 
         error ->
           map_lock_errors(error)
@@ -2787,28 +2797,28 @@ defmodule Philomena.Images do
   On success the uploader is reassigned, the image is
   reindexed, and a moderation log is written attributing the change to `actor`.
 
-  Returns `{:ok, uploader}` with the updated uploader display, or
+  Returns `{:ok, uploader_input}` with the updated uploader input display, or
   `{:error, %Ecto.Changeset{}}` when the username names no user, leaving the
   image untouched.
 
   ## Examples
 
       iex> update_image_uploader(moderator, "42", %{"username" => "Admin"})
-      {:ok, %Uploader{}}
+      {:ok, %UploaderInput{}}
 
       iex> update_image_uploader(user, "42", %{"username" => "Admin"})
       {:error, :unauthorized}
 
   """
   @spec update_image_uploader(Actor.t(), IntegerId.integer_id(), any()) ::
-          {:ok, Uploader.t()}
-          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(Uploader.t())}
+          {:ok, UploaderInput.t()}
+          | {:error, :ban | :unauthorized | :not_found | Ecto.Changeset.t(UploaderInput.t())}
   def update_image_uploader(%Actor{} = actor, image_id, params) do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_uploader, image_id),
-         {:ok, uploader} <- Forms.update(Uploader, params) do
-      username = uploader.username
+         {:ok, uploader_input} <- Forms.update(UploaderInput, params) do
+      username = uploader_input.username
 
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
@@ -2835,10 +2845,10 @@ defmodule Philomena.Images do
           {:ok,
            image
            |> Repo.preload(:user)
-           |> Uploader.render()}
+           |> UploaderInput.render()}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, uploader)}
+          {:error, Forms.copy_errors(changeset, uploader_input)}
       end
     end
   end

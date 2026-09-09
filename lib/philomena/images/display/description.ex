@@ -1,30 +1,23 @@
 defmodule Philomena.Images.Display.Description do
   @moduledoc """
-  Presentation data for an image's description edit control.
+  Presentation data for an image's description.
 
-  Contains the raw description.
+  Contains the image's description.
   """
 
-  use Ecto.Schema
-
-  import Ecto.Changeset
-
+  alias Philomena.Images.Display.DescriptionInput
   alias Philomena.Images.Image
 
-  @type t :: %__MODULE__{}
-  @primary_key false
+  @enforce_keys [:body, :changeset]
+  defstruct @enforce_keys
 
-  embedded_schema do
-    field :description
-  end
-
-  @doc false
-  def changeset(description, attrs \\ %{}) do
-    cast(description, attrs, [:description])
-  end
+  @type t :: %__MODULE__{
+          body: String.t(),
+          changeset: Ecto.Changeset.t(DescriptionInput.t()) | nil
+        }
 
   @doc false
-  def render(%Image{} = image) do
-    %__MODULE__{description: image.description}
+  def render(%Image{description: description}, changeset) do
+    %__MODULE__{body: description, changeset: changeset}
   end
 end

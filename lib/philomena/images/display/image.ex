@@ -1,13 +1,18 @@
-defmodule Philomena.Images.Display.Form do
+defmodule Philomena.Images.Display.Image do
+  @moduledoc """
+  Presentation data for the image creation form.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Philomena.Images.Display.SourceEntryForm
+  alias Philomena.Images.Display.Source
 
   @type t :: %__MODULE__{}
+  @primary_key false
 
   embedded_schema do
-    embeds_many :sources, SourceEntryForm
+    embeds_many :sources, Source
 
     field :anonymous, :boolean
     field :description, :string
@@ -16,8 +21,8 @@ defmodule Philomena.Images.Display.Form do
   end
 
   @doc false
-  def changeset(form, attrs \\ %{}) do
-    form
+  def changeset(image, attrs \\ %{}) do
+    image
     |> cast(attrs, [:anonymous, :description, :source_url, :tag_input])
     |> cast_embed(:sources)
     |> validate_length(:description, max: 50_000, count: :bytes)

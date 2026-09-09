@@ -1562,13 +1562,13 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "update_image_comment_lock/3" do
+  describe "update_image_comments_lock/3" do
     test "a moderator locks comments, clearing commenting_allowed" do
       moderator = moderator_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
       assert {:ok, comment_lock} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+               Images.update_image_comments_lock(actor(moderator), to_string(image.id), %{
                  comments_locked: true
                })
 
@@ -1581,7 +1581,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: true)
 
       assert {:ok, _} =
-               Images.update_image_comment_lock(actor(admin), to_string(image.id), %{
+               Images.update_image_comments_lock(actor(admin), to_string(image.id), %{
                  comments_locked: true
                })
 
@@ -1593,7 +1593,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: false)
 
       assert {:ok, comment_lock} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+               Images.update_image_comments_lock(actor(moderator), to_string(image.id), %{
                  comments_locked: false
                })
 
@@ -1606,7 +1606,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: true)
 
       assert {:ok, _} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+               Images.update_image_comments_lock(actor(moderator), to_string(image.id), %{
                  comments_locked: true
                })
 
@@ -1622,7 +1622,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: false)
 
       assert {:ok, _} =
-               Images.update_image_comment_lock(actor(moderator), to_string(image.id), %{
+               Images.update_image_comments_lock(actor(moderator), to_string(image.id), %{
                  comments_locked: false
                })
 
@@ -1638,7 +1638,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(commenting_allowed: true)
 
       assert {:ok, comment_lock} =
-               Images.update_image_comment_lock(actor(moderator), image.id, %{
+               Images.update_image_comments_lock(actor(moderator), image.id, %{
                  comments_locked: true
                })
 
@@ -1650,7 +1650,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture(commenting_allowed: true)
 
-      assert Images.update_image_comment_lock(actor(user), to_string(image.id), %{
+      assert Images.update_image_comments_lock(actor(user), to_string(image.id), %{
                comments_locked: true
              }) ==
                {:error, :unauthorized}
@@ -1662,7 +1662,7 @@ defmodule Philomena.ImagesTest do
     test "an anonymous actor cannot lock comments and the flag stays set" do
       image = image_fixture(commenting_allowed: true)
 
-      assert Images.update_image_comment_lock(actor(), to_string(image.id), %{
+      assert Images.update_image_comments_lock(actor(), to_string(image.id), %{
                comments_locked: true
              }) ==
                {:error, :unauthorized}
@@ -1675,7 +1675,7 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(moderator), "2147483647", %{
+      assert Images.update_image_comments_lock(actor(moderator), "2147483647", %{
                comments_locked: true
              }) ==
                {:error, :not_found}
@@ -1687,7 +1687,9 @@ defmodule Philomena.ImagesTest do
       # Missing image locators resolve to not-found before authorization.
       admin = admin_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(admin), "2147483647", %{comments_locked: true}) ==
+      assert Images.update_image_comments_lock(actor(admin), "2147483647", %{
+               comments_locked: true
+             }) ==
                {:error, :not_found}
 
       assert moderation_log_count() == 0
@@ -1696,7 +1698,7 @@ defmodule Philomena.ImagesTest do
     test "a non-castable id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(moderator), "not-a-number", %{
+      assert Images.update_image_comments_lock(actor(moderator), "not-a-number", %{
                comments_locked: true
              }) ==
                {:error, :not_found}
@@ -1705,7 +1707,7 @@ defmodule Philomena.ImagesTest do
     test "an out-of-range id is not found" do
       moderator = moderator_user_fixture()
 
-      assert Images.update_image_comment_lock(actor(moderator), "99999999999999999999", %{
+      assert Images.update_image_comments_lock(actor(moderator), "99999999999999999999", %{
                comments_locked: true
              }) ==
                {:error, :not_found}
@@ -2841,7 +2843,7 @@ defmodule Philomena.ImagesTest do
                  "description" => "A fresh description"
                })
 
-      assert updated.description == "A fresh description"
+      assert updated.description.body == "A fresh description"
       assert Repo.reload!(image).description == "A fresh description"
       assert moderation_log_count() == 0
     end
@@ -2856,7 +2858,7 @@ defmodule Philomena.ImagesTest do
                  "description" => "Moderator edit"
                })
 
-      assert updated.description == "Moderator edit"
+      assert updated.description.body == "Moderator edit"
       assert Repo.reload!(image).description == "Moderator edit"
     end
 
@@ -2869,7 +2871,7 @@ defmodule Philomena.ImagesTest do
                  "description" => "Via int"
                })
 
-      assert updated.description == "Via int"
+      assert updated.description.body == "Via int"
     end
 
     test "a banned actor is rejected before any loading, even with a garbage id" do
@@ -2929,7 +2931,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(user_id: uploader.id, description: "Original")
       too_long = String.duplicate("a", 50_001)
 
-      assert {:error, %Ecto.Changeset{}} =
+      assert {:error, %{changeset: %Ecto.Changeset{}}} =
                Images.update_image_description(actor(uploader), to_string(image.id), %{
                  "description" => too_long
                })
@@ -4292,8 +4294,8 @@ defmodule Philomena.ImagesTest do
                  tag_attrs("safe", "safe, added test tag, other added tag")
                )
 
-      assert result.tags.tag_change_count >= 1
-      assert result.tags.tag_change_tag_count >= 1
+      assert result.tags.tag_changes_count >= 1
+      assert result.tags.tag_change_tags_count >= 1
 
       assert tag_names(image) == ["added test tag", "other added tag", "safe"]
 
@@ -4648,7 +4650,7 @@ defmodule Philomena.ImagesTest do
       assert %Ecto.Changeset{} = page.comment_changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
-      refute page.description_changeset
+      refute page.description.changeset
       refute page.hide_changeset
       refute page.file_changeset
       refute page.feature_changeset
@@ -4678,7 +4680,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.description_changeset == nil
+      assert page.description.changeset == nil
       assert page.tags.changeset == nil
       assert page.sources.changeset == nil
       assert page.file_changeset == nil
@@ -4700,7 +4702,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert page.description_changeset == nil
+      assert page.description.changeset == nil
       assert page.tags.changeset == nil
       assert page.sources.changeset == nil
       assert page.file_changeset == nil
@@ -4720,7 +4722,7 @@ defmodule Philomena.ImagesTest do
       refute page.can_interact
       assert page.interactions == []
       assert page.comment_changeset == nil
-      assert %Ecto.Changeset{} = page.description_changeset
+      assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
       assert %Ecto.Changeset{} = page.file_changeset
@@ -4737,7 +4739,7 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(uploader), image, page: 1, page_size: 25)
 
-      assert %Ecto.Changeset{} = page.description_changeset
+      assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
       refute page.hide_changeset
@@ -4749,7 +4751,7 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(staff), image, page: 1, page_size: 25)
 
-      assert %Ecto.Changeset{} = page.description_changeset
+      assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
       assert %Ecto.Changeset{} = page.file_changeset

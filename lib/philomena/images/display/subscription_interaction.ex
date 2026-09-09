@@ -1,0 +1,28 @@
+defmodule Philomena.Images.Display.SubscriptionInteraction do
+  @moduledoc """
+  Presentation data for an image's subscription control.
+  """
+
+  use Ecto.Schema
+
+  import Ecto.Changeset
+
+  alias Philomena.Images.Image
+
+  @type t :: %__MODULE__{}
+  @primary_key false
+
+  embedded_schema do
+    field :subscribed, :boolean
+  end
+
+  @doc false
+  def changeset(subscription, attrs) do
+    cast(subscription, attrs, [])
+  end
+
+  @doc false
+  def render(%Image{}, subscribed?) do
+    %__MODULE__{subscribed: subscribed?}
+  end
+end
