@@ -22,7 +22,6 @@ defmodule Philomena.Images.Display.Moderation do
 
   @enforce_keys [
     :hidden_from_users?,
-    :scratchpad,
     :anonymous_changeset,
     :comments_lock_changeset,
     :description_lock_changeset,
@@ -32,6 +31,7 @@ defmodule Philomena.Images.Display.Moderation do
     :hash_changeset,
     :hide_changeset,
     :repair_changeset,
+    :scratchpad_changeset,
     :source_history_changeset,
     :tags_lock_changeset,
     :uploader_input_changeset
@@ -40,7 +40,6 @@ defmodule Philomena.Images.Display.Moderation do
 
   @type t :: %__MODULE__{
           hidden_from_users?: boolean(),
-          scratchpad: Scratchpad.t() | nil,
           anonymous_changeset: Ecto.Changeset.t(Anonymous.t()) | nil,
           comments_lock_changeset: Ecto.Changeset.t(CommentsLock.t()) | nil,
           description_lock_changeset: Ecto.Changeset.t(DescriptionLock.t()) | nil,
@@ -50,6 +49,7 @@ defmodule Philomena.Images.Display.Moderation do
           hash_changeset: Ecto.Changeset.t(Hash.t()) | nil,
           hide_changeset: Ecto.Changeset.t(Hide.t()) | nil,
           repair_changeset: Ecto.Changeset.t(Repair.t()) | nil,
+          scratchpad_changeset: Ecto.Changeset.t(Scratchpad.t()) | nil,
           source_history_changeset: Ecto.Changeset.t(SourceHistory.t()) | nil,
           tags_lock_changeset: Ecto.Changeset.t(TagsLock.t()) | nil,
           uploader_input_changeset: Ecto.Changeset.t(UploaderInput.t()) | nil
