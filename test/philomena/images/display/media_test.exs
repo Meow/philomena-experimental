@@ -142,10 +142,10 @@ defmodule Philomena.Images.Display.MediaTest do
     test "omits every media path for destroyed content" do
       result = Media.render(image(destroyed_content: true), false)
 
-      assert result.view == :not_available
-      assert result.download == :not_available
-      assert result.supplements == :not_available
-      assert result.thumbnails == :not_available
+      assert result.view == :destroyed
+      assert result.download == :destroyed
+      assert result.supplements == :destroyed
+      assert result.thumbnails == :destroyed
 
       result = Media.render(image(destroyed_content: true), true)
 

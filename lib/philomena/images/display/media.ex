@@ -108,13 +108,13 @@ defmodule Philomena.Images.Display.Media do
   defp guarded_versions(%Image{} = image, may_reveal_hidden?, callback)
        when is_function(callback, 1) do
     cond do
-      (image.hidden_from_users or image.destroyed_content) and not may_reveal_hidden? ->
-        # Don't return files for images the actor may not see
-        :not_available
-
       image.destroyed_content ->
         # No files available for destroyed images
         :destroyed
+
+      image.hidden_from_users and not may_reveal_hidden? ->
+        # Don't return files for images the actor may not see
+        :not_available
 
       not image.thumbnails_generated ->
         # File URIs are useless before thumbnails are generated
