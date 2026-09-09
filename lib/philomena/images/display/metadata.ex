@@ -38,7 +38,7 @@ defmodule Philomena.Images.Display.Metadata do
           original_size: non_neg_integer(),
           sha512_hash: String.t() | nil,
           original_sha512_hash: String.t() | nil,
-          filename: String.t(),
+          filename: String.t() | nil,
           animated?: boolean()
         }
 end
