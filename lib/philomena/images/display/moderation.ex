@@ -9,6 +9,7 @@ defmodule Philomena.Images.Display.Moderation do
   alias Philomena.Images.Display.Anonymous
   alias Philomena.Images.Display.CommentsLock
   alias Philomena.Images.Display.DescriptionLock
+  alias Philomena.Images.Display.Destruction
   alias Philomena.Images.Display.Feature
   alias Philomena.Images.Display.File
   alias Philomena.Images.Display.Hash
@@ -25,6 +26,7 @@ defmodule Philomena.Images.Display.Moderation do
     :anonymous_changeset,
     :comments_lock_changeset,
     :description_lock_changeset,
+    :destruction_changeset,
     :feature_changeset,
     :file_changeset,
     :hash_changeset,
@@ -42,6 +44,7 @@ defmodule Philomena.Images.Display.Moderation do
           anonymous_changeset: Ecto.Changeset.t(Anonymous.t()) | nil,
           comments_lock_changeset: Ecto.Changeset.t(CommentsLock.t()) | nil,
           description_lock_changeset: Ecto.Changeset.t(DescriptionLock.t()) | nil,
+          destruction_changeset: Ecto.Changeset.t(Destruction.t()) | nil,
           feature_changeset: Ecto.Changeset.t(Feature.t()) | nil,
           file_changeset: Ecto.Changeset.t(File.t()) | nil,
           hash_changeset: Ecto.Changeset.t(Hash.t()) | nil,
