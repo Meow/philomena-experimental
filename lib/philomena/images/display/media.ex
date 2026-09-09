@@ -8,9 +8,9 @@ defmodule Philomena.Images.Display.Media do
   alias Philomena.Tags.Tag
 
   @enforce_keys [
-    :view_uris,
-    :download_uris,
-    :supplemental_uris,
+    :view,
+    :download,
+    :supplements,
     :thumbnails,
     :rendered?,
     :optimized?,
@@ -44,44 +44,44 @@ defmodule Philomena.Images.Display.Media do
           thumb_tiny: version()
         }
 
-  @type gif_supplemental_uris :: %{
-          static_preview: String.t(),
-          mp4: String.t(),
-          webm: String.t()
+  @type gif_supplements :: %{
+          static_preview: version(),
+          mp4: version(),
+          webm: version()
         }
 
-  @type svg_supplemental_uris :: %{
-          static_preview: String.t(),
-          svg: String.t()
+  @type svg_supplements :: %{
+          static_preview: version(),
+          svg: version()
         }
 
-  @type webm_supplemental_uris :: %{
+  @type webm_supplements :: %{
           gif_previews: video_previews(),
-          static_preview: String.t(),
-          mp4: String.t()
+          static_preview: version(),
+          mp4: version()
         }
 
-  @type mp4_supplemental_uris :: %{
+  @type mp4_supplements :: %{
           gif_previews: video_previews(),
-          static_preview: String.t(),
-          webm: String.t()
+          static_preview: version(),
+          webm: version()
         }
 
-  @type file_uris :: %{
-          short: String.t(),
-          long: String.t()
+  @type files :: %{
+          short: version(),
+          long: version()
         }
 
   @type t :: %__MODULE__{
-          view_uris: omitted() | {:file_uris, file_uris()},
-          download_uris: omitted() | {:file_uris, file_uris()},
-          supplemental_uris:
+          view: omitted() | {:files, files()},
+          download: omitted() | {:files, files()},
+          supplements:
             omitted()
             | :none
-            | {:gif, gif_supplemental_uris()}
-            | {:svg, svg_supplemental_uris()}
-            | {:webm, webm_supplemental_uris()}
-            | {:mp4, mp4_supplemental_uris()},
+            | {:gif, gif_supplements()}
+            | {:svg, svg_supplements()}
+            | {:webm, webm_supplements()}
+            | {:mp4, mp4_supplements()},
           thumbnails: omitted() | {:thumbnails, thumbnails()},
           rendered?: boolean(),
           optimized?: boolean(),
@@ -94,10 +94,9 @@ defmodule Philomena.Images.Display.Media do
     image_format = normalized_format(image)
 
     %__MODULE__{
-      view_uris: guarded_versions(image, may_reveal_hidden?, &file_uris(&1, image_format, false)),
-      download_uris:
-        guarded_versions(image, may_reveal_hidden?, &file_uris(&1, image_format, true)),
-      supplemental_uris:
+      view: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, false)),
+      download: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, true)),
+      supplements:
         guarded_versions(image, may_reveal_hidden?, &supplemental_uris(&1, image_format)),
       thumbnails: guarded_versions(image, may_reveal_hidden?, &thumbnail_uris(&1, image_format)),
       rendered?: image.thumbnails_generated,
@@ -126,16 +125,16 @@ defmodule Philomena.Images.Display.Media do
     end
   end
 
-  defp file_uris(%Image{} = image, image_format, download?) do
+  defp files(%Image{} = image, image_format, download?) do
     image_format = version_format(image_format, download?)
 
-    file_uris =
+    files =
       %{
-        short: file_uri(image, image_format, true, download?),
-        long: file_uri(image, image_format, false, download?)
+        short: file_version(image, image_format, true, download?),
+        long: file_version(image, image_format, false, download?)
       }
 
-    {:file_uris, file_uris}
+    {:files, files}
   end
 
   defp thumbnail_uris(%Image{} = image, image_format) do
@@ -146,11 +145,7 @@ defmodule Philomena.Images.Display.Media do
       |> Map.new(fn {version_name, _} = version ->
         {version_name, version_uri(image, image_format, version)}
       end)
-      |> Map.put(:full, %{
-        uri: file_uri(image, image_format, true, false),
-        width: image.image_width,
-        height: image.image_height
-      })
+      |> Map.put(:full, file_version(image, image_format, true, false))
 
     {:thumbnails, thumbnails}
   end
@@ -223,29 +218,37 @@ defmodule Philomena.Images.Display.Media do
       "svg" ->
         {:svg,
          %{
-           static_preview: file_uri(image, "png", true, false),
-           svg: file_uri(image, "svg", true, false)
+           static_preview: file_version(image, "png", true, false),
+           svg: file_version(image, "svg", true, false)
          }}
 
       "gif" ->
         {:gif,
          %{
-           static_preview: exact_version_uri(image, "png", :rendered),
-           webm: file_uri(image, "webm", true, false),
-           mp4: file_uri(image, "mp4", true, false)
+           static_preview: version(image, exact_version_uri(image, "png", :rendered)),
+           webm: file_version(image, "webm", true, false),
+           mp4: file_version(image, "mp4", true, false)
          }}
 
       "webm" ->
         {:webm,
          %{
            gif_previews: video_preview_uris(image),
-           static_preview: exact_version_uri(image, "png", :rendered),
-           mp4: file_uri(image, "mp4", true, false)
+           static_preview: version(image, exact_version_uri(image, "png", :rendered)),
+           mp4: file_version(image, "mp4", true, false)
          }}
 
       _ ->
         :none
     end
+  end
+
+  defp file_version(%Image{} = image, image_format, short?, download?) do
+    version(image, file_uri(image, image_format, short?, download?))
+  end
+
+  defp version(%Image{image_width: width, image_height: height}, uri) do
+    %{uri: uri, width: width, height: height}
   end
 
   defp file_name_slug(%Image{tags: tags}) do

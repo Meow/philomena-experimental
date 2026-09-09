@@ -44,14 +44,18 @@ defmodule Philomena.Images.Display.MediaTest do
     "#{root()}/2024/1/2/#{id_fragment}/#{version}.#{format}"
   end
 
+  defp version(image, uri) do
+    %{uri: uri, width: image.image_width, height: image.image_height}
+  end
+
   describe "render/2" do
     test "returns documented file and thumbnail shapes for a public image" do
       image = image()
 
       assert %Media{
-               view_uris: {:file_uris, view_uris},
-               download_uris: {:file_uris, download_uris},
-               supplemental_uris: :none,
+               view: {:files, view_uris},
+               download: {:files, download_uris},
+               supplements: :none,
                thumbnails: {:thumbnails, thumbnails},
                rendered?: true,
                optimized?: true,
@@ -59,13 +63,14 @@ defmodule Philomena.Images.Display.MediaTest do
              } = Media.render(image, false)
 
       assert view_uris == %{
-               short: "#{root()}/view/2024/1/2/42.png",
-               long: "#{root()}/view/2024/1/2/42__safe_artistfoo+bar_zebra.png"
+               short: version(image, "#{root()}/view/2024/1/2/42.png"),
+               long: version(image, "#{root()}/view/2024/1/2/42__safe_artistfoo+bar_zebra.png")
              }
 
       assert download_uris == %{
-               short: "#{root()}/download/2024/1/2/42.png",
-               long: "#{root()}/download/2024/1/2/42__safe_artistfoo+bar_zebra.png"
+               short: version(image, "#{root()}/download/2024/1/2/42.png"),
+               long:
+                 version(image, "#{root()}/download/2024/1/2/42__safe_artistfoo+bar_zebra.png")
              }
 
       assert Map.keys(thumbnails) |> Enum.sort() ==
@@ -106,9 +111,9 @@ defmodule Philomena.Images.Display.MediaTest do
     test "omits every media path before thumbnails are generated" do
       result = Media.render(image(thumbnails_generated: false, processed: false), false)
 
-      assert result.view_uris == :not_rendered
-      assert result.download_uris == :not_rendered
-      assert result.supplemental_uris == :not_rendered
+      assert result.view == :not_rendered
+      assert result.download == :not_rendered
+      assert result.supplements == :not_rendered
       assert result.thumbnails == :not_rendered
       assert result.rendered? == false
       assert result.optimized? == false
@@ -119,17 +124,17 @@ defmodule Philomena.Images.Display.MediaTest do
 
       result = Media.render(image, false)
 
-      assert result.view_uris == :not_available
-      assert result.download_uris == :not_available
-      assert result.supplemental_uris == :not_available
+      assert result.view == :not_available
+      assert result.download == :not_available
+      assert result.supplements == :not_available
       assert result.thumbnails == :not_available
       refute inspect(result) =~ image.hidden_image_key
 
       revealed = Media.render(image, true)
 
-      assert {:file_uris, %{short: short}} = revealed.view_uris
-      assert short == exact(image, :full)
-      assert short =~ image.hidden_image_key
+      assert {:files, %{short: short}} = revealed.view
+      assert short.uri == exact(image, :full)
+      assert short.uri =~ image.hidden_image_key
       assert {:thumbnails, %{thumb: %{uri: thumb_path}}} = revealed.thumbnails
       assert thumb_path =~ image.hidden_image_key
     end
@@ -137,16 +142,16 @@ defmodule Philomena.Images.Display.MediaTest do
     test "omits every media path for destroyed content" do
       result = Media.render(image(destroyed_content: true), false)
 
-      assert result.view_uris == :not_available
-      assert result.download_uris == :not_available
-      assert result.supplemental_uris == :not_available
+      assert result.view == :not_available
+      assert result.download == :not_available
+      assert result.supplements == :not_available
       assert result.thumbnails == :not_available
 
       result = Media.render(image(destroyed_content: true), true)
 
-      assert result.view_uris == :destroyed
-      assert result.download_uris == :destroyed
-      assert result.supplemental_uris == :destroyed
+      assert result.view == :destroyed
+      assert result.download == :destroyed
+      assert result.supplements == :destroyed
       assert result.thumbnails == :destroyed
     end
   end
@@ -155,14 +160,20 @@ defmodule Philomena.Images.Display.MediaTest do
     test "provides a rendered PNG path for SVG images" do
       result = Media.render(image(image_format: "SVG"), false)
 
-      assert {:svg, %{static_preview: rendered, svg: svg}} = result.supplemental_uris
-      assert rendered == "#{root()}/view/2024/1/2/42.png"
-      assert svg == "#{root()}/view/2024/1/2/42.svg"
-      assert {:file_uris, %{short: view, long: view_long}} = result.view_uris
-      assert view == "#{root()}/view/2024/1/2/42.png"
-      assert view_long == "#{root()}/view/2024/1/2/42__safe_artistfoo+bar_zebra.png"
-      assert {:file_uris, %{short: download}} = result.download_uris
-      assert download == "#{root()}/download/2024/1/2/42.svg"
+      assert {:svg, %{static_preview: rendered, svg: svg}} = result.supplements
+      assert rendered == version(image(image_format: "SVG"), "#{root()}/view/2024/1/2/42.png")
+      assert svg == version(image(image_format: "SVG"), "#{root()}/view/2024/1/2/42.svg")
+      assert {:files, %{short: view, long: view_long}} = result.view
+      assert view == version(image(image_format: "SVG"), "#{root()}/view/2024/1/2/42.png")
+
+      assert view_long ==
+               version(
+                 image(image_format: "SVG"),
+                 "#{root()}/view/2024/1/2/42__safe_artistfoo+bar_zebra.png"
+               )
+
+      assert {:files, %{short: download}} = result.download
+      assert download == version(image(image_format: "SVG"), "#{root()}/download/2024/1/2/42.svg")
 
       assert {:thumbnails, %{full: %{uri: full_path}}} = result.thumbnails
       assert full_path == "#{root()}/view/2024/1/2/42.png"
@@ -172,12 +183,12 @@ defmodule Philomena.Images.Display.MediaTest do
 
     test "provides rendered, WebM, and MP4 paths for GIF images" do
       image = image(image_format: "gif")
-      assert {:gif, paths} = Media.render(image, false).supplemental_uris
+      assert {:gif, paths} = Media.render(image, false).supplements
 
       assert paths == %{
-               static_preview: exact(image, :rendered, "png"),
-               webm: "#{root()}/view/2024/1/2/42.webm",
-               mp4: "#{root()}/view/2024/1/2/42.mp4"
+               static_preview: version(image, exact(image, :rendered, "png")),
+               webm: version(image, "#{root()}/view/2024/1/2/42.webm"),
+               mp4: version(image, "#{root()}/view/2024/1/2/42.mp4")
              }
     end
 
@@ -185,10 +196,10 @@ defmodule Philomena.Images.Display.MediaTest do
       image = image(image_format: "webm")
 
       assert {:webm, %{static_preview: rendered, mp4: mp4, gif_previews: previews}} =
-               Media.render(image, false).supplemental_uris
+               Media.render(image, false).supplements
 
-      assert rendered == exact(image, :rendered, "png")
-      assert mp4 == "#{root()}/view/2024/1/2/42.mp4"
+      assert rendered == version(image, exact(image, :rendered, "png"))
+      assert mp4 == version(image, "#{root()}/view/2024/1/2/42.mp4")
       assert Map.keys(previews) |> Enum.sort() == [:thumb, :thumb_small, :thumb_tiny]
       assert previews[:thumb] == %{uri: exact(image, :thumb, "gif"), width: 250, height: 125}
     end
