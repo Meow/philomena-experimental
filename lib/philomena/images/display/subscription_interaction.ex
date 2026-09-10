@@ -13,7 +13,6 @@ defmodule Philomena.Images.Display.SubscriptionInteraction do
   @primary_key false
 
   embedded_schema do
-    field :subscribed, :boolean
   end
 
   @doc false
@@ -22,7 +21,7 @@ defmodule Philomena.Images.Display.SubscriptionInteraction do
   end
 
   @doc false
-  def render(%Image{}, subscribed?) do
-    %__MODULE__{subscribed: subscribed?}
+  def render(%Image{}) do
+    %__MODULE__{}
   end
 end

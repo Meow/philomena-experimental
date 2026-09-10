@@ -1140,6 +1140,17 @@ defmodule Philomena.ImagesTest do
       assert Repo.reload!(image).scratchpad == nil
     end
 
+    test "omitted fields retain their committed value" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(scratchpad: "existing note")
+
+      assert {:ok, scratchpad} =
+               Images.update_image_scratchpad(actor(moderator), to_string(image.id), %{})
+
+      assert scratchpad.scratchpad == "existing note"
+      assert Repo.reload!(image).scratchpad == "existing note"
+    end
+
     test "a successful update writes an exact moderation log with the new value" do
       moderator = moderator_user_fixture()
       image = image_fixture()
@@ -1599,6 +1610,17 @@ defmodule Philomena.ImagesTest do
 
       refute comment_lock.comments_locked
       assert Repo.reload!(image).commenting_allowed
+    end
+
+    test "omitted fields retain their committed value" do
+      moderator = moderator_user_fixture()
+      image = image_fixture(commenting_allowed: false)
+
+      assert {:ok, comment_lock} =
+               Images.update_image_comments_lock(actor(moderator), to_string(image.id), %{})
+
+      assert comment_lock.comments_locked
+      refute Repo.reload!(image).commenting_allowed
     end
 
     test "locking writes an exact moderation log" do
@@ -2848,6 +2870,18 @@ defmodule Philomena.ImagesTest do
       assert moderation_log_count() == 0
     end
 
+    test "omitted fields retain their committed value" do
+      uploader = confirmed_user_fixture()
+      image = image_fixture(user_id: uploader.id, description: "Existing description")
+
+      assert {:ok, updated} =
+               Images.update_image_description(actor(uploader), to_string(image.id), %{})
+
+      assert updated.description_input.description == "Existing description"
+      assert updated.description.body == "Existing description"
+      assert Repo.reload!(image).description == "Existing description"
+    end
+
     test "a moderator edits another user's image" do
       moderator = moderator_user_fixture()
       uploader = confirmed_user_fixture()
@@ -4056,7 +4090,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      assert {:ok, %{sources: sources}} =
+      assert {:ok, %{source_input: source_input, sources: sources}} =
                Images.update_image_sources(
                  actor(user),
                  to_string(image.id),
@@ -4064,6 +4098,8 @@ defmodule Philomena.ImagesTest do
                )
 
       assert sources.source_change_count == 1
+      assert source_input.old_sources == source_input.sources
+      assert Enum.map(source_input.sources, & &1.source) == ["https://example.com/art"]
 
       change = Repo.one(from s in SourceChange, where: s.image_id == ^image.id)
       assert change.source_url == "https://example.com/art"
@@ -4296,6 +4332,7 @@ defmodule Philomena.ImagesTest do
 
       assert result.tags.tag_changes_count >= 1
       assert result.tags.tag_change_tags_count >= 1
+      assert result.tag_input.old_tag_input == result.tag_input.tag_input
 
       assert tag_names(image) == ["added test tag", "other added tag", "safe"]
 

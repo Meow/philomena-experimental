@@ -45,7 +45,9 @@ defmodule PhilomenaWeb.Image.DescriptionControllerTest do
         "description_input" => %{"description" => String.duplicate("a", 50_001)}
       })
 
-    assert html_response(conn, 200)
+    assert html_response(conn, 200) =~
+             "Oops, something went wrong! Please check the errors below."
+
     assert Repo.reload!(image).description == "Original description"
   end
 

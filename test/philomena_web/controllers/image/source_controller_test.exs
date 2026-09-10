@@ -100,7 +100,9 @@ defmodule PhilomenaWeb.Image.SourceControllerTest do
         "source_input" => %{"old_sources" => %{}, "sources" => sources}
       })
 
-    assert html_response(conn, 200)
+    assert html_response(conn, 200) =~
+             "Oops, something went wrong! Please check the errors below."
+
     refute Repo.exists?(from sc in SourceChange, where: sc.image_id == ^image.id)
   end
 

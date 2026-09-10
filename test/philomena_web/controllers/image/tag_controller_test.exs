@@ -159,7 +159,9 @@ defmodule PhilomenaWeb.Image.TagControllerTest do
         "tag_input" => %{"old_tag_input" => "safe", "tag_input" => "safe, one more"}
       })
 
-    assert html_response(conn, 200)
+    assert html_response(conn, 200) =~
+             "Oops, something went wrong! Please check the errors below."
+
     assert tag_names(image) == ["safe"]
     refute Repo.exists?(from tc in TagChange, where: tc.image_id == ^image.id)
   end

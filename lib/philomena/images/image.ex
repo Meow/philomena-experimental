@@ -338,16 +338,16 @@ defmodule Philomena.Images.Image do
     |> put_change(:duplicate_id, nil)
   end
 
-  def lock_comments_changeset(image, locked) do
-    change(image, commenting_allowed: not locked)
+  def lock_comments_changeset(image, locked?) do
+    change(image, commenting_allowed: not locked?)
   end
 
-  def lock_description_changeset(image, locked) do
-    change(image, description_editing_allowed: not locked)
+  def lock_description_changeset(image, locked?) do
+    change(image, description_editing_allowed: not locked?)
   end
 
-  def lock_tags_changeset(image, locked) do
-    change(image, tag_editing_allowed: not locked)
+  def lock_tags_changeset(image, locked?) do
+    change(image, tag_editing_allowed: not locked?)
   end
 
   def remove_hash_changeset(image) do
