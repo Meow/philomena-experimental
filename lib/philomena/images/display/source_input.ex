@@ -15,8 +15,8 @@ defmodule Philomena.Images.Display.SourceInput do
   @primary_key false
 
   embedded_schema do
-    embeds_many :old_sources, Source
-    embeds_many :sources, Source
+    embeds_many :old_sources, Source, on_replace: :delete
+    embeds_many :sources, Source, on_replace: :delete
   end
 
   @doc false
