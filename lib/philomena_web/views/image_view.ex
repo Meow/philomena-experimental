@@ -1,12 +1,88 @@
 defmodule PhilomenaWeb.ImageView do
   use PhilomenaWeb, :view
 
-  alias Philomena.Tags.Tag
   alias Philomena.Images
+  alias Philomena.Images.Display
   alias Philomena.Images.Thumbnailer
+  alias Philomena.Tags.Tag
 
-  def show_vote_counts?(%{settings: %{hide_vote_counts: true}}), do: false
-  def show_vote_counts?(_user), do: true
+  def client_interactions(%Display.Page{metadata: metadata, interactions: interactions}) do
+    [
+      {interactions.faved?, "faved", ""},
+      {interactions.hidden?, "hidden", ""},
+      {interactions.upvoted?, "voted", "up"},
+      {interactions.downvoted?, "voted", "down"}
+    ]
+    |> Enum.flat_map(fn
+      {true, interaction_type, value} ->
+        [%{image_id: metadata.id, interaction_type: interaction_type, value: value}]
+
+      {false, _interaction_type, _value} ->
+        []
+    end)
+  end
+
+  def interaction_count({:count, count}), do: count
+  def interaction_count(:hidden), do: nil
+
+  def moderation_controls?(%Display.Moderation{} = moderation) do
+    moderation
+    |> Map.from_struct()
+    |> Map.delete(:hidden_from_users?)
+    |> Map.values()
+    |> Enum.any?(& &1)
+  end
+
+  def display_tag_list(%Display.Tags{tags: tags}) do
+    tags
+    |> Tag.display_order()
+    |> Enum.map_join(", ", & &1.name)
+  end
+
+  def display_title_text(%Display.Page{metadata: metadata, tags: tags}) do
+    "Size: #{metadata.width}x#{metadata.height} | Tagged: #{display_tag_list(tags)}"
+  end
+
+  def display_thumbnail_uris(%Display.Media{thumbnails: {:thumbnails, thumbnails}}) do
+    Map.new(thumbnails, fn {name, version} -> {name, version.uri} end)
+  end
+
+  def display_thumbnail_uris(%Display.Media{}), do: nil
+
+  def display_image_container_data(%Display.Page{} = page, size) do
+    metadata = page.metadata
+    interactions = page.interactions
+
+    data = [
+      image_id: metadata.id,
+      image_tags: JSON.encode!(Enum.map(page.tags.tags, & &1.id)),
+      image_tag_aliases:
+        page.tags.tags
+        |> Enum.flat_map(&([&1] ++ &1.aliases))
+        |> Enum.map_join(", ", & &1.name),
+      tag_count: length(page.tags.tags),
+      score: interaction_count(interactions.score),
+      faves: interaction_count(interactions.faves_count),
+      upvotes: interaction_count(interactions.upvotes_count),
+      downvotes: interaction_count(interactions.downvotes_count),
+      comment_count: page.comments.comments_count,
+      created_at: DateTime.to_iso8601(metadata.created_at),
+      source_url: page.sources.sources |> List.first() |> display_source(),
+      source_urls: JSON.encode!(Enum.map(page.sources.sources, & &1.source)),
+      width: metadata.width,
+      height: metadata.height,
+      aspect_ratio: metadata.aspect_ratio,
+      size: size
+    ]
+
+    case display_thumbnail_uris(page.media) do
+      nil -> data
+      uris -> Keyword.put(data, :uris, JSON.encode!(uris))
+    end
+  end
+
+  defp display_source(nil), do: ""
+  defp display_source(source), do: source.source
 
   def title_text(image) do
     tags = Tag.display_order(image.tags) |> Enum.map_join(", ", & &1.name)

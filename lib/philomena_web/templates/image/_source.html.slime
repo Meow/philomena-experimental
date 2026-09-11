@@ -54,12 +54,12 @@
               ' Add/Edit
             - else
               ' Add
-        = if @sources.source_change_count > 0 do
+        = if @sources.source_changes_count > 0 do
           a.button.button--link.button--inline href=~p"/images/#{@image_id}/source_changes" title="Source history"
             i.fa.fa-history>
             span.hide-mobile> History
             | (
-            = @sources.source_change_count
+            = @sources.source_changes_count
             | )
     .block__content.flex.flex--wrap.flex--column
       .image_sources

@@ -1,17 +1,28 @@
 span.image_uploader
   ' by
-  => render PhilomenaWeb.UserAttributionView, "_anon_user.html", object: @image, awards: true, conn: @conn
+  = case @page.uploader.uploader do
+    - {:user, attribution} ->
+      strong<>
+        = link attribution.user.name, to: ~p"/profiles/#{attribution.user}"
+      = render PhilomenaWeb.ProfileView, "_awards.html", awards: attribution.awards
+    - {:anonymous_revealed, attribution} ->
+      strong<>
+        = link attribution.discriminant, to: ~p"/profiles/#{attribution.user}"
+    - {:anonymous, attribution} ->
+      strong<> = attribution.discriminant
 
-  = if can?(@conn, :show, :identity_metadata) and not hide_staff_tools?(@conn) do
-    => link_to_ip(@conn, @image.ip)
-    => link_to_fingerprint(@conn, @image.fingerprint)
-    a#edit-uploader href="#" data-click-hide=".image_uploader" data-click-show="#uploader-form"
-      i.fas.fa-edit
-    a#edit-anonymous href="#" data-click-toggle=".image-anonymous"
-      i.fas.fa-eye
+  = if @page.uploader.identity_metadata && not hide_staff_tools?(@conn) do
+    => link_to_ip(@conn, @page.uploader.identity_metadata.ip)
+    => link_to_fingerprint(@conn, @page.uploader.identity_metadata.fingerprint)
+    = if @page.moderation.uploader_input_changeset do
+      a#edit-uploader href="#" data-click-hide=".image_uploader" data-click-show="#uploader-form"
+        i.fas.fa-edit
+    = if @page.moderation.anonymous_changeset do
+      a#edit-anonymous href="#" data-click-toggle=".image-anonymous"
+        i.fas.fa-eye
 
-= if @uploader_changeset do
-  = form_for @uploader_changeset, ~p"/images/#{@image}/uploader", [class: "block__content hidden", id: "uploader-form", method: "put"], fn f ->
+= if @page.moderation.uploader_input_changeset do
+  = form_for @page.moderation.uploader_input_changeset, ~p"/images/#{@page.metadata.id}/uploader", [class: "block__content hidden", id: "uploader-form", method: "put"], fn f ->
     => label f, :username, "Uploader"
     => text_input f, :username, class: "input input--short input--small"
 
@@ -19,9 +30,9 @@ span.image_uploader
 
     div Changes IP to '127.0.0.1' and FP to 'ffff'. Empty for anonymous.
 
-= if @anonymous_changeset do
+= if @page.moderation.anonymous_changeset do
   .image-anonymous.hidden
-    = if @image.anonymous do
-      = button_to "Reveal author", ~p"/images/#{@image}/anonymous", class: "button button--small", method: "delete", data: [confirm: "Are you really, really sure?"]
+    = if @page.moderation.anonymous_changeset.data.anonymous do
+      = button_to "Reveal author", ~p"/images/#{@page.metadata.id}/anonymous", class: "button button--small", method: "delete", data: [confirm: "Are you really, really sure?"]
     - else
-      = button_to "Hide author", ~p"/images/#{@image}/anonymous", class: "button button--small", method: "create", data: [confirm: "Are you really, really sure?"]
+      = button_to "Hide author", ~p"/images/#{@page.metadata.id}/anonymous", class: "button button--small", method: "create", data: [confirm: "Are you really, really sure?"]

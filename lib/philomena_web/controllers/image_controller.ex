@@ -1,12 +1,13 @@
 defmodule PhilomenaWeb.ImageController do
   use PhilomenaWeb, :controller
 
-  alias PhilomenaWeb.ImageScope
-  alias PhilomenaWeb.NotificationCountPlug
-  alias PhilomenaWeb.MarkdownRenderer
-  alias PhilomenaWeb.RateLimitedResponse
   alias Philomena.Images
   alias Philomena.Interactions
+  alias PhilomenaWeb.ImageScope
+  alias PhilomenaWeb.ImageView
+  alias PhilomenaWeb.MarkdownRenderer
+  alias PhilomenaWeb.NotificationCountPlug
+  alias PhilomenaWeb.RateLimitedResponse
 
   action_fallback PhilomenaWeb.FallbackController
 
@@ -48,36 +49,26 @@ defmodule PhilomenaWeb.ImageController do
     # be re-read afterwards.
     conn = NotificationCountPlug.call(conn)
 
-    rendered = MarkdownRenderer.render_collection(page.comments.entries, conn)
-    comments = %{page.comments | entries: Enum.zip(page.comments.entries, rendered)}
+    page =
+      update_in(page.comments.comments.entries, fn comments ->
+        rendered = MarkdownRenderer.render_collection(comments, conn)
+
+        Enum.zip(comments, rendered)
+      end)
 
     rendered_description = MarkdownRenderer.render_one(page.description, conn)
 
+    {_image, conn} = pop_in(conn.assigns[:image])
+
     assigns = [
-      image: image,
-      comments: comments,
-      tags: page.tags,
-      sources: page.sources,
-      description: page.description,
+      page: page,
       rendered_description: rendered_description,
-      comment_changeset: page.comment_changeset,
-      file_changeset: page.file_changeset,
-      hide_changeset: page.hide_changeset,
-      feature_changeset: page.feature_changeset,
-      repair_changeset: page.repair_changeset,
-      hash_changeset: page.hash_changeset,
-      source_history_changeset: page.source_history_changeset,
-      uploader_changeset: page.uploader_changeset,
-      anonymous_changeset: page.anonymous_changeset,
-      user_galleries: page.user_galleries,
-      interactions: page.interactions,
-      watching: page.watching,
-      can_interact: page.can_interact,
+      interactions: ImageView.client_interactions(page),
       layout_class: "layout--wide",
-      title: "##{image.id} - #{Images.tag_list(image)}"
+      title: "##{page.metadata.id} - #{ImageView.display_tag_list(page.tags)}"
     ]
 
-    if image.hidden_from_users do
+    if page.moderation_metadata.hidden_from_users? do
       render(conn, "deleted.html", assigns)
     else
       render(conn, "show.html", assigns)
@@ -113,11 +104,7 @@ defmodule PhilomenaWeb.ImageController do
   defp load_image(conn, _opts) do
     case Images.show_image(conn.assigns.actor, conn.params["id"]) do
       {:ok, image} ->
-        conn
-        |> assign(:image, image)
-        |> assign(:tag_change_count, image.tag_change_count)
-        |> assign(:tag_change_tag_count, image.tag_change_tag_count)
-        |> assign(:source_change_count, image.source_change_count)
+        assign(conn, :image, image)
 
       {:duplicate_of, target_image_id} ->
         conn

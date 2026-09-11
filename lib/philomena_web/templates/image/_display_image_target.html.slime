@@ -1,0 +1,34 @@
+- size = assigns[:size] || :full
+- embed_display = assigns[:embed_display] || false
+- {:thumbnails, thumbnails} = @page.media.thumbnails
+- uris = display_thumbnail_uris(@page.media)
+
+= content_tag :div, [data: display_image_container_data(@page, size), class: "image-show-container"] do
+  .block.block--fixed.block--warning.block--no-margin.image-filtered.hidden
+    strong
+      = link("This image is blocked by your current filter - click here to display it anyway", to: "#", data: [click_unfilter: @page.metadata.id])
+    p
+      = img_tag(static_path(@conn, "/images/tagblocked.svg"), width: 250, height: 250, data: [click_unfilter: @page.metadata.id])
+    span.filter-explanation
+    =< link("your current filter", to: ~p"/filters/#{@conn.assigns.current_filter}", class: "filter-link")
+    ' .
+
+  = if size == :full and not embed_display do
+    .image-target.hidden.image-show data-scaled=scaled_value(@conn.assigns.current_user) data-uris=JSON.encode!(uris) data-width=@page.metadata.width data-height=@page.metadata.height data-image-size=@page.metadata.size data-mime-type=@page.metadata.mime_type
+      = if @page.metadata.mime_type == "video/webm" do
+        video controls=true
+      - else
+        picture
+  - else
+    .image-show.hidden
+      a href=~p"/images/#{@page.metadata.id}" title=display_title_text(@page)
+        span.imgspoiler
+          - thumb = thumbnails[size]
+
+          = if @page.metadata.mime_type == "video/webm" do
+            video data-image-id=@page.metadata.id autoplay="autoplay" loop="loop" muted="muted" playsinline="playsinline"
+              source src=thumb.uri type="video/webm"
+              source src=String.replace(thumb.uri, ".webm", ".mp4") type="video/mp4"
+          - else
+            picture data-image-id=@page.metadata.id
+              img src=thumb.uri

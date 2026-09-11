@@ -1,15 +1,17 @@
 .center--layout--flex
-  = if @image.thumbnails_generated do
-    = render PhilomenaWeb.ImageView, "_image_target.html", embed_display: false, image: @image, conn: @conn
-  - else
-    #thumbnails-not-yet-generated.block.block--fixed.block--warning.layout--narrow
-      h3 Just a moment
-      = if @image.image_mime_type == "video/webm" do
-        p WEBM uploads may take longer to process, it should appear in up to an hour (depending on file size and video length).
-      - else
-        p The image should appear in a few minutes; report it otherwise.
-      p Implications might have added tags, so check them in the meanwhile.
-  = if !@image.processed and @image.thumbnails_generated do
-    br
-    #image-being-optimized.block.block--fixed.block--warning.layout--narrow
-      | This image is being processed to optimize the filesize. It should finish shortly.
+  = case @page.media.thumbnails do
+    - {:thumbnails, _thumbnails} ->
+      = render PhilomenaWeb.ImageView, "_display_image_target.html", page: @page, conn: @conn
+      = if not @page.media.optimized? do
+        br
+        #image-being-optimized.block.block--fixed.block--warning.layout--narrow
+          | This image is being processed to optimize the filesize. It should finish shortly.
+    - :not_rendered ->
+      #thumbnails-not-yet-generated.block.block--fixed.block--warning.layout--narrow
+        h3 Just a moment
+        = if @page.metadata.mime_type == "video/webm" do
+          p WEBM uploads may take longer to process, it should appear in up to an hour (depending on file size and video length).
+        - else
+          p The image should appear in a few minutes; report it otherwise.
+        p Implications might have added tags, so check them in the meanwhile.
+    - _ ->

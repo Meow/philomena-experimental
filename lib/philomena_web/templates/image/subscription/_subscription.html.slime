@@ -1,11 +1,14 @@
 elixir:
-  watch_path = ~p"/images/#{@image}/subscription"
-  watch_class = if @watching, do: "hidden", else: ""
+  image_id = assigns[:image_id] || @image
+  watching = if assigns[:subscription], do: @subscription.subscribed?, else: @watching
+  available = if assigns[:subscription], do: @subscription.changeset, else: @conn.assigns.current_user
+  watch_path = ~p"/images/#{image_id}/subscription"
+  watch_class = if watching, do: "hidden", else: ""
 
-  unwatch_path = ~p"/images/#{@image}/subscription"
-  unwatch_class = if @watching, do: "", else: "hidden"
+  unwatch_path = ~p"/images/#{image_id}/subscription"
+  unwatch_class = if watching, do: "", else: "hidden"
 
-= if @conn.assigns.current_user do
+= if available do
   span.js-subscription-target
     a.js-subscription-link href=watch_path class=watch_class data-remote="true" data-method="post"
       i.fa.fa-bell>

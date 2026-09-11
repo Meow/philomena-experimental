@@ -1,4 +1,4 @@
-= if not @image.approved and not @image.hidden_from_users do
+= if not @page.moderation_metadata.approved? and not @page.moderation_metadata.hidden_from_users? do
   .block.block--fixed.block--warning
     h2 Hold up!
     p This image is pending approval from a staff member. It will appear on the site once it's reviewed and approved.

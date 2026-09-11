@@ -6,6 +6,7 @@ defmodule Philomena.Images.Display.Interactions do
   alias Philomena.Images.Display.FaveInteraction
   alias Philomena.Images.Display.HideInteraction
   alias Philomena.Images.Display.VoteInteraction
+  alias Philomena.Images.Image
 
   @enforce_keys [
     :faved?,
@@ -42,13 +43,28 @@ defmodule Philomena.Images.Display.Interactions do
         }
 
   @doc false
-  def redact_interaction_counts(%__MODULE__{} = interactions, may_reveal_vote_counts?) do
-    # Interaction counts are never sensitive information (anonymous actors can see them)
-    # This is simply a convenience to avoid a function with many parameters
-    if may_reveal_vote_counts? do
-      interactions
+  def render(%Image{} = image, state, may_reveal_vote_counts?, controls) do
+    %__MODULE__{
+      faved?: state.faved?,
+      faves_count: render_count(image.faves_count, true),
+      upvoted?: state.upvoted?,
+      upvotes_count: render_count(image.upvotes_count, may_reveal_vote_counts?),
+      score: render_count(image.score, true),
+      downvoted?: state.downvoted?,
+      downvotes_count: render_count(image.downvotes_count, may_reveal_vote_counts?),
+      hidden?: state.hidden?,
+      hides_count: render_count(image.hides_count, true),
+      fave_changeset: controls.fave_changeset,
+      hide_changeset: controls.hide_changeset,
+      vote_changeset: controls.vote_changeset
+    }
+  end
+
+  defp render_count(count, revealed?) do
+    if revealed? do
+      {:count, count}
     else
-      %{interactions | upvotes_count: :hidden, downvotes_count: :hidden}
+      :hidden
     end
   end
 end
