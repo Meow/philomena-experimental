@@ -7,12 +7,13 @@ defmodule PhilomenaWeb.ImageControllerTest do
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
 
-  alias PhilomenaQuery.Search
-  alias PhilomenaQuery.SearchHelpers
+  alias Philomena.Images.Display
   alias Philomena.Images.Image
-  alias Philomena.Tags.Tag
   alias Philomena.Repo
   alias Philomena.Roles.Role
+  alias Philomena.Tags.Tag
+  alias PhilomenaQuery.Search
+  alias PhilomenaQuery.SearchHelpers
 
   setup do
     Search.clear_index!(Image)
@@ -94,6 +95,12 @@ defmodule PhilomenaWeb.ImageControllerTest do
       conn = get(conn, ~p"/images/#{image}")
       response = html_response(conn, 200)
 
+      assert %Display.Page{} = page = conn.assigns.page
+      assert page.metadata.id == image.id
+      assert page.description.body == "An image *described* in markdown."
+      assert %Display.Comments{} = page.comments
+      assert %Display.Interactions{} = page.interactions
+      refute Map.has_key?(conn.assigns, :image)
       assert response =~ "##{image.id} - safe - Derpibooru"
       assert response =~ "An image <em>described</em> in markdown."
       assert response =~ "Test image comment body"
@@ -198,6 +205,13 @@ defmodule PhilomenaWeb.ImageControllerTest do
       conn = get(conn, ~p"/images/#{image}")
 
       response = html_response(conn, 200)
+      page = conn.assigns.page
+
+      assert page.description.body == ""
+      assert page.comments.comments.entries == []
+      assert page.sources.sources == []
+      assert page.media.thumbnails == :not_available
+      assert page.moderation_metadata.deleter == nil
       assert response =~ "This image has been deleted"
       refute response =~ "Done by:"
     end
@@ -215,11 +229,30 @@ defmodule PhilomenaWeb.ImageControllerTest do
 
     test "renders the deleted page for a moderator", %{conn: conn} do
       %{conn: conn} = register_and_log_in_moderator(%{conn: conn})
-      image = image_fixture(hidden_from_users: true)
+
+      image =
+        image_fixture(
+          description: "Moderator-only deleted description",
+          sources: ["https://example.com/deleted-source"]
+        )
+
+      _comment = comment_fixture(image, nil, %{"body" => "Moderator-only deleted comment"})
+      image = image |> Ecto.Changeset.change(hidden_from_users: true) |> Repo.update!()
 
       conn = get(conn, ~p"/images/#{image}")
 
       response = html_response(conn, 200)
+      page = conn.assigns.page
+
+      assert page.description.body == "Moderator-only deleted description"
+      assert Enum.any?(page.sources.sources, &(&1.source == "https://example.com/deleted-source"))
+
+      assert Enum.any?(page.comments.comments.entries, fn {comment, _rendered} ->
+               comment.body == "Moderator-only deleted comment"
+             end)
+
+      assert {:thumbnails, _thumbnails} = page.media.thumbnails
+      assert page.moderation_metadata.deleter == :system
       assert response =~ "This image has been deleted"
       assert response =~ "Done by:"
       assert response =~ ~s(id="image_options_area")
@@ -238,15 +271,35 @@ defmodule PhilomenaWeb.ImageControllerTest do
       assert response =~ ~p"/images/#{image}/destroy"
     end
 
-    test "regular viewers do not receive hidden image media or moderation tools", %{conn: conn} do
+    test "regular viewers get the full deleted layout without hidden disclosures or affordances",
+         %{
+           conn: conn
+         } do
       %{conn: conn} = register_and_log_in_user(%{conn: conn})
-      image = image_fixture(hidden_from_users: true)
 
-      response = html_response(get(conn, ~p"/images/#{image}"), 200)
+      image =
+        image_fixture(
+          description: "Redacted deleted description",
+          sources: ["https://example.com/redacted-source"]
+        )
+
+      _comment = comment_fixture(image, nil, %{"body" => "Redacted deleted comment"})
+      image = image |> Ecto.Changeset.change(hidden_from_users: true) |> Repo.update!()
+
+      conn = get(conn, ~p"/images/#{image}")
+      response = html_response(conn, 200)
+      page = conn.assigns.page
 
       refute response =~ "Done by:"
-      refute response =~ ~s(id="image_options_area")
+      assert response =~ ~s(id="image_options_area")
       refute response =~ "data-uris="
+      refute response =~ "Redacted deleted description"
+      refute response =~ "https://example.com/redacted-source"
+      refute response =~ "Redacted deleted comment"
+      refute response =~ "Manage"
+      assert page.comments.comments.entries == []
+      refute page.moderation.hide_changeset
+      refute page.moderation.file_changeset
     end
 
     test "redirects a merged duplicate to its target", %{conn: conn} do

@@ -16,7 +16,7 @@ defmodule Philomena.Images.Display.SubscriptionInteraction do
   end
 
   @doc false
-  def changeset(subscription, attrs) do
+  def changeset(subscription, attrs \\ %{}) do
     cast(subscription, attrs, [])
   end
 

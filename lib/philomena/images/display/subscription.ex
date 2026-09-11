@@ -10,7 +10,7 @@ defmodule Philomena.Images.Display.Subscription do
 
   @type t :: %__MODULE__{
           subscribed?: boolean(),
-          changeset: Ecto.Changeset.t(SubscriptionInteraction.t())
+          changeset: Ecto.Changeset.t(SubscriptionInteraction.t()) | nil
         }
 
   @doc false

@@ -16,6 +16,8 @@ defmodule Philomena.Images do
   alias Philomena.Multi
   alias Philomena.Repo
 
+  alias Philomena.Attribution.AnonymousName
+
   alias Philomena.Images.Display
 
   alias Philomena.Images.Display.{
@@ -80,7 +82,6 @@ defmodule Philomena.Images do
   alias Philomena.Reports
   alias Philomena.Comments
   alias Philomena.Galleries
-  alias Philomena.Images.ImagePage
   alias Philomena.Images.Query, as: ImageQuery
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
@@ -339,57 +340,7 @@ defmodule Philomena.Images do
     end
   end
 
-  ## Forms and uploads
-
-  defp image_permitted?(%Actor{} = actor, action, %Image{} = image) do
-    write_access?(actor) and permitted?(actor, action, image) and
-      match?(:ok, Filtering.verify_not_forced(actor, image))
-  end
-
-  defp control_for(%Actor{} = actor, action, %Image{} = image, control) do
-    Forms.change_if(
-      fn -> control.render(image) end,
-      image_permitted?(actor, action, image)
-    )
-  end
-
-  defp image_interaction_allowed?(%Actor{user: nil}, _image), do: false
-  defp image_interaction_allowed?(_actor, %Image{hidden_from_users: true}), do: false
-
-  defp image_interaction_allowed?(actor, image) do
-    with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, :vote, image),
-         :ok <- Filtering.verify_not_forced(actor, image) do
-      true
-    else
-      _error -> false
-    end
-  end
-
-  defp comment_changeset_for(_actor, %Image{hidden_from_users: true}), do: nil
-
-  defp comment_changeset_for(actor, image) do
-    with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, :create_comment, image),
-         :ok <- Filtering.verify_not_forced(actor, image) do
-      Comments.new_comment_changeset()
-    else
-      _error -> nil
-    end
-  end
-
-  defp image_changeset_for(actor, image, action) do
-    with :ok <- verify_write_access(actor),
-         :ok <- authorize(actor, action, image),
-         :ok <- Filtering.verify_not_forced(actor, image) do
-      change_image(%{image | sources: sources_for_edit(image.sources)})
-    else
-      _error -> nil
-    end
-  end
-
-  defp sources_for_edit([]), do: [%Source{}]
-  defp sources_for_edit(sources), do: sources
+  ## Uploads
 
   defp async_upload(image, upload) do
     linked_pid =
@@ -676,6 +627,220 @@ defmodule Philomena.Images do
   defp deleted_vote_type(%{unupvote: {1, _}}), do: "upvote"
   defp deleted_vote_type(_changes), do: "vote"
 
+  ## Display
+
+  defp image_permitted?(%Actor{} = actor, action, %Image{} = image) do
+    write_access?(actor) and permitted?(actor, action, image) and
+      match?(:ok, Filtering.verify_not_forced(actor, image))
+  end
+
+  defp control_for(%Actor{} = actor, action, %Image{} = image, control) do
+    Forms.change_if(
+      fn -> control.render(image) end,
+      image_permitted?(actor, action, image)
+    )
+  end
+
+  defp display_comments(%Actor{} = actor, %Image{} = image, comments, changeset \\ nil) do
+    changeset =
+      if image_permitted?(actor, :create_comment, image) do
+        changeset || Comments.new_comment_changeset()
+      end
+
+    Display.Comments.render(image, permitted?(actor, :hide, image), comments, changeset)
+  end
+
+  defp display_description(%Actor{} = actor, %Image{} = image, changeset \\ nil) do
+    changeset =
+      if image_permitted?(actor, :edit_description, image) do
+        changeset ||
+          image
+          |> DescriptionInput.render()
+          |> DescriptionInput.changeset()
+      end
+
+    Display.Description.render(image, permitted?(actor, :hide, image), changeset)
+  end
+
+  defp display_gallery_choices(%Actor{} = actor, %Image{}, choices) do
+    Enum.map(choices, fn {gallery, present?} ->
+      action = if present?, do: :remove_image, else: :add_image
+
+      %Display.GalleryChoice{
+        id: gallery.id,
+        name: gallery.title,
+        present?: present?,
+        changeset:
+          Forms.change_if(
+            fn -> %Display.GalleryInteraction{} end,
+            write_access?(actor) and permitted?(actor, action, gallery)
+          )
+      }
+    end)
+  end
+
+  defp display_galleries(%Actor{} = actor, %Image{} = image, choices) do
+    changeset =
+      case Galleries.new_gallery(actor) do
+        {:ok, changeset} -> changeset
+        {:error, _reason} -> nil
+      end
+
+    %Display.Galleries{
+      choices: display_gallery_choices(actor, image, choices),
+      changeset: changeset
+    }
+  end
+
+  defp show_vote_counts?(%User{settings: %{hide_vote_counts: hide_vote_counts}}),
+    do: not hide_vote_counts
+
+  defp show_vote_counts?(_user), do: true
+
+  defp display_interactions(%Actor{user: user} = actor, %Image{} = image, image_interactions) do
+    faved? = Enum.any?(image_interactions, &(&1.interaction_type == "faved"))
+    hidden? = Enum.any?(image_interactions, &(&1.interaction_type == "hidden"))
+
+    upvoted? =
+      Enum.any?(image_interactions, &(&1.interaction_type == "voted" and &1.value == "up"))
+
+    downvoted? =
+      Enum.any?(image_interactions, &(&1.interaction_type == "voted" and &1.value == "down"))
+
+    Display.Interactions.render(
+      image,
+      %{
+        faved?: faved?,
+        upvoted?: upvoted?,
+        downvoted?: downvoted?,
+        hidden?: hidden?
+      },
+      show_vote_counts?(user),
+      %{
+        fave_changeset: control_for(actor, :vote, image, Display.FaveInteraction),
+        hide_changeset: control_for(actor, :vote, image, Display.HideInteraction),
+        vote_changeset: control_for(actor, :vote, image, Display.VoteInteraction)
+      }
+    )
+  end
+
+  defp display_media(%Actor{} = actor, %Image{} = image) do
+    Display.Media.render(image, permitted?(actor, :hide, image))
+  end
+
+  defp display_metadata(%Actor{}, %Image{} = image) do
+    Display.Metadata.render(image)
+  end
+
+  defp display_moderation_metadata(%Actor{} = actor, %Image{} = image) do
+    Display.ModerationMetadata.render(image, permitted?(actor, :hide, image))
+  end
+
+  defp display_moderation(%Actor{} = actor, %Image{} = image) do
+    %Display.Moderation{
+      hidden_from_users?: image.hidden_from_users,
+      anonymous_changeset: control_for(actor, :update_anonymous, image, Display.Anonymous),
+      approval_changeset:
+        if not image.approved do
+          control_for(actor, :approve, image, Display.Approval)
+        end,
+      comments_lock_changeset: control_for(actor, :lock_comments, image, Display.CommentsLock),
+      description_lock_changeset:
+        control_for(actor, :lock_description, image, Display.DescriptionLock),
+      destruction_changeset:
+        if image.hidden_from_users do
+          control_for(actor, :destroy, image, Display.Destruction)
+        end,
+      feature_changeset: control_for(actor, :feature, image, Display.Feature),
+      file_changeset: control_for(actor, :replace_file, image, Display.File),
+      hash_changeset: control_for(actor, :remove_hash, image, Display.Hash),
+      hide_changeset: control_for(actor, :hide, image, Display.Hide),
+      locked_tags_changeset: control_for(actor, :lock_tags, image, Display.LockedTags),
+      repair_changeset: control_for(actor, :repair, image, Display.Repair),
+      scratchpad_changeset: control_for(actor, :edit_scratchpad, image, Display.Scratchpad),
+      source_history_changeset:
+        control_for(actor, :remove_source_history, image, Display.SourceHistory),
+      tags_lock_changeset: control_for(actor, :lock_tags, image, Display.TagsLock),
+      uploader_input_changeset: control_for(actor, :update_uploader, image, Display.UploaderInput)
+    }
+  end
+
+  defp display_sources(%Actor{} = actor, %Image{} = image, source_changes_count, changeset \\ nil) do
+    changeset =
+      if image_permitted?(actor, :edit_metadata, image) do
+        changeset ||
+          image
+          |> Display.SourceInput.render()
+          |> Display.SourceInput.changeset()
+      end
+
+    Display.Sources.render(image, source_changes_count, changeset)
+  end
+
+  defp display_subscription(%Actor{user: user}, %Image{} = image, subscribed?) do
+    changeset =
+      if user do
+        image
+        |> Display.SubscriptionInteraction.render()
+        |> Display.SubscriptionInteraction.changeset()
+      end
+
+    Display.Subscription.render(subscribed?, changeset)
+  end
+
+  defp display_tags(
+         %Actor{} = actor,
+         %Image{} = image,
+         tag_changes_count,
+         tag_change_tags_count,
+         changeset \\ nil
+       ) do
+    changeset =
+      if image_permitted?(actor, :edit_metadata, image) do
+        changeset ||
+          image
+          |> Display.TagInput.render()
+          |> Display.TagInput.changeset()
+      end
+
+    Display.Tags.render(image, tag_changes_count, tag_change_tags_count, changeset)
+  end
+
+  defp display_uploader(%Actor{} = actor, %Image{} = image) do
+    identity_metadata =
+      if permitted?(actor, :show, :identity_metadata) do
+        %Philomena.Attribution.Display.IdentityMetadata{
+          ip: image.ip,
+          fingerprint: image.fingerprint
+        }
+      end
+
+    uploader =
+      cond do
+        image.user && not image.anonymous ->
+          {:user,
+           %Philomena.Attribution.Display.UserAttribution{
+             user: image.user,
+             awards: image.user.awards
+           }}
+
+        image.user && permitted?(actor, :reveal_anon, image) ->
+          {:anonymous_revealed,
+           %Philomena.Attribution.Display.AnonymousRevealedAttribution{
+             discriminant: AnonymousName.generate(image, true),
+             user: image.user
+           }}
+
+        true ->
+          {:anonymous,
+           %Philomena.Attribution.Display.AnonymousAttribution{
+             discriminant: AnonymousName.generate(image)
+           }}
+      end
+
+    %Display.Uploader{identity_metadata: identity_metadata, uploader: uploader}
+  end
+
   @doc group: "Browsing and discovery"
   @doc """
   Loads the most recent featured image visible to `actor`.
@@ -877,7 +1042,7 @@ defmodule Philomena.Images do
 
   @doc group: "Browsing and discovery"
   @doc """
-  Assembles the `ImagePage` for `actor`: the visible page of comments,
+  Assembles the `Display.Page` for `actor`: the visible page of comments,
   the viewer's subscription state, their galleries paired with membership of
   this image, their interactions, and changesets for each action available on
   the page.
@@ -895,56 +1060,48 @@ defmodule Philomena.Images do
   ## Examples
 
       iex> show_image_page(actor, image, page: 1, page_size: 25)
-      %ImagePage{}
+      %Display.Page{}
 
   """
-  @spec show_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: ImagePage.t()
+  @spec show_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: Display.Page.t()
   def show_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
-    # TODO: remove this
-    image = Repo.preload(image, [:user, :tags, :locked_tags])
+    image =
+      Repo.preload(image, [
+        :deleter,
+        :locked_tags,
+        :sources,
+        user: [awards: :badge],
+        tags: :aliases
+      ])
 
     clear_image_notification(image, user)
 
     comment_pagination = maybe_jump_to_last_page(actor, image, comment_pagination)
     {:ok, gallery_choices} = Galleries.gallery_choices_for_image(actor, image)
 
-    can_interact = image_interaction_allowed?(actor, image)
+    comments = Comments.list_image_comments(actor, image, comment_pagination)
+    image_interactions = Interactions.user_interactions(actor, [image])
+    subscribed? = subscribed?(image, user)
 
-    tag_input_changeset = control_for(actor, :edit_metadata, image, TagInput)
-    source_input_changeset = control_for(actor, :edit_metadata, image, SourceInput)
-    description_input_changeset = control_for(actor, :edit_description, image, DescriptionInput)
-
-    # TODO: remove lateral
-    tags =
-      Display.Tags.render(
-        image,
-        image.tag_change_count,
-        image.tag_change_tag_count,
-        tag_input_changeset
-      )
-
-    sources = Display.Sources.render(image, image.source_change_count, source_input_changeset)
-    description = Description.render(image, description_input_changeset)
-
-    %ImagePage{
-      image: image,
-      comments: Comments.list_image_comments(actor, image, comment_pagination),
-      watching: subscribed?(image, user),
-      can_interact: can_interact,
-      user_galleries: gallery_choices,
-      interactions: Interactions.user_interactions(actor, [image]),
-      description: description,
-      tags: tags,
-      sources: sources,
-      comment_changeset: comment_changeset_for(actor, image),
-      file_changeset: image_changeset_for(actor, image, :replace_file),
-      hide_changeset: control_for(actor, :hide, image, Hide),
-      feature_changeset: image_changeset_for(actor, image, :feature),
-      repair_changeset: image_changeset_for(actor, image, :repair),
-      hash_changeset: image_changeset_for(actor, image, :remove_hash),
-      source_history_changeset: control_for(actor, :remove_source_history, image, SourceHistory),
-      uploader_changeset: control_for(actor, :update_uploader, image, UploaderInput),
-      anonymous_changeset: control_for(actor, :update_anonymous, image, Anonymous)
+    %Display.Page{
+      interactions: display_interactions(actor, image, image_interactions),
+      metadata: display_metadata(actor, image),
+      subscription: display_subscription(actor, image, subscribed?),
+      galleries: display_galleries(actor, image, gallery_choices),
+      media: display_media(actor, image),
+      uploader: display_uploader(actor, image),
+      description: display_description(actor, image),
+      tags:
+        display_tags(
+          actor,
+          image,
+          image.tag_change_count,
+          image.tag_change_tag_count
+        ),
+      sources: display_sources(actor, image, image.source_change_count),
+      moderation: display_moderation(actor, image),
+      moderation_metadata: display_moderation_metadata(actor, image),
+      comments: display_comments(actor, image, comments)
     }
   end
 
@@ -2483,13 +2640,15 @@ defmodule Philomena.Images do
           broadcast_description_update(image, old_image.description)
 
           description_input = DescriptionInput.render(image)
-          description = Description.render(image, DescriptionInput.changeset(description_input))
+
+          description =
+            Description.render(image, true, DescriptionInput.changeset(description_input))
 
           {:ok, %{description_input: description_input, description: description}}
 
         {:error, :image, %Ecto.Changeset{} = changeset, %{locked_image: %Image{} = image}} ->
           changeset = Forms.copy_errors(changeset, description_input)
-          description = Description.render(image, changeset)
+          description = Description.render(image, true, changeset)
 
           {:error, %{changeset: changeset, description: description}}
 

@@ -13,6 +13,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.ImageHides.ImageHide
   alias Philomena.Galleries.Interaction
   alias Philomena.Images
+  alias Philomena.Images.Display
   alias Philomena.Images.Display.LockedTags
   alias Philomena.ImageVotes
   alias Philomena.ImageVotes.ImageVote
@@ -25,7 +26,6 @@ defmodule Philomena.ImagesTest do
   alias Philomena.TagChanges.Limits
   alias Philomena.TagChanges.TagChange
   alias Philomena.Images.Image
-  alias Philomena.Images.ImagePage
   alias Philomena.Images.Search.Scope
   alias Philomena.Tags.Tag
   alias PhilomenaQuery.Search
@@ -4097,7 +4097,7 @@ defmodule Philomena.ImagesTest do
                  add_source_attrs("https://example.com/art")
                )
 
-      assert sources.source_change_count == 1
+      assert sources.source_changes_count == 1
       assert source_input.old_sources == source_input.sources
       assert Enum.map(source_input.sources, & &1.source) == ["https://example.com/art"]
 
@@ -4678,22 +4678,23 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
-      assert %ImagePage{} = page
-      assert page.image.id == image.id
-      assert %Scrivener.Page{} = page.comments
-      assert is_boolean(page.watching)
-      assert is_list(page.user_galleries)
-      assert is_list(page.interactions)
-      assert %Ecto.Changeset{} = page.comment_changeset
+      assert %Display.Page{} = page
+      assert page.metadata.id == image.id
+      assert %Scrivener.Page{} = page.comments.comments
+      assert is_boolean(page.subscription.subscribed?)
+      assert is_list(page.galleries.choices)
+      assert %Display.Interactions{} = page.interactions
+      assert %Ecto.Changeset{} = page.interactions.vote_changeset
+      assert %Ecto.Changeset{} = page.comments.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
       refute page.description.changeset
-      refute page.hide_changeset
-      refute page.file_changeset
-      refute page.feature_changeset
-      refute page.repair_changeset
-      refute page.hash_changeset
-      refute page.uploader_changeset
+      refute page.moderation.hide_changeset
+      refute page.moderation.file_changeset
+      refute page.moderation.feature_changeset
+      refute page.moderation.repair_changeset
+      refute page.moderation.hash_changeset
+      refute page.moderation.uploader_input_changeset
     end
 
     test "assembles the page struct for an anonymous viewer" do
@@ -4701,11 +4702,12 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(), image, page: 1, page_size: 25)
 
-      assert %ImagePage{} = page
-      refute page.watching
-      assert page.user_galleries == []
-      assert page.interactions == []
-      refute page.can_interact
+      assert %Display.Page{} = page
+      refute page.subscription.subscribed?
+      refute page.subscription.changeset
+      assert page.galleries.choices == []
+      refute page.galleries.changeset
+      refute page.interactions.vote_changeset
     end
 
     test "a banned viewer gets no write controls or mutation changesets" do
@@ -4714,18 +4716,19 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(user, ban: @ban), image, page: 1, page_size: 25)
 
-      refute page.can_interact
-      assert page.interactions == []
-      assert page.comment_changeset == nil
+      assert page.interactions.vote_changeset == nil
+      assert page.interactions.fave_changeset == nil
+      assert page.interactions.hide_changeset == nil
+      assert page.comments.changeset == nil
       assert page.description.changeset == nil
       assert page.tags.changeset == nil
       assert page.sources.changeset == nil
-      assert page.file_changeset == nil
-      assert page.hide_changeset == nil
-      assert page.feature_changeset == nil
-      assert page.repair_changeset == nil
-      assert page.hash_changeset == nil
-      assert page.uploader_changeset == nil
+      assert page.moderation.file_changeset == nil
+      assert page.moderation.hide_changeset == nil
+      assert page.moderation.feature_changeset == nil
+      assert page.moderation.repair_changeset == nil
+      assert page.moderation.hash_changeset == nil
+      assert page.moderation.uploader_input_changeset == nil
     end
 
     test "a forced-filtered image gets no write controls or mutation changesets" do
@@ -4736,38 +4739,40 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
-      refute page.can_interact
-      assert page.interactions == []
-      assert page.comment_changeset == nil
+      assert page.interactions.vote_changeset == nil
+      assert page.interactions.fave_changeset == nil
+      assert page.interactions.hide_changeset == nil
+      assert page.comments.changeset == nil
       assert page.description.changeset == nil
       assert page.tags.changeset == nil
       assert page.sources.changeset == nil
-      assert page.file_changeset == nil
-      assert page.hide_changeset == nil
-      assert page.feature_changeset == nil
-      assert page.repair_changeset == nil
-      assert page.hash_changeset == nil
-      assert page.uploader_changeset == nil
+      assert page.moderation.file_changeset == nil
+      assert page.moderation.hide_changeset == nil
+      assert page.moderation.feature_changeset == nil
+      assert page.moderation.repair_changeset == nil
+      assert page.moderation.hash_changeset == nil
+      assert page.moderation.uploader_input_changeset == nil
     end
 
-    test "a hidden image gets no interaction controls even for a moderator" do
+    test "a hidden image gets interaction controls for a moderator" do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
       page = Images.show_image_page(actor(moderator), image, page: 1, page_size: 25)
 
-      refute page.can_interact
-      assert page.interactions == []
-      assert page.comment_changeset == nil
+      assert %Ecto.Changeset{} = page.interactions.vote_changeset
+      assert %Ecto.Changeset{} = page.interactions.fave_changeset
+      assert %Ecto.Changeset{} = page.interactions.hide_changeset
+      assert %Ecto.Changeset{} = page.comments.changeset
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
-      assert %Ecto.Changeset{} = page.file_changeset
-      assert %Ecto.Changeset{} = page.hide_changeset
-      assert %Ecto.Changeset{} = page.feature_changeset
-      assert %Ecto.Changeset{} = page.repair_changeset
-      assert %Ecto.Changeset{} = page.hash_changeset
-      assert %Ecto.Changeset{} = page.uploader_changeset
+      assert %Ecto.Changeset{} = page.moderation.file_changeset
+      assert %Ecto.Changeset{} = page.moderation.hide_changeset
+      assert %Ecto.Changeset{} = page.moderation.feature_changeset
+      assert %Ecto.Changeset{} = page.moderation.repair_changeset
+      assert %Ecto.Changeset{} = page.moderation.hash_changeset
+      assert %Ecto.Changeset{} = page.moderation.uploader_input_changeset
     end
 
     test "an image uploader can edit the description" do
@@ -4779,7 +4784,7 @@ defmodule Philomena.ImagesTest do
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
-      refute page.hide_changeset
+      refute page.moderation.hide_changeset
     end
 
     test "staff gets changesets for image management actions" do
@@ -4791,12 +4796,12 @@ defmodule Philomena.ImagesTest do
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
       assert %Ecto.Changeset{} = page.sources.changeset
-      assert %Ecto.Changeset{} = page.file_changeset
-      assert %Ecto.Changeset{} = page.hide_changeset
-      assert %Ecto.Changeset{} = page.feature_changeset
-      assert %Ecto.Changeset{} = page.repair_changeset
-      assert %Ecto.Changeset{} = page.hash_changeset
-      assert %Ecto.Changeset{} = page.uploader_changeset
+      assert %Ecto.Changeset{} = page.moderation.file_changeset
+      assert %Ecto.Changeset{} = page.moderation.hide_changeset
+      assert %Ecto.Changeset{} = page.moderation.feature_changeset
+      assert %Ecto.Changeset{} = page.moderation.repair_changeset
+      assert %Ecto.Changeset{} = page.moderation.hash_changeset
+      assert %Ecto.Changeset{} = page.moderation.uploader_input_changeset
     end
 
     test "watching is true once the viewer is subscribed" do
@@ -4806,7 +4811,7 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
-      assert page.watching
+      assert page.subscription.subscribed?
     end
 
     test "user_galleries pairs each of the viewer's galleries with image membership" do
@@ -4819,7 +4824,7 @@ defmodule Philomena.ImagesTest do
       page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
 
       memberships =
-        Map.new(page.user_galleries, fn {gallery, member?} -> {gallery.id, member?} end)
+        Map.new(page.galleries.choices, fn choice -> {choice.id, choice.present?} end)
 
       assert memberships[containing.id] == true
       assert memberships[empty.id] == false
@@ -4851,7 +4856,7 @@ defmodule Philomena.ImagesTest do
       page = Images.show_image_page(actor(user), image, page: 1, page_size: 2)
 
       # Three comments over a page size of two put the newest on the second page.
-      assert page.comments.page_number == 2
+      assert page.comments.comments.page_number == 2
     end
 
     test "a viewer without the jump preference stays on the requested page" do
@@ -4861,7 +4866,7 @@ defmodule Philomena.ImagesTest do
 
       page = Images.show_image_page(actor(user), image, page: 1, page_size: 2)
 
-      assert page.comments.page_number == 1
+      assert page.comments.comments.page_number == 1
     end
   end
 

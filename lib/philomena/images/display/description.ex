@@ -17,7 +17,14 @@ defmodule Philomena.Images.Display.Description do
         }
 
   @doc false
-  def render(%Image{description: description}, changeset) do
-    %__MODULE__{body: description, changeset: changeset}
+  def render(%Image{} = image, may_reveal_description_on_hidden_image?, changeset) do
+    body =
+      if not image.hidden_from_users or may_reveal_description_on_hidden_image? do
+        image.description
+      else
+        ""
+      end
+
+    %__MODULE__{body: body, changeset: changeset}
   end
 end

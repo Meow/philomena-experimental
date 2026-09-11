@@ -11,6 +11,6 @@ defmodule Philomena.Images.Display.Galleries do
   @type t :: %__MODULE__{
           choices: [GalleryChoice.t()],
           # TODO(presentation-split)
-          changeset: Ecto.Changeset.t(Philomena.Galleries.Gallery.t())
+          changeset: Ecto.Changeset.t(Philomena.Galleries.Gallery.t()) | nil
         }
 end

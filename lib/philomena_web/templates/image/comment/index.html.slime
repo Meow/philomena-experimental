@@ -1,5 +1,7 @@
 elixir:
-  route = fn p -> ~p"/images/#{@image}/comments?#{p}" end
+  image_id = assigns[:image_id] || @image.id
+  comments_count = assigns[:comments_count] || @image.comments_count
+  route = fn p -> ~p"/images/#{image_id}/comments?#{p}" end
   pagination = render PhilomenaWeb.PaginationView, "_pagination.html", page: @comments, route: route
 
 .block
@@ -7,8 +9,8 @@ elixir:
     .page__pagination = pagination
     .page__info
       span.block__header__title
-        =<> @image.comments_count
-        => pluralize("comment", "comments", @image.comments_count)
+        =<> comments_count
+        => pluralize("comment", "comments", comments_count)
         ' posted
       button.button#js-refresh-comments title="Refresh" data-disable-with="..."
         i.fa.fa-sync

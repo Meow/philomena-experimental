@@ -8,31 +8,31 @@
     .block
       .block__content.add-to-gallery-list
         .block__list
-          a.block__list__link.primary href=~p"/galleries?#{[gallery: [include_image: @image.id]]}"
+          a.block__list__link.primary href=~p"/galleries?#{[gallery: [include_image: @image_id]]}"
             i.fa.fa-table>
             span.hide-mobile Featured in
 
-        = if Enum.any?(@user_galleries) do
+        = if Enum.any?(@galleries.choices) do
           ul.block__list.js-gallery-list
-            = for {gallery, present} <- @user_galleries do
-              = if present do
+            = for choice <- @galleries.choices, choice.changeset do
+              = if choice.present? do
                 / Options to remove
-                li id="gallery_#{gallery.id}"
-                  a.block__list__link.js-gallery-add.hidden data-fetchcomplete-hide="#gallery_#{gallery.id} .js-gallery-add" data-fetchcomplete-show="#gallery_#{gallery.id} .js-gallery-remove" data-method="post" data-remote="true" href=~p"/galleries/#{gallery}/images?#{[image_id: @image.id]}"
-                    = gallery.title
-                  a.block__list__link.active.js-gallery-remove data-fetchcomplete-hide="#gallery_#{gallery.id} .js-gallery-remove" data-fetchcomplete-show="#gallery_#{gallery.id} .js-gallery-add" data-method="delete" data-remote="true" href=~p"/galleries/#{gallery}/images?#{[image_id: @image.id]}"
-                    = gallery.title
+                li id="gallery_#{choice.id}"
+                  a.block__list__link.js-gallery-add.hidden data-fetchcomplete-hide="#gallery_#{choice.id} .js-gallery-add" data-fetchcomplete-show="#gallery_#{choice.id} .js-gallery-remove" data-method="post" data-remote="true" href=~p"/galleries/#{choice.id}/images?#{[image_id: @image_id]}"
+                    = choice.name
+                  a.block__list__link.active.js-gallery-remove data-fetchcomplete-hide="#gallery_#{choice.id} .js-gallery-remove" data-fetchcomplete-show="#gallery_#{choice.id} .js-gallery-add" data-method="delete" data-remote="true" href=~p"/galleries/#{choice.id}/images?#{[image_id: @image_id]}"
+                    = choice.name
               - else
                 / Options to add
-                li id="gallery_#{gallery.id}"
-                  a.block__list__link.js-gallery-add data-fetchcomplete-hide="#gallery_#{gallery.id} .js-gallery-add" data-fetchcomplete-show="#gallery_#{gallery.id} .js-gallery-remove" data-method="post" data-remote="true" href=~p"/galleries/#{gallery}/images?#{[image_id: @image.id]}"
-                    = gallery.title
-                  a.block__list__link.active.js-gallery-remove.hidden data-fetchcomplete-hide="#gallery_#{gallery.id} .js-gallery-remove" data-fetchcomplete-show="#gallery_#{gallery.id} .js-gallery-add" data-method="delete" data-remote="true" href=~p"/galleries/#{gallery}/images?#{[image_id: @image.id]}"
-                    = gallery.title
+                li id="gallery_#{choice.id}"
+                  a.block__list__link.js-gallery-add data-fetchcomplete-hide="#gallery_#{choice.id} .js-gallery-add" data-fetchcomplete-show="#gallery_#{choice.id} .js-gallery-remove" data-method="post" data-remote="true" href=~p"/galleries/#{choice.id}/images?#{[image_id: @image_id]}"
+                    = choice.name
+                  a.block__list__link.active.js-gallery-remove.hidden data-fetchcomplete-hide="#gallery_#{choice.id} .js-gallery-remove" data-fetchcomplete-show="#gallery_#{choice.id} .js-gallery-add" data-method="delete" data-remote="true" href=~p"/galleries/#{choice.id}/images?#{[image_id: @image_id]}"
+                    = choice.name
 
         .block__list
-          = if @conn.assigns.current_user do
-            a.block__list__link.primary href=~p"/galleries/new?#{[with_image: @image.id]}"
+          = if @galleries.changeset do
+            a.block__list__link.primary href=~p"/galleries/new?#{[with_image: @image_id]}"
               i.fa.fa-plus>
               span.hide-limited-desktop.hide-mobile Create a gallery
           - else

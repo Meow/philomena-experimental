@@ -1,14 +1,16 @@
-- display_mod_tools? = can?(@conn, :hide, @image)
+- display_mod_tools? = moderation_controls?(@page.moderation)
+- image_id = @page.metadata.id
+- scratchpad = if @page.moderation.scratchpad_changeset, do: @page.moderation.scratchpad_changeset.data.scratchpad
 
 #image_options_area
   .block__header.block__header--js-tabbed
-    a href="#" data-click-tab="reporting" data-load-tab=~p"/images/#{@image}/reporting"
+    a href="#" data-click-tab="reporting" data-load-tab=~p"/images/#{image_id}/reporting"
       i.fa.fa-exclamation-triangle>
       | Report
     a href="#" data-click-tab="sharing"
       i.fa.fa-share>
       | Share
-    a href="#" data-click-tab="favoriters" data-load-tab=~p"/images/#{@image}/favorites"
+    a href="#" data-click-tab="favoriters" data-load-tab=~p"/images/#{image_id}/favorites"
       i.fa.fa-star>
       | List favoriters
     = if display_mod_tools? and not hide_staff_tools?(@conn) do
@@ -18,7 +20,7 @@
       a href="#" data-click-tab="administration"
         i.fa.fa-toolbox>
         | Manage
-        = if present?(@image.scratchpad) do
+        = if present?(scratchpad) do
           i.fa.fa-sticky-note.fa--important<
           i.fa.fa-exclamation.fa--important
 
@@ -28,24 +30,24 @@
     p Loading...
   .block__tab.hidden data-tab="sharing"
     #embed_options
-      - source_link = if image_has_sources(@image), do: " - [url=#{image_first_source(@image)}]Original source[/url]", else: " (Original source unknown at time of posting)"
-      - medium_url = thumb_url(@image, false, select_version(@image, :medium))
+      - source_link = if image_has_sources(@page.sources), do: " - [url=#{image_first_source(@page.sources)}]Original source[/url]", else: " (Original source unknown at time of posting)"
+      - medium_url = case @page.media.thumbnails do {:thumbnails, thumbnails} -> thumbnails.medium.uri; _ -> nil end
       h5 Derpibooru
       p
         strong> Small thumbnail
-        input.input#embed_small_thumbnail_tag type="text" value=">>#{@image.id}s" cols="10" readonly="readonly"
+        input.input#embed_small_thumbnail_tag type="text" value=">>#{image_id}s" cols="10" readonly="readonly"
         a< href="#" data-click-copy="#embed_small_thumbnail_tag"
           i.fa.fa-clipboard>
           | Copy
       p
         strong> Thumbnail
-        input.input#embed_thumbnail_tag type="text" value=">>#{@image.id}t" cols="10" readonly="readonly"
+        input.input#embed_thumbnail_tag type="text" value=">>#{image_id}t" cols="10" readonly="readonly"
         a< href="#" data-click-copy="#embed_thumbnail_tag"
           i.fa.fa-clipboard>
           | Copy
       p
         strong> Preview
-        input.input#embed_preview_tag type="text" value=">>#{@image.id}p" cols="10" readonly="readonly"
+        input.input#embed_preview_tag type="text" value=">>#{image_id}p" cols="10" readonly="readonly"
         a< href="#" data-click-copy="#embed_preview_tag"
           i.fa.fa-clipboard>
           | Copy
@@ -57,7 +59,7 @@
           | Copy
         br
         textarea.input.input--wide.input--separate-top#bbcode_embed_full_tag rows="2" cols="100" readonly="readonly"
-          = "[img]#{medium_url}[/img]\n[url=#{url(~p"/images/#{@image}")}]View on Derpibooru[/url]#{source_link}"
+          = "[img]#{medium_url}[/img]\n[url=#{url(~p"/images/#{image_id}")}]View on Derpibooru[/url]#{source_link}"
       p
         strong> Thumbnailed BBcode
         a href="#" data-click-copy="#bbcode_embed_thumbnail_tag"
@@ -65,96 +67,105 @@
           | Copy
         br
         textarea.input.input--wide.input--separate-top#bbcode_embed_thumbnail_tag rows="2" cols="100" readonly="readonly"
-          = "[img]#{medium_url}[/img]\n[url=#{url(~p"/images/#{@image}")}]View on Derpibooru[/url]#{source_link}"
+          = "[img]#{medium_url}[/img]\n[url=#{url(~p"/images/#{image_id}")}]View on Derpibooru[/url]#{source_link}"
 
   = if display_mod_tools? do
     .block__tab.hidden data-tab="replace"
-      = form_for @file_changeset, ~p"/images/#{@image}/file", [method: "put", multipart: true], fn f ->
-        #js-image-upload-previews
-        p Upload a file from your computer
-        .field
-          = file_input f, :image, class: "input js-scraper"
+      = if @page.moderation.file_changeset do
+        = form_for @page.moderation.file_changeset, ~p"/images/#{image_id}/file", [method: "put", multipart: true], fn f ->
+          #js-image-upload-previews
+          p Upload a file from your computer
+          .field
+            = file_input f, :image, class: "input js-scraper"
 
-        .field.field--inline
-          = url_input f, :scraper_url, class: "input input--wide js-scraper", placeholder: "Link a deviantART page, a Tumblr post, or the image directly"
-          button.button.button--separate-left#js-scraper-preview(type="button" title="Fetch the image at the specified URL" data-disable-with="Fetch" disabled)
-            ' Fetch
+          .field.field--inline
+            = url_input f, :scraper_url, class: "input input--wide js-scraper", placeholder: "Link a deviantART page, a Tumblr post, or the image directly"
+            button.button.button--separate-left#js-scraper-preview(type="button" title="Fetch the image at the specified URL" data-disable-with="Fetch" disabled)
+              ' Fetch
 
-        .field-error-js.hidden.js-scraper
+          .field-error-js.hidden.js-scraper
 
-        = submit "Save changes", class: "button", data: [disable_with: raw("Replacing&hellip;")]
+          = submit "Save changes", class: "button", data: [disable_with: raw("Replacing&hellip;")]
 
     .block__tab.hidden data-tab="administration"
-      .block.block--danger
-        a.button.button--link> href=~p"/images/#{@image}/scratchpad/edit"
-          i.far.fa-edit
-        = if present?(@image.scratchpad) do
-          strong> Mod notes:
-          = escape_nl2br @image.scratchpad
-        - else
-          em No mod notes present
+      = if @page.moderation.scratchpad_changeset do
+        .block.block--danger
+          a.button.button--link> href=~p"/images/#{image_id}/scratchpad/edit"
+            i.far.fa-edit
+          = if present?(scratchpad) do
+            strong> Mod notes:
+            = escape_nl2br scratchpad
+          - else
+            em No mod notes present
 
-      = if @hide_changeset do
-        = if @image.hidden_from_users do
-          = form_for @hide_changeset, ~p"/images/#{@image}/delete", [method: "put"], fn f ->
+      = if @page.moderation.hide_changeset do
+        = if @page.moderation.hidden_from_users? do
+          = form_for @page.moderation.hide_changeset, ~p"/images/#{image_id}/delete", [method: "put"], fn f ->
             = label f, :deletion_reason, "Deletion reason (cannot be empty)"
             .field.field--inline
               = text_input f, :deletion_reason, class: "input input--wide", placeholder: "Rule violation", required: true
               = submit "Change deletion reason", class: "button button--state-danger button--separate-left"
         - else
-          = form_for @hide_changeset, ~p"/images/#{@image}/delete", [method: "post"], fn f ->
+          = form_for @page.moderation.hide_changeset, ~p"/images/#{image_id}/delete", [method: "post"], fn f ->
             = label f, :deletion_reason, "Deletion reason (cannot be empty)"
             .field.field--inline
               = text_input f, :deletion_reason, class: "input input--wide", placeholder: "Rule violation", required: true
               = submit "Delete", class: "button button--state-danger button--separate-left"
 
       .flex.flex--spaced-out.flex--wrap
-        = if not @image.hidden_from_users do
-          = form_for @feature_changeset, ~p"/images/#{@image}/feature", [method: "post"], fn _f ->
+        = if @page.moderation.feature_changeset do
+          = form_for @page.moderation.feature_changeset, ~p"/images/#{image_id}/feature", [method: "post"], fn _f ->
             .field
               p Marks the image as featured
               = submit "Feature", data: [confirm: "Are you really, really sure?"], class: "button button--state-success"
-        - else
-          = button_to "Restore", ~p"/images/#{@image}/delete", method: "delete", class: "button button--state-success"
 
-        = form_for @repair_changeset, ~p"/images/#{@image}/repair", [method: "post"], fn _f ->
-          .field
-            = submit "Repair", class: "button button--state-success"
+        = if @page.moderation.hidden_from_users? and @page.moderation.hide_changeset do
+          = button_to "Restore", ~p"/images/#{image_id}/delete", method: "delete", class: "button button--state-success"
 
-        = form_for @hash_changeset, ~p"/images/#{@image}/hash", [method: "delete"], fn _f ->
-          .field
-            p Allows reuploading the image
-            .flex.flex--end-bunched
-              = submit "Clear hash", data: [confirm: "Are you really, really sure?"], class: "button button--state-danger"
+        = if @page.moderation.repair_changeset do
+          = form_for @page.moderation.repair_changeset, ~p"/images/#{image_id}/repair", [method: "post"], fn _f ->
+            .field
+              = submit "Repair", class: "button button--state-success"
 
-      br
-      .flex.flex--spaced-out
-        = if @image.commenting_allowed do
-          = button_to "Lock commenting", ~p"/images/#{@image}/comment_lock", method: "post", class: "button"
-        - else
-          = button_to "Unlock commenting", ~p"/images/#{@image}/comment_lock", method: "delete", class: "button"
-
-        = if @image.description_editing_allowed do
-          = button_to "Lock description editing", ~p"/images/#{@image}/description_lock", method: "post", class: "button"
-        - else
-          = button_to "Unlock description editing", ~p"/images/#{@image}/description_lock", method: "delete", class: "button"
-
-        = if @image.tag_editing_allowed do
-          = button_to "Lock tag editing", ~p"/images/#{@image}/tags_lock", method: "post", class: "button"
-        - else
-          = button_to "Unlock tag editing", ~p"/images/#{@image}/tags_lock", method: "delete", class: "button"
+        = if @page.moderation.hash_changeset do
+          = form_for @page.moderation.hash_changeset, ~p"/images/#{image_id}/hash", [method: "delete"], fn _f ->
+            .field
+              p Allows reuploading the image
+              .flex.flex--end-bunched
+                = submit "Clear hash", data: [confirm: "Are you really, really sure?"], class: "button button--state-danger"
 
       br
       .flex.flex--spaced-out
-        = link "Lock specific tags", to: ~p"/images/#{@image}/locked_tags/edit", class: "button"
-        = if not @image.approved and can?(@conn, :approve, @image) do
-          = button_to "Approve image", ~p"/images/#{@image}/approve", method: "post", class: "button button--state-success", data: [confirm: "Are you sure?"]
-        = if @image.hidden_from_users and can?(@conn, :destroy, @image) do
-          = button_to "Destroy image", ~p"/images/#{@image}/destroy", method: "post", class: "button button--state-danger", data: [confirm: "This action is IRREVERSIBLE. Are you sure?"]
+        = if @page.moderation.comments_lock_changeset do
+          = if @page.moderation.comments_lock_changeset.data.comments_locked do
+            = button_to "Unlock commenting", ~p"/images/#{image_id}/comment_lock", method: "delete", class: "button"
+          - else
+            = button_to "Lock commenting", ~p"/images/#{image_id}/comment_lock", method: "post", class: "button"
+
+        = if @page.moderation.description_lock_changeset do
+          = if @page.moderation.description_lock_changeset.data.description_locked do
+            = button_to "Unlock description editing", ~p"/images/#{image_id}/description_lock", method: "delete", class: "button"
+          - else
+            = button_to "Lock description editing", ~p"/images/#{image_id}/description_lock", method: "post", class: "button"
+
+        = if @page.moderation.tags_lock_changeset do
+          = if @page.moderation.tags_lock_changeset.data.tags_locked do
+            = button_to "Unlock tag editing", ~p"/images/#{image_id}/tags_lock", method: "delete", class: "button"
+          - else
+            = button_to "Lock tag editing", ~p"/images/#{image_id}/tags_lock", method: "post", class: "button"
 
       br
       .flex.flex--spaced-out
-        = if @source_history_changeset do
-          = form_for @source_history_changeset, ~p"/images/#{@image}/source_history", [method: "delete"], fn _f ->
+        = if @page.moderation.locked_tags_changeset do
+          = link "Lock specific tags", to: ~p"/images/#{image_id}/locked_tags/edit", class: "button"
+        = if @page.moderation.approval_changeset do
+          = button_to "Approve image", ~p"/images/#{image_id}/approve", method: "post", class: "button button--state-success", data: [confirm: "Are you sure?"]
+        = if @page.moderation.destruction_changeset do
+          = button_to "Destroy image", ~p"/images/#{image_id}/destroy", method: "post", class: "button button--state-danger", data: [confirm: "This action is IRREVERSIBLE. Are you sure?"]
+
+      br
+      .flex.flex--spaced-out
+        = if @page.moderation.source_history_changeset do
+          = form_for @page.moderation.source_history_changeset, ~p"/images/#{image_id}/source_history", [method: "delete"], fn _f ->
             .field
               = submit "Wipe source history", data: [confirm: "Are you really, really sure?"], class: "button button--state-danger"
