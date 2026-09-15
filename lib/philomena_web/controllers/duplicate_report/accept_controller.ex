@@ -7,15 +7,16 @@ defmodule PhilomenaWeb.DuplicateReport.AcceptController do
 
   def create(conn, %{"duplicate_report_id" => id}) do
     case DuplicateReports.create_duplicate_report_accept(conn.assigns.actor, id) do
-      {:ok, _duplicate_report} ->
+      {:ok, _report, reports} ->
         conn
-        |> put_flash(:info, "Successfully accepted report.")
-        |> redirect(to: ~p"/duplicate_reports")
+        |> put_view(PhilomenaWeb.DuplicateReportView)
+        |> render("_duplicate_reports.html", layout: false, duplicate_reports: reports)
 
       {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Failed to accept report! Maybe someone else already accepted it.")
-        |> redirect(to: ~p"/duplicate_reports")
+        |> send_resp(:multiple_choices, "")
+        |> halt()
 
       error ->
         error

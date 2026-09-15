@@ -7,15 +7,19 @@ defmodule PhilomenaWeb.DuplicateReport.RejectController do
 
   def create(conn, %{"duplicate_report_id" => id}) do
     case DuplicateReports.create_duplicate_report_reject(conn.assigns.actor, id) do
-      {:ok, _report} ->
+      {:ok, report} ->
         conn
-        |> put_flash(:info, "Successfully rejected report.")
-        |> redirect(to: ~p"/duplicate_reports")
+        |> put_view(PhilomenaWeb.DuplicateReportView)
+        |> render("_duplicate_reports.html",
+          layout: false,
+          duplicate_reports: [report]
+        )
 
       {:error, %Ecto.Changeset{}} ->
         conn
         |> put_flash(:error, "Failed to reject report.")
-        |> redirect(to: ~p"/duplicate_reports")
+        |> send_resp(:multiple_choices, "")
+        |> halt()
 
       error ->
         error

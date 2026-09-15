@@ -68,7 +68,7 @@ defmodule Philomena.MixProject do
       {:redix, "~> 1.5"},
       {:remote_ip, "~> 1.2"},
       {:briefly, "~> 0.5"},
-      {:req, "~> 0.7"},
+      {:req, "~> 0.7.4"},
       {:exq, "~> 0.21"},
       {:ex_aws, "~> 2.6"},
       {:ex_aws_s3, "~> 2.5"},

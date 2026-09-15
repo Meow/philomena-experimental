@@ -90,16 +90,23 @@ defmodule Philomena.DuplicateReports do
   defp put_reject_open_reports(%Multi{} = multi) do
     Multi.update_all(
       multi,
-      :reject_open_reports,
+      :rejected_open_reports,
       fn %{locked_source_image: %{id: source_id}, locked_target_image: %{id: target_id}} ->
         from report in DuplicateReport,
           where:
             (report.image_id == ^source_id and report.duplicate_of_image_id == ^target_id) or
               (report.duplicate_of_image_id == ^source_id and report.image_id == ^target_id),
-          where: report.state in ~w(open claimed)
+          where: report.state in ~w(open claimed),
+          select: report.id
       end,
       set: [state: "rejected"]
     )
+  end
+
+  defp affected_reports(report, {_count, ids}) do
+    DuplicateReport
+    |> where([other], other.id in ^Enum.uniq([report.id | ids]))
+    |> preload(^@report_preloads)
   end
 
   @doc """
@@ -381,18 +388,20 @@ defmodule Philomena.DuplicateReports do
   images are checked before row-locked state is changed. The report, competing
   active reports, image merge, and moderation log commit atomically. Merge
   indexing, notifications, thumbnails, and broadcasts run after commit.
+  Returns the accepted report and all affected reports with display associations
+  loaded so callers can refresh both accepted and rejected rows.
 
   ## Examples
 
       iex> create_duplicate_report_accept(moderator, "42")
-      {:ok, %DuplicateReport{}}
+      {:ok, %DuplicateReport{}, [%DuplicateReport{}]}
 
       iex> create_duplicate_report_accept(user, "42")
       {:error, :unauthorized}
 
   """
   @spec create_duplicate_report_accept(Actor.t(), Loader.integer_id()) ::
-          {:ok, map()}
+          {:ok, DuplicateReport.t(), [DuplicateReport.t()]}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def create_duplicate_report_accept(%Actor{user: user} = actor, report_id) do
     with :ok <- verify_write_access(actor),
@@ -402,6 +411,9 @@ defmodule Philomena.DuplicateReports do
       |> put_reject_open_reports()
       |> Multi.update(:duplicate_report, fn %{locked_duplicate_report: duplicate_report} ->
         DuplicateReport.accept_changeset(duplicate_report, user)
+      end)
+      |> Multi.all(:affected_reports, fn %{rejected_open_reports: reports} ->
+        affected_reports(report, reports)
       end)
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -420,8 +432,8 @@ defmodule Philomena.DuplicateReports do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
-          {:ok, duplicate_report}
+        {:ok, %{duplicate_report: duplicate_report, affected_reports: affected}} ->
+          {:ok, duplicate_report, affected}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
@@ -440,16 +452,18 @@ defmodule Philomena.DuplicateReports do
 
   The original report is rejected and a locked reverse-direction report is
   inserted or accepted in the same transaction as the image merge and audit
-  log. Authorization and post-commit behavior match `accept_duplicate_report/2`.
+  log. Returns the accepted reverse report and all affected reports with display
+  associations loaded. Authorization and post-commit behavior match
+  `create_duplicate_report_accept/2`.
 
   ## Examples
 
       iex> create_duplicate_report_accept_reverse(moderator, "42")
-      {:ok, %DuplicateReport{}}
+      {:ok, %DuplicateReport{}, [%DuplicateReport{}, %DuplicateReport{}]}
 
   """
   @spec create_duplicate_report_accept_reverse(Actor.t(), Loader.integer_id()) ::
-          {:ok, map()}
+          {:ok, DuplicateReport.t(), [DuplicateReport.t()]}
           | {:error, :ban | :not_found | :unauthorized | Ecto.Changeset.t()}
   def create_duplicate_report_accept_reverse(%Actor{user: user} = actor, report_id) do
     with :ok <- verify_write_access(actor),
@@ -461,7 +475,6 @@ defmodule Philomena.DuplicateReports do
         :show,
         :accept_reverse
       )
-      |> put_reject_open_reports()
       |> Multi.one(:existing_reverse_report, fn %{locked_duplicate_report: forward_report} ->
         from reverse_report in DuplicateReport,
           where: reverse_report.id != ^forward_report.id,
@@ -470,6 +483,7 @@ defmodule Philomena.DuplicateReports do
           order_by: [desc: :id],
           limit: 1
       end)
+      |> put_reject_open_reports()
       |> Multi.insert_or_update(:reverse_report, fn
         %{existing_reverse_report: nil, locked_duplicate_report: duplicate_report} ->
           %DuplicateReport{
@@ -480,6 +494,10 @@ defmodule Philomena.DuplicateReports do
 
         %{existing_reverse_report: reverse_report} ->
           DuplicateReport.accept_changeset(reverse_report, user)
+      end)
+      |> Multi.all(:affected_reports, fn
+        %{rejected_open_reports: reports, reverse_report: report} ->
+          affected_reports(report, reports)
       end)
       |> ModerationLogs.put_log(
         :moderation_log,
@@ -498,8 +516,8 @@ defmodule Philomena.DuplicateReports do
       end)
       |> Multi.transact()
       |> case do
-        {:ok, %{reverse_report: %DuplicateReport{} = reverse_report}} ->
-          {:ok, reverse_report}
+        {:ok, %{reverse_report: reverse_report, affected_reports: affected}} ->
+          {:ok, reverse_report, affected}
 
         {:error, :reverse_report, %Ecto.Changeset{} = changeset, _changes} ->
           {:error, changeset}
@@ -547,7 +565,7 @@ defmodule Philomena.DuplicateReports do
       |> Multi.transact()
       |> case do
         {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
-          {:ok, duplicate_report}
+          {:ok, Repo.preload(duplicate_report, @report_preloads)}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _steps} ->
           {:error, changeset}
@@ -591,7 +609,7 @@ defmodule Philomena.DuplicateReports do
       |> Multi.transact()
       |> case do
         {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
-          {:ok, duplicate_report}
+          {:ok, Repo.preload(duplicate_report, @report_preloads)}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _steps} ->
           {:error, changeset}
@@ -635,7 +653,7 @@ defmodule Philomena.DuplicateReports do
       |> Multi.transact()
       |> case do
         {:ok, %{duplicate_report: %DuplicateReport{} = duplicate_report}} ->
-          {:ok, duplicate_report}
+          {:ok, Repo.preload(duplicate_report, @report_preloads)}
 
         {:error, :duplicate_report, %Ecto.Changeset{} = changeset, _steps} ->
           {:error, changeset}

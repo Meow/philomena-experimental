@@ -54,6 +54,18 @@ defmodule Philomena.ConversationsTest do
   end
 
   describe "list_conversations/3" do
+    test "sorts unread conversations first from the actor's perspective" do
+      user = confirmed_user_fixture()
+      received = conversation_fixture(confirmed_user_fixture(), user)
+      sent = conversation_fixture(user, confirmed_user_fixture())
+      read = conversation_fixture(confirmed_user_fixture(), user)
+      {:ok, _} = Conversations.update_conversation_read(actor(user), sent.slug, false)
+      {:ok, _} = Conversations.update_conversation_read(actor(user), read.slug)
+
+      assert {:ok, index} = Conversations.list_conversations(actor(user), %{}, @pagination)
+      assert Enum.map(index.conversations.entries, & &1.id) == [sent.id, received.id, read.id]
+    end
+
     test "lists the user's sent and received conversations but not unrelated ones" do
       user = confirmed_user_fixture()
       received = conversation_fixture(confirmed_user_fixture(), user)

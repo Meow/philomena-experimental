@@ -29,7 +29,7 @@ defmodule Philomena.Conversations.QueryBuilder do
         |> conversation_index_query()
         |> maybe_filter_partner(user, query_form)
         |> assign_message_count()
-        |> apply_sort()
+        |> apply_sort(user)
         |> apply_preloads()
 
       {:ok, query, query_form}
@@ -71,8 +71,15 @@ defmodule Philomena.Conversations.QueryBuilder do
       select: %{conversation | message_count: count.value}
   end
 
-  defp apply_sort(query) do
-    order_by(query, desc: :last_message_at, desc: :id)
+  defp apply_sort(query, %User{id: user_id}) do
+    unread_predicate =
+      dynamic(
+        [conversation],
+        (conversation.from_id == ^user_id and not conversation.from_read) or
+          (conversation.to_id == ^user_id and not conversation.to_read)
+      )
+
+    order_by(query, ^[desc: unread_predicate, desc: :last_message_at, desc: :id])
   end
 
   defp apply_preloads(query) do

@@ -112,7 +112,10 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       conn = post(conn, ~p"/images/#{image}/tag_lock")
 
       assert redirected_to(conn) == ~p"/images/#{image}"
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully locked tags."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Successfully locked tags and sources."
+
       refute tags_editable?(image)
     end
 
@@ -122,7 +125,9 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
 
       conn = post(conn, ~p"/images/#{image}/tag_lock")
 
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully locked tags."
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Successfully locked tags and sources."
+
       refute tags_editable?(image)
     end
 
@@ -278,7 +283,10 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
       conn = delete(conn, ~p"/images/#{image}/tag_lock")
 
       assert redirected_to(conn) == ~p"/images/#{image}"
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully unlocked tags."
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Successfully unlocked tags and sources."
+
       assert tags_editable?(image)
     end
 
@@ -288,7 +296,9 @@ defmodule PhilomenaWeb.Image.TagLockControllerTest do
 
       conn = delete(conn, ~p"/images/#{image}/tag_lock")
 
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Successfully unlocked tags."
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Successfully unlocked tags and sources."
+
       assert tags_editable?(image)
     end
 
