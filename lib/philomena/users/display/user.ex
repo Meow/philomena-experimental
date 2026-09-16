@@ -54,6 +54,7 @@ defmodule Philomena.Users.Display.User do
           statistics: statistics()
         }
 
+  @doc false
   def render(%User{} = user) do
     %__MODULE__{
       name: user.name,
