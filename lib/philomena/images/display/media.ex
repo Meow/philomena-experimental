@@ -24,6 +24,8 @@ defmodule Philomena.Images.Display.Media do
   @type version :: %{
           width: pos_integer(),
           height: pos_integer(),
+          # TODO(presentation-split)
+          # mime_type: String.t(),
           uri: String.t()
         }
 
