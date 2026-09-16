@@ -1,4 +1,4 @@
-defmodule Philomena.Attribution.Display.UserAttribution do
+defmodule Philomena.Attribution.Display.User do
   @moduledoc """
   Presentation data for a non-anonymously attributed user and award list.
   """

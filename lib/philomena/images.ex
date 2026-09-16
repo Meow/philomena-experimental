@@ -16,8 +16,6 @@ defmodule Philomena.Images do
   alias Philomena.Multi
   alias Philomena.Repo
 
-  alias Philomena.Attribution.AnonymousName
-
   alias Philomena.Images.Display
 
   alias Philomena.Images.Display.{
@@ -808,35 +806,10 @@ defmodule Philomena.Images do
 
   defp display_uploader(%Actor{} = actor, %Image{} = image) do
     identity_metadata =
-      if permitted?(actor, :show, :identity_metadata) do
-        %Philomena.Attribution.Display.IdentityMetadata{
-          ip: image.ip,
-          fingerprint: image.fingerprint
-        }
-      end
+      Philomena.Attribution.Display.IdentityMetadata.display_identity_metadata(actor, image)
 
     uploader =
-      cond do
-        image.user && not image.anonymous ->
-          {:user,
-           %Philomena.Attribution.Display.UserAttribution{
-             user: image.user,
-             awards: image.user.awards
-           }}
-
-        image.user && permitted?(actor, :reveal_anon, image) ->
-          {:anonymous_revealed,
-           %Philomena.Attribution.Display.AnonymousRevealedAttribution{
-             discriminant: AnonymousName.generate(image, true),
-             user: image.user
-           }}
-
-        true ->
-          {:anonymous,
-           %Philomena.Attribution.Display.AnonymousAttribution{
-             discriminant: AnonymousName.generate(image)
-           }}
-      end
+      Philomena.Attribution.Display.Attribution.display_attribution(actor, image)
 
     %Display.Uploader{identity_metadata: identity_metadata, uploader: uploader}
   end

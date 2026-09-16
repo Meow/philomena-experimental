@@ -7,9 +7,15 @@ span.image_uploader
       = render PhilomenaWeb.ProfileView, "_awards.html", awards: attribution.awards
     - {:anonymous_revealed, attribution} ->
       strong<>
-        = link attribution.discriminant, to: ~p"/profiles/#{attribution.user}"
+        a href=~p"/profiles/#{attribution.user}"
+          => attribution.user.name
+          | (#
+          = attribution.discriminant
+          | , hidden)
     - {:anonymous, attribution} ->
-      strong<> = attribution.discriminant
+      strong<>
+        ' Background Pony #
+        = attribution.discriminant
 
   = if @page.uploader.identity_metadata && not hide_staff_tools?(@conn) do
     => link_to_ip(@conn, @page.uploader.identity_metadata.ip)

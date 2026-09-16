@@ -1,4 +1,4 @@
-defmodule Philomena.Attribution.Display.AnonymousRevealedAttribution do
+defmodule Philomena.Attribution.Display.AnonymousRevealed do
   @moduledoc """
   Presentation data for an anonymously attributed user who is revealed to staff.
   """

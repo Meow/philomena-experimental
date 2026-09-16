@@ -23,19 +23,28 @@ defmodule Philomena.Attribution.AnonymousName do
 
   @spec generate(struct(), boolean()) :: String.t()
   def generate(object, reveal_anonymous? \\ false) do
-    salt = Application.get_env(:philomena, :anonymous_name_salt) |> to_string()
+    if object.user && reveal_anonymous? do
+      "#{object.user.name} (##{discriminant(object)}, hidden)"
+    else
+      "Background Pony ##{discriminant(object)}"
+    end
+  end
+
+  @spec discriminant(struct()) :: String.t()
+  def discriminant(object) do
+    salt = anonymous_name_salt()
     object_id = Attribution.object_identifier(object)
     user_id = Attribution.best_user_identifier(object)
 
     {:ok, <<key::size(16)>>} =
       :pbkdf2.pbkdf2(:sha256, object_id <> user_id, salt, 100, 2)
 
-    hash = key |> Integer.to_string(16) |> String.pad_leading(4, "0")
+    key
+    |> Integer.to_string(16)
+    |> String.pad_leading(4, "0")
+  end
 
-    if object.user && reveal_anonymous? do
-      "#{object.user.name} (##{hash}, hidden)"
-    else
-      "Background Pony ##{hash}"
-    end
+  defp anonymous_name_salt do
+    to_string(Application.get_env(:philomena, :anonymous_name_salt))
   end
 end
