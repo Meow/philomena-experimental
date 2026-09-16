@@ -42,41 +42,72 @@ export function showThumb(img: HTMLDivElement) {
 
   const uris: ImageUris = JSON.parse(urisString);
   const supplements: MediaSupplements = JSON.parse(supplementsString);
+
   if (supplements.type === 'not_rendered' || supplements.type === 'not_available' || supplements.type === 'destroyed') {
     return false;
   }
-  const preview =
-    supplements.type === 'webm' && (size === 'thumb' || size === 'thumb_small' || size === 'thumb_tiny')
-      ? supplements.gif_previews[size].uri
-      : null;
-  const thumbUri = preview ?? uris[size];
 
-  const picEl = $<HTMLPictureElement>('picture', img);
-  if (!picEl) {
-    return supplements.type === 'webm' ? showVideoThumb(img, uris[size], supplements.mp4_thumbnails[size].uri) : false;
+  if (supplements.type === 'webm') {
+    return showVideoPreview(img, size, uris, supplements);
   }
+
+  return showImageThumb(img, uris[size], size, uris, supplements.type !== 'gif');
+}
+
+function showImageThumb(
+  img: HTMLDivElement,
+  thumbUri: string,
+  size: ThumbnailSize,
+  uris: ImageUris,
+  allowHidpi: boolean,
+  overlayText?: string,
+) {
+  const picEl = $<HTMLPictureElement>('picture', img);
+  if (!picEl) return false;
 
   const imgEl = $<HTMLImageElement>('img', picEl);
   if (!imgEl || imgEl.src.indexOf(thumbUri) !== -1) return false;
 
-  if (store.get('serve_hidpi') && supplements.type !== 'gif' && !preview) {
-    // Check whether the HiDPI option is enabled, and make an exception for GIFs due to their size
-    const x2Size = size === 'medium' ? uris.large : uris.medium;
-    // use even larger thumb if normal size is medium already
-    imgEl.srcset = `${thumbUri} 1x, ${x2Size} 2x`;
+  if (allowHidpi) {
+    setHidpiThumb(imgEl, thumbUri, size, uris);
   }
 
   imgEl.src = thumbUri;
   const overlay = getSpoilerOverlay(img);
 
-  if (supplements.type === 'webm') {
+  if (overlayText) {
     overlay.classList.remove('hidden');
-    overlay.innerHTML = 'WebM';
+    overlay.innerHTML = overlayText;
   } else {
     overlay.classList.add('hidden');
   }
 
   return true;
+}
+
+function setHidpiThumb(img: HTMLImageElement, thumbUri: string, size: ThumbnailSize, uris: ImageUris) {
+  if (!store.get('serve_hidpi')) return;
+
+  // Use an even larger thumb if normal size is medium already
+  const x2Size = size === 'medium' ? uris.large : uris.medium;
+  img.srcset = `${thumbUri} 1x, ${x2Size} 2x`;
+}
+
+function showVideoPreview(
+  img: HTMLDivElement,
+  size: ThumbnailSize,
+  uris: ImageUris,
+  supplements: Extract<MediaSupplements, { type: 'webm' }>,
+) {
+  if (!$<HTMLPictureElement>('picture', img)) {
+    return showVideoThumb(img, uris[size], supplements.mp4_thumbnails[size].uri);
+  }
+
+  const preview =
+    size === 'thumb' || size === 'thumb_small' || size === 'thumb_tiny' ? supplements.gif_previews[size].uri : null;
+
+  // Animated previews skip high resolution sources due to filesize
+  return showImageThumb(img, preview ?? uris[size], size, uris, !preview, 'WebM');
 }
 
 export function showBlock(img: HTMLDivElement) {

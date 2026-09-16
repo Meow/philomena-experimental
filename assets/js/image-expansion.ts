@@ -94,72 +94,92 @@ export function pickAndResize(elem: ImageTargetElement) {
   const uri = uris[version];
   if (!uri) return;
 
-  const useGifVideo = version === 'full' && supplements.type === 'gif' && store.get<boolean>('serve_webm');
-  let videoSources: { webm: string; mp4: string } | null = null;
   if (supplements.type === 'webm') {
-    videoSources = { webm: uri, mp4: supplements.mp4_thumbnails[version].uri };
-  } else if (supplements.type === 'gif' && useGifVideo) {
-    videoSources = { webm: supplements.webm.uri, mp4: supplements.mp4.uri };
+    showVideo(elem, { webm: uri, mp4: supplements.mp4_thumbnails[version].uri });
+  } else if (version === 'full' && supplements.type === 'gif' && store.get<boolean>('serve_webm')) {
+    showVideo(
+      elem,
+      { webm: supplements.webm.uri, mp4: supplements.mp4.uri },
+      { width: imageWidth, height: imageHeight },
+    );
+  } else {
+    showImage(elem, uri, version, imageWidth, imageHeight);
+  }
+}
+
+function applyScaling(media: HTMLImageElement | HTMLVideoElement, scaled: ScaledState) {
+  if (scaled === 'true') {
+    media.className = 'image-scaled';
+  } else if (scaled === 'partscaled') {
+    media.className = 'image-partscaled';
+  }
+}
+
+function showVideo(
+  elem: ImageTargetElement,
+  sources: { webm: string; mp4: string },
+  gifDimensions?: { width: number; height: number },
+) {
+  const currentSources = $$<HTMLSourceElement>('video source', elem);
+  if (
+    currentSources.length === 2 &&
+    currentSources[0].getAttribute('src') === sources.webm &&
+    currentSources[1].getAttribute('src') === sources.mp4
+  ) {
+    // Do nothing if the source will stay the same to avoid flicker
+    return;
   }
 
-  if (videoSources) {
-    const sources = $$<HTMLSourceElement>('video source', elem);
-    if (
-      sources.length === 2 &&
-      sources[0].getAttribute('src') === videoSources.webm &&
-      sources[1].getAttribute('src') === videoSources.mp4
-    ) {
-      return;
-    }
-
-    clearEl(elem);
-  }
-
-  elem.classList.toggle('full-height', Boolean(useGifVideo));
+  clearEl(elem);
+  elem.classList.toggle('full-height', Boolean(gifDimensions));
 
   const muted = store.get<boolean>('unmute_videos') ? '' : 'muted';
   const autoplay = elem.classList.contains('hidden') ? '' : 'autoplay'; // Fix for spoilered image pages
+  const dimensions = gifDimensions
+    ? `width="${gifDimensions.width}" height="${gifDimensions.height}" preload="auto"`
+    : '';
 
-  if (videoSources) {
-    const dimensions = useGifVideo ? `width="${imageWidth}" height="${imageHeight}" preload="auto"` : '';
-    elem.insertAdjacentHTML(
-      'afterbegin',
-      `<video controls ${autoplay} loop ${muted} playsinline ${dimensions} id="image-display">
-        <source src="${videoSources.webm}" type="video/webm">
-        <source src="${videoSources.mp4}" type="video/mp4">
-        <p class="block block--fixed block--warning">
-          Your browser supports neither MP4/H264 nor
-          WebM/VP8! Please update it to the latest version.
-        </p>
-       </video>`,
-    );
-    const video = assertNotNull($<HTMLVideoElement>('video', elem));
-    if (!useGifVideo && scaled === 'true') {
-      video.className = 'image-scaled';
-    } else if (!useGifVideo && scaled === 'partscaled') {
-      video.className = 'image-partscaled';
-    }
-  } else {
-    const picture = document.createElement('picture');
-    const img = document.createElement('img');
-    picture.appendChild(img);
-    img.id = 'image-display';
-    img.src = uri;
-    if (version === 'full') {
-      // Let layout engine know image size before it arrives
-      img.width = imageWidth;
-      img.height = imageHeight;
-    }
-    if (scaled === 'true') {
-      img.className = 'image-scaled';
-    } else if (scaled === 'partscaled') {
-      img.className = 'image-partscaled';
-    }
-    if (elem.children.length === 1 && elem.children[0].isEqualNode(picture)) return;
+  elem.insertAdjacentHTML(
+    'afterbegin',
+    `<video controls ${autoplay} loop ${muted} playsinline ${dimensions} id="image-display">
+      <source src="${sources.webm}" type="video/webm">
+      <source src="${sources.mp4}" type="video/mp4">
+      <p class="block block--fixed block--warning">
+        Your browser supports neither MP4/H264 nor
+        WebM/VP8! Please update it to the latest version.
+      </p>
+     </video>`,
+  );
 
-    clearEl(elem);
-    elem.appendChild(picture);
+  if (!gifDimensions) {
+    applyScaling(assertNotNull($<HTMLVideoElement>('video', elem)), elem.dataset.scaled);
   }
+}
+
+function showImage(
+  elem: ImageTargetElement,
+  uri: string,
+  version: ImageVersion,
+  imageWidth: number,
+  imageHeight: number,
+) {
+  elem.classList.remove('full-height');
+
+  const picture = document.createElement('picture');
+  const img = document.createElement('img');
+  picture.appendChild(img);
+  img.id = 'image-display';
+  img.src = uri;
+  if (version === 'full') {
+    // Let layout engine know image size before it arrives
+    img.width = imageWidth;
+    img.height = imageHeight;
+  }
+  applyScaling(img, elem.dataset.scaled);
+  if (elem.children.length === 1 && elem.children[0].isEqualNode(picture)) return;
+
+  clearEl(elem);
+  elem.appendChild(picture);
 }
 
 /**
