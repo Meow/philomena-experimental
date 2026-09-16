@@ -1,0 +1,14 @@
+- awards = assigns[:awards] || false
+
+strong<>
+  = case @attribution do
+    - {:user, attribution} ->
+        = link attribution.user.name, to: ~p"/profiles/#{attribution.user}"
+        = if awards do
+          = render PhilomenaWeb.ProfileView, "_awards.html", awards: attribution.awards
+
+    - {:anonymous_revealed, attribution} ->
+        = link "#{attribution.user.name} (##{attribution.discriminant}, hidden)", to: ~p"/profiles/#{attribution.user}"
+
+    - {:anonymous, attribution} ->
+        = discriminated_name(attribution.discriminant)

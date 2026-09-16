@@ -1,21 +1,6 @@
 span.image_uploader
   ' by
-  = case @page.uploader.uploader do
-    - {:user, attribution} ->
-      strong<>
-        = link attribution.user.name, to: ~p"/profiles/#{attribution.user}"
-      = render PhilomenaWeb.ProfileView, "_awards.html", awards: attribution.awards
-    - {:anonymous_revealed, attribution} ->
-      strong<>
-        a href=~p"/profiles/#{attribution.user}"
-          => attribution.user.name
-          | (#
-          = attribution.discriminant
-          | , hidden)
-    - {:anonymous, attribution} ->
-      strong<>
-        ' Background Pony #
-        = attribution.discriminant
+  => render PhilomenaWeb.AttributionView, "_user.html", attribution: @page.uploader.uploader, awards: true
 
   = if @page.uploader.identity_metadata && not hide_staff_tools?(@conn) do
     => link_to_ip(@conn, @page.uploader.identity_metadata.ip)

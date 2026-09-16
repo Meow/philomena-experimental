@@ -1,0 +1,4 @@
+- class = assigns[:class] || "avatar--100px"
+
+.image-constrained class=class
+  img src=avatar_url(@attribution)

@@ -1,0 +1,10 @@
+- class = assigns[:class] || "avatar--100px"
+
+= case @attribution do
+  - {:user, attribution} ->
+    a.image-constrained class=class href=~p"/profiles/#{attribution.user}"
+      img src=avatar_url(@attribution)
+
+  - _attribution ->
+    .image-constrained class=class
+      img src=avatar_url(@attribution)
