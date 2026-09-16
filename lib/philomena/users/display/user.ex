@@ -5,6 +5,8 @@ defmodule Philomena.Users.Display.User do
 
   alias Philomena.Users.User
 
+  @derive {Phoenix.Param, key: :slug}
+
   @enforce_keys [
     :name,
     :slug,

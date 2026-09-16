@@ -24,17 +24,17 @@ defmodule Philomena.Attribution.Display.Attribution do
   def display_attribution(%Actor{} = actor, object) do
     cond do
       not is_nil(object.user) and not Attribution.anonymous?(object) ->
-        {:user, %User{user: object.user, awards: object.user.awards}}
+        {:user, User.render(object.user)}
 
       not is_nil(object.user) and permitted?(actor, :reveal_anon, object) ->
         discriminant = AnonymousName.discriminant(object)
 
-        {:anonymous_revealed, %AnonymousRevealed{user: object.user, discriminant: discriminant}}
+        {:anonymous_revealed, AnonymousRevealed.render(object.user, discriminant)}
 
       true ->
         discriminant = AnonymousName.discriminant(object)
 
-        {:anonymous, %Anonymous{discriminant: discriminant}}
+        {:anonymous, Anonymous.render(discriminant)}
     end
   end
 end

@@ -9,4 +9,9 @@ defmodule Philomena.Attribution.Display.Anonymous do
   @type t :: %__MODULE__{
           discriminant: String.t()
         }
+
+  @doc false
+  def render(discriminant) do
+    %__MODULE__{discriminant: discriminant}
+  end
 end

@@ -1,5 +1,7 @@
 defmodule PhilomenaWeb.AttributionViewTest do
-  use ExUnit.Case, async: true
+  use Philomena.DataCase, async: true
+
+  import Philomena.UsersFixtures
 
   alias Philomena.Attribution.Display.{Anonymous, AnonymousRevealed, User}
   alias PhilomenaWeb.AttributionView
@@ -12,10 +14,11 @@ defmodule PhilomenaWeb.AttributionViewTest do
   end
 
   test "renders display names and profile links without a conn or source object" do
-    user = %Philomena.Users.User{name: "Uploader", slug: "uploader", awards: []}
+    user = user_fixture(name: "Uploader")
+    user = Philomena.Users.Display.User.render(user)
 
-    html = render("_user.html", {:user, %User{user: user, awards: []}})
-    assert html =~ ~s(href="/profiles/uploader")
+    html = render("_user.html", {:user, %{user: user, awards: []}})
+    assert html =~ ~s(href="/profiles/Uploader")
     assert html =~ "Uploader"
 
     html =
@@ -24,7 +27,7 @@ defmodule PhilomenaWeb.AttributionViewTest do
         {:anonymous_revealed, %AnonymousRevealed{user: user, discriminant: "ABCD"}}
       )
 
-    assert html =~ ~s(href="/profiles/uploader")
+    assert html =~ ~s(href="/profiles/Uploader")
     assert html =~ "Uploader (#ABCD, hidden)"
 
     html = render("_user.html", {:anonymous, %Anonymous{discriminant: "ABCD"}})
