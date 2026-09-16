@@ -60,6 +60,42 @@ defmodule PhilomenaWeb.ImageViewTest do
     end
   end
 
+  describe "frontend media supplements" do
+    test "serializes tagged supplements", %{conn: conn} do
+      for {format, mime} <- [{"png", "image/png"}, {"gif", "image/gif"}, {"webm", "video/webm"}] do
+        image = image_fixture(image_format: format, image_mime_type: mime)
+        image = Repo.preload(image, tags: :aliases)
+        media = Philomena.Images.Display.Media.render(image, false)
+        data = ImageView.image_container_data(viewer_conn(conn, nil), image, :thumb)
+
+        assert JSON.decode!(data[:uris]) ==
+                 JSON.decode!(JSON.encode!(ImageView.display_thumbnail_uris(media)))
+
+        assert JSON.decode!(data[:supplements]) ==
+                 JSON.decode!(JSON.encode!(ImageView.display_supplements(media)))
+
+        assert JSON.decode!(data[:supplements])["type"] ==
+                 if(format == "png", do: "none", else: format)
+
+        assert Map.keys(JSON.decode!(data[:uris])) |> Enum.sort() ==
+                 ~w(full large medium small tall thumb thumb_small thumb_tiny)
+      end
+    end
+
+    test "unavailable supplements serialize only their status", %{conn: conn} do
+      image =
+        image_fixture(
+          image_format: "webm",
+          image_mime_type: "video/webm",
+          hidden_from_users: true
+        )
+
+      image = Repo.preload(image, tags: :aliases)
+      data = ImageView.image_container_data(viewer_conn(conn, nil), image, :thumb)
+      assert JSON.decode!(data[:supplements]) == %{"type" => "not_available"}
+    end
+  end
+
   describe "hides_images?/1" do
     test "is false for anonymous and regular viewers", %{conn: conn} do
       assert ImageView.hides_images?(viewer_conn(conn, nil)) == false

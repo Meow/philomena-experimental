@@ -1,3 +1,4 @@
+/* eslint-disable camelcase -- Media JSON uses the context field names. */
 import { bindImageTarget, selectVersion, pickAndResize, ImageTargetElement } from '../image-expansion';
 import store from '../utils/store';
 import { fireEvent } from '@testing-library/dom';
@@ -196,327 +197,120 @@ describe('image-expansion', () => {
   });
 
   describe('pickAndResize', () => {
-    function createImageTarget(
-      width: string,
-      height: string,
-      imageSize: string,
-      mimeType: string,
-      scaled: string,
-      uris: string,
-    ): ImageTargetElement {
+    const sizes = ['full', 'tall', 'large', 'medium', 'small', 'thumb', 'thumb_small', 'thumb_tiny'];
+    const version = (uri: string) => ({ uri, width: 1920, height: 1080 });
+
+    function createImageTarget(type: 'none' | 'gif' | 'webm', scaled = 'false'): ImageTargetElement {
       const elem = document.createElement('div');
       elem.className = 'image-target';
-      elem.dataset.width = width;
-      elem.dataset.height = height;
-      elem.dataset.imageSize = imageSize;
-      elem.dataset.mimeType = mimeType;
-      elem.dataset.scaled = scaled;
-      elem.dataset.uris = uris;
-      return elem as unknown as ImageTargetElement;
+      Object.assign(elem.dataset, {
+        width: '1920',
+        height: '1080',
+        imageSize: '1000000',
+        mimeType: { webm: 'video/webm', gif: 'image/gif', none: 'image/png' }[type],
+        scaled,
+        uris: JSON.stringify(Object.fromEntries(sizes.map(size => [size, `/primary/${size}?token=abc`]))),
+        supplements: JSON.stringify(
+          {
+            none: { type: 'none' },
+            gif: {
+              type: 'gif',
+              static_preview: version('/poster'),
+              webm: version('/gif-webm?token=1'),
+              mp4: version('/gif-mp4?token=2'),
+            },
+            webm: {
+              type: 'webm',
+              static_preview: version('/poster'),
+              mp4: version('/fallback/full?token=2'),
+              mp4_thumbnails: Object.fromEntries(sizes.map(size => [size, version(`/fallback/${size}?token=2`)])),
+              gif_previews: Object.fromEntries(
+                ['thumb', 'thumb_small', 'thumb_tiny'].map(size => [size, version(`/preview/${size}`)]),
+              ),
+            },
+          }[type],
+        ),
+      });
+      return elem as ImageTargetElement;
     }
 
-    it('should render a static image when not scaled', () => {
-      const uris = JSON.stringify({
-        full: '/images/full.png',
-        large: '/images/large.png',
-        medium: '/images/medium.png',
-        small: '/images/small.png',
-      });
-      const elem = createImageTarget('1920', '1080', '1000000', 'image/png', 'false', uris);
-
+    it.each(['none', 'gif'] as const)('renders %s images using opaque URLs', type => {
+      const elem = createImageTarget(type);
       pickAndResize(elem);
-
-      expect(elem.innerHTML).toContain('<picture>');
-      expect(elem.innerHTML).toContain('src="/images/full.png"');
-      expect(elem.innerHTML).toContain('width="1920"');
-      expect(elem.innerHTML).toContain('height="1080"');
-      expect(elem.innerHTML).not.toContain('class=');
+      expect($('img', elem)?.getAttribute('src')).toBe('/primary/full?token=abc');
+      expect($('img', elem)?.getAttribute('width')).toBe('1920');
+      const picture = $('picture', elem);
+      pickAndResize(elem);
+      expect($('picture', elem)).toBe(picture);
     });
 
-    it('should render a scaled image when scaled is true', () => {
-      Object.defineProperty(document.documentElement, 'clientWidth', {
-        writable: true,
-        configurable: true,
-        value: 640,
-      });
-
-      const uris = JSON.stringify({
-        full: '/images/full.png',
-        large: '/images/large.png',
-        medium: '/images/medium.png',
-        small: '/images/small.png',
-      });
-      const elem = createImageTarget('1920', '1080', '1000000', 'image/png', 'true', uris);
-
+    it.each(['true', 'partscaled'])('applies the %s scaling class', scaled => {
+      const elem = createImageTarget('none', scaled);
       pickAndResize(elem);
-
-      expect(elem.innerHTML).toContain('<picture>');
-      expect(elem.innerHTML).toContain('src="/images/medium.png"');
-      expect(elem.innerHTML).toContain('class="image-scaled"');
+      expect($('img', elem)?.className).toBe(scaled === 'true' ? 'image-scaled' : 'image-partscaled');
     });
 
-    it('should render a partscaled image', () => {
-      const uris = JSON.stringify({
-        full: '/images/full.png',
-        large: '/images/large.png',
-        medium: '/images/medium.png',
-        small: '/images/small.png',
-      });
-      const elem = createImageTarget('1920', '1080', '1000000', 'image/png', 'partscaled', uris);
-
+    it('uses the selected image size', () => {
+      Object.defineProperty(document.documentElement, 'clientWidth', { value: 640 });
+      const elem = createImageTarget('none', 'true');
       pickAndResize(elem);
-
-      expect(elem.innerHTML).toContain('<picture>');
-      expect(elem.innerHTML).toContain('src="/images/full.png"');
-      expect(elem.innerHTML).toContain('class="image-partscaled"');
+      expect($('img', elem)?.getAttribute('src')).toBe('/primary/medium?token=abc');
     });
 
-    it('should not re-render if the image content is the same', () => {
-      const uris = JSON.stringify({
-        full: '/images/full.png',
-      });
-      const elem = createImageTarget('1920', '1080', '1000000', 'image/png', 'false', uris);
-
+    it.each(['true', 'partscaled', 'false'])('uses explicit WebM and MP4 sources when scaled=%s', scaled => {
+      Object.defineProperty(document.documentElement, 'clientWidth', { value: 640 });
+      const elem = createImageTarget('webm', scaled);
       pickAndResize(elem);
-      const firstHTML = elem.innerHTML;
-
+      const size = scaled === 'true' ? 'medium' : 'full';
+      const sources = elem.querySelectorAll('source');
+      expect(sources[0].getAttribute('src')).toBe(`/primary/${size}?token=abc`);
+      expect(sources[1].getAttribute('src')).toBe(`/fallback/${size}?token=2`);
+      const video = $('video', elem);
       pickAndResize(elem);
-      const secondHTML = elem.innerHTML;
-
-      expect(firstHTML).toBe(secondHTML);
+      expect($('video', elem)).toBe(video);
     });
 
-    it('should render webm video with scaled class when scaled is true', () => {
-      const uris = JSON.stringify({
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'true', uris);
-
+    it('plays a full GIF as video when requested and returns to an image when scaled', () => {
+      vi.spyOn(store, 'get').mockImplementation(key => key === 'serve_webm');
+      const elem = createImageTarget('gif');
       pickAndResize(elem);
+      expect(elem.querySelectorAll('source')[0].getAttribute('src')).toBe('/gif-webm?token=1');
+      expect(elem.querySelectorAll('source')[1].getAttribute('src')).toBe('/gif-mp4?token=2');
+      expect($('video', elem)?.getAttribute('width')).toBe('1920');
+      expect(elem).toHaveClass('full-height');
+      const video = $('video', elem);
+      pickAndResize(elem);
+      expect($('video', elem)).toBe(video);
 
-      const video = $<HTMLVideoElement>('video', elem);
-      expect(video).not.toBeNull();
-      expect(video?.className).toBe('image-scaled');
+      Object.defineProperty(document.documentElement, 'clientWidth', { value: 640 });
+      elem.dataset.scaled = 'true';
+      pickAndResize(elem);
+      expect($('img', elem)?.getAttribute('src')).toBe('/primary/medium?token=abc');
+      expect(elem).not.toHaveClass('full-height');
     });
 
-    it('should render webm video with partscaled class when scaled is partscaled', () => {
-      const uris = JSON.stringify({
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'partscaled', uris);
-
+    it('refreshes video sources if the MP4 supplement changes', () => {
+      const elem = createImageTarget('webm');
       pickAndResize(elem);
-
-      const video = $<HTMLVideoElement>('video', elem);
-      expect(video).not.toBeNull();
-      expect(video?.className).toBe('image-partscaled');
+      const first = $('video', elem);
+      elem.querySelectorAll('source')[1].src = '/outdated';
+      pickAndResize(elem);
+      expect($('video', elem)).not.toBe(first);
+      expect(elem.querySelectorAll('source')[1].getAttribute('src')).toBe('/fallback/full?token=2');
     });
 
-    it('should prefer mp4 when serve_webm is enabled and mp4 is available', () => {
-      vi.spyOn(store, 'get').mockReturnValue(true);
-
-      const uris = JSON.stringify({
-        full: '/videos/video.webm',
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-
+    it.each([true, false])('respects unmute_videos=%s', unmute => {
+      vi.spyOn(store, 'get').mockImplementation(key => key === 'unmute_videos' && unmute);
+      const elem = createImageTarget('webm');
       pickAndResize(elem);
-
-      expect(elem.innerHTML).toContain('src="/videos/video.webm"');
-      expect(elem.innerHTML).toContain('src="/videos/video.mp4"');
-      expect(elem.innerHTML).toContain('width="1920"');
-      expect(elem.innerHTML).toContain('height="1080"');
-      expect(elem.classList.contains('full-height')).toBe(true);
+      expect($('video', elem)?.hasAttribute('muted')).toBe(!unmute);
     });
 
-    it('should add muted attribute when unmute_videos is not set', () => {
-      vi.spyOn(store, 'get').mockReturnValue(null);
-
-      const uris = JSON.stringify({
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-
+    it.each([true, false])('only autoplays visible videos (hidden=%s)', hidden => {
+      const elem = createImageTarget('webm');
+      elem.classList.toggle('hidden', hidden);
       pickAndResize(elem);
-
-      expect(elem.innerHTML).toContain('muted');
-    });
-
-    it('should not add muted attribute when unmute_videos is true', () => {
-      vi.spyOn(store, 'get').mockImplementation((key: string) => {
-        if (key === 'unmute_videos') return true;
-        return null;
-      });
-
-      const uris = JSON.stringify({
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-
-      pickAndResize(elem);
-
-      expect(elem.innerHTML).not.toContain('muted');
-    });
-
-    it('should not add autoplay attribute when element has hidden class', () => {
-      const uris = JSON.stringify({
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-      elem.classList.add('hidden');
-
-      pickAndResize(elem);
-
-      expect(elem.innerHTML).not.toContain('autoplay');
-    });
-
-    it('should add autoplay attribute when element does not have hidden class', () => {
-      const uris = JSON.stringify({
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-
-      pickAndResize(elem);
-
-      expect(elem.innerHTML).toContain('autoplay');
-    });
-
-    it('should handle missing uri gracefully', () => {
-      const uris = JSON.stringify({
-        small: '/images/small.png',
-      });
-      const elem = createImageTarget('1920', '1080', '1000000', 'image/png', 'true', uris);
-
-      // Force it to select a version that doesn't exist
-      Object.defineProperty(document.documentElement, 'clientWidth', {
-        writable: true,
-        configurable: true,
-        value: 5000,
-      });
-
-      pickAndResize(elem);
-
-      // Should not crash, element should remain empty or unchanged
-      expect(elem.innerHTML).toBe('');
-    });
-
-    it('should handle malformed uri regex gracefully', () => {
-      const uris = JSON.stringify({
-        full: 'no-extension',
-      });
-      const elem = createImageTarget('1920', '1080', '1000000', 'image/png', 'false', uris);
-
-      pickAndResize(elem);
-
-      // Should not crash
-      expect(elem.innerHTML).toBe('');
-    });
-
-    it('should not re-render video when mp4 source already matches via uris.mp4', () => {
-      vi.spyOn(store, 'get').mockImplementation((key: string) => {
-        if (key === 'serve_webm') return true;
-        return null;
-      });
-
-      const uris = JSON.stringify({
-        full: '/videos/video.webm',
-        webm: '/videos/video.webm',
-        mp4: '/videos/alt-video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-
-      // First render
-      pickAndResize(elem);
-
-      // Manually set up the video element with sources that would match the mp4 condition
-      elem.innerHTML = `
-        <video controls autoplay loop muted playsinline preload="auto" id="image-display" width="1920" height="1080">
-          <source src="/videos/video.webm" type="video/webm">
-          <source src="/videos/alt-video.mp4" type="video/mp4">
-        </video>
-      `;
-
-      const firstHTML = elem.innerHTML;
-
-      // Second render should not re-render because source matches uris.mp4
-      pickAndResize(elem);
-      const secondHTML = elem.innerHTML;
-
-      expect(firstHTML).toBe(secondHTML);
-    });
-
-    it('should not re-render when webm source already matches uri under mp4 mode', () => {
-      vi.spyOn(store, 'get').mockImplementation((key: string) => {
-        if (key === 'serve_webm') return true;
-        return null;
-      });
-
-      const uris = JSON.stringify({
-        full: '/videos/video.webm',
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-
-      // First render
-      pickAndResize(elem);
-
-      // Manually alter video to keep webm src equal to uri (so first disjunct matches),
-      // but change mp4 to a different file so the second disjunct would be false
-      elem.innerHTML = `
-        <video controls autoplay loop muted playsinline preload="auto" id="image-display" width="1920" height="1080">
-          <source src="/videos/video.webm" type="video/webm">
-          <source src="/videos/different.mp4" type="video/mp4">
-        </video>
-      `;
-
-      const firstHTML = elem.innerHTML;
-
-      // Second render should detect matching webm source (uri) and avoid re-render
-      pickAndResize(elem);
-      const secondHTML = elem.innerHTML;
-
-      expect(firstHTML).toBe(secondHTML);
-    });
-
-    it('should clear and re-render when switching to mp4 with non-matching existing video sources', () => {
-      // Force mp4 mode
-      vi.spyOn(store, 'get').mockImplementation((key: string) => {
-        if (key === 'serve_webm') return true;
-        return null;
-      });
-
-      const uris = JSON.stringify({
-        full: '/videos/target.webm',
-        webm: '/videos/target.webm',
-        mp4: '/videos/target.mp4',
-      });
-      const elem = createImageTarget('1920', '1080', '5000000', 'video/webm', 'false', uris);
-
-      // Seed with a different video whose sources do not match either uri or uris.mp4
-      elem.innerHTML = `
-        <video controls autoplay loop muted playsinline preload="auto" id="image-display" width="1920" height="1080">
-          <source src="/videos/old.webm" type="video/webm">
-          <source src="/videos/old.mp4" type="video/mp4">
-        </video>
-      `;
-
-      const before = elem.innerHTML;
-      pickAndResize(elem);
-      const after = elem.innerHTML;
-
-      // Should have cleared and re-rendered to use the target sources
-      expect(after).not.toBe(before);
-      expect(after).toContain('/videos/target.webm');
-      expect(after).toContain('/videos/target.mp4');
+      expect($('video', elem)?.hasAttribute('autoplay')).toBe(!hidden);
     });
   });
 
@@ -528,6 +322,7 @@ describe('image-expansion', () => {
       elem.dataset.height = '1080';
       elem.dataset.imageSize = '1000000';
       elem.dataset.mimeType = mimeType;
+      elem.dataset.supplements = JSON.stringify({ type: 'none' });
       elem.dataset.scaled = 'true';
       elem.dataset.uris = JSON.stringify({
         full: '/images/full.png',
@@ -560,9 +355,9 @@ describe('image-expansion', () => {
 
     it('should not bind click handler for video/webm', () => {
       const elem = createImageTarget('video/webm');
+      elem.dataset.supplements = JSON.stringify({ type: 'webm', mp4_thumbnails: { full: { uri: '/fallback' } } });
       elem.dataset.uris = JSON.stringify({
-        webm: '/videos/video.webm',
-        mp4: '/videos/video.mp4',
+        full: '/videos/video.webm',
       });
       document.body.appendChild(elem);
 

@@ -203,5 +203,47 @@ defmodule Philomena.Images.Display.MediaTest do
       assert Map.keys(previews) |> Enum.sort() == [:thumb, :thumb_small, :thumb_tiny]
       assert previews[:thumb] == %{uri: exact(image, :thumb, "gif"), width: 250, height: 125}
     end
+
+    test "provides matching MP4 versions for scaled and full WebM playback" do
+      image = image(image_format: "webm")
+      assert {:webm, %{mp4_thumbnails: thumbnails}} = Media.render(image, false).supplements
+
+      assert Map.keys(thumbnails) |> Enum.sort() ==
+               [:full, :large, :medium, :small, :tall, :thumb, :thumb_small, :thumb_tiny]
+
+      assert thumbnails.medium == %{uri: exact(image, :medium, "mp4"), width: 800, height: 400}
+      assert thumbnails.large == version(image, "#{root()}/view/2024/1/2/42.mp4")
+      assert thumbnails.full == thumbnails.large
+    end
+
+    test "small WebM previews use generated GIFs rather than a nonexistent full GIF" do
+      image = image(image_format: "webm", image_width: 20, image_height: 10)
+      assert {:webm, %{gif_previews: previews}} = Media.render(image, false).supplements
+
+      for size <- [:thumb, :thumb_small, :thumb_tiny] do
+        assert previews[size] == version(image, exact(image, size, "gif"))
+      end
+    end
+
+    test "guards all video supplements and uses hidden storage paths when authorized" do
+      for format <- ["gif", "webm"] do
+        image = image(image_format: format, hidden_from_users: true, hidden_image_key: "secret")
+        assert Media.render(image, false).supplements == :not_available
+        assert Media.render(%{image | destroyed_content: true}, true).supplements == :destroyed
+
+        assert Media.render(%{image | thumbnails_generated: false}, true).supplements ==
+                 :not_rendered
+
+        assert {_type, supplements} = Media.render(image, true).supplements
+        assert supplements.mp4.uri == exact(image, :full, "mp4")
+
+        if format == "webm" do
+          assert supplements.mp4_thumbnails.medium.uri == exact(image, :medium, "mp4")
+          assert supplements.gif_previews.thumb.uri == exact(image, :thumb, "gif")
+        else
+          assert supplements.webm.uri == exact(image, :full, "webm")
+        end
+      end
+    end
   end
 end

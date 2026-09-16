@@ -49,11 +49,22 @@ defmodule PhilomenaWeb.ImageView do
 
   def display_thumbnail_uris(%Display.Media{}), do: nil
 
+  def display_supplements(%Display.Media{supplements: {type, supplements}}) do
+    Map.put(supplements, :type, type)
+  end
+
+  def display_supplements(%Display.Media{supplements: status}), do: %{type: status}
+
+  def image_supplements(image, show_hidden) do
+    image |> Display.Media.render(show_hidden) |> display_supplements()
+  end
+
   def display_image_container_data(%Display.Page{} = page, size) do
     metadata = page.metadata
     interactions = page.interactions
 
     data = [
+      supplements: JSON.encode!(display_supplements(page.media)),
       image_id: metadata.id,
       image_tags: JSON.encode!(Enum.map(page.tags.tags, & &1.id)),
       image_tag_aliases:
@@ -97,6 +108,7 @@ defmodule PhilomenaWeb.ImageView do
     uris = thumb_urls(image, can?(conn, :show, image))
     vid? = image.image_mime_type == "video/webm"
     gif? = image.image_mime_type == "image/gif"
+    supplements = image_supplements(image, can?(conn, :show, image))
     alt = title_text(image)
 
     hidpi? = conn.cookies["hidpi"] == "true"
@@ -114,11 +126,17 @@ defmodule PhilomenaWeb.ImageView do
       hidpi? and not (gif? or vid?) ->
         {:hidpi, uris[size], uris[:medium], alt}
 
-      not vid? or use_gif? ->
-        {:image, String.replace(uris[size], ".webm", ".gif"), alt}
+      use_gif? and supplements.type == :webm ->
+        {:image, supplements.gif_previews[size].uri, alt}
+
+      not vid? ->
+        {:image, uris[size], alt}
+
+      supplements.type == :webm ->
+        {:video, uris[size], supplements.mp4_thumbnails[size].uri, alt}
 
       true ->
-        {:video, uris[size], String.replace(uris[size], ".webm", ".mp4"), alt}
+        :not_rendered
     end
   end
 
@@ -248,6 +266,7 @@ defmodule PhilomenaWeb.ImageView do
 
   def image_container_data(conn, image, size) do
     [
+      supplements: JSON.encode!(image_supplements(image, can?(conn, :show, image))),
       image_id: image.id,
       image_tags: JSON.encode!(Enum.map(image.tags, & &1.id)),
       image_tag_aliases:
@@ -262,7 +281,11 @@ defmodule PhilomenaWeb.ImageView do
       source_url:
         if(Enum.count(image.sources) > 0, do: Enum.at(image.sources, 0).source, else: ""),
       source_urls: JSON.encode!(Enum.map(image.sources, & &1.source)),
-      uris: JSON.encode!(thumb_urls(image, can?(conn, :show, image))),
+      uris:
+        image
+        |> Display.Media.render(can?(conn, :show, image))
+        |> display_thumbnail_uris()
+        |> JSON.encode!(),
       width: image.image_width,
       height: image.image_height,
       aspect_ratio: image.image_aspect_ratio,

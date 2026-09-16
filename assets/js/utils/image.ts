@@ -1,6 +1,7 @@
 import { assertNotNull } from './assert';
 import { $, clearEl } from './dom';
 import store from './store';
+import { ImageUris, MediaSupplements, ThumbnailSize } from './media';
 
 function getSpoilerOverlay(img: HTMLDivElement): HTMLElement {
   // This always exists in markup, regardless of the image type and state
@@ -12,9 +13,7 @@ function getFilterExplanation(img: HTMLDivElement): HTMLElement {
   return assertNotNull($<HTMLElement>('.filter-explanation', img));
 }
 
-function showVideoThumb(img: HTMLDivElement, size: string, uris: Record<string, string>) {
-  const thumbUri = uris[size];
-
+function showVideoThumb(img: HTMLDivElement, webm: string, mp4: string) {
   const vidEl = $<HTMLVideoElement>('video', img);
   if (!vidEl) return false;
 
@@ -24,8 +23,8 @@ function showVideoThumb(img: HTMLDivElement, size: string, uris: Record<string, 
   imgEl.classList.add('hidden');
 
   vidEl.innerHTML = `
-    <source src="${thumbUri}" type="video/webm"/>
-    <source src="${thumbUri.replace(/webm$/, 'mp4')}" type="video/mp4"/>
+    <source src="${webm}" type="video/webm"/>
+    <source src="${mp4}" type="video/mp4"/>
   `;
   vidEl.classList.remove('hidden');
   vidEl.play();
@@ -36,20 +35,31 @@ function showVideoThumb(img: HTMLDivElement, size: string, uris: Record<string, 
 }
 
 export function showThumb(img: HTMLDivElement) {
-  const size = img.dataset.size;
+  const size = img.dataset.size as ThumbnailSize | undefined;
   const urisString = img.dataset.uris;
-  if (!size || !urisString) return false;
+  const supplementsString = img.dataset.supplements;
+  if (!size || !urisString || !supplementsString) return false;
 
-  const uris: Record<string, string> = JSON.parse(urisString);
-  const thumbUri = uris[size].replace(/webm$/, 'gif');
+  const uris: ImageUris = JSON.parse(urisString);
+  const supplements: MediaSupplements = JSON.parse(supplementsString);
+  if (supplements.type === 'not_rendered' || supplements.type === 'not_available' || supplements.type === 'destroyed') {
+    return false;
+  }
+  const preview =
+    supplements.type === 'webm' && (size === 'thumb' || size === 'thumb_small' || size === 'thumb_tiny')
+      ? supplements.gif_previews[size].uri
+      : null;
+  const thumbUri = preview ?? uris[size];
 
   const picEl = $<HTMLPictureElement>('picture', img);
-  if (!picEl) return showVideoThumb(img, size, uris);
+  if (!picEl) {
+    return supplements.type === 'webm' ? showVideoThumb(img, uris[size], supplements.mp4_thumbnails[size].uri) : false;
+  }
 
   const imgEl = $<HTMLImageElement>('img', picEl);
   if (!imgEl || imgEl.src.indexOf(thumbUri) !== -1) return false;
 
-  if (store.get('serve_hidpi') && !thumbUri.endsWith('.gif')) {
+  if (store.get('serve_hidpi') && supplements.type !== 'gif' && !preview) {
     // Check whether the HiDPI option is enabled, and make an exception for GIFs due to their size
     const x2Size = size === 'medium' ? uris.large : uris.medium;
     // use even larger thumb if normal size is medium already
@@ -59,7 +69,7 @@ export function showThumb(img: HTMLDivElement) {
   imgEl.src = thumbUri;
   const overlay = getSpoilerOverlay(img);
 
-  if (uris[size].indexOf('.webm') !== -1) {
+  if (supplements.type === 'webm') {
     overlay.classList.remove('hidden');
     overlay.innerHTML = 'WebM';
   } else {

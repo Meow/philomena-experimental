@@ -1,3 +1,4 @@
+/* eslint-disable camelcase -- Media JSON uses the context field names. */
 import { hideThumb, showBlock, showThumb, spoilerBlock, spoilerThumb } from '../image';
 import { getRandomArrayItem } from '../../../test/randomness';
 import { mockStorage } from '../../../test/mock-storage';
@@ -27,6 +28,27 @@ describe('Image utils', () => {
     const mockSizeUrls = getMockImageSizeUrls(extension);
     element.setAttribute('data-size', mockSize);
     element.setAttribute('data-uris', JSON.stringify(mockSizeUrls));
+    const version = (uri: string) => ({ uri, width: 250, height: 250 });
+    let supplements: object = { type: 'none' };
+    if (extension === 'webm') {
+      supplements = {
+        type: 'webm',
+        static_preview: version('/poster'),
+        mp4: version('/video-mp4'),
+        mp4_thumbnails: Object.fromEntries(
+          PossibleImageSizes.map(name => [name, version(`https://example.com/fallback/${name}?format=mp4`)]),
+        ),
+        gif_previews: { thumb: version('https://example.com/preview?format=gif') },
+      };
+    } else if (extension === 'gif') {
+      supplements = {
+        type: 'gif',
+        static_preview: version('/poster'),
+        webm: version('/video-webm'),
+        mp4: version('/video-mp4'),
+      };
+    }
+    element.dataset.supplements = JSON.stringify(supplements);
     return { mockSize, mockSizeUrls };
   };
   const createMockSpoilerOverlay = () => {
@@ -151,7 +173,7 @@ describe('Image utils', () => {
         const mp4SourceElement = mockVideo.children[1];
         expect(mp4SourceElement.nodeName).toEqual('SOURCE');
         expect(mp4SourceElement.getAttribute('type')).toEqual('video/mp4');
-        expect(mp4SourceElement.getAttribute('src')).toEqual(webmSource.replace('webm', 'mp4'));
+        expect(mp4SourceElement.getAttribute('src')).toEqual(`https://example.com/fallback/${mockSize}?format=mp4`);
 
         expect(mockVideo).not.toHaveClass(hiddenClass);
         expect(playSpy).toHaveBeenCalledTimes(1);
@@ -161,7 +183,7 @@ describe('Image utils', () => {
         expect(result).toBe(true);
       });
 
-      ['data-size', 'data-uris'].forEach(missingAttributeName => {
+      ['data-size', 'data-uris', 'data-supplements'].forEach(missingAttributeName => {
         it(`should return early if the ${missingAttributeName} attribute is missing`, () => {
           const { mockElement } = createMockElements({
             extension: 'webm',
@@ -242,17 +264,24 @@ describe('Image utils', () => {
     });
 
     it('should show the correct thumbnail image for webm extension', () => {
-      const { mockElement, mockSpoilerOverlay, mockSizeImage, mockSizeUrls, mockSize } =
-        createMockElementWithPicture('webm');
+      const { mockElement, mockSpoilerOverlay, mockSizeImage } = createMockElementWithPicture('webm', 'thumb');
       const result = showThumb(mockElement);
 
-      expect(mockSizeImage.src).toBe(mockSizeUrls[mockSize].replace('webm', 'gif'));
+      expect(mockSizeImage.src).toBe('https://example.com/preview?format=gif');
       expect(mockSizeImage.srcset).toBe('');
 
       expect(mockSpoilerOverlay).not.toHaveClass(hiddenClass);
       expect(mockSpoilerOverlay).toHaveTextContent('WebM');
 
       expect(result).toBe(true);
+    });
+
+    it.each(['not_rendered', 'not_available', 'destroyed'])('does not reveal unavailable media (%s)', type => {
+      const { mockElement, mockSizeImage } = createMockElementWithPicture('webm', 'thumb');
+      mockElement.dataset.uris = 'null';
+      mockElement.dataset.supplements = JSON.stringify({ type });
+      expect(showThumb(mockElement)).toBe(false);
+      expect(mockSizeImage.getAttribute('src')).toBeNull();
     });
 
     describe('high DPI srcset handling', () => {

@@ -1,3 +1,4 @@
+- supplements = display_supplements(@page.media)
 - size = assigns[:size] || :full
 - embed_display = assigns[:embed_display] || false
 - {:thumbnails, thumbnails} = @page.media.thumbnails
@@ -14,7 +15,7 @@
     ' .
 
   = if size == :full and not embed_display do
-    .image-target.hidden.image-show data-scaled=scaled_value(@conn.assigns.current_user) data-uris=JSON.encode!(uris) data-width=@page.metadata.width data-height=@page.metadata.height data-image-size=@page.metadata.size data-mime-type=@page.metadata.mime_type
+    .image-target.hidden.image-show data-scaled=scaled_value(@conn.assigns.current_user) data-supplements=JSON.encode!(supplements) data-uris=JSON.encode!(uris) data-width=@page.metadata.width data-height=@page.metadata.height data-image-size=@page.metadata.size data-mime-type=@page.metadata.mime_type
       = if @page.metadata.mime_type == "video/webm" do
         video controls=true
       - else
@@ -28,7 +29,7 @@
           = if @page.metadata.mime_type == "video/webm" do
             video data-image-id=@page.metadata.id autoplay="autoplay" loop="loop" muted="muted" playsinline="playsinline"
               source src=thumb.uri type="video/webm"
-              source src=String.replace(thumb.uri, ".webm", ".mp4") type="video/mp4"
+              source src=supplements.mp4_thumbnails[size].uri type="video/mp4"
           - else
             picture data-image-id=@page.metadata.id
               img src=thumb.uri

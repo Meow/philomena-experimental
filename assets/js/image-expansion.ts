@@ -1,8 +1,8 @@
 import { $, $$, clearEl } from './utils/dom';
 import { assertNotNull } from './utils/assert';
 import store from './utils/store';
+import { ImageVersion, ImageUris, MediaSupplements } from './utils/media';
 
-type ImageVersion = 'small' | 'medium' | 'large' | 'tall' | 'full';
 type ScaledState = 'true' | 'false' | 'partscaled';
 
 type ImageVersionDimensions = [ImageVersion, [number, number]];
@@ -15,17 +15,8 @@ export interface ImageTargetElement extends HTMLElement {
     mimeType: string;
     scaled: ScaledState;
     uris: string;
+    supplements: string;
   };
-}
-
-interface ImageUris {
-  small?: string;
-  medium?: string;
-  large?: string;
-  tall?: string;
-  full?: string;
-  webm?: string;
-  mp4?: string;
 }
 
 const imageVersions: ImageVersionDimensions[] = [
@@ -92,6 +83,7 @@ export function pickAndResize(elem: ImageTargetElement) {
   const imageMime = elem.dataset.mimeType;
   const scaled = elem.dataset.scaled;
   const uris: ImageUris = JSON.parse(elem.dataset.uris);
+  const supplements: MediaSupplements = JSON.parse(elem.dataset.supplements);
 
   let version: ImageVersion = 'full';
 
@@ -99,55 +91,42 @@ export function pickAndResize(elem: ImageTargetElement) {
     version = selectVersion(imageWidth, imageHeight, imageSize, imageMime);
   }
 
-  let uri = uris[version];
-
-  // For video/webm, if there's no full version, use webm key
-  if (!uri && imageMime === 'video/webm' && uris.webm) {
-    uri = uris.webm;
-  }
-
+  const uri = uris[version];
   if (!uri) return;
 
-  let imageFormat = /\.(\w+?)$/.exec(uri)?.[1];
-  if (!imageFormat) return;
-
-  if (version === 'full' && store.get<boolean>('serve_webm') && Boolean(uris.mp4)) {
-    imageFormat = 'mp4';
+  const useGifVideo = version === 'full' && supplements.type === 'gif' && store.get<boolean>('serve_webm');
+  let videoSources: { webm: string; mp4: string } | null = null;
+  if (supplements.type === 'webm') {
+    videoSources = { webm: uri, mp4: supplements.mp4_thumbnails[version].uri };
+  } else if (supplements.type === 'gif' && useGifVideo) {
+    videoSources = { webm: supplements.webm.uri, mp4: supplements.mp4.uri };
   }
 
-  // Check if we need to change to avoid flickering
-  if (imageFormat === 'mp4' || imageFormat === 'webm') {
-    for (const sourceEl of $$<HTMLSourceElement>('video source', elem)) {
-      if (sourceEl.src.endsWith(uri) || (imageFormat === 'mp4' && uris.mp4 && sourceEl.src.endsWith(uris.mp4))) return;
+  if (videoSources) {
+    const sources = $$<HTMLSourceElement>('video source', elem);
+    if (
+      sources.length === 2 &&
+      sources[0].getAttribute('src') === videoSources.webm &&
+      sources[1].getAttribute('src') === videoSources.mp4
+    ) {
+      return;
     }
 
-    // Scrub out the target element.
     clearEl(elem);
   }
+
+  elem.classList.toggle('full-height', Boolean(useGifVideo));
 
   const muted = store.get<boolean>('unmute_videos') ? '' : 'muted';
   const autoplay = elem.classList.contains('hidden') ? '' : 'autoplay'; // Fix for spoilered image pages
 
-  if (imageFormat === 'mp4') {
-    elem.classList.add('full-height');
+  if (videoSources) {
+    const dimensions = useGifVideo ? `width="${imageWidth}" height="${imageHeight}" preload="auto"` : '';
     elem.insertAdjacentHTML(
       'afterbegin',
-      `<video controls ${autoplay} loop ${muted} playsinline preload="auto" id="image-display"
-           width="${imageWidth}" height="${imageHeight}">
-        <source src="${uris.webm}" type="video/webm">
-        <source src="${uris.mp4}" type="video/mp4">
-        <p class="block block--fixed block--warning">
-          Your browser supports neither MP4/H264 nor
-          WebM/VP8! Please update it to the latest version.
-        </p>
-       </video>`,
-    );
-  } else if (imageFormat === 'webm') {
-    elem.insertAdjacentHTML(
-      'afterbegin',
-      `<video controls ${autoplay} loop ${muted} playsinline id="image-display">
-        <source src="${uri}" type="video/webm">
-        <source src="${uri.replace(/webm$/, 'mp4')}" type="video/mp4">
+      `<video controls ${autoplay} loop ${muted} playsinline ${dimensions} id="image-display">
+        <source src="${videoSources.webm}" type="video/webm">
+        <source src="${videoSources.mp4}" type="video/mp4">
         <p class="block block--fixed block--warning">
           Your browser supports neither MP4/H264 nor
           WebM/VP8! Please update it to the latest version.
@@ -155,9 +134,9 @@ export function pickAndResize(elem: ImageTargetElement) {
        </video>`,
     );
     const video = assertNotNull($<HTMLVideoElement>('video', elem));
-    if (scaled === 'true') {
+    if (!useGifVideo && scaled === 'true') {
       video.className = 'image-scaled';
-    } else if (scaled === 'partscaled') {
+    } else if (!useGifVideo && scaled === 'partscaled') {
       video.className = 'image-partscaled';
     }
   } else {

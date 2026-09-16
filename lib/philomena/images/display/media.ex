@@ -60,13 +60,15 @@ defmodule Philomena.Images.Display.Media do
   @type webm_supplements :: %{
           gif_previews: video_previews(),
           static_preview: version(),
-          mp4: version()
+          mp4: version(),
+          mp4_thumbnails: thumbnails()
         }
 
   @type mp4_supplements :: %{
           gif_previews: video_previews(),
           static_preview: version(),
-          webm: version()
+          webm: version(),
+          webm_thumbnails: thumbnails()
         }
 
   @type files :: %{
@@ -158,7 +160,9 @@ defmodule Philomena.Images.Display.Media do
       version_name in [:thumb, :thumb_small, :thumb_tiny]
     end)
     |> Map.new(fn {version_name, _} = version ->
-      {version_name, version_uri(image, "gif", version)}
+      preview = version_uri(image, "gif", version)
+
+      {version_name, %{preview | uri: exact_version_uri(image, "gif", version_name)}}
     end)
   end
 
@@ -233,11 +237,14 @@ defmodule Philomena.Images.Display.Media do
          }}
 
       "webm" ->
+        {:thumbnails, mp4_thumbnails} = thumbnail_uris(image, "mp4")
+
         {:webm,
          %{
            gif_previews: video_preview_uris(image),
            static_preview: version(image, exact_version_uri(image, "png", :rendered)),
-           mp4: file_version(image, "mp4", true, false)
+           mp4: file_version(image, "mp4", true, false),
+           mp4_thumbnails: mp4_thumbnails
          }}
 
       _ ->
