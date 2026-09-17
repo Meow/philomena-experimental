@@ -1,0 +1,40 @@
+= case viewability_intent(@conn, @image) do
+  - {:viewable, :image} ->
+    .media-box__overlay.js-spoiler-info-overlay
+    a href=@link title=@hover_text
+      picture
+        = case image_render_intent(@conn, @image, @size) do
+          - {:hidpi, small_url, medium_url} ->
+            img src=small_url srcset="#{small_url} 1x, #{medium_url} 2x" alt=@hover_text
+
+          - {:image, small_url} ->
+            img src=small_url alt=@hover_text
+
+  - {:viewable, :video} ->
+    = case video_render_intent(@conn, @image, @size) do
+      - {:preview, url} ->
+        .media-box__overlay.js-spoiler-info-overlay
+          | WebM
+        a href=@link title=@hover_text
+          picture
+            img src=url alt=@hover_text
+
+      - {:video, webm, mp4} ->
+        .media-box__overlay.js-spoiler-info-overlay
+        a href=@link title=@hover_text
+          video alt=@hover_text autoplay="autoplay" muted="muted" loop="loop" playsinline="playsinline" disablepictureinpicture="disablepictureinpicture"
+            source src=webm type="video/webm"
+            source src=mp4 type="video/mp4"
+          img alt=@hover_text
+
+  - {:filtered, :image} ->
+    .media-box__overlay.js-spoiler-info-overlay
+    a href=@link title=@hover_text
+      picture
+        img alt=@hover_text
+
+  - {:filtered, :video} ->
+    .media-box__overlay.js-spoiler-info-overlay
+    a href=@link title=@hover_text
+      video autoplay="autoplay" muted="muted" loop="loop" playsinline="playsinline" disablepictureinpicture="disablepictureinpicture"
+      img alt=@hover_text

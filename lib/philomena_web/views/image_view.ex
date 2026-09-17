@@ -101,42 +101,52 @@ defmodule PhilomenaWeb.ImageView do
     "Size: #{image.image_width}x#{image.image_height} | Tagged: #{tags}"
   end
 
-  # this is a bit ridiculous
-  def render_intent(_conn, %{thumbnails_generated: false}, _size), do: :not_rendered
-
-  def render_intent(conn, image, size) do
-    uris = thumb_urls(image, can?(conn, :show, image))
-    vid? = image.image_mime_type == "video/webm"
-    gif? = image.image_mime_type == "image/gif"
-    supplements = image_supplements(image, can?(conn, :show, image))
-    alt = title_text(image)
-
-    hidpi? = conn.cookies["hidpi"] == "true"
-    webm? = conn.cookies["webm"] == "true"
-    use_gif? = vid? and not webm? and size in ~W(thumb thumb_small thumb_tiny)a
-    filtered? = filter_or_spoiler_hits?(conn, image)
+  def visibility_intent(conn, image) do
+    can_view? = can?(conn, :show, image)
 
     cond do
-      filtered? and vid? ->
-        {:filtered_video, alt}
+      image.destroyed_content ->
+        :destroyed
 
-      filtered? and not vid? ->
-        {:filtered_image, alt}
+      not can_view? ->
+        :not_available
 
-      hidpi? and not (gif? or vid?) ->
-        {:hidpi, uris[size], uris[:medium], alt}
-
-      use_gif? and supplements.type == :webm ->
-        {:image, supplements.gif_previews[size].uri, alt}
-
-      not vid? ->
-        {:image, uris[size], alt}
-
-      supplements.type == :webm ->
-        {:video, uris[size], supplements.mp4_thumbnails[size].uri, alt}
+      not image.thumbnails_generated ->
+        :not_rendered
 
       true ->
-        :not_rendered
+        :image
+    end
+  end
+
+  def viewability_intent(conn, image) do
+    filtered? = filter_or_spoiler_hits?(conn, image)
+    video? = image.image_mime_type == "video/webm"
+
+    viewable = if filtered?, do: :filtered, else: :viewable
+    type = if video?, do: :video, else: :image
+
+    {viewable, type}
+  end
+
+  def image_render_intent(conn, image, size) do
+    uris = thumb_urls(image, can?(conn, :show, image))
+
+    if conn.cookies["hidpi"] == "true" and image.image_mime_type != "image/gif" do
+      {:hidpi, uris[size], uris[:medium]}
+    else
+      {:image, uris[size]}
+    end
+  end
+
+  def video_render_intent(conn, image, size) do
+    supplements = image_supplements(image, can?(conn, :show, image))
+
+    if conn.cookies["webm"] != "true" and size in [:thumb, :thumb_small, :thumb_tiny] do
+      {:preview, supplements.gif_previews[size].uri}
+    else
+      uris = thumb_urls(image, can?(conn, :show, image))
+      {:video, uris[size], supplements.mp4_thumbnails[size].uri}
     end
   end
 
