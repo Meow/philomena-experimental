@@ -98,6 +98,7 @@ defmodule Philomena.Images.Display.Media do
     image_format = normalized_format(image)
 
     %__MODULE__{
+      # TODO(presentation-split): just have one guarded key
       view: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, false)),
       download: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, true)),
       supplements:

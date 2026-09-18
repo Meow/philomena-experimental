@@ -4,6 +4,7 @@ defmodule Philomena.Images.Display.ModerationMetadata do
   """
 
   alias Philomena.Images.Image
+  alias Philomena.Users.Display.User
 
   @enforce_keys [
     :approved?,
@@ -21,22 +22,22 @@ defmodule Philomena.Images.Display.ModerationMetadata do
           destroyed?: boolean(),
           duplicate_id: integer() | nil,
           deletion_reason: String.t() | nil,
-          # TODO(presentation-split)
-          deleter: Philomena.Users.User.t() | nil
+          # TODO(presentation-split): not present vs not disclosed?
+          deleter: User.t() | nil
         }
 
   @doc false
   def render(%Image{} = image, may_reveal_deleter?) do
-    # TODO(presentation-split)
-    false = match?(%Ecto.Association.NotLoaded{}, image.deleter)
-
     %__MODULE__{
       approved?: image.approved,
       hidden_from_users?: image.hidden_from_users,
       destroyed?: image.destroyed_content,
       duplicate_id: image.duplicate_id,
       deletion_reason: image.deletion_reason,
-      deleter: if(may_reveal_deleter?, do: image.deleter)
+      deleter:
+        if may_reveal_deleter? and not is_nil(image.deleter) do
+          User.render(image.deleter)
+        end
     }
   end
 end

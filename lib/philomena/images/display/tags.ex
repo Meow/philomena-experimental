@@ -5,6 +5,7 @@ defmodule Philomena.Images.Display.Tags do
 
   alias Philomena.Images.Display.TagInput
   alias Philomena.Images.Image
+  alias Philomena.Tags.Display.Tag
 
   @enforce_keys [
     :tag_changes_count,
@@ -18,10 +19,8 @@ defmodule Philomena.Images.Display.Tags do
   @type t :: %__MODULE__{
           tag_changes_count: non_neg_integer(),
           tag_change_tags_count: non_neg_integer(),
-          # TODO(presentation-split): this is currently an array of Tag,
-          # but it should be an array of the Tag presentation display.
-          tags: [Philomena.Tags.Tag.t()],
-          locked_tags: [Philomena.Tags.Tag.t()],
+          tags: [Tag.t()],
+          locked_tags: [Tag.t()],
           changeset: Ecto.Changeset.t(TagInput.t()) | nil
         }
 
@@ -32,16 +31,11 @@ defmodule Philomena.Images.Display.Tags do
         tag_change_tags_count,
         tag_input_changeset
       ) do
-    # TODO(presentation-split): this is to ensure that the associations are loaded
-    # Convert to Tag presentation display when ready
-    _ = Enum.any?(tags)
-    _ = Enum.any?(locked_tags)
-
     %__MODULE__{
       tag_changes_count: tag_changes_count,
       tag_change_tags_count: tag_change_tags_count,
-      tags: tags,
-      locked_tags: locked_tags,
+      tags: Enum.map(tags, &Tag.render/1),
+      locked_tags: Enum.map(locked_tags, &Tag.render/1),
       changeset: tag_input_changeset
     }
   end

@@ -1,5 +1,36 @@
-= for {class, label} <- user_labels(@attribution) do
-  = if assigns[:large] do
-    .label.label--block class=class = label
-  - else
-    .label.label--block.label--small class=class = label
+- large = assigns[:large] || false
+- class = if(not large, do: "label--small")
+
+= for label <- user_labels(@attribution) do
+  = case label do
+    - {:personal_title, title} ->
+      .label.label--block.label--primary class=class
+        = title
+
+    - {:secondary_role, title} ->
+      .label.label--block.label--warning class=class
+        = title
+
+    - :senior_administrator_role ->
+      .label.label--block.label--danger class=class
+        | Head Administrator
+
+    - :administrator_role ->
+      .label.label--block.label--danger class=class
+        | Administrator
+
+    - :senior_moderator_role ->
+      .label.label--block.label--success class=class
+        | Senior Moderator
+
+    - :moderator_role ->
+      .label.label--block.label--success class=class
+        | Moderator
+
+    - :senior_assistant_role ->
+      .label.label--block.label--purple class=class
+        | Senior Assistant
+
+    - :assistant_role ->
+      .label.label--block.label--purple class=class
+        | Assistant

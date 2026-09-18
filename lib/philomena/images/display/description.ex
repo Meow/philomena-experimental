@@ -22,6 +22,7 @@ defmodule Philomena.Images.Display.Description do
       if not image.hidden_from_users or may_reveal_description_on_hidden_image? do
         image.description
       else
+        # TODO(presentation-split): not present vs not disclosed?
         ""
       end
 
