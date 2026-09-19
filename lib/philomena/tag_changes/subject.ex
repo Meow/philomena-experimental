@@ -1,4 +1,4 @@
-defimpl Philomena.Attribution, for: Philomena.TagChanges.TagChange do
+defimpl Philomena.Attribution.Subject, for: Philomena.TagChanges.TagChange do
   def object_identifier(tag_change) do
     to_string(tag_change.image_id || tag_change.id)
   end

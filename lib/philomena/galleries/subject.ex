@@ -1,4 +1,4 @@
-defimpl Philomena.Attribution, for: Philomena.Galleries.Gallery do
+defimpl Philomena.Attribution.Subject, for: Philomena.Galleries.Gallery do
   def object_identifier(gallery) do
     to_string(gallery.id)
   end

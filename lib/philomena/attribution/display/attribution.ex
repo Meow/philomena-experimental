@@ -5,7 +5,7 @@ defmodule Philomena.Attribution.Display.Attribution do
 
   import Philomena.Authorization, only: [permitted?: 3]
 
-  alias Philomena.Attribution
+  alias Philomena.Attribution.Subject
   alias Philomena.Attribution.Actor
   alias Philomena.Attribution.AnonymousName
 
@@ -23,7 +23,7 @@ defmodule Philomena.Attribution.Display.Attribution do
   @spec display_attribution(Actor.t(), struct()) :: t()
   def display_attribution(%Actor{} = actor, object) do
     cond do
-      not is_nil(object.user) and not Attribution.anonymous?(object) ->
+      not is_nil(object.user) and not Subject.anonymous?(object) ->
         {:user, User.render(object.user)}
 
       not is_nil(object.user) and permitted?(actor, :reveal_anon, object) ->

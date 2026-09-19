@@ -6,11 +6,11 @@ defmodule Philomena.Attribution.AnonymousName do
   available user, fingerprint, or IP identifier.
   """
 
-  alias Philomena.Attribution
+  alias Philomena.Attribution.Subject
 
   @spec anonymous?(struct()) :: boolean()
   def anonymous?(object) do
-    not is_nil(Attribution.impl_for(object)) and Attribution.anonymous?(object)
+    not is_nil(Subject.impl_for(object)) and Subject.anonymous?(object)
   end
 
   @spec anonymous_user?(struct()) :: boolean()
@@ -33,8 +33,8 @@ defmodule Philomena.Attribution.AnonymousName do
   @spec discriminant(struct()) :: String.t()
   def discriminant(object) do
     salt = anonymous_name_salt()
-    object_id = Attribution.object_identifier(object)
-    user_id = Attribution.best_user_identifier(object)
+    object_id = Subject.object_identifier(object)
+    user_id = Subject.best_user_identifier(object)
 
     {:ok, <<key::size(16)>>} =
       :pbkdf2.pbkdf2(:sha256, object_id <> user_id, salt, 100, 2)

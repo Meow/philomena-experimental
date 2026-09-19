@@ -12,6 +12,7 @@ defmodule Philomena.Tags.Display.Tag do
     :slug,
     :name,
     :category,
+    :short_description,
     :images_count
   ]
   defstruct @enforce_keys
@@ -21,6 +22,7 @@ defmodule Philomena.Tags.Display.Tag do
           slug: String.t(),
           name: String.t(),
           category: String.t() | nil,
+          short_description: String.t() | nil,
           images_count: non_neg_integer()
         }
 
@@ -31,6 +33,7 @@ defmodule Philomena.Tags.Display.Tag do
       slug: tag.slug,
       name: tag.name,
       category: tag.category,
+      short_description: tag.short_description,
       images_count: tag.images_count
     }
   end

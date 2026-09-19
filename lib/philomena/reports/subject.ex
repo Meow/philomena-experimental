@@ -1,4 +1,4 @@
-defimpl Philomena.Attribution, for: Philomena.Reports.Report do
+defimpl Philomena.Attribution.Subject, for: Philomena.Reports.Report do
   def object_identifier(report) do
     to_string(report.id)
   end

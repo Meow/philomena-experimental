@@ -1,11 +1,11 @@
-defimpl Philomena.Attribution,
+defimpl Philomena.Attribution.Subject,
   for: [Philomena.Comments.CommentVersion, Philomena.Posts.PostVersion] do
   def object_identifier(version) do
-    Philomena.Attribution.object_identifier(version.parent)
+    Philomena.Attribution.Subject.object_identifier(version.parent)
   end
 
   def best_user_identifier(version) do
-    Philomena.Attribution.best_user_identifier(version.parent)
+    Philomena.Attribution.Subject.best_user_identifier(version.parent)
   end
 
   def anonymous?(version) do

@@ -68,9 +68,7 @@ defmodule PhilomenaWeb.ImageView do
       image_id: metadata.id,
       image_tags: JSON.encode!(Enum.map(page.tags.tags, & &1.id)),
       image_tag_aliases:
-        page.tags.tags
-        |> Enum.flat_map(&([&1] ++ &1.aliases))
-        |> Enum.map_join(", ", & &1.name),
+        Enum.map_join(page.deprecated_tags_with_aliases.tags_with_aliases, ", ", & &1.name),
       tag_count: length(page.tags.tags),
       score: interaction_count(interactions.score),
       faves: interaction_count(interactions.faves_count),

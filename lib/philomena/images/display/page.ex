@@ -6,6 +6,7 @@ defmodule Philomena.Images.Display.Page do
   alias Philomena.Images.Display.{
     Comments,
     Description,
+    DeprecatedTagsWithAliases,
     Galleries,
     Interactions,
     Media,
@@ -27,6 +28,7 @@ defmodule Philomena.Images.Display.Page do
     :uploader,
     :description,
     :tags,
+    :deprecated_tags_with_aliases,
     :sources,
     :moderation,
     :moderation_metadata,
@@ -43,6 +45,7 @@ defmodule Philomena.Images.Display.Page do
           uploader: Uploader.t(),
           description: Description.t(),
           tags: Tags.t(),
+          deprecated_tags_with_aliases: DeprecatedTagsWithAliases.t(),
           sources: Sources.t(),
           moderation: Moderation.t(),
           moderation_metadata: ModerationMetadata.t(),

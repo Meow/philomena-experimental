@@ -1,4 +1,4 @@
-defmodule Philomena.Comments.Display.Moderation do
+defmodule Philomena.Comments.Display.Options do
   @moduledoc """
   Presentation data for comment controls.
   """

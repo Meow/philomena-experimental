@@ -36,11 +36,11 @@ defmodule PhilomenaWeb.AttributionViewTest do
   end
 
   test "revealed anonymous users retain anonymous avatars and have no titles" do
-    user = %Philomena.Users.User{
+    user = %{
       name: "Uploader",
       slug: "uploader",
       avatar: "custom.png",
-      personal_title: "Personal title"
+      labels: [{:personal_title, "Personal title"}]
     }
 
     anonymous = {:anonymous, %Anonymous{discriminant: "ABCD"}}

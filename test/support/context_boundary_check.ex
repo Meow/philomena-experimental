@@ -10,7 +10,6 @@ defmodule Philomena.ContextBoundaryCheck do
 
   @excluded_modules [
     Philomena.Application,
-    Philomena.Attribution,
     Philomena.Config,
     Philomena.IntegerId,
     Philomena.Mailer,

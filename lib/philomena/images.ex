@@ -786,6 +786,10 @@ defmodule Philomena.Images do
     Display.Subscription.render(subscribed?, changeset)
   end
 
+  defp display_deprecated_tags_with_aliases(%Actor{}, %Image{} = image) do
+    Display.DeprecatedTagsWithAliases.render(image)
+  end
+
   defp display_tags(
          %Actor{} = actor,
          %Image{} = image,
@@ -1071,6 +1075,7 @@ defmodule Philomena.Images do
           image.tag_change_count,
           image.tag_change_tag_count
         ),
+      deprecated_tags_with_aliases: display_deprecated_tags_with_aliases(actor, image),
       sources: display_sources(actor, image, image.source_change_count),
       moderation: display_moderation(actor, image),
       moderation_metadata: display_moderation_metadata(actor, image),
