@@ -1,9 +1,9 @@
-defmodule Philomena.FormsTest do
+defmodule Philomena.FormHelpersTest do
   use ExUnit.Case, async: true
 
   import Ecto.Changeset
 
-  alias Philomena.Forms
+  alias Philomena.FormHelpers
 
   defmodule Form do
     use Ecto.Schema
@@ -30,7 +30,7 @@ defmodule Philomena.FormsTest do
         |> Map.replace!(:action, :update)
 
       assert %Ecto.Changeset{action: :update, errors: [first: {"is invalid", []}]} =
-               Forms.copy_errors(source, %Form{})
+               FormHelpers.copy_errors(source, %Form{})
     end
   end
 
@@ -38,7 +38,7 @@ defmodule Philomena.FormsTest do
     test "applies attrs to the populated projection and returns only its changes" do
       form = %Form{first: "kept", second: "old"}
 
-      assert {:ok, updated, %{second: "new"}} = Forms.update(form, %{second: "new"})
+      assert {:ok, updated, %{second: "new"}} = FormHelpers.update(form, %{second: "new"})
       assert updated == %Form{first: "kept", second: "new"}
     end
   end

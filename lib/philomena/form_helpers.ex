@@ -1,4 +1,4 @@
-defmodule Philomena.Forms do
+defmodule Philomena.FormHelpers do
   @moduledoc """
   Helpers for building and applying changesets for form schemas.
 

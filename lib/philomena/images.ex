@@ -38,8 +38,6 @@ defmodule Philomena.Images do
     UploaderInput
   }
 
-  alias Philomena.Forms
-
   alias PhilomenaQuery.Search
   alias Philomena.Workers.ThumbnailJob
   alias Philomena.Workers.ImagePurgeJob
@@ -81,6 +79,7 @@ defmodule Philomena.Images do
   alias Philomena.Reports
   alias Philomena.Comments
   alias Philomena.Galleries
+  alias Philomena.FormHelpers
   alias Philomena.Images.Query, as: ImageQuery
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
@@ -295,7 +294,7 @@ defmodule Philomena.Images do
   defp update_source_input(%Image{} = image, params) do
     source_input = SourceInput.render(image)
 
-    case Forms.update(source_input, params) do
+    case FormHelpers.update(source_input, params) do
       {:ok, source_input, changes} ->
         {:ok, source_input, changes}
 
@@ -330,7 +329,7 @@ defmodule Philomena.Images do
   defp update_tag_input(%Image{} = image, params) do
     tag_input = TagInput.render(image)
 
-    case Forms.update(tag_input, params) do
+    case FormHelpers.update(tag_input, params) do
       {:ok, tag_input, changes} ->
         {:ok, tag_input, changes}
 
@@ -634,7 +633,7 @@ defmodule Philomena.Images do
   end
 
   defp control_for(%Actor{} = actor, action, %Image{} = image, control) do
-    Forms.change_if(
+    FormHelpers.change_if(
       fn -> control.render(image) end,
       image_permitted?(actor, action, image)
     )
@@ -670,7 +669,7 @@ defmodule Philomena.Images do
         name: gallery.title,
         present?: present?,
         changeset:
-          Forms.change_if(
+          FormHelpers.change_if(
             fn -> %Display.GalleryInteraction{} end,
             write_access?(actor) and permitted?(actor, action, gallery)
           )
@@ -1767,7 +1766,7 @@ defmodule Philomena.Images do
   def create_image_approval(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :approve, image_id),
-         {:ok, approval} <- Forms.create(Approval, %{}) do
+         {:ok, approval} <- FormHelpers.create(Approval, %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} -> Image.approve_changeset(image) end)
@@ -1782,7 +1781,7 @@ defmodule Philomena.Images do
           {:ok, Approval.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, approval)}
+          {:error, FormHelpers.copy_errors(changeset, approval)}
 
         error ->
           error
@@ -1884,7 +1883,7 @@ defmodule Philomena.Images do
   def create_image_destruction(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :destroy, image_id),
-         {:ok, destruction, _changes} <- Forms.update(Destruction.render(image), %{}) do
+         {:ok, destruction, _changes} <- FormHelpers.update(Destruction.render(image), %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -1903,7 +1902,7 @@ defmodule Philomena.Images do
           {:ok, Destruction.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, destruction)}
+          {:error, FormHelpers.copy_errors(changeset, destruction)}
       end
     end
   end
@@ -1933,7 +1932,7 @@ defmodule Philomena.Images do
   def update_image_comments_lock(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_comments, image_id),
-         {:ok, comments_lock, _changes} <- Forms.update(CommentsLock.render(image), params) do
+         {:ok, comments_lock, _changes} <- FormHelpers.update(CommentsLock.render(image), params) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -1985,7 +1984,7 @@ defmodule Philomena.Images do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_description, image_id),
          {:ok, description_lock, _changes} <-
-           Forms.update(DescriptionLock.render(image), params) do
+           FormHelpers.update(DescriptionLock.render(image), params) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2035,7 +2034,7 @@ defmodule Philomena.Images do
   def update_image_tags_lock(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_tags, image_id),
-         {:ok, tags_lock, _changes} <- Forms.update(TagsLock.render(image), params) do
+         {:ok, tags_lock, _changes} <- FormHelpers.update(TagsLock.render(image), params) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2169,7 +2168,7 @@ defmodule Philomena.Images do
   def create_image_hide(%Actor{user: user} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :hide, image_id),
-         {:ok, hide} <- Forms.create(Hide, params) do
+         {:ok, hide} <- FormHelpers.create(Hide, params) do
       changeset_fun =
         fn %{locked_image: image} ->
           Image.hide_changeset(image, %{deletion_reason: hide.deletion_reason}, user)
@@ -2193,7 +2192,7 @@ defmodule Philomena.Images do
           {:ok, Hide.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, hide)}
+          {:error, FormHelpers.copy_errors(changeset, hide)}
       end
     end
   end
@@ -2364,7 +2363,7 @@ defmodule Philomena.Images do
   def delete_image_hash(%Actor{} = actor, image_id) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :remove_hash, image_id),
-         {:ok, _hash, _changes} <- Forms.update(Hash.render(image), %{}) do
+         {:ok, _hash, _changes} <- FormHelpers.update(Hash.render(image), %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} -> Image.remove_hash_changeset(image) end)
@@ -2434,7 +2433,7 @@ defmodule Philomena.Images do
   def update_image_scratchpad(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_scratchpad, image_id),
-         {:ok, scratchpad, changes} <- Forms.update(Scratchpad.render(image), params) do
+         {:ok, scratchpad, changes} <- FormHelpers.update(Scratchpad.render(image), params) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2454,7 +2453,7 @@ defmodule Philomena.Images do
           {:ok, Scratchpad.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, scratchpad)}
+          {:error, FormHelpers.copy_errors(changeset, scratchpad)}
       end
     end
   end
@@ -2487,7 +2486,7 @@ defmodule Philomena.Images do
          {:ok, image} <-
            load_image_member(actor, :remove_source_history, image_id, [:source_changes]),
          {:ok, _source_history, _changes} <-
-           Forms.update(SourceHistory.render(image), %{}) do
+           FormHelpers.update(SourceHistory.render(image), %{}) do
       image_query =
         Image
         |> where(id: ^image.id)
@@ -2543,7 +2542,7 @@ defmodule Philomena.Images do
   def update_image_file(%Actor{} = actor, image_id, upload) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :replace_file, image_id),
-         {:ok, file, _changes} <- Forms.update(File.render(image), %{}) do
+         {:ok, file, _changes} <- FormHelpers.update(File.render(image), %{}) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2565,7 +2564,7 @@ defmodule Philomena.Images do
           {:ok, File.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, file)}
+          {:error, FormHelpers.copy_errors(changeset, file)}
       end
     end
   end
@@ -2603,7 +2602,7 @@ defmodule Philomena.Images do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :edit_description, image_id),
          {:ok, description_input, changes} <-
-           Forms.update(DescriptionInput.render(image), params) do
+           FormHelpers.update(DescriptionInput.render(image), params) do
       Multi.new()
       |> put_lock_image(actor, image.id, :edit_description, [:user, :sources, tags: :aliases])
       |> Multi.update(:image, fn %{locked_image: image} ->
@@ -2623,7 +2622,7 @@ defmodule Philomena.Images do
           {:ok, %{description_input: description_input, description: description}}
 
         {:error, :image, %Ecto.Changeset{} = changeset, %{locked_image: %Image{} = image}} ->
-          changeset = Forms.copy_errors(changeset, description_input)
+          changeset = FormHelpers.copy_errors(changeset, description_input)
           description = Description.render(image, true, changeset)
 
           {:error, %{changeset: changeset, description: description}}
@@ -2706,7 +2705,7 @@ defmodule Philomena.Images do
           {:ok, source_update_success(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, source_update_failure(image, Forms.copy_errors(changeset, source_input))}
+          {:error, source_update_failure(image, FormHelpers.copy_errors(changeset, source_input))}
 
         error ->
           map_lock_errors(error)
@@ -2771,7 +2770,7 @@ defmodule Philomena.Images do
   def update_image_locked_tags(%Actor{} = actor, image_id, params) do
     with :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :lock_tags, image_id, [:locked_tags]),
-         {:ok, locked_tags, _changes} <- Forms.update(LockedTags.render(image), params) do
+         {:ok, locked_tags, _changes} <- FormHelpers.update(LockedTags.render(image), params) do
       tag_names = Tag.parse_tag_list(locked_tags.tag_input)
 
       image_query =
@@ -2799,7 +2798,7 @@ defmodule Philomena.Images do
           {:ok, LockedTags.render(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, locked_tags)}
+          {:error, FormHelpers.copy_errors(changeset, locked_tags)}
       end
     end
   end
@@ -2918,7 +2917,7 @@ defmodule Philomena.Images do
           {:ok, tag_update_success(image)}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, tag_update_failure(image, Forms.copy_errors(changeset, tag_input))}
+          {:error, tag_update_failure(image, FormHelpers.copy_errors(changeset, tag_input))}
 
         {:error, :check_limits, _reason, _changes} ->
           {:error, :rate_limited}
@@ -2963,7 +2962,8 @@ defmodule Philomena.Images do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_uploader, image_id, [:user]),
-         {:ok, uploader_input, _changes} <- Forms.update(UploaderInput.render(image), params) do
+         {:ok, uploader_input, _changes} <-
+           FormHelpers.update(UploaderInput.render(image), params) do
       username = uploader_input.username
 
       Multi.new()
@@ -2994,7 +2994,7 @@ defmodule Philomena.Images do
            |> UploaderInput.render()}
 
         {:error, :image, %Ecto.Changeset{} = changeset, _changes} ->
-          {:error, Forms.copy_errors(changeset, uploader_input)}
+          {:error, FormHelpers.copy_errors(changeset, uploader_input)}
       end
     end
   end
@@ -3028,7 +3028,7 @@ defmodule Philomena.Images do
     with :ok <- authorize(actor, :show, :identity_metadata),
          :ok <- verify_write_access(actor),
          {:ok, image} <- load_image_member(actor, :update_anonymous, image_id),
-         {:ok, _anonymous, changes} <- Forms.update(Anonymous.render(image), params) do
+         {:ok, _anonymous, changes} <- FormHelpers.update(Anonymous.render(image), params) do
       Multi.new()
       |> Multi.lock_one(:locked_image, where(Image, id: ^image.id))
       |> Multi.update(:image, fn %{locked_image: image} ->
