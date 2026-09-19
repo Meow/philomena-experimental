@@ -3,8 +3,8 @@ defmodule Philomena.Images.Display.Sources do
   Presentation data for an image's sources area.
   """
 
-  alias Philomena.Images.Display.Source
-  alias Philomena.Images.Display.SourceInput
+  alias Philomena.Images.Forms.Source
+  alias Philomena.Images.Forms.SourceInput
   alias Philomena.Images.Image
 
   @enforce_keys [

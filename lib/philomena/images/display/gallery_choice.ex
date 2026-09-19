@@ -3,7 +3,7 @@ defmodule Philomena.Images.Display.GalleryChoice do
   Presentation data for an image gallery choice control.
   """
 
-  alias Philomena.Images.Display.GalleryInteraction
+  alias Philomena.Images.Forms.GalleryInteraction
 
   @enforce_keys [:name, :id, :present?, :changeset]
   defstruct @enforce_keys

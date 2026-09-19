@@ -5,7 +5,7 @@ defmodule Philomena.Images.Display.Description do
   Contains the image's description.
   """
 
-  alias Philomena.Images.Display.DescriptionInput
+  alias Philomena.Images.Forms.DescriptionInput
   alias Philomena.Images.Image
 
   @enforce_keys [:body, :changeset]

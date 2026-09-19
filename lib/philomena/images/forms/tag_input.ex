@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.TagInput do
+defmodule Philomena.Images.Forms.TagInput do
   @moduledoc """
   Presentation data for an image's tag input control.
 

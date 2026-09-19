@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.SourceHistory do
+defmodule Philomena.Images.Forms.HideInteraction do
   @moduledoc """
-  Presentation data for an image's source history destruction control.
+  Presentation data for an image's hide interaction control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.SourceHistory do
   end
 
   @doc false
-  def changeset(source_history, attrs \\ %{}) do
-    cast(source_history, attrs, [])
+  def changeset(hide_interaction, attrs) do
+    cast(hide_interaction, attrs, [])
   end
 
   @doc false

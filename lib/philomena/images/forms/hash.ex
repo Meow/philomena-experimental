@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.Repair do
+defmodule Philomena.Images.Forms.Hash do
   @moduledoc """
-  Presentation data for an image's repair control.
+  Presentation data for an image's hash removal control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.Repair do
   end
 
   @doc false
-  def changeset(repair, attrs \\ %{}) do
-    cast(repair, attrs, [])
+  def changeset(hash, attrs \\ %{}) do
+    cast(hash, attrs, [])
   end
 
   @doc false

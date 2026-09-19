@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.Hide do
+defmodule Philomena.Images.Forms.Hide do
   @moduledoc """
   Presentation data for an image's staff hide control.
 

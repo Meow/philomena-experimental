@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.TagsLock do
+defmodule Philomena.Images.Forms.TagsLock do
   @moduledoc """
   Presentation data for an image's tags lock control.
 

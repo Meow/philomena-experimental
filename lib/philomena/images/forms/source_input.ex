@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.SourceInput do
+defmodule Philomena.Images.Forms.SourceInput do
   @moduledoc """
   Presentation data for an image's source input control.
 
@@ -8,7 +8,7 @@ defmodule Philomena.Images.Display.SourceInput do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Philomena.Images.Display.Source
+  alias Philomena.Images.Forms.Source
   alias Philomena.Images.Image
 
   @type t :: %__MODULE__{}

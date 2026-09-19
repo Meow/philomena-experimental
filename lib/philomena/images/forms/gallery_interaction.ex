@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.GalleryInteraction do
+defmodule Philomena.Images.Forms.GalleryInteraction do
   @moduledoc """
   Presentation data for an image gallery interaction control.
   """

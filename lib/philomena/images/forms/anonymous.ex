@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.Anonymous do
+defmodule Philomena.Images.Forms.Anonymous do
   @moduledoc """
   Presentation data for an image's anonymity control.
 

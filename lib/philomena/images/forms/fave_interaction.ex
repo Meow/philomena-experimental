@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.File do
+defmodule Philomena.Images.Forms.FaveInteraction do
   @moduledoc """
-  Presentation data for an image's file replacement control.
+  Presentation data for an image's fave interaction control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.File do
   end
 
   @doc false
-  def changeset(file, attrs \\ %{}) do
-    cast(file, attrs, [])
+  def changeset(fave_interaction, attrs) do
+    cast(fave_interaction, attrs, [])
   end
 
   @doc false

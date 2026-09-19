@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.SubscriptionInteraction do
+defmodule Philomena.Images.Forms.Approval do
   @moduledoc """
-  Presentation data for an image's subscription control.
+  Presentation data for an image's approval control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.SubscriptionInteraction do
   end
 
   @doc false
-  def changeset(subscription, attrs \\ %{}) do
-    cast(subscription, attrs, [])
+  def changeset(approval, attrs \\ %{}) do
+    cast(approval, attrs, [])
   end
 
   @doc false

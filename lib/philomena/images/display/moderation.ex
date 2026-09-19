@@ -6,21 +6,21 @@ defmodule Philomena.Images.Display.Moderation do
   the hidden from users state, and the moderation scratchpad.
   """
 
-  alias Philomena.Images.Display.Anonymous
-  alias Philomena.Images.Display.Approval
-  alias Philomena.Images.Display.CommentsLock
-  alias Philomena.Images.Display.DescriptionLock
-  alias Philomena.Images.Display.Destruction
-  alias Philomena.Images.Display.Feature
-  alias Philomena.Images.Display.File
-  alias Philomena.Images.Display.Hash
-  alias Philomena.Images.Display.Hide
-  alias Philomena.Images.Display.LockedTags
-  alias Philomena.Images.Display.Repair
-  alias Philomena.Images.Display.Scratchpad
-  alias Philomena.Images.Display.SourceHistory
-  alias Philomena.Images.Display.TagsLock
-  alias Philomena.Images.Display.UploaderInput
+  alias Philomena.Images.Forms.Anonymous
+  alias Philomena.Images.Forms.Approval
+  alias Philomena.Images.Forms.CommentsLock
+  alias Philomena.Images.Forms.DescriptionLock
+  alias Philomena.Images.Forms.Destruction
+  alias Philomena.Images.Forms.Feature
+  alias Philomena.Images.Forms.File
+  alias Philomena.Images.Forms.Hash
+  alias Philomena.Images.Forms.Hide
+  alias Philomena.Images.Forms.LockedTags
+  alias Philomena.Images.Forms.Repair
+  alias Philomena.Images.Forms.Scratchpad
+  alias Philomena.Images.Forms.SourceHistory
+  alias Philomena.Images.Forms.TagsLock
+  alias Philomena.Images.Forms.UploaderInput
 
   @enforce_keys [
     :hidden_from_users?,

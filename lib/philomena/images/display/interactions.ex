@@ -3,9 +3,9 @@ defmodule Philomena.Images.Display.Interactions do
   Presentation data for image interactions.
   """
 
-  alias Philomena.Images.Display.FaveInteraction
-  alias Philomena.Images.Display.HideInteraction
-  alias Philomena.Images.Display.VoteInteraction
+  alias Philomena.Images.Forms.FaveInteraction
+  alias Philomena.Images.Forms.HideInteraction
+  alias Philomena.Images.Forms.VoteInteraction
   alias Philomena.Images.Image
 
   @enforce_keys [

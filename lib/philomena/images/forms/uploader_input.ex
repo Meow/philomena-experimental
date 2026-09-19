@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.UploaderInput do
+defmodule Philomena.Images.Forms.UploaderInput do
   @moduledoc """
   Presentation data for an image's uploader input control.
 

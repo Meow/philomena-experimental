@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.FaveInteraction do
+defmodule Philomena.Images.Forms.VoteInteraction do
   @moduledoc """
-  Presentation data for an image's fave interaction control.
+  Presentation data for an image's vote interaction control.
   """
 
   use Ecto.Schema
@@ -13,11 +13,14 @@ defmodule Philomena.Images.Display.FaveInteraction do
   @primary_key false
 
   embedded_schema do
+    field :up, :boolean
   end
 
   @doc false
-  def changeset(fave_interaction, attrs) do
-    cast(fave_interaction, attrs, [])
+  def changeset(vote_interaction, attrs) do
+    vote_interaction
+    |> cast(attrs, [:up])
+    |> validate_required([:up])
   end
 
   @doc false

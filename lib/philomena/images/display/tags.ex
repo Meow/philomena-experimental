@@ -3,7 +3,7 @@ defmodule Philomena.Images.Display.Tags do
   Presentation data for an image's tags area.
   """
 
-  alias Philomena.Images.Display.TagInput
+  alias Philomena.Images.Forms.TagInput
   alias Philomena.Images.Image
   alias Philomena.Tags.Display.Tag
 

@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.Destruction do
+defmodule Philomena.Images.Forms.Repair do
   @moduledoc """
-  Presentation data for an image's destruction control.
+  Presentation data for an image's repair control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.Destruction do
   end
 
   @doc false
-  def changeset(destruction, attrs \\ %{}) do
-    cast(destruction, attrs, [])
+  def changeset(repair, attrs \\ %{}) do
+    cast(repair, attrs, [])
   end
 
   @doc false

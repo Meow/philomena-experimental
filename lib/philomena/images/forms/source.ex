@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.Source do
+defmodule Philomena.Images.Forms.Source do
   @moduledoc """
   Presentation data for an image source control.
   """

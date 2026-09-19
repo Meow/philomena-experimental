@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.Hash do
+defmodule Philomena.Images.Forms.Destruction do
   @moduledoc """
-  Presentation data for an image's hash removal control.
+  Presentation data for an image's destruction control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.Hash do
   end
 
   @doc false
-  def changeset(hash, attrs \\ %{}) do
-    cast(hash, attrs, [])
+  def changeset(destruction, attrs \\ %{}) do
+    cast(destruction, attrs, [])
   end
 
   @doc false

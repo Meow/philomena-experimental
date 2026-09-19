@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.Approval do
+defmodule Philomena.Images.Forms.SourceHistory do
   @moduledoc """
-  Presentation data for an image's approval control.
+  Presentation data for an image's source history destruction control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.Approval do
   end
 
   @doc false
-  def changeset(approval, attrs \\ %{}) do
-    cast(approval, attrs, [])
+  def changeset(source_history, attrs \\ %{}) do
+    cast(source_history, attrs, [])
   end
 
   @doc false

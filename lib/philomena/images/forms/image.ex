@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.Image do
+defmodule Philomena.Images.Forms.Image do
   @moduledoc """
   Presentation data for the image creation form.
   """
@@ -6,7 +6,7 @@ defmodule Philomena.Images.Display.Image do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Philomena.Images.Display.Source
+  alias Philomena.Images.Forms.Source
 
   @type t :: %__MODULE__{}
   @primary_key false

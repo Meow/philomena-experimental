@@ -14,7 +14,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.Galleries.Interaction
   alias Philomena.Images
   alias Philomena.Images.Display
-  alias Philomena.Images.Display.LockedTags
+  alias Philomena.Images.Forms.LockedTags
   alias Philomena.ImageVotes
   alias Philomena.ImageVotes.ImageVote
   alias Philomena.ModerationLogs.ModerationLog

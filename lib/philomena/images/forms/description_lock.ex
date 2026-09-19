@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.DescriptionLock do
+defmodule Philomena.Images.Forms.DescriptionLock do
   @moduledoc """
   Presentation data for an image's description lock control.
 

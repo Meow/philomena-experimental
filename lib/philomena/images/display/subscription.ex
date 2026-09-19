@@ -3,7 +3,7 @@ defmodule Philomena.Images.Display.Subscription do
   Presentation data for an image's subscription.
   """
 
-  alias Philomena.Images.Display.SubscriptionInteraction
+  alias Philomena.Images.Forms.SubscriptionInteraction
 
   @enforce_keys [:subscribed?, :changeset]
   defstruct @enforce_keys

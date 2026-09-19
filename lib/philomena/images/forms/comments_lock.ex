@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.CommentsLock do
+defmodule Philomena.Images.Forms.CommentsLock do
   @moduledoc """
   Presentation data for an image's comments lock control.
 

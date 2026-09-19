@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.DescriptionInput do
+defmodule Philomena.Images.Forms.DescriptionInput do
   @moduledoc """
   Presentation data for an image's description input control.
 

@@ -1,4 +1,4 @@
-defmodule Philomena.Images.Display.Scratchpad do
+defmodule Philomena.Images.Forms.Scratchpad do
   @moduledoc """
   Presentation data for an image's moderation scratchpad control.
 

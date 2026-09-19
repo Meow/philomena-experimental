@@ -21,6 +21,7 @@ defmodule Philomena.Images.Display.Comments do
       if not image.hidden_from_users or may_reveal_comments_on_hidden_image? do
         comments
       else
+        # TODO(presentation-split): not present vs not disclosed?
         %{comments | entries: []}
       end
 

@@ -1,6 +1,6 @@
-defmodule Philomena.Images.Display.HideInteraction do
+defmodule Philomena.Images.Forms.Feature do
   @moduledoc """
-  Presentation data for an image's hide interaction control.
+  Presentation data for an image's feature control.
   """
 
   use Ecto.Schema
@@ -16,8 +16,8 @@ defmodule Philomena.Images.Display.HideInteraction do
   end
 
   @doc false
-  def changeset(hide_interaction, attrs) do
-    cast(hide_interaction, attrs, [])
+  def changeset(feature, attrs \\ %{}) do
+    cast(feature, attrs, [])
   end
 
   @doc false
