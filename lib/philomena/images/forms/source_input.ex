@@ -8,15 +8,15 @@ defmodule Philomena.Images.Forms.SourceInput do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Philomena.Images.Forms.Source
+  alias Philomena.Images.Forms
   alias Philomena.Images.Image
 
   @type t :: %__MODULE__{}
   @primary_key false
 
   embedded_schema do
-    embeds_many :old_sources, Source, on_replace: :delete
-    embeds_many :sources, Source, on_replace: :delete
+    embeds_many :old_sources, Forms.Source, on_replace: :delete
+    embeds_many :sources, Forms.Source, on_replace: :delete
   end
 
   @doc false
@@ -30,7 +30,7 @@ defmodule Philomena.Images.Forms.SourceInput do
 
   @doc false
   def render(%Image{sources: sources}) do
-    sources = Enum.map(sources, &Source.render/1)
+    sources = Enum.map(sources, &Forms.Source.render/1)
 
     %__MODULE__{
       old_sources: sources,
@@ -42,7 +42,7 @@ defmodule Philomena.Images.Forms.SourceInput do
     # Empty sources are dropped on submission. One source is provided if none
     # are in the list to ensure the client has something to work with.
     if get_field(changeset, :sources) == [] do
-      put_embed(changeset, :sources, [Source.changeset(%Source{})])
+      put_embed(changeset, :sources, [Forms.Source.changeset(%Forms.Source{})])
     else
       changeset
     end

@@ -3,9 +3,7 @@ defmodule Philomena.Images.Display.Interactions do
   Presentation data for image interactions.
   """
 
-  alias Philomena.Images.Forms.FaveInteraction
-  alias Philomena.Images.Forms.HideInteraction
-  alias Philomena.Images.Forms.VoteInteraction
+  alias Philomena.Images.Forms
   alias Philomena.Images.Image
 
   @enforce_keys [
@@ -37,9 +35,9 @@ defmodule Philomena.Images.Display.Interactions do
           downvotes_count: interaction_count(),
           hidden?: boolean(),
           hides_count: interaction_count(),
-          fave_changeset: Ecto.Changeset.t(FaveInteraction.t()) | nil,
-          hide_changeset: Ecto.Changeset.t(HideInteraction.t()) | nil,
-          vote_changeset: Ecto.Changeset.t(VoteInteraction.t()) | nil
+          fave_changeset: Ecto.Changeset.t(Forms.FaveInteraction.t()) | nil,
+          hide_changeset: Ecto.Changeset.t(Forms.HideInteraction.t()) | nil,
+          vote_changeset: Ecto.Changeset.t(Forms.VoteInteraction.t()) | nil
         }
 
   @doc false

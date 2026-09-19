@@ -3,7 +3,7 @@ defmodule Philomena.Images.Display.GalleryChoice do
   Presentation data for an image gallery choice control.
   """
 
-  alias Philomena.Images.Forms.GalleryInteraction
+  alias Philomena.Images.Forms
 
   @enforce_keys [:name, :id, :present?, :changeset]
   defstruct @enforce_keys
@@ -12,6 +12,6 @@ defmodule Philomena.Images.Display.GalleryChoice do
           name: String.t(),
           id: integer(),
           present?: boolean(),
-          changeset: Ecto.Changeset.t(GalleryInteraction.t()) | nil
+          changeset: Ecto.Changeset.t(Forms.GalleryInteraction.t()) | nil
         }
 end

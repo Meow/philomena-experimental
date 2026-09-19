@@ -4,7 +4,7 @@ defmodule Philomena.Images.Display.ModerationMetadata do
   """
 
   alias Philomena.Images.Image
-  alias Philomena.Users.Display.User
+  alias Philomena.Users
 
   @enforce_keys [
     :approved?,
@@ -23,7 +23,7 @@ defmodule Philomena.Images.Display.ModerationMetadata do
           duplicate_id: integer() | nil,
           deletion_reason: String.t() | nil,
           # TODO(presentation-split): not present vs not disclosed?
-          deleter: User.t() | nil
+          deleter: Users.Display.User.t() | nil
         }
 
   @doc false
@@ -36,7 +36,7 @@ defmodule Philomena.Images.Display.ModerationMetadata do
       deletion_reason: image.deletion_reason,
       deleter:
         if may_reveal_deleter? and not is_nil(image.deleter) do
-          User.render(image.deleter)
+          Users.Display.User.render(image.deleter)
         end
     }
   end

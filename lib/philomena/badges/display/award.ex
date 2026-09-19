@@ -3,7 +3,7 @@ defmodule Philomena.Badges.Display.Award do
   Presentation data for a badge award.
   """
 
-  alias Philomena.Badges.Display.Badge
+  alias Philomena.Badges.Display
   alias Philomena.Badges.Award
 
   @enforce_keys [:title, :label, :created_at, :id, :badge]
@@ -14,11 +14,11 @@ defmodule Philomena.Badges.Display.Award do
           label: String.t(),
           created_at: DateTime.t(),
           id: integer(),
-          badge: Badge.t()
+          badge: Display.Badge.t()
         }
 
   @doc false
-  def render(%Award{} = award, %Badge{} = badge) do
+  def render(%Award{} = award, %Display.Badge{} = badge) do
     %__MODULE__{
       title: presence(award.badge_name) || badge.title,
       label: award.label,

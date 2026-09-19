@@ -3,13 +3,13 @@ defmodule Philomena.Images.Display.Galleries do
   Presentation data for the image page gallery menu.
   """
 
-  alias Philomena.Images.Display.GalleryChoice
+  alias Philomena.Images.Display
 
   @enforce_keys [:choices, :changeset]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          choices: [GalleryChoice.t()],
+          choices: [Display.GalleryChoice.t()],
           # TODO(presentation-split)
           changeset: Ecto.Changeset.t(Philomena.Galleries.Gallery.t()) | nil
         }

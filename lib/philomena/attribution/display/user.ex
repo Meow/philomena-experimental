@@ -3,26 +3,25 @@ defmodule Philomena.Attribution.Display.User do
   Presentation data for a non-anonymously attributed user and award list.
   """
 
-  alias Philomena.Users.Display.User
-  alias Philomena.Badges.Display.Award
-  alias Philomena.Badges.Display.Badge
+  alias Philomena.Badges
+  alias Philomena.Users
 
   @enforce_keys [:user, :awards]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          user: User.t(),
-          awards: [Award.t()]
+          user: Users.Display.User.t(),
+          awards: [Badges.Display.Award.t()]
         }
 
   @doc false
-  def render(%Philomena.Users.User{} = user) do
+  def render(%Users.User{} = user) do
     %__MODULE__{
-      user: User.render(user),
+      user: Users.Display.User.render(user),
       awards:
         Enum.map(user.awards, fn award ->
-          badge = Badge.render(award.badge)
-          Award.render(award, badge)
+          badge = Badges.Display.Badge.render(award.badge)
+          Badges.Display.Award.render(award, badge)
         end)
     }
   end

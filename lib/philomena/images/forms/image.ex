@@ -6,13 +6,13 @@ defmodule Philomena.Images.Forms.Image do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Philomena.Images.Forms.Source
+  alias Philomena.Images.Forms
 
   @type t :: %__MODULE__{}
   @primary_key false
 
   embedded_schema do
-    embeds_many :sources, Source
+    embeds_many :sources, Forms.Source
 
     field :anonymous, :boolean
     field :description, :string

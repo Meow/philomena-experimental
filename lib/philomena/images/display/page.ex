@@ -3,21 +3,7 @@ defmodule Philomena.Images.Display.Page do
   Presentation data for a complete image page.
   """
 
-  alias Philomena.Images.Display.{
-    Comments,
-    Description,
-    DeprecatedTagsWithAliases,
-    Galleries,
-    Interactions,
-    Media,
-    Metadata,
-    Moderation,
-    ModerationMetadata,
-    Sources,
-    Subscription,
-    Tags,
-    Uploader
-  }
+  alias Philomena.Images.Display
 
   @enforce_keys [
     :interactions,
@@ -37,18 +23,18 @@ defmodule Philomena.Images.Display.Page do
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          interactions: Interactions.t(),
-          metadata: Metadata.t(),
-          subscription: Subscription.t(),
-          galleries: Galleries.t(),
-          media: Media.t(),
-          uploader: Uploader.t(),
-          description: Description.t(),
-          tags: Tags.t(),
-          deprecated_tags_with_aliases: DeprecatedTagsWithAliases.t(),
-          sources: Sources.t(),
-          moderation: Moderation.t(),
-          moderation_metadata: ModerationMetadata.t(),
-          comments: Comments.t()
+          interactions: Display.Interactions.t(),
+          metadata: Display.Metadata.t(),
+          subscription: Display.Subscription.t(),
+          galleries: Display.Galleries.t(),
+          media: Display.Media.t(),
+          uploader: Display.Uploader.t(),
+          description: Display.Description.t(),
+          tags: Display.Tags.t(),
+          deprecated_tags_with_aliases: Display.DeprecatedTagsWithAliases.t(),
+          sources: Display.Sources.t(),
+          moderation: Display.Moderation.t(),
+          moderation_metadata: Display.ModerationMetadata.t(),
+          comments: Display.Comments.t()
         }
 end

@@ -3,14 +3,10 @@ defmodule Philomena.Attribution.Display.Attribution do
   Presentation data for user attribution.
   """
 
-  alias Philomena.Attribution.Display.{
-    Anonymous,
-    AnonymousRevealed,
-    User
-  }
+  alias Philomena.Attribution.Display
 
   @type t ::
-          {:anonymous, Anonymous.t()}
-          | {:anonymous_revealed, AnonymousRevealed.t()}
-          | {:user, User.t()}
+          {:anonymous, Display.Anonymous.t()}
+          | {:anonymous_revealed, Display.AnonymousRevealed.t()}
+          | {:user, Display.User.t()}
 end

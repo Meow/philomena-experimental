@@ -3,9 +3,9 @@ defmodule Philomena.Images.Display.Tags do
   Presentation data for an image's tags area.
   """
 
-  alias Philomena.Images.Forms.TagInput
+  alias Philomena.Images.Forms
   alias Philomena.Images.Image
-  alias Philomena.Tags.Display.Tag
+  alias Philomena.Tags
 
   @enforce_keys [
     :tag_changes_count,
@@ -19,9 +19,9 @@ defmodule Philomena.Images.Display.Tags do
   @type t :: %__MODULE__{
           tag_changes_count: non_neg_integer(),
           tag_change_tags_count: non_neg_integer(),
-          tags: [Tag.t()],
-          locked_tags: [Tag.t()],
-          changeset: Ecto.Changeset.t(TagInput.t()) | nil
+          tags: [Tags.Display.Tag.t()],
+          locked_tags: [Tags.Display.Tag.t()],
+          changeset: Ecto.Changeset.t(Forms.TagInput.t()) | nil
         }
 
   @doc false
@@ -34,8 +34,8 @@ defmodule Philomena.Images.Display.Tags do
     %__MODULE__{
       tag_changes_count: tag_changes_count,
       tag_change_tags_count: tag_change_tags_count,
-      tags: Enum.map(tags, &Tag.render/1),
-      locked_tags: Enum.map(locked_tags, &Tag.render/1),
+      tags: Enum.map(tags, &Tags.Display.Tag.render/1),
+      locked_tags: Enum.map(locked_tags, &Tags.Display.Tag.render/1),
       changeset: tag_input_changeset
     }
   end

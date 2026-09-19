@@ -5,7 +5,7 @@ defmodule Philomena.Images.Display.Description do
   Contains the image's description.
   """
 
-  alias Philomena.Images.Forms.DescriptionInput
+  alias Philomena.Images.Forms
   alias Philomena.Images.Image
 
   @enforce_keys [:body, :changeset]
@@ -13,7 +13,7 @@ defmodule Philomena.Images.Display.Description do
 
   @type t :: %__MODULE__{
           body: String.t(),
-          changeset: Ecto.Changeset.t(DescriptionInput.t()) | nil
+          changeset: Ecto.Changeset.t(Forms.DescriptionInput.t()) | nil
         }
 
   @doc false

@@ -3,14 +3,14 @@ defmodule Philomena.Images.Display.Subscription do
   Presentation data for an image's subscription.
   """
 
-  alias Philomena.Images.Forms.SubscriptionInteraction
+  alias Philomena.Images.Forms
 
   @enforce_keys [:subscribed?, :changeset]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           subscribed?: boolean(),
-          changeset: Ecto.Changeset.t(SubscriptionInteraction.t()) | nil
+          changeset: Ecto.Changeset.t(Forms.SubscriptionInteraction.t()) | nil
         }
 
   @doc false

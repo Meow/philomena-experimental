@@ -3,11 +3,11 @@ defmodule Philomena.Comments.Display.Comment do
   Presentation data for an image comment.
   """
 
-  alias Philomena.Attribution.Display.Attribution
-  alias Philomena.Attribution.Display.IdentityMetadata
+  alias Philomena.Attribution
+  alias Philomena.Attribution
   alias Philomena.Comments.Comment
-  alias Philomena.Comments.Display.Options
-  alias Philomena.Users.Display.User
+  alias Philomena.Comments.Display
+  alias Philomena.Users
 
   @derive {Phoenix.Param, key: :id}
 
@@ -32,7 +32,7 @@ defmodule Philomena.Comments.Display.Comment do
   @type communication_redaction :: %{
           deletion_reason: String.t() | nil,
           # TODO(presentation-split): not present vs not disclosed?
-          deleted_by: User.t() | nil
+          deleted_by: Users.Display.User.t() | nil
         }
 
   # TODO(presentation-split): redundancy with moderation metadata
@@ -48,17 +48,17 @@ defmodule Philomena.Comments.Display.Comment do
           destroyed?: boolean(),
           deletion_reason: String.t() | nil,
           # TODO(presentation-split): not present vs not disclosed?
-          deleted_by: User.t() | nil
+          deleted_by: Users.Display.User.t() | nil
         }
 
   @type t :: %__MODULE__{
           id: integer(),
           image_id: integer(),
           created_at: DateTime.t(),
-          author: Attribution.t(),
-          identity_metadata: IdentityMetadata.t() | nil,
+          author: Attribution.Display.Attribution.t(),
+          identity_metadata: Attribution.Display.IdentityMetadata.t() | nil,
           moderation_metadata: moderation_metadata(),
-          options: Options.t(),
+          options: Display.Options.t(),
           body: body()
         }
 
@@ -116,7 +116,7 @@ defmodule Philomena.Comments.Display.Comment do
       deletion_reason: comment.deletion_reason,
       deleted_by:
         if may_reveal_redacted? and not is_nil(comment.deleted_by) do
-          User.render(comment.deleted_by)
+          Users.Display.User.render(comment.deleted_by)
         end
     }
   end

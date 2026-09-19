@@ -6,21 +6,7 @@ defmodule Philomena.Images.Display.Moderation do
   the hidden from users state, and the moderation scratchpad.
   """
 
-  alias Philomena.Images.Forms.Anonymous
-  alias Philomena.Images.Forms.Approval
-  alias Philomena.Images.Forms.CommentsLock
-  alias Philomena.Images.Forms.DescriptionLock
-  alias Philomena.Images.Forms.Destruction
-  alias Philomena.Images.Forms.Feature
-  alias Philomena.Images.Forms.File
-  alias Philomena.Images.Forms.Hash
-  alias Philomena.Images.Forms.Hide
-  alias Philomena.Images.Forms.LockedTags
-  alias Philomena.Images.Forms.Repair
-  alias Philomena.Images.Forms.Scratchpad
-  alias Philomena.Images.Forms.SourceHistory
-  alias Philomena.Images.Forms.TagsLock
-  alias Philomena.Images.Forms.UploaderInput
+  alias Philomena.Images.Forms
 
   @enforce_keys [
     :hidden_from_users?,
@@ -44,20 +30,20 @@ defmodule Philomena.Images.Display.Moderation do
 
   @type t :: %__MODULE__{
           hidden_from_users?: boolean(),
-          anonymous_changeset: Ecto.Changeset.t(Anonymous.t()) | nil,
-          approval_changeset: Ecto.Changeset.t(Approval.t()) | nil,
-          comments_lock_changeset: Ecto.Changeset.t(CommentsLock.t()) | nil,
-          description_lock_changeset: Ecto.Changeset.t(DescriptionLock.t()) | nil,
-          destruction_changeset: Ecto.Changeset.t(Destruction.t()) | nil,
-          feature_changeset: Ecto.Changeset.t(Feature.t()) | nil,
-          file_changeset: Ecto.Changeset.t(File.t()) | nil,
-          hash_changeset: Ecto.Changeset.t(Hash.t()) | nil,
-          hide_changeset: Ecto.Changeset.t(Hide.t()) | nil,
-          locked_tags_changeset: Ecto.Changeset.t(LockedTags.t()) | nil,
-          repair_changeset: Ecto.Changeset.t(Repair.t()) | nil,
-          scratchpad_changeset: Ecto.Changeset.t(Scratchpad.t()) | nil,
-          source_history_changeset: Ecto.Changeset.t(SourceHistory.t()) | nil,
-          tags_lock_changeset: Ecto.Changeset.t(TagsLock.t()) | nil,
-          uploader_input_changeset: Ecto.Changeset.t(UploaderInput.t()) | nil
+          anonymous_changeset: Ecto.Changeset.t(Forms.Anonymous.t()) | nil,
+          approval_changeset: Ecto.Changeset.t(Forms.Approval.t()) | nil,
+          comments_lock_changeset: Ecto.Changeset.t(Forms.CommentsLock.t()) | nil,
+          description_lock_changeset: Ecto.Changeset.t(Forms.DescriptionLock.t()) | nil,
+          destruction_changeset: Ecto.Changeset.t(Forms.Destruction.t()) | nil,
+          feature_changeset: Ecto.Changeset.t(Forms.Feature.t()) | nil,
+          file_changeset: Ecto.Changeset.t(Forms.File.t()) | nil,
+          hash_changeset: Ecto.Changeset.t(Forms.Hash.t()) | nil,
+          hide_changeset: Ecto.Changeset.t(Forms.Hide.t()) | nil,
+          locked_tags_changeset: Ecto.Changeset.t(Forms.LockedTags.t()) | nil,
+          repair_changeset: Ecto.Changeset.t(Forms.Repair.t()) | nil,
+          scratchpad_changeset: Ecto.Changeset.t(Forms.Scratchpad.t()) | nil,
+          source_history_changeset: Ecto.Changeset.t(Forms.SourceHistory.t()) | nil,
+          tags_lock_changeset: Ecto.Changeset.t(Forms.TagsLock.t()) | nil,
+          uploader_input_changeset: Ecto.Changeset.t(Forms.UploaderInput.t()) | nil
         }
 end

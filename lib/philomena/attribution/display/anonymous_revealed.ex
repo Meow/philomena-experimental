@@ -3,20 +3,20 @@ defmodule Philomena.Attribution.Display.AnonymousRevealed do
   Presentation data for an anonymously attributed user who is revealed to staff.
   """
 
-  alias Philomena.Users.Display.User
+  alias Philomena.Users
 
   @enforce_keys [:discriminant, :user]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           discriminant: String.t(),
-          user: User.t()
+          user: Users.Display.User.t()
         }
 
   @doc false
-  def render(%Philomena.Users.User{} = user, discriminant) do
+  def render(%Users.User{} = user, discriminant) do
     %__MODULE__{
-      user: User.render(user),
+      user: Users.Display.User.render(user),
       discriminant: discriminant
     }
   end
