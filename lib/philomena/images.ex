@@ -62,6 +62,7 @@ defmodule Philomena.Images do
   alias Philomena.Workers.IndexJob
   alias Philomena.Loader
   alias Philomena.RateLimiter
+  alias Philomena.Attribution
   alias Philomena.Attribution.Actor
   alias Philomena.ModerationLogs
   alias Philomena.ModerationLogs.Paths
@@ -809,13 +810,10 @@ defmodule Philomena.Images do
   end
 
   defp display_uploader(%Actor{} = actor, %Image{} = image) do
-    identity_metadata =
-      Philomena.Attribution.Display.IdentityMetadata.display_identity_metadata(actor, image)
-
-    uploader =
-      Philomena.Attribution.Display.Attribution.display_attribution(actor, image)
-
-    %Display.Uploader{identity_metadata: identity_metadata, uploader: uploader}
+    %Display.Uploader{
+      identity_metadata: Attribution.display_identity_metadata(actor, image),
+      uploader: Attribution.display_attribution(actor, image)
+    }
   end
 
   @doc group: "Browsing and discovery"
