@@ -1,6 +1,6 @@
 .center--layout--flex
-  = case @page.media.thumbnails do
-    - {:thumbnails, _thumbnails} ->
+  = case @page.media.representations do
+    - {:image, _representation} ->
       = render PhilomenaWeb.ImageView, "_display_image_target.html", page: @page, conn: @conn
       = if not @page.media.optimized? do
         br

@@ -43,17 +43,22 @@ defmodule PhilomenaWeb.ImageView do
     "Size: #{metadata.width}x#{metadata.height} | Tagged: #{display_tag_list(tags)}"
   end
 
-  def display_thumbnail_uris(%Display.Media{thumbnails: {:thumbnails, thumbnails}}) do
+  def display_thumbnail_uris(%Display.Media{representations: {:image, %{thumbnails: thumbnails}}}) do
     Map.new(thumbnails, fn {name, version} -> {name, version.uri} end)
   end
 
   def display_thumbnail_uris(%Display.Media{}), do: nil
 
-  def display_supplements(%Display.Media{supplements: {type, supplements}}) do
+  def display_supplements(%Display.Media{
+        representations: {:image, %{supplements: {type, supplements}}}
+      }) do
     Map.put(supplements, :type, type)
   end
 
-  def display_supplements(%Display.Media{supplements: status}), do: %{type: status}
+  def display_supplements(%Display.Media{representations: {:image, %{supplements: :none}}}),
+    do: %{type: :none}
+
+  def display_supplements(%Display.Media{representations: status}), do: %{type: status}
 
   def image_supplements(image, show_hidden) do
     image |> Display.Media.render(show_hidden) |> display_supplements()

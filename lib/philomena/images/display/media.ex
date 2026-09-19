@@ -8,18 +8,13 @@ defmodule Philomena.Images.Display.Media do
   alias Philomena.Tags.Tag
 
   @enforce_keys [
-    :view,
-    :download,
-    :supplements,
-    :thumbnails,
+    :representations,
     :rendered?,
     :optimized?,
     :duplication_checked?
   ]
-  defstruct @enforce_keys
 
-  @type omitted ::
-          :not_rendered | :not_available | :destroyed
+  defstruct @enforce_keys
 
   @type version :: %{
           width: pos_integer(),
@@ -75,29 +70,26 @@ defmodule Philomena.Images.Display.Media do
           long: version()
         }
 
-  @type t :: %__MODULE__{
-          # TODO(presentation-split): just have one guarded key
-          # representations: :destroyed | :not_available | :not_rendered | {:image, %{
-          #   view: files(),
-          #   download: files(),
-          #   thumbnails: thumbnails(),
-          #   supplements:
-          #     :none
-          #     | {:gif, gif_supplements()}
-          #     | {:svg, svg_supplements()}
-          #     | {:webm, webm_supplements()}
-          #     | {:mp4, mp4_supplements()}
-          # }}
-          view: omitted() | {:files, files()},
-          download: omitted() | {:files, files()},
+  @type image_representations :: %{
+          view: files(),
+          download: files(),
+          thumbnails: thumbnails(),
           supplements:
-            omitted()
-            | :none
+            :none
             | {:gif, gif_supplements()}
             | {:svg, svg_supplements()}
             | {:webm, webm_supplements()}
-            | {:mp4, mp4_supplements()},
-          thumbnails: omitted() | {:thumbnails, thumbnails()},
+            | {:mp4, mp4_supplements()}
+        }
+
+  @type representations ::
+          :destroyed
+          | :not_available
+          | :not_rendered
+          | {:image, image_representations()}
+
+  @type t :: %__MODULE__{
+          representations: representations(),
           rendered?: boolean(),
           optimized?: boolean(),
           duplication_checked?: boolean()
@@ -108,62 +100,55 @@ defmodule Philomena.Images.Display.Media do
   def render(%Image{} = image, may_reveal_hidden?) do
     image_format = normalized_format(image)
 
+    representations =
+      cond do
+        image.destroyed_content ->
+          # No files available for destroyed images
+          :destroyed
+
+        image.hidden_from_users and not may_reveal_hidden? ->
+          # Don't return files for images the actor may not see
+          :not_available
+
+        not image.thumbnails_generated ->
+          # File URIs are useless before thumbnails are generated
+          :not_rendered
+
+        true ->
+          {:image,
+           %{
+             view: files(image, image_format, false),
+             download: files(image, image_format, true),
+             supplements: supplemental_versions(image, image_format),
+             thumbnails: thumbnail_versions(image, image_format)
+           }}
+      end
+
     %__MODULE__{
-      view: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, false)),
-      download: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, true)),
-      supplements:
-        guarded_versions(image, may_reveal_hidden?, &supplemental_versions(&1, image_format)),
-      thumbnails:
-        guarded_versions(image, may_reveal_hidden?, &thumbnail_versions(&1, image_format)),
+      representations: representations,
       rendered?: image.thumbnails_generated,
       optimized?: image.processed,
       duplication_checked?: image.duplication_checked
     }
   end
 
-  defp guarded_versions(%Image{} = image, may_reveal_hidden?, callback)
-       when is_function(callback, 1) do
-    cond do
-      image.destroyed_content ->
-        # No files available for destroyed images
-        :destroyed
-
-      image.hidden_from_users and not may_reveal_hidden? ->
-        # Don't return files for images the actor may not see
-        :not_available
-
-      not image.thumbnails_generated ->
-        # File URIs are useless before thumbnails are generated
-        :not_rendered
-
-      true ->
-        callback.(image)
-    end
-  end
-
   defp files(%Image{} = image, image_format, download?) do
     image_format = version_format(image_format, download?)
 
-    files =
-      %{
-        short: full_version(image, image_format, short?: true, download?: download?),
-        long: full_version(image, image_format, short?: false, download?: download?)
-      }
-
-    {:files, files}
+    %{
+      short: full_version(image, image_format, short?: true, download?: download?),
+      long: full_version(image, image_format, short?: false, download?: download?)
+    }
   end
 
   defp thumbnail_versions(%Image{} = image, image_format) do
     image_format = version_format(image_format, false)
 
-    thumbnails =
-      Thumbnailer.thumbnail_versions()
-      |> Map.new(fn {version_name, _} = version ->
-        {version_name, constrained_version(image, image_format, version)}
-      end)
-      |> Map.put(:full, full_version(image, image_format))
-
-    {:thumbnails, thumbnails}
+    Thumbnailer.thumbnail_versions()
+    |> Map.new(fn {version_name, _} = version ->
+      {version_name, constrained_version(image, image_format, version)}
+    end)
+    |> Map.put(:full, full_version(image, image_format))
   end
 
   defp video_preview_versions(%Image{} = image) do
@@ -224,7 +209,7 @@ defmodule Philomena.Images.Display.Media do
          }}
 
       "webm" ->
-        {:thumbnails, mp4_thumbnails} = thumbnail_versions(image, "mp4")
+        mp4_thumbnails = thumbnail_versions(image, "mp4")
 
         {:webm,
          %{

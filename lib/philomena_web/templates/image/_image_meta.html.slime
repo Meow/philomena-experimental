@@ -42,8 +42,8 @@
         i.fa.fa-sitemap>
         span.hide-limited-desktop.hide-mobile Related
     .stretched-mobile-links
-      = case @page.media.view do
-        - {:files, view} ->
+      = case @page.media.representations do
+        - {:image, %{view: view}} ->
           a href=view.long.uri rel="nofollow" title="View (tags in filename)"
             i.fa.fa-eye>
             | View
@@ -51,8 +51,8 @@
             i.fa.fa-eye>
             | VS
         - _ ->
-      = case @page.media.download do
-        - {:files, download} ->
+      = case @page.media.representations do
+        - {:image, %{download: download}} ->
           a href=download.long.uri rel="nofollow" title="Download (tags in filename)"
             i.fa.fa-download>
             | Download

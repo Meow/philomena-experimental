@@ -31,7 +31,7 @@
   .block__tab.hidden data-tab="sharing"
     #embed_options
       - source_link = if image_has_sources(@page.sources), do: " - [url=#{image_first_source(@page.sources)}]Original source[/url]", else: " (Original source unknown at time of posting)"
-      - medium_url = case @page.media.thumbnails do {:thumbnails, thumbnails} -> thumbnails.medium.uri; _ -> nil end
+      - medium_url = case @page.media.representations do {:image, %{thumbnails: thumbnails}} -> thumbnails.medium.uri; _ -> nil end
       h5 Derpibooru
       p
         strong> Small thumbnail

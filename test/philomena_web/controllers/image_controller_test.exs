@@ -210,7 +210,7 @@ defmodule PhilomenaWeb.ImageControllerTest do
       assert page.description.body == ""
       assert page.comments.comments.entries == []
       assert page.sources.sources == []
-      assert page.media.thumbnails == :not_available
+      assert page.media.representations == :not_available
       assert page.moderation_metadata.deleter == nil
       assert response =~ "This image has been deleted"
       refute response =~ "Done by:"
@@ -251,7 +251,7 @@ defmodule PhilomenaWeb.ImageControllerTest do
                comment.body == "Moderator-only deleted comment"
              end)
 
-      assert {:thumbnails, _thumbnails} = page.media.thumbnails
+      assert {:image, %{thumbnails: _thumbnails}} = page.media.representations
       assert page.moderation_metadata.deleter == nil
       assert response =~ "This image has been deleted"
       refute response =~ "Done by:"

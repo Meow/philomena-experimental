@@ -1,7 +1,7 @@
 - supplements = display_supplements(@page.media)
 - size = assigns[:size] || :full
 - embed_display = assigns[:embed_display] || false
-- {:thumbnails, thumbnails} = @page.media.thumbnails
+- {:image, %{thumbnails: thumbnails}} = @page.media.representations
 - uris = display_thumbnail_uris(@page.media)
 
 = content_tag :div, [data: display_image_container_data(@page, size), class: "image-show-container"] do
