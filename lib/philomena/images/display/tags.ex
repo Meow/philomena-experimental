@@ -31,6 +31,9 @@ defmodule Philomena.Images.Display.Tags do
         tag_change_tags_count,
         tag_input_changeset
       ) do
+    tags = Tags.Tag.display_order(tags)
+    locked_tags = Tags.Tag.display_order(locked_tags)
+
     %__MODULE__{
       tag_changes_count: tag_changes_count,
       tag_change_tags_count: tag_change_tags_count,

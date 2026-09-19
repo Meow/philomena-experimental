@@ -10,6 +10,7 @@ defmodule Philomena.Images.Forms.TagInput do
   import Ecto.Changeset
 
   alias Philomena.Images.Image
+  alias Philomena.Tags
 
   @type t :: %__MODULE__{}
   @primary_key false
@@ -27,8 +28,11 @@ defmodule Philomena.Images.Forms.TagInput do
   end
 
   @doc false
-  def render(%Image{} = image) do
-    tag_input = Enum.map_join(image.tags, ", ", & &1.name)
+  def render(%Image{tags: tags}) do
+    tag_input =
+      tags
+      |> Tags.Tag.display_order()
+      |> Enum.map_join(", ", & &1.name)
 
     %__MODULE__{
       old_tag_input: tag_input,

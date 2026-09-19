@@ -10,6 +10,7 @@ defmodule Philomena.Images.Forms.LockedTags do
   import Ecto.Changeset
 
   alias Philomena.Images.Image
+  alias Philomena.Tags
 
   @type t :: %__MODULE__{}
   @primary_key false
@@ -24,7 +25,12 @@ defmodule Philomena.Images.Forms.LockedTags do
   end
 
   @doc false
-  def render(%Image{} = image) do
-    %__MODULE__{tag_input: Enum.map_join(image.locked_tags, ", ", & &1.name)}
+  def render(%Image{locked_tags: locked_tags}) do
+    tag_input =
+      locked_tags
+      |> Tags.Tag.display_order()
+      |> Enum.map_join(", ", & &1.name)
+
+    %__MODULE__{tag_input: tag_input}
   end
 end
