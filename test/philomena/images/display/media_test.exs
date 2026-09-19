@@ -16,6 +16,7 @@ defmodule Philomena.Images.Display.MediaTest do
         image_height: 500,
         image_aspect_ratio: 2.0,
         image_format: "png",
+        image_mime_type: "image/png",
         thumbnails_generated: true,
         processed: true,
         duplication_checked: true,
@@ -44,8 +45,13 @@ defmodule Philomena.Images.Display.MediaTest do
     "#{root()}/2024/1/2/#{id_fragment}/#{version}.#{format}"
   end
 
-  defp version(image, uri) do
-    %{uri: uri, width: image.image_width, height: image.image_height}
+  defp version(image, uri, mime_type \\ nil) do
+    %{
+      uri: uri,
+      width: image.image_width,
+      height: image.image_height,
+      mime_type: mime_type || image.image_mime_type
+    }
   end
 
   describe "render/2" do
@@ -79,25 +85,29 @@ defmodule Philomena.Images.Display.MediaTest do
       assert thumbnails[:thumb] == %{
                uri: exact(image, :thumb),
                width: 250,
-               height: 125
+               height: 125,
+               mime_type: "image/png"
              }
 
       assert thumbnails[:medium] == %{
                uri: exact(image, :medium),
                width: 800,
-               height: 400
+               height: 400,
+               mime_type: "image/png"
              }
 
       assert thumbnails[:large] == %{
                uri: "#{root()}/view/2024/1/2/42.png",
                width: 1000,
-               height: 500
+               height: 500,
+               mime_type: "image/png"
              }
 
       assert thumbnails[:full] == %{
                uri: "#{root()}/view/2024/1/2/42.png",
                width: 1000,
-               height: 500
+               height: 500,
+               mime_type: "image/png"
              }
     end
 
@@ -105,7 +115,12 @@ defmodule Philomena.Images.Display.MediaTest do
       image = image(image_width: 500, image_height: 1000, image_aspect_ratio: 0.5)
       assert {:thumbnails, %{thumb: thumb}} = Media.render(image, false).thumbnails
 
-      assert thumb == %{uri: exact(image, :thumb), width: 125, height: 250}
+      assert thumb == %{
+               uri: exact(image, :thumb),
+               width: 125,
+               height: 250,
+               mime_type: "image/png"
+             }
     end
 
     test "omits every media path before thumbnails are generated" do
@@ -158,27 +173,29 @@ defmodule Philomena.Images.Display.MediaTest do
 
   describe "format-specific supplemental paths" do
     test "provides a rendered PNG path for SVG images" do
-      result = Media.render(image(image_format: "SVG"), false)
+      image = image(image_format: "SVG", image_mime_type: "image/svg+xml")
+      result = Media.render(image, false)
 
       assert {:svg, %{static_preview: rendered, svg: svg}} = result.supplements
-      assert rendered == version(image(image_format: "SVG"), "#{root()}/view/2024/1/2/42.png")
-      assert svg == version(image(image_format: "SVG"), "#{root()}/view/2024/1/2/42.svg")
+      assert rendered == version(image, "#{root()}/view/2024/1/2/42.png", "image/png")
+      assert svg == version(image, "#{root()}/view/2024/1/2/42.svg")
       assert {:files, %{short: view, long: view_long}} = result.view
-      assert view == version(image(image_format: "SVG"), "#{root()}/view/2024/1/2/42.png")
+      assert view == version(image, "#{root()}/view/2024/1/2/42.png", "image/png")
 
       assert view_long ==
                version(
-                 image(image_format: "SVG"),
-                 "#{root()}/view/2024/1/2/42__safe_artistfoo+bar_zebra.png"
+                 image,
+                 "#{root()}/view/2024/1/2/42__safe_artistfoo+bar_zebra.png",
+                 "image/png"
                )
 
       assert {:files, %{short: download}} = result.download
-      assert download == version(image(image_format: "SVG"), "#{root()}/download/2024/1/2/42.svg")
+      assert download == version(image, "#{root()}/download/2024/1/2/42.svg")
 
       assert {:thumbnails, %{full: %{uri: full_path}}} = result.thumbnails
       assert full_path == "#{root()}/view/2024/1/2/42.png"
       assert {:thumbnails, %{thumb: %{uri: thumb_path}}} = result.thumbnails
-      assert thumb_path == exact(image(image_format: "SVG"), :thumb, "png")
+      assert thumb_path == exact(image, :thumb, "png")
     end
 
     test "provides rendered, WebM, and MP4 paths for GIF images" do
@@ -186,33 +203,45 @@ defmodule Philomena.Images.Display.MediaTest do
       assert {:gif, paths} = Media.render(image, false).supplements
 
       assert paths == %{
-               static_preview: version(image, exact(image, :rendered, "png")),
-               webm: version(image, "#{root()}/view/2024/1/2/42.webm"),
-               mp4: version(image, "#{root()}/view/2024/1/2/42.mp4")
+               static_preview: version(image, exact(image, :rendered, "png"), "image/png"),
+               webm: version(image, "#{root()}/view/2024/1/2/42.webm", "video/webm"),
+               mp4: version(image, "#{root()}/view/2024/1/2/42.mp4", "video/mp4")
              }
     end
 
     test "provides rendered, MP4, and GIF preview paths for WebM images" do
-      image = image(image_format: "webm")
+      image = image(image_format: "webm", image_mime_type: "video/webm")
 
       assert {:webm, %{static_preview: rendered, mp4: mp4, gif_previews: previews}} =
                Media.render(image, false).supplements
 
-      assert rendered == version(image, exact(image, :rendered, "png"))
-      assert mp4 == version(image, "#{root()}/view/2024/1/2/42.mp4")
+      assert rendered == version(image, exact(image, :rendered, "png"), "image/png")
+      assert mp4 == version(image, "#{root()}/view/2024/1/2/42.mp4", "video/mp4")
       assert Map.keys(previews) |> Enum.sort() == [:thumb, :thumb_small, :thumb_tiny]
-      assert previews[:thumb] == %{uri: exact(image, :thumb, "gif"), width: 250, height: 125}
+
+      assert previews[:thumb] == %{
+               uri: exact(image, :thumb, "gif"),
+               width: 250,
+               height: 125,
+               mime_type: "image/gif"
+             }
     end
 
     test "provides matching MP4 versions for scaled and full WebM playback" do
-      image = image(image_format: "webm")
+      image = image(image_format: "webm", image_mime_type: "video/webm")
       assert {:webm, %{mp4_thumbnails: thumbnails}} = Media.render(image, false).supplements
 
       assert Map.keys(thumbnails) |> Enum.sort() ==
                [:full, :large, :medium, :small, :tall, :thumb, :thumb_small, :thumb_tiny]
 
-      assert thumbnails.medium == %{uri: exact(image, :medium, "mp4"), width: 800, height: 400}
-      assert thumbnails.large == version(image, "#{root()}/view/2024/1/2/42.mp4")
+      assert thumbnails.medium == %{
+               uri: exact(image, :medium, "mp4"),
+               width: 800,
+               height: 400,
+               mime_type: "video/mp4"
+             }
+
+      assert thumbnails.large == version(image, "#{root()}/view/2024/1/2/42.mp4", "video/mp4")
       assert thumbnails.full == thumbnails.large
     end
 
@@ -221,7 +250,7 @@ defmodule Philomena.Images.Display.MediaTest do
       assert {:webm, %{gif_previews: previews}} = Media.render(image, false).supplements
 
       for size <- [:thumb, :thumb_small, :thumb_tiny] do
-        assert previews[size] == version(image, exact(image, size, "gif"))
+        assert previews[size] == version(image, exact(image, size, "gif"), "image/gif")
       end
     end
 

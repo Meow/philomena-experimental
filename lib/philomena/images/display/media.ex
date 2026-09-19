@@ -24,8 +24,7 @@ defmodule Philomena.Images.Display.Media do
   @type version :: %{
           width: pos_integer(),
           height: pos_integer(),
-          # TODO(presentation-split)
-          # mime_type: String.t(),
+          mime_type: String.t(),
           uri: String.t()
         }
 
@@ -77,6 +76,18 @@ defmodule Philomena.Images.Display.Media do
         }
 
   @type t :: %__MODULE__{
+          # TODO(presentation-split): just have one guarded key
+          # representations: :destroyed | :not_available | :not_rendered | {:image, %{
+          #   view: files(),
+          #   download: files(),
+          #   thumbnails: thumbnails(),
+          #   supplements:
+          #     :none
+          #     | {:gif, gif_supplements()}
+          #     | {:svg, svg_supplements()}
+          #     | {:webm, webm_supplements()}
+          #     | {:mp4, mp4_supplements()}
+          # }}
           view: omitted() | {:files, files()},
           download: omitted() | {:files, files()},
           supplements:
@@ -98,12 +109,12 @@ defmodule Philomena.Images.Display.Media do
     image_format = normalized_format(image)
 
     %__MODULE__{
-      # TODO(presentation-split): just have one guarded key
       view: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, false)),
       download: guarded_versions(image, may_reveal_hidden?, &files(&1, image_format, true)),
       supplements:
-        guarded_versions(image, may_reveal_hidden?, &supplemental_uris(&1, image_format)),
-      thumbnails: guarded_versions(image, may_reveal_hidden?, &thumbnail_uris(&1, image_format)),
+        guarded_versions(image, may_reveal_hidden?, &supplemental_versions(&1, image_format)),
+      thumbnails:
+        guarded_versions(image, may_reveal_hidden?, &thumbnail_versions(&1, image_format)),
       rendered?: image.thumbnails_generated,
       optimized?: image.processed,
       duplication_checked?: image.duplication_checked
@@ -135,39 +146,42 @@ defmodule Philomena.Images.Display.Media do
 
     files =
       %{
-        short: file_version(image, image_format, true, download?),
-        long: file_version(image, image_format, false, download?)
+        short: full_version(image, image_format, short?: true, download?: download?),
+        long: full_version(image, image_format, short?: false, download?: download?)
       }
 
     {:files, files}
   end
 
-  defp thumbnail_uris(%Image{} = image, image_format) do
+  defp thumbnail_versions(%Image{} = image, image_format) do
     image_format = version_format(image_format, false)
 
     thumbnails =
       Thumbnailer.thumbnail_versions()
       |> Map.new(fn {version_name, _} = version ->
-        {version_name, version_uri(image, image_format, version)}
+        {version_name, constrained_version(image, image_format, version)}
       end)
-      |> Map.put(:full, file_version(image, image_format, true, false))
+      |> Map.put(:full, full_version(image, image_format))
 
     {:thumbnails, thumbnails}
   end
 
-  defp video_preview_uris(%Image{} = image) do
+  defp video_preview_versions(%Image{} = image) do
     Thumbnailer.thumbnail_versions()
     |> Enum.filter(fn {version_name, _} ->
       version_name in [:thumb, :thumb_small, :thumb_tiny]
     end)
     |> Map.new(fn {version_name, _} = version ->
-      preview = version_uri(image, "gif", version)
+      # There is no full GIF representation to fall back on; the scaled
+      # URI must always be chosen, even if the image dimensions are smaller.
+      preview = constrained_version(image, "gif", version)
+      preview = %{preview | uri: scaled_version_uri(image, "gif", version_name)}
 
-      {version_name, %{preview | uri: exact_version_uri(image, "gif", version_name)}}
+      {version_name, preview}
     end)
   end
 
-  defp version_uri(
+  defp constrained_version(
          %Image{image_aspect_ratio: aspect_ratio, image_width: width, image_height: height} =
            image,
          image_format,
@@ -177,13 +191,12 @@ defmodule Philomena.Images.Display.Media do
       {thumbnail_width, thumbnail_height} =
         constrained_dimensions(aspect_ratio, max_width, max_height)
 
-      %{
-        uri: exact_version_uri(image, image_format, version_name),
+      scaled_version(image, image_format, version_name,
         width: thumbnail_width,
         height: thumbnail_height
-      }
+      )
     else
-      %{uri: file_uri(image, image_format, true, false), width: width, height: height}
+      full_version(image, image_format)
     end
   end
 
@@ -193,7 +206,40 @@ defmodule Philomena.Images.Display.Media do
   defp constrained_dimensions(ar, _w, h),
     do: {floor(h * ar), h}
 
-  def exact_version_uri(%Image{} = image, image_format, version_name) do
+  defp supplemental_versions(%Image{} = image, image_format) do
+    case image_format do
+      "svg" ->
+        {:svg,
+         %{
+           static_preview: full_version(image, "png"),
+           svg: full_version(image, "svg")
+         }}
+
+      "gif" ->
+        {:gif,
+         %{
+           static_preview: scaled_version(image, "png", :rendered),
+           webm: full_version(image, "webm"),
+           mp4: full_version(image, "mp4")
+         }}
+
+      "webm" ->
+        {:thumbnails, mp4_thumbnails} = thumbnail_versions(image, "mp4")
+
+        {:webm,
+         %{
+           gif_previews: video_preview_versions(image),
+           static_preview: scaled_version(image, "png", :rendered),
+           mp4: full_version(image, "mp4"),
+           mp4_thumbnails: mp4_thumbnails
+         }}
+
+      _ ->
+        :none
+    end
+  end
+
+  defp scaled_version_uri(%Image{} = image, image_format, version_name) do
     %{year: year, month: month, day: day} = image.created_at
 
     id_fragment =
@@ -206,10 +252,10 @@ defmodule Philomena.Images.Display.Media do
     "#{image_url_root()}/#{year}/#{month}/#{day}/#{id_fragment}/#{version_name}.#{image_format}"
   end
 
-  defp file_uri(%Image{} = image, image_format, short?, download?) do
+  defp full_version_uri(%Image{} = image, image_format, short?, download?) do
     if image.hidden_from_users do
       # Hidden images don't support the view/download routes
-      exact_version_uri(image, image_format, :full)
+      scaled_version_uri(image, image_format, :full)
     else
       %{year: year, month: month, day: day} = image.created_at
 
@@ -220,46 +266,37 @@ defmodule Philomena.Images.Display.Media do
     end
   end
 
-  defp supplemental_uris(%Image{} = image, image_format) do
-    case image_format do
-      "svg" ->
-        {:svg,
-         %{
-           static_preview: file_version(image, "png", true, false),
-           svg: file_version(image, "svg", true, false)
-         }}
+  defp scaled_version(%Image{} = image, image_format, version_name, options \\ []) do
+    width = Keyword.get(options, :width, image.image_width)
+    height = Keyword.get(options, :height, image.image_height)
+    uri = scaled_version_uri(image, image_format, version_name)
 
-      "gif" ->
-        {:gif,
-         %{
-           static_preview: version(image, exact_version_uri(image, "png", :rendered)),
-           webm: file_version(image, "webm", true, false),
-           mp4: file_version(image, "mp4", true, false)
-         }}
-
-      "webm" ->
-        {:thumbnails, mp4_thumbnails} = thumbnail_uris(image, "mp4")
-
-        {:webm,
-         %{
-           gif_previews: video_preview_uris(image),
-           static_preview: version(image, exact_version_uri(image, "png", :rendered)),
-           mp4: file_version(image, "mp4", true, false),
-           mp4_thumbnails: mp4_thumbnails
-         }}
-
-      _ ->
-        :none
-    end
+    render_version(width, height, mime_type(image_format), uri)
   end
 
-  defp file_version(%Image{} = image, image_format, short?, download?) do
-    version(image, file_uri(image, image_format, short?, download?))
+  defp full_version(%Image{} = image, image_format, options \\ []) do
+    short? = Keyword.get(options, :short?, true)
+    download? = Keyword.get(options, :download?, false)
+    uri = full_version_uri(image, image_format, short?, download?)
+
+    render_version(image.image_width, image.image_height, mime_type(image_format), uri)
   end
 
-  defp version(%Image{image_width: width, image_height: height}, uri) do
-    %{uri: uri, width: width, height: height}
+  defp render_version(width, height, mime_type, uri) do
+    %{
+      width: width,
+      height: height,
+      mime_type: mime_type,
+      uri: uri
+    }
   end
+
+  defp mime_type("png"), do: "image/png"
+  defp mime_type("jpg"), do: "image/jpeg"
+  defp mime_type("gif"), do: "image/gif"
+  defp mime_type("svg"), do: "image/svg+xml"
+  defp mime_type("webm"), do: "video/webm"
+  defp mime_type("mp4"), do: "video/mp4"
 
   defp file_name_slug(%Image{tags: tags}) do
     # Truncate filename to 150 characters, making room for the path + filename on Windows
