@@ -5,11 +5,10 @@ defmodule Philomena.Images.Display.Comments do
 
   alias Philomena.Images.Image
 
-  @enforce_keys [:comments_count, :comments, :changeset]
+  @enforce_keys [:comments, :changeset]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          comments_count: non_neg_integer(),
           # TODO(presentation-split)
           comments: Scrivener.Page.t(Philomena.Comments.Comment.t()),
           changeset: Ecto.Changeset.t(Philomena.Comments.Comment.t()) | nil
@@ -26,7 +25,6 @@ defmodule Philomena.Images.Display.Comments do
       end
 
     %__MODULE__{
-      comments_count: image.comments_count,
       comments: comments,
       changeset: changeset
     }

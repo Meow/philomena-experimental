@@ -12,6 +12,7 @@ defmodule Philomena.ImagesTest do
   alias Philomena.ImageHides
   alias Philomena.ImageHides.ImageHide
   alias Philomena.Galleries.Interaction
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Images
   alias Philomena.Images.Display
   alias Philomena.Images.Forms.LockedTags
@@ -48,6 +49,13 @@ defmodule Philomena.ImagesTest do
     valid_until: ~U[3000-01-01 00:00:00Z],
     generated_ban_id: "U123456",
     type: "User"
+  }
+
+  @filter %ImageFilter{
+    query: %{match_none: %{}},
+    display_query: %{match_none: %{}},
+    display_tag_ids: [],
+    errors: []
   }
 
   @approval_pagination %{page_number: 1, page_size: 25}
@@ -4676,7 +4684,7 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, @filter, page: 1, page_size: 25)
 
       assert %Display.Page{} = page
       assert page.metadata.id == image.id
@@ -4700,7 +4708,7 @@ defmodule Philomena.ImagesTest do
     test "assembles the page struct for an anonymous viewer" do
       image = image_fixture()
 
-      page = Images.show_image_page(actor(), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(), image, @filter, page: 1, page_size: 25)
 
       assert %Display.Page{} = page
       refute page.subscription.subscribed?
@@ -4714,7 +4722,8 @@ defmodule Philomena.ImagesTest do
       user = confirmed_user_fixture()
       image = image_fixture()
 
-      page = Images.show_image_page(actor(user, ban: @ban), image, page: 1, page_size: 25)
+      page =
+        Images.show_image_page(actor(user, ban: @ban), image, @filter, page: 1, page_size: 25)
 
       assert page.interactions.vote_changeset == nil
       assert page.interactions.fave_changeset == nil
@@ -4737,7 +4746,7 @@ defmodule Philomena.ImagesTest do
       {user, _filter} =
         force_filter(confirmed_user_fixture(), hidden_complex_str: "id:#{image.id}")
 
-      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, @filter, page: 1, page_size: 25)
 
       assert page.interactions.vote_changeset == nil
       assert page.interactions.fave_changeset == nil
@@ -4758,7 +4767,7 @@ defmodule Philomena.ImagesTest do
       moderator = moderator_user_fixture()
       image = image_fixture(hidden_from_users: true)
 
-      page = Images.show_image_page(actor(moderator), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(moderator), image, @filter, page: 1, page_size: 25)
 
       assert %Ecto.Changeset{} = page.interactions.vote_changeset
       assert %Ecto.Changeset{} = page.interactions.fave_changeset
@@ -4779,7 +4788,7 @@ defmodule Philomena.ImagesTest do
       uploader = confirmed_user_fixture()
       image = image_fixture(user_id: uploader.id)
 
-      page = Images.show_image_page(actor(uploader), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(uploader), image, @filter, page: 1, page_size: 25)
 
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
@@ -4791,7 +4800,7 @@ defmodule Philomena.ImagesTest do
       staff = moderator_user_fixture()
       image = image_fixture()
 
-      page = Images.show_image_page(actor(staff), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(staff), image, @filter, page: 1, page_size: 25)
 
       assert %Ecto.Changeset{} = page.description.changeset
       assert %Ecto.Changeset{} = page.tags.changeset
@@ -4809,7 +4818,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       {:ok, _} = Images.create_subscription(image, user)
 
-      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, @filter, page: 1, page_size: 25)
 
       assert page.subscription.subscribed?
     end
@@ -4821,7 +4830,7 @@ defmodule Philomena.ImagesTest do
       empty = gallery_fixture(user)
       gallery_image_fixture(containing, image)
 
-      page = Images.show_image_page(actor(user), image, page: 1, page_size: 25)
+      page = Images.show_image_page(actor(user), image, @filter, page: 1, page_size: 25)
 
       memberships =
         Map.new(page.galleries.choices, fn choice -> {choice.id, choice.present?} end)
@@ -4836,7 +4845,7 @@ defmodule Philomena.ImagesTest do
       arrange_comment_notification(image, user)
       assert comment_notification?(image, user)
 
-      Images.show_image_page(actor(user), image, page: 1, page_size: 25)
+      Images.show_image_page(actor(user), image, @filter, page: 1, page_size: 25)
 
       refute comment_notification?(image, user)
     end
@@ -4853,7 +4862,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       for _ <- 1..3, do: comment_fixture(image, confirmed_user_fixture())
 
-      page = Images.show_image_page(actor(user), image, page: 1, page_size: 2)
+      page = Images.show_image_page(actor(user), image, @filter, page: 1, page_size: 2)
 
       # Three comments over a page size of two put the newest on the second page.
       assert page.comments.comments.page_number == 2
@@ -4864,7 +4873,7 @@ defmodule Philomena.ImagesTest do
       image = image_fixture()
       for _ <- 1..3, do: comment_fixture(image, confirmed_user_fixture())
 
-      page = Images.show_image_page(actor(user), image, page: 1, page_size: 2)
+      page = Images.show_image_page(actor(user), image, @filter, page: 1, page_size: 2)
 
       assert page.comments.comments.page_number == 1
     end

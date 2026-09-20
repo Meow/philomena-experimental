@@ -26,4 +26,4 @@
     - true ->
 
   #comments data-current-url=~p"/images/#{@page.metadata.id}/comments" data-loaded="true"
-    = render PhilomenaWeb.Image.CommentView, "index.html", image_id: @page.metadata.id, comments_count: @page.comments.comments_count, comments: @page.comments.comments, conn: @conn
+    = render PhilomenaWeb.Image.CommentView, "index.html", image_id: @page.metadata.id, comments_count: interaction_count(@page.interactions.comments_count), comments: @page.comments.comments, conn: @conn

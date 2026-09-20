@@ -42,6 +42,7 @@ defmodule PhilomenaWeb.ImageController do
       Images.show_image_page(
         conn.assigns.actor,
         image,
+        conn.assigns.image_filter,
         conn.assigns.comment_scrivener
       )
 

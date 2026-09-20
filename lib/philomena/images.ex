@@ -24,6 +24,7 @@ defmodule Philomena.Images do
   alias Philomena.Workers.ImagePurgeJob
   alias Philomena.DuplicateReports
   alias Philomena.DnpEntries
+  alias Philomena.Filters
   alias Philomena.Images.Image
   alias Philomena.Images.Filtering
   alias Philomena.Images.Tagging
@@ -1019,8 +1020,14 @@ defmodule Philomena.Images do
       %Display.Page{}
 
   """
-  @spec show_image_page(Actor.t(), Image.t(), Repo.pagination_params()) :: Display.Page.t()
-  def show_image_page(%Actor{user: user} = actor, %Image{} = image, comment_pagination) do
+  @spec show_image_page(Actor.t(), Image.t(), Filters.ImageFilter.t(), Repo.pagination_params()) ::
+          Display.Page.t()
+  def show_image_page(
+        %Actor{user: user} = actor,
+        %Image{} = image,
+        image_filter,
+        comment_pagination
+      ) do
     image =
       Repo.preload(image, [
         :deleter,
@@ -1040,13 +1047,18 @@ defmodule Philomena.Images do
     subscribed? = subscribed?(image, user)
 
     %Display.Page{
-      interactions: display_interactions(actor, image, image_interactions),
-      metadata: display_metadata(actor, image),
-      subscription: display_subscription(actor, image, subscribed?),
-      galleries: display_galleries(actor, image, gallery_choices),
-      media: display_media(actor, image),
-      uploader: display_uploader(actor, image),
+      comments: display_comments(actor, image, comments),
+      deprecated_tags_with_aliases: display_deprecated_tags_with_aliases(actor, image),
       description: display_description(actor, image),
+      galleries: display_galleries(actor, image, gallery_choices),
+      interactions: display_interactions(actor, image, image_interactions),
+      filter_or_spoiler_hits?: filter_or_spoiler_hits?(image, image_filter),
+      media: display_media(actor, image),
+      metadata: display_metadata(actor, image),
+      moderation_metadata: display_moderation_metadata(actor, image),
+      moderation: display_moderation(actor, image),
+      sources: display_sources(actor, image, image.source_change_count),
+      subscription: display_subscription(actor, image, subscribed?),
       tags:
         display_tags(
           actor,
@@ -1054,11 +1066,7 @@ defmodule Philomena.Images do
           image.tag_change_count,
           image.tag_change_tag_count
         ),
-      deprecated_tags_with_aliases: display_deprecated_tags_with_aliases(actor, image),
-      sources: display_sources(actor, image, image.source_change_count),
-      moderation: display_moderation(actor, image),
-      moderation_metadata: display_moderation_metadata(actor, image),
-      comments: display_comments(actor, image, comments)
+      uploader: display_uploader(actor, image)
     }
   end
 
@@ -2311,7 +2319,7 @@ defmodule Philomena.Images do
   @doc """
   Returns whether `image` matches the viewer's compiled hide/spoiler policy.
   """
-  @spec filter_or_spoiler_hits?(Image.t(), Philomena.Filters.ImageFilter.t()) :: boolean()
+  @spec filter_or_spoiler_hits?(Image.t(), Filters.ImageFilter.t()) :: boolean()
   def filter_or_spoiler_hits?(%Image{} = image, image_filter) do
     Filtering.filter_or_spoiler_hits?(image, image_filter)
   end

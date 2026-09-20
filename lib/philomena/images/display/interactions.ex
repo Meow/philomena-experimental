@@ -16,6 +16,7 @@ defmodule Philomena.Images.Display.Interactions do
     :downvotes_count,
     :hidden?,
     :hides_count,
+    :comments_count,
     :fave_changeset,
     :hide_changeset,
     :vote_changeset
@@ -35,6 +36,7 @@ defmodule Philomena.Images.Display.Interactions do
           downvotes_count: interaction_count(),
           hidden?: boolean(),
           hides_count: interaction_count(),
+          comments_count: interaction_count(),
           fave_changeset: Ecto.Changeset.t(Forms.FaveInteraction.t()) | nil,
           hide_changeset: Ecto.Changeset.t(Forms.HideInteraction.t()) | nil,
           vote_changeset: Ecto.Changeset.t(Forms.VoteInteraction.t()) | nil
@@ -52,6 +54,7 @@ defmodule Philomena.Images.Display.Interactions do
       downvotes_count: render_count(image.downvotes_count, may_reveal_vote_counts?),
       hidden?: state.hidden?,
       hides_count: render_count(image.hides_count, true),
+      comments_count: render_count(image.comments_count, true),
       fave_changeset: controls.fave_changeset,
       hide_changeset: controls.hide_changeset,
       vote_changeset: controls.vote_changeset

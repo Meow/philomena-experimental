@@ -1,42 +1,33 @@
-defmodule Philomena.Images.Display.Page do
+defmodule Philomena.Images.Display.Preview do
   @moduledoc """
-  Presentation data for a complete image page.
+  Presentation data for an image preview: images on a listing page or
+  embedded in a communication.
   """
 
   alias Philomena.Images.Display
 
   @enforce_keys [
-    :comments,
+    :cursor,
     :deprecated_tags_with_aliases,
-    :description,
     :filter_or_spoiler_hits?,
-    :galleries,
-    :interactions,
     :media,
     :metadata,
     :moderation_metadata,
-    :moderation,
+    :interactions,
     :sources,
-    :subscription,
-    :tags,
-    :uploader
+    :tags
   ]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          comments: Display.Comments.t(),
+          cursor: {:cursor, [number()]} | :none,
           deprecated_tags_with_aliases: Display.DeprecatedTagsWithAliases.t(),
-          description: Display.Description.t(),
           filter_or_spoiler_hits?: boolean(),
-          galleries: Display.Galleries.t(),
-          interactions: Display.Interactions.t(),
           media: Display.Media.t(),
           metadata: Display.Metadata.t(),
           moderation_metadata: Display.ModerationMetadata.t(),
-          moderation: Display.Moderation.t(),
+          interactions: Display.Interactions.t(),
           sources: Display.Sources.t(),
-          subscription: Display.Subscription.t(),
-          tags: Display.Tags.t(),
-          uploader: Display.Uploader.t()
+          tags: Display.Tags.t()
         }
 end

@@ -30,7 +30,7 @@
             span.downvotes< title="Downvotes" data-image-id=@page.metadata.id = interaction_count(@page.interactions.downvotes_count)
       a.interaction--comments href="#comments" title="Comments"
         i.fa.fa-comments
-        span.comments_count< data-image-id=@page.metadata.id = @page.comments.comments_count
+        span.comments_count< data-image-id=@page.metadata.id = interaction_count(@page.interactions.comments_count)
       = if @page.interactions.hide_changeset do
         a.interaction--hide href="#" rel="nofollow" data-image-id=@page.metadata.id
           span.hide-span title="Hide"

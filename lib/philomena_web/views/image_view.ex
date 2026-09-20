@@ -79,7 +79,7 @@ defmodule PhilomenaWeb.ImageView do
       faves: interaction_count(interactions.faves_count),
       upvotes: interaction_count(interactions.upvotes_count),
       downvotes: interaction_count(interactions.downvotes_count),
-      comment_count: page.comments.comments_count,
+      comment_count: interaction_count(page.interactions.comments_count),
       created_at: DateTime.to_iso8601(metadata.created_at),
       source_url: page.sources.sources |> List.first() |> display_source(),
       source_urls: JSON.encode!(Enum.map(page.sources.sources, & &1.source)),
