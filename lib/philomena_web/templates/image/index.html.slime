@@ -4,8 +4,8 @@ elixir:
   scope = assigns[:scope] || []
   tags = assigns[:tags] || []
   route = assigns[:route] || fn p -> ~p"/images?#{p}" end
-  image_url = fn image -> ~p"/images/#{image}?#{scope}" end
-  sorted_url = fn image, hit -> ~p"/images/#{image}?#{Keyword.put(scope, :sort, hit["sort"])}" end
+  image_url = fn image -> ~p"/images/#{image.metadata.id}?#{scope}" end
+  sorted_url = fn image, cursor -> ~p"/images/#{image.metadata.id}?#{Keyword.put(scope, :sort, cursor)}" end
   pagination = render PhilomenaWeb.PaginationView, "_pagination.html", page: @images, route: route, params: params
   info = render PhilomenaWeb.PaginationView, "_pagination_info.html", page: @images
 
@@ -25,12 +25,12 @@ elixir:
   = info_row @conn, tags
 
   .block__content.media-list
-    = for record <- @images do
-      = case record do
-        - {image, hit} ->
-          = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: sorted_url.(image, hit), size: assigns[:size] || :thumb, conn: @conn
+    = for image <- @images do
+      = case image.cursor do
+        - {:cursor, cursor} ->
+          = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: sorted_url.(image, cursor), size: assigns[:size] || :thumb, conn: @conn
 
-        - image ->
+        - :none ->
           = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: image_url.(image), size: assigns[:size] || :thumb, conn: @conn
 
   .block__header.block__header--light.page__header.flex

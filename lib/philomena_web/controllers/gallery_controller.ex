@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.GalleryController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.ImageScope
+  alias PhilomenaWeb.ImageView
   alias PhilomenaWeb.NotificationCountPlug
   alias Philomena.Galleries
 
@@ -42,10 +43,11 @@ defmodule PhilomenaWeb.GalleryController do
     case Galleries.show_gallery(
            conn.assigns.actor,
            ImageScope.search_scope(conn),
+           conn.assigns.image_filter,
            params["id"]
          ) do
       {:ok, page} ->
-        gallery_json = JSON.encode!(Enum.map(page.gallery_images, &elem(&1, 0).id))
+        gallery_json = JSON.encode!(Enum.map(page.gallery_images, & &1.metadata.id))
 
         # The page load clears the gallery notification, so the header ticker
         # must be re-read afterwards.
@@ -61,7 +63,7 @@ defmodule PhilomenaWeb.GalleryController do
           gallery_next: page.gallery_next,
           gallery_images: page.gallery_images,
           images: page.images,
-          interactions: page.interactions
+          interactions: ImageView.client_interactions(page.gallery_images)
         )
 
       {:error, _} = error ->

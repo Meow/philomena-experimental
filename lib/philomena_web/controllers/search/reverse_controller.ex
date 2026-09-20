@@ -3,7 +3,7 @@ defmodule PhilomenaWeb.Search.ReverseController do
 
   alias Philomena.DuplicateReports
   alias Philomena.DuplicateReports.SearchResult
-  alias Philomena.Interactions
+  alias PhilomenaWeb.ImageView
 
   plug PhilomenaWeb.ScraperCachePlug
   plug PhilomenaWeb.ScraperPlug, params_key: "image", params_name: "image"
@@ -16,16 +16,19 @@ defmodule PhilomenaWeb.Search.ReverseController do
       when is_map(image_params) and image_params != %{} do
     upload = PhilomenaMedia.Upload.cast(image_params, "image")
 
-    case DuplicateReports.create_reverse_search(conn.assigns.actor, image_params, upload) do
+    case DuplicateReports.create_reverse_search(
+           conn.assigns.actor,
+           conn.assigns.image_filter,
+           image_params,
+           upload
+         ) do
       {:ok, %SearchResult{} = result} ->
-        interactions = Interactions.user_interactions(conn.assigns.actor, result.images)
-
         render(conn, "index.html",
           title: "Reverse Search",
           layout_class: "layout--wide",
           images: result.images,
           changeset: result.changeset,
-          interactions: interactions
+          interactions: ImageView.client_interactions(result.images)
         )
 
       {:error, changeset} ->

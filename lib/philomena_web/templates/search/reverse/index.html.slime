@@ -51,7 +51,7 @@ h1 Reverse Search
 
     .block__content.media-list
       = for image <- @images do
-        = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: ~p"/images/#{image}", size: :thumb, conn: @conn
+        = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: ~p"/images/#{image.metadata.id}", size: :thumb, conn: @conn
 
     .block__header.block__header--light.page__header.flex
       span.block__header__title.page__info

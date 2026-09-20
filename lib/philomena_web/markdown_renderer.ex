@@ -70,23 +70,23 @@ defmodule PhilomenaWeb.MarkdownRenderer do
     |> Enum.filter(fn m -> Enum.at(m, 0) < 2_147_483_647 end)
   end
 
-  defp load_images(images) do
+  defp load_images(images, conn) do
     ids = Enum.map(images, fn m -> Enum.at(m, 0) end)
 
-    ids
-    |> Images.list_images_by_ids()
-    |> Map.new(&{&1.id, &1})
+    conn.assigns.actor
+    |> Images.list_images_by_ids(conn.assigns.image_filter, ids)
+    |> Map.new(&{&1.metadata.id, &1})
   end
 
   defp link_suffix(image) do
     cond do
-      not is_nil(image.duplicate_id) ->
+      not is_nil(image.moderation_metadata.duplicate_id) ->
         " (merged)"
 
-      image.hidden_from_users ->
+      image.moderation_metadata.hidden_from_users? ->
         " (deleted)"
 
-      not image.approved ->
+      not image.moderation_metadata.approved? ->
         " (pending approval)"
 
       true ->
@@ -95,7 +95,7 @@ defmodule PhilomenaWeb.MarkdownRenderer do
   end
 
   defp render_representations(images, conn) do
-    loaded_images = load_images(images)
+    loaded_images = load_images(images, conn)
 
     Map.new(images, fn group ->
       img = loaded_images[Enum.at(group, 0)]
@@ -103,42 +103,47 @@ defmodule PhilomenaWeb.MarkdownRenderer do
 
       rendered =
         if img != nil do
-          case group do
-            [_id, "p"] when not img.hidden_from_users and img.approved ->
+          case {group, img.media.representations} do
+            {[_id, suffix], _representations} when not img.moderation_metadata.approved? ->
+              # The app intentionally does not restrict users from viewing unapproved images
+              # with a direct link to them. However, for Markdown rendering, we do not want
+              # to show unapproved images.
+              ">>#{img.metadata.id}#{suffix}#{link_suffix(img)}"
+
+            {[_id, "p"], {:image, _representation}} ->
               Phoenix.View.render(ImageView, "_image_target.html",
                 embed_display: true,
                 image: img,
-                size: ImageView.select_version(img, :medium),
+                size: :medium,
                 conn: conn
               )
 
-            [_id, "t"] when not img.hidden_from_users and img.approved ->
+            {[_id, "t"], {:image, _representation}} ->
               Phoenix.View.render(ImageView, "_image_target.html",
                 embed_display: true,
                 image: img,
-                size: ImageView.select_version(img, :small),
+                size: :small,
                 conn: conn
               )
 
-            [_id, "s"] when not img.hidden_from_users and img.approved ->
+            {[_id, "s"], {:image, _representation}} ->
               Phoenix.View.render(ImageView, "_image_target.html",
                 embed_display: true,
                 image: img,
-                size: ImageView.select_version(img, :thumb_small),
+                size: :thumb_small,
                 conn: conn
               )
 
-            [_id, suffix] when not img.approved ->
-              ">>#{img.id}#{suffix}#{link_suffix(img)}"
+            {[_id, ""], _representations} ->
+              link(">>#{img.metadata.id}#{link_suffix(img)}", to: "/images/#{img.metadata.id}")
 
-            [_id, ""] ->
-              link(">>#{img.id}#{link_suffix(img)}", to: "/images/#{img.id}")
-
-            [_id, suffix] when suffix in ["t", "s", "p"] ->
-              link(">>#{img.id}#{suffix}#{link_suffix(img)}", to: "/images/#{img.id}")
+            {[_id, suffix], _representations} when suffix in ["t", "s", "p"] ->
+              link(">>#{img.metadata.id}#{suffix}#{link_suffix(img)}",
+                to: "/images/#{img.metadata.id}"
+              )
 
             # This condition should never trigger, but let's leave it here just in case.
-            [id, suffix] ->
+            {[id, suffix], _representations} ->
               ">>#{id}#{suffix}"
           end
         else

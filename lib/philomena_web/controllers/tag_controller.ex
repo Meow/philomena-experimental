@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.TagController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.ImageScope
+  alias PhilomenaWeb.ImageView
   alias PhilomenaWeb.MarkdownRenderer
   alias Philomena.Tags
 
@@ -24,9 +25,15 @@ defmodule PhilomenaWeb.TagController do
   end
 
   def show(conn, params) do
-    case Tags.show_tag_page(conn.assigns.actor, ImageScope.search_scope(conn), params["id"]) do
+    case Tags.show_tag_page(
+           conn.assigns.actor,
+           ImageScope.search_scope(conn),
+           conn.assigns.image_filter,
+           params["id"]
+         ) do
       {:ok, page} ->
         tag = page.tag
+
         body = MarkdownRenderer.render_one(%{body: tag.description || ""}, conn)
 
         dnp_bodies =
@@ -46,7 +53,7 @@ defmodule PhilomenaWeb.TagController do
           tag: tag,
           tags: [{tag, body, dnp_entries}],
           search_query: page.search_query,
-          interactions: page.interactions,
+          interactions: ImageView.client_interactions(page.images),
           images: page.images,
           layout_class: "layout--wide",
           title: "#{tag.name} - Tags"

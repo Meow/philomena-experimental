@@ -2,7 +2,6 @@ defmodule PhilomenaWeb.ImageController do
   use PhilomenaWeb, :controller
 
   alias Philomena.Images
-  alias Philomena.Interactions
   alias PhilomenaWeb.ImageScope
   alias PhilomenaWeb.ImageView
   alias PhilomenaWeb.MarkdownRenderer
@@ -22,15 +21,18 @@ defmodule PhilomenaWeb.ImageController do
   plug PhilomenaWeb.AdvertPlug when action in [:show]
 
   def index(conn, _params) do
-    images = Images.list_images(conn.assigns.actor, ImageScope.search_scope(conn))
-
-    interactions = Interactions.user_interactions(conn.assigns.actor, images)
+    images =
+      Images.list_images(
+        conn.assigns.actor,
+        ImageScope.search_scope(conn),
+        conn.assigns.image_filter
+      )
 
     render(conn, "index.html",
       title: "Images",
       layout_class: "layout--wide",
       images: images,
-      interactions: interactions,
+      interactions: ImageView.client_interactions(images),
       scope: ImageScope.scope(conn)
     )
   end

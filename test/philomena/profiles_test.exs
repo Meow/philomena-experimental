@@ -26,6 +26,7 @@ defmodule Philomena.ProfilesTest do
   import Philomena.UsersFixtures
 
   alias Philomena.Comments.Comment
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Images.Image
   alias Philomena.Images.Search.Scope
   alias Philomena.Posts.Post
@@ -65,7 +66,15 @@ defmodule Philomena.ProfilesTest do
     Philomena.FiltersFixtures.system_filter_fixture()
   end
 
-  describe "show_profile/4" do
+  defp image_filter do
+    %ImageFilter{
+      query: default_filter(),
+      display_query: %{match_none: %{}},
+      display_tag_ids: []
+    }
+  end
+
+  describe "show_profile/5" do
     setup do
       Search.clear_index!(Image)
       Search.clear_index!(Comment)
@@ -84,17 +93,20 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.show_profile(actor(), scope(), current_filter(), user.slug)
+               Profiles.show_profile(
+                 actor(),
+                 scope(),
+                 current_filter(),
+                 image_filter(),
+                 user.slug
+               )
 
       assert page.user.id == user.id
 
-      # NOTE: the image strips are %Scrivener.Page{} (msearch_records returns named
-      # page per definition), not bare lists, though the struct type doc says
-      # list(). They are Enumerable, so mapping over them yields the records.
       assert %Scrivener.Page{} = page.recent_uploads
       assert %Scrivener.Page{} = page.recent_faves
       assert %Scrivener.Page{} = page.recent_artwork
-      assert upload.id in Enum.map(page.recent_uploads, & &1.id)
+      assert upload.id in Enum.map(page.recent_uploads, & &1.metadata.id)
 
       # recent_comments holds only comments whose images the viewer may see; the
       # comment is on a visible image, so it is present. It and recent_posts are
@@ -103,7 +115,6 @@ defmodule Philomena.ProfilesTest do
       assert comment.id in Enum.map(page.recent_comments, & &1.id)
       assert is_list(page.recent_posts)
       assert is_list(page.recent_galleries)
-      assert is_list(page.interactions)
       assert is_list(page.tags)
 
       # The 90-day statistics series carries one list of 90 daily values per
@@ -137,7 +148,13 @@ defmodule Philomena.ProfilesTest do
       SearchHelpers.reindex_all!(Comment)
 
       assert {:ok, %ProfilePage{} = page} =
-               Profiles.show_profile(actor(), scope(), current_filter(), user.slug)
+               Profiles.show_profile(
+                 actor(),
+                 scope(),
+                 current_filter(),
+                 image_filter(),
+                 user.slug
+               )
 
       # The comment itself is not hidden, so it matches the search, but an
       # anonymous viewer cannot see the hidden image, so it is dropped from the
@@ -151,6 +168,7 @@ defmodule Philomena.ProfilesTest do
                  viewer,
                  scope(),
                  current_filter(),
+                 image_filter(),
                  "no-such-user"
                ) == {:error, :not_found}
       end
@@ -167,6 +185,7 @@ defmodule Philomena.ProfilesTest do
                actor(admin_user_fixture()),
                scope(),
                current_filter(),
+               image_filter(),
                user.slug
              ) == {:error, :not_found}
     end

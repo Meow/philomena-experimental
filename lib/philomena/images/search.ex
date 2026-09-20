@@ -119,7 +119,7 @@ defmodule Philomena.Images.Search do
   """
   @spec execute(definition(), Keyword.t()) :: Enumerable.t()
   def execute(definition, opts \\ []) do
-    preloads = Keyword.get(opts, :preload, [:sources, tags: :aliases])
+    preloads = Keyword.get(opts, :preload, [:deleter, :sources, tags: :aliases])
     queryable = preload(Image, ^preloads)
 
     if opts[:hits] do

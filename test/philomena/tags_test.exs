@@ -24,6 +24,7 @@ defmodule Philomena.TagsTest do
   alias Philomena.Tags.Tag
   alias Philomena.Tags.TagDetail
   alias Philomena.Tags.TagPage
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Images.Image
   alias Philomena.Images.Search.Scope
   alias Philomena.ModerationLogs.ModerationLog
@@ -58,6 +59,14 @@ defmodule Philomena.TagsTest do
 
   defp scope(_user) do
     Scope.new(default_filter(), @pagination)
+  end
+
+  defp image_filter do
+    %ImageFilter{
+      query: default_filter(),
+      display_query: %{match_none: %{}},
+      display_tag_ids: []
+    }
   end
 
   defp only_moderation_log!, do: Repo.one!(ModerationLog)
@@ -184,18 +193,18 @@ defmodule Philomena.TagsTest do
     end
   end
 
-  describe "show_tag_page/2" do
+  describe "show_tag_page/4" do
     test "assembles the page for a real tag, carrying its tagged image" do
       created_at = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)
       image = image_fixture(tags: "safe", created_at: created_at)
       tag = Repo.get_by!(Tag, name: "safe")
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, %TagPage{} = page} = Tags.show_tag_page(actor(), scope(nil), tag.slug)
+      assert {:ok, %TagPage{} = page} =
+               Tags.show_tag_page(actor(), scope(nil), image_filter(), tag.slug)
 
       assert page.tag.id == tag.id
-      assert image.id in Enum.map(page.images, & &1.id)
-      assert is_list(page.interactions)
+      assert image.id in Enum.map(page.images, & &1.metadata.id)
       # A tag whose name compiles back to itself is used verbatim.
       assert page.search_query == "safe"
     end
@@ -209,24 +218,29 @@ defmodule Philomena.TagsTest do
         |> Repo.update!()
 
       assert {:aliased_to, %Tag{} = returned} =
-               Tags.show_tag_page(actor(), scope(nil), aliased.slug)
+               Tags.show_tag_page(actor(), scope(nil), image_filter(), aliased.slug)
 
       assert returned.id == aliased.id
       assert returned.aliased_tag.id == target.id
     end
 
     test "an unknown slug is not-found for every viewer" do
-      assert Tags.show_tag_page(actor(), scope(nil), "nonexistent-tag") ==
+      assert Tags.show_tag_page(actor(), scope(nil), image_filter(), "nonexistent-tag") ==
                {:error, :not_found}
 
       user = confirmed_user_fixture()
 
-      assert Tags.show_tag_page(actor(user), scope(user), "nonexistent-tag") ==
+      assert Tags.show_tag_page(actor(user), scope(user), image_filter(), "nonexistent-tag") ==
                {:error, :not_found}
 
       moderator = moderator_user_fixture()
 
-      assert Tags.show_tag_page(actor(moderator), scope(moderator), "nonexistent-tag") ==
+      assert Tags.show_tag_page(
+               actor(moderator),
+               scope(moderator),
+               image_filter(),
+               "nonexistent-tag"
+             ) ==
                {:error, :not_found}
     end
   end

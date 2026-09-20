@@ -1,6 +1,6 @@
 elixir:
   scope = scope(@conn)
-  image_url = fn image, hit -> ~p"/images/#{image}?#{Keyword.put(scope, :sort, hit["sort"])}" end
+  image_url = fn image, cursor -> ~p"/images/#{image.metadata.id}?#{Keyword.put(scope, :sort, cursor)}" end
   route = fn p -> ~p"/galleries/#{@gallery}?#{p}" end
   pagination = render PhilomenaWeb.PaginationView, "_pagination.html", page: @images, route: route, params: scope
   info = render PhilomenaWeb.PaginationView, "_pagination_info.html", page: @images
@@ -77,8 +77,9 @@ elixir:
         strong Note that you may have to wait a couple of seconds before the order is applied.
 
     .block__content.media-list
-      = for {image, hit} <- @gallery_images do
-        = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: image_url.(image, hit), size: :thumb, conn: @conn
+      = for image <- @gallery_images do
+        - {:cursor, cursor} = image.cursor
+        = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: image_url.(image, cursor), size: :thumb, conn: @conn
 
     .block__header.block__header--light.flex.page__header
       .page__pagination = pagination

@@ -13,7 +13,9 @@ defmodule Philomena.Profiles do
   alias Philomena.Comments
   alias Philomena.Comments.Comment
   alias Philomena.Filters.Filter
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Galleries.Gallery
+  alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.Images.Search, as: ImageSearch
   alias Philomena.Images.Search.Scope
@@ -47,7 +49,7 @@ defmodule Philomena.Profiles do
     ]
   ]
 
-  defp assemble_profile_page(actor, scope, current_filter, user) do
+  defp assemble_profile_page(actor, scope, current_filter, image_filter, user) do
     {:ok, {recent_uploads_def, _tags}} =
       ImageSearch.search_string(
         actor,
@@ -113,9 +115,11 @@ defmodule Philomena.Profiles do
       recent_posts: recent_posts
     } =
       Search.msearch_records(
-        recent_uploads: {recent_uploads_def, preload(Image, [:sources, tags: :aliases])},
-        recent_faves: {recent_faves_def, preload(Image, [:sources, tags: :aliases])},
-        recent_artwork: {recent_artwork_def, preload(Image, [:sources, tags: :aliases])},
+        recent_uploads:
+          {recent_uploads_def, preload(Image, [:deleter, :sources, tags: :aliases])},
+        recent_faves: {recent_faves_def, preload(Image, [:deleter, :sources, tags: :aliases])},
+        recent_artwork:
+          {recent_artwork_def, preload(Image, [:deleter, :sources, tags: :aliases])},
         recent_comments:
           {recent_comments_def,
            preload(Comment, [
@@ -140,6 +144,14 @@ defmodule Philomena.Profiles do
     interactions =
       Interactions.user_interactions(actor, [recent_uploads, recent_faves, recent_artwork])
 
+    [recent_uploads, recent_faves, recent_artwork] =
+      Images.display_image_previews(
+        actor,
+        image_filter,
+        [recent_uploads, recent_faves, recent_artwork],
+        interactions
+      )
+
     %ProfilePage{
       user: user,
       recent_uploads: recent_uploads,
@@ -151,7 +163,6 @@ defmodule Philomena.Profiles do
       statistics: calculate_statistics(user),
       watcher_counts: watcher_counts(verified_tag_ids),
       tags: tags,
-      interactions: interactions,
       bans: user_bans(user)
     }
   end
@@ -237,7 +248,8 @@ defmodule Philomena.Profiles do
 
   The actor is carried separately from the image-search scope and the loaded
   profile is authorized with `:show`. Missing and deactivated profiles are
-  always not found. `current_filter` scopes the recent comments strip. Posts
+  always not found. `current_filter` scopes the recent comments strip and
+  `image_filter` determines the presentation state of the image strips. Posts
   and comments whose parents the actor cannot show are removed after search.
   The loaded user includes its forced filter for the caller's owner/staff-only
   presentation gate.
@@ -246,24 +258,25 @@ defmodule Philomena.Profiles do
 
   ## Examples
 
-      iex> show_profile(actor, scope, filter, "somebody")
+      iex> show_profile(actor, scope, filter, image_filter, "somebody")
       {:ok, %ProfilePage{}}
 
-      iex> show_profile(actor, scope, filter, "missing")
+      iex> show_profile(actor, scope, filter, image_filter, "missing")
       {:error, :not_found}
 
   """
-  @spec show_profile(Actor.t(), Scope.t(), Filter.t(), String.t()) ::
+  @spec show_profile(Actor.t(), Scope.t(), Filter.t(), ImageFilter.t(), String.t()) ::
           {:ok, ProfilePage.t()} | {:error, :unauthorized | :not_found}
   def show_profile(
         %Actor{} = actor,
         %Scope{} = scope,
         %Filter{} = current_filter,
+        %ImageFilter{} = image_filter,
         slug
       ) do
     with {:ok, user} <- Users.load_profile(actor, slug) do
       user = Repo.preload(user, @profile_preloads)
-      {:ok, assemble_profile_page(actor, scope, current_filter, user)}
+      {:ok, assemble_profile_page(actor, scope, current_filter, image_filter, user)}
     end
   end
 

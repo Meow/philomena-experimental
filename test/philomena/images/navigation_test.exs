@@ -18,6 +18,7 @@ defmodule Philomena.Images.NavigationTest do
   import Philomena.AttributionFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.Images.Search.Scope
@@ -49,6 +50,14 @@ defmodule Philomena.Images.NavigationTest do
       Keyword.get(overrides, :pagination, %{page_number: 1, page_size: 25}),
       Keyword.get(overrides, :params, %{})
     )
+  end
+
+  defp image_filter do
+    %ImageFilter{
+      query: default_filter(),
+      display_query: %{match_none: %{}},
+      display_tag_ids: []
+    }
   end
 
   defp hours_ago(hours) do
@@ -186,19 +195,19 @@ defmodule Philomena.Images.NavigationTest do
     end
   end
 
-  describe "list_related_images/2" do
+  describe "list_related_images/4" do
     test "an image sharing a tag lists the related image" do
       image = image_fixture(tags: "safe, test related subject")
       related = image_fixture(tags: "safe, test related subject")
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, {loaded, page}} =
-               Images.list_related_images(actor(), scope(), to_string(image.id))
+               Images.list_related_images(actor(), scope(), to_string(image.id), image_filter())
 
       assert loaded.id == image.id
-      assert related.id in Enum.map(page.entries, & &1.id)
+      assert related.id in Enum.map(page.entries, & &1.metadata.id)
       # The subject image never appears among its own related results.
-      refute image.id in Enum.map(page.entries, & &1.id)
+      refute image.id in Enum.map(page.entries, & &1.metadata.id)
     end
 
     test "an image with no shared tags still succeeds with an empty page" do
@@ -208,7 +217,7 @@ defmodule Philomena.Images.NavigationTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, {loaded, page}} =
-               Images.list_related_images(actor(), scope(), to_string(image.id))
+               Images.list_related_images(actor(), scope(), to_string(image.id), image_filter())
 
       assert loaded.id == image.id
       assert page.entries == []
@@ -218,21 +227,30 @@ defmodule Philomena.Images.NavigationTest do
       image = image_fixture()
       SearchHelpers.reindex_all!(Image)
 
-      assert {:ok, {loaded, _page}} = Images.list_related_images(actor(), scope(), image.id)
+      assert {:ok, {loaded, _page}} =
+               Images.list_related_images(actor(), scope(), image.id, image_filter())
+
       assert loaded.id == image.id
     end
 
     test "an unknown well-formed id is not found for an anonymous viewer" do
-      assert Images.list_related_images(actor(), scope(), "2147483647") == {:error, :not_found}
+      assert Images.list_related_images(actor(), scope(), "2147483647", image_filter()) ==
+               {:error, :not_found}
     end
 
     test "an unknown well-formed id is not found for an admin" do
-      assert Images.list_related_images(actor(admin_user_fixture()), scope(), "2147483647") ==
+      assert Images.list_related_images(
+               actor(admin_user_fixture()),
+               scope(),
+               "2147483647",
+               image_filter()
+             ) ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not found" do
-      assert Images.list_related_images(actor(), scope(), "not-a-number") == {:error, :not_found}
+      assert Images.list_related_images(actor(), scope(), "not-a-number", image_filter()) ==
+               {:error, :not_found}
     end
   end
 

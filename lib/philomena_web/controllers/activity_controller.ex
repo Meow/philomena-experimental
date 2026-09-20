@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.ActivityController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.ImageScope
+  alias PhilomenaWeb.ImageView
   alias Philomena.Activities
 
   action_fallback PhilomenaWeb.FallbackController
@@ -12,6 +13,7 @@ defmodule PhilomenaWeb.ActivityController do
              conn.assigns.actor,
              ImageScope.search_scope(conn),
              conn.assigns.current_filter,
+             conn.assigns.image_filter,
              conn.cookies["chan_nsfw"] == "true"
            ) do
       render(
@@ -25,7 +27,13 @@ defmodule PhilomenaWeb.ActivityController do
         featured_image: page.featured_image,
         streams: page.streams,
         topics: page.topics,
-        interactions: page.interactions,
+        interactions:
+          ImageView.client_interactions([
+            page.images,
+            page.top_scoring,
+            page.watched,
+            page.featured_image
+          ]),
         layout_class: "layout--wide",
         show_sidebar: show_sidebar?(conn.assigns.current_user)
       )

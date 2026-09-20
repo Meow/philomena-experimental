@@ -4,6 +4,7 @@ defmodule PhilomenaWeb.ImageViewTest do
   import Philomena.ImagesFixtures
   import Philomena.UsersFixtures
 
+  alias Philomena.Images
   alias Philomena.Repo
   alias PhilomenaWeb.ImageView
 
@@ -20,43 +21,47 @@ defmodule PhilomenaWeb.ImageViewTest do
       {:ok, image: Repo.preload(image, tags: :aliases)}
     end
 
-    test "image_render_intent omits the hidden thumbnail path for regular viewers", %{
+    test "the preview omits hidden media for regular viewers", %{
       conn: conn,
       image: image
     } do
-      {:image, url} = ImageView.image_render_intent(viewer_conn(conn, nil), image, :thumb)
-
-      assert url =~ "/#{image.id}/thumb.png"
-      refute url =~ image.hidden_image_key
+      image = preview(viewer_conn(conn, nil), image)
+      assert ImageView.visibility_intent(conn, image) == :not_available
     end
 
     test "image_render_intent includes the hidden thumbnail path for moderators", %{
       conn: conn,
       image: image
     } do
-      moderator_conn = viewer_conn(conn, moderator_user_fixture())
-      {:image, url} = ImageView.image_render_intent(moderator_conn, image, :thumb)
+      hidden_image_key = image.hidden_image_key
+      conn = viewer_conn(conn, moderator_user_fixture())
+      image = preview(conn, image)
+      {:image, url} = ImageView.image_render_intent(conn, image, :thumb)
 
-      assert url =~ "#{image.id}-#{image.hidden_image_key}/thumb.png"
+      assert url =~ "#{image.metadata.id}-#{hidden_image_key}/thumb.png"
     end
 
     test "image_container_data redacts hidden URIs from regular viewers", %{
       conn: conn,
       image: image
     } do
-      data = ImageView.image_container_data(viewer_conn(conn, nil), image, :full)
+      hidden_image_key = image.hidden_image_key
+      image = preview(viewer_conn(conn, nil), image)
+      data = ImageView.image_container_data(image, :full)
 
-      refute data[:uris] =~ image.hidden_image_key
+      refute data[:uris]
+      refute inspect(data) =~ hidden_image_key
     end
 
     test "image_container_data includes hidden URIs for moderators", %{
       conn: conn,
       image: image
     } do
-      data =
-        ImageView.image_container_data(viewer_conn(conn, moderator_user_fixture()), image, :full)
+      hidden_image_key = image.hidden_image_key
+      image = preview(viewer_conn(conn, moderator_user_fixture()), image)
+      data = ImageView.image_container_data(image, :full)
 
-      assert data[:uris] =~ image.hidden_image_key
+      assert data[:uris] =~ hidden_image_key
     end
   end
 
@@ -124,6 +129,8 @@ defmodule PhilomenaWeb.ImageViewTest do
   end
 
   defp thumbnail_html(conn, image, size) do
+    image = preview(conn, image)
+
     ImageView
     |> Phoenix.View.render_to_string("_image_container.html",
       conn: conn,
@@ -138,7 +145,8 @@ defmodule PhilomenaWeb.ImageViewTest do
         image = image_fixture(image_format: format, image_mime_type: mime)
         image = Repo.preload(image, tags: :aliases)
         media = Philomena.Images.Display.Media.render(image, false)
-        data = ImageView.image_container_data(viewer_conn(conn, nil), image, :thumb)
+        image = preview(viewer_conn(conn, nil), image)
+        data = ImageView.image_container_data(image, :thumb)
 
         assert JSON.decode!(data[:uris]) ==
                  JSON.decode!(JSON.encode!(ImageView.display_thumbnail_uris(media)))
@@ -163,9 +171,15 @@ defmodule PhilomenaWeb.ImageViewTest do
         )
 
       image = Repo.preload(image, tags: :aliases)
-      data = ImageView.image_container_data(viewer_conn(conn, nil), image, :thumb)
+      image = preview(viewer_conn(conn, nil), image)
+      data = ImageView.image_container_data(image, :thumb)
       assert JSON.decode!(data[:supplements]) == %{"type" => "not_available"}
     end
+  end
+
+  defp preview(conn, image) do
+    image = Repo.preload(image, [:deleter, :sources, tags: :aliases])
+    Images.display_image_previews(conn.assigns.actor, conn.assigns.image_filter, image)
   end
 
   describe "hides_images?/1" do

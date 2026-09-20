@@ -6,7 +6,7 @@ defmodule PhilomenaWeb.ImageView do
   alias Philomena.Images.Thumbnailer
   alias Philomena.Tags.Tag
 
-  def client_interactions(%Display.Page{metadata: metadata, interactions: interactions}) do
+  def client_interactions(%{metadata: metadata, interactions: interactions}) do
     [
       {interactions.faved?, "faved", ""},
       {interactions.hidden?, "hidden", ""},
@@ -20,6 +20,14 @@ defmodule PhilomenaWeb.ImageView do
       {false, _interaction_type, _value} ->
         []
     end)
+  end
+
+  def client_interactions(nil), do: []
+
+  def client_interactions(images) do
+    images
+    |> Enum.flat_map(&client_interactions/1)
+    |> Enum.uniq()
   end
 
   def interaction_count({:count, count}), do: count
@@ -39,8 +47,14 @@ defmodule PhilomenaWeb.ImageView do
     |> Enum.map_join(", ", & &1.name)
   end
 
-  def display_title_text(%Display.Page{metadata: metadata, tags: tags}) do
+  def title_text(%{metadata: metadata, tags: tags}) do
     "Size: #{metadata.width}x#{metadata.height} | Tagged: #{display_tag_list(tags)}"
+  end
+
+  def title_text(image) do
+    tags = Tag.display_order(image.tags) |> Enum.map_join(", ", & &1.name)
+
+    "Size: #{image.image_width}x#{image.image_height} | Tagged: #{tags}"
   end
 
   def display_thumbnail_uris(%Display.Media{representations: {:image, %{thumbnails: thumbnails}}}) do
@@ -64,32 +78,29 @@ defmodule PhilomenaWeb.ImageView do
     image |> Display.Media.render(show_hidden) |> display_supplements()
   end
 
-  def display_image_container_data(%Display.Page{} = page, size) do
-    metadata = page.metadata
-    interactions = page.interactions
-
+  def image_container_data(%{metadata: metadata, interactions: interactions} = image, size) do
     data = [
-      supplements: JSON.encode!(display_supplements(page.media)),
+      supplements: JSON.encode!(display_supplements(image.media)),
       image_id: metadata.id,
-      image_tags: JSON.encode!(Enum.map(page.tags.tags, & &1.id)),
+      image_tags: JSON.encode!(Enum.map(image.tags.tags, & &1.id)),
       image_tag_aliases:
-        Enum.map_join(page.deprecated_tags_with_aliases.tags_with_aliases, ", ", & &1.name),
-      tag_count: length(page.tags.tags),
+        Enum.map_join(image.deprecated_tags_with_aliases.tags_with_aliases, ", ", & &1.name),
+      tag_count: length(image.tags.tags),
       score: interaction_count(interactions.score),
       faves: interaction_count(interactions.faves_count),
       upvotes: interaction_count(interactions.upvotes_count),
       downvotes: interaction_count(interactions.downvotes_count),
-      comment_count: interaction_count(page.interactions.comments_count),
+      comment_count: interaction_count(image.interactions.comments_count),
       created_at: DateTime.to_iso8601(metadata.created_at),
-      source_url: page.sources.sources |> List.first() |> display_source(),
-      source_urls: JSON.encode!(Enum.map(page.sources.sources, & &1.source)),
+      source_url: image.sources.sources |> List.first() |> display_source(),
+      source_urls: JSON.encode!(Enum.map(image.sources.sources, & &1.source)),
       width: metadata.width,
       height: metadata.height,
       aspect_ratio: metadata.aspect_ratio,
       size: size
     ]
 
-    case display_thumbnail_uris(page.media) do
+    case display_thumbnail_uris(image.media) do
       nil -> data
       uris -> Keyword.put(data, :uris, JSON.encode!(uris))
     end
@@ -98,10 +109,11 @@ defmodule PhilomenaWeb.ImageView do
   defp display_source(nil), do: ""
   defp display_source(source), do: source.source
 
-  def title_text(image) do
-    tags = Tag.display_order(image.tags) |> Enum.map_join(", ", & &1.name)
-
-    "Size: #{image.image_width}x#{image.image_height} | Tagged: #{tags}"
+  def visibility_intent(_conn, %{media: %Display.Media{representations: representations}}) do
+    case representations do
+      {:image, _representation} -> :image
+      status -> status
+    end
   end
 
   def visibility_intent(conn, image) do
@@ -122,6 +134,13 @@ defmodule PhilomenaWeb.ImageView do
     end
   end
 
+  def viewability_intent(_conn, %{filter_or_spoiler_hits?: filtered?, metadata: metadata}) do
+    viewable = if filtered?, do: :filtered, else: :viewable
+    type = if metadata.mime_type == "video/webm", do: :video, else: :image
+
+    {viewable, type}
+  end
+
   def viewability_intent(conn, image) do
     filtered? = filter_or_spoiler_hits?(conn, image)
     video? = image.image_mime_type == "video/webm"
@@ -132,6 +151,17 @@ defmodule PhilomenaWeb.ImageView do
     {viewable, type}
   end
 
+  def image_render_intent(conn, %{media: media, metadata: metadata}, size) do
+    {:image, %{thumbnails: thumbnails}} = media.representations
+    small = thumbnails[size].uri
+
+    if conn.cookies["hidpi"] == "true" and metadata.mime_type != "image/gif" do
+      {:hidpi, small, thumbnails.medium.uri}
+    else
+      {:image, small}
+    end
+  end
+
   def image_render_intent(conn, image, size) do
     uris = thumb_urls(image, can?(conn, :show, image))
 
@@ -139,6 +169,17 @@ defmodule PhilomenaWeb.ImageView do
       {:hidpi, uris[size], uris[:medium]}
     else
       {:image, uris[size]}
+    end
+  end
+
+  def video_render_intent(conn, %{media: media}, size) do
+    {:image, %{thumbnails: thumbnails, supplements: {_type, supplements}}} =
+      media.representations
+
+    if conn.cookies["webm"] != "true" and size in [:thumb, :thumb_small, :thumb_tiny] do
+      {:preview, supplements.gif_previews[size].uri}
+    else
+      {:video, thumbnails[size].uri, supplements.mp4_thumbnails[size].uri}
     end
   end
 
@@ -306,12 +347,34 @@ defmodule PhilomenaWeb.ImageView do
     ]
   end
 
+  def image_container(_conn, %{metadata: _metadata} = image, size, block) do
+    content_tag(:div, block.(),
+      class: "image-container #{size}",
+      data: image_container_data(image, size)
+    )
+  end
+
   def image_container(conn, image, size, block) do
     content_tag(:div, block.(),
       class: "image-container #{size}",
       data: image_container_data(conn, image, size)
     )
   end
+
+  def image_id(%{metadata: metadata}), do: metadata.id
+  def image_id(image), do: image.id
+
+  def image_duplicate_id(%{moderation_metadata: metadata}), do: metadata.duplicate_id
+  def image_duplicate_id(image), do: image.duplicate_id
+
+  def image_destroyed?(%{moderation_metadata: metadata}), do: metadata.destroyed?
+  def image_destroyed?(image), do: image.destroyed_content
+
+  def image_hidden?(%{moderation_metadata: metadata}), do: metadata.hidden_from_users?
+  def image_hidden?(image), do: image.hidden_from_users
+
+  def image_deletion_reason(%{moderation_metadata: metadata}), do: metadata.deletion_reason
+  def image_deletion_reason(image), do: image.deletion_reason
 
   def display_order(tags) do
     Tag.display_order(tags)

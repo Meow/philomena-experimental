@@ -1,19 +1,19 @@
-- link = assigns[:link] || ~p"/images/#{@image}"
+- link = assigns[:link] || ~p"/images/#{image_id(@image)}"
 
 = image_container @conn, @image, @size, fn ->
   = cond do
-    - @image.duplicate_id ->
+    - image_duplicate_id(@image) ->
       .media-box__overlay
         strong Marked Duplicate
 
-    - @image.destroyed_content ->
+    - image_destroyed?(@image) ->
       .media-box__overlay
         strong Destroyed Content
 
-    - @image.hidden_from_users ->
+    - image_hidden?(@image) ->
       .media-box__overlay
         strong Deleted:
-        =< @image.deletion_reason
+        =< image_deletion_reason(@image)
 
     - true ->
 

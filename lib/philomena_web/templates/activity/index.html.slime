@@ -1,7 +1,7 @@
 .column-layout
   = if @show_sidebar do
     aside.column-layout__left#activity-side
-      = if not is_nil(@featured_image) and not PhilomenaWeb.ImageView.filter_or_spoiler_hits?(@conn, @featured_image) do
+      = if not is_nil(@featured_image) and not @featured_image.filter_or_spoiler_hits? do
         .center
           h4.remove-top-margin Featured Image
           .media--featured
@@ -53,4 +53,4 @@
         .block__content
           .media-list.media-list--small
             = for image <- @watched do
-              = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: ~p"/images/#{image}?#{[q: "my:watched"]}", size: :thumb_small, conn: @conn
+              = render PhilomenaWeb.ImageView, "_image_box.html", image: image, link: ~p"/images/#{image.metadata.id}?#{[q: "my:watched"]}", size: :thumb_small, conn: @conn

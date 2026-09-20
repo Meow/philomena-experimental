@@ -635,25 +635,29 @@ defmodule Philomena.Tags do
   Loads the tag before `:show` authorization. Missing and malformed slugs are
   always not found. A tag that is aliased into another is
   `{:aliased_to, tag}`, its `:aliased_tag` association carrying the target.
-  Otherwise the page carries the tag, the executed page of
-  images tagged with it, the viewer's interactions, and the escaped search
-  query for the tag.
+  Otherwise the page carries the tag, the executed page of image previews
+  tagged with it, and the escaped search query for the tag.
 
   Returns `{:ok, %TagPage{}}`, `{:aliased_to, tag}`, `{:error, :not_found}`,
   or `{:error, :unauthorized}`.
 
   ## Examples
 
-      iex> show_tag_page(actor, scope, "safe")
+      iex> show_tag_page(actor, scope, image_filter, "safe")
       {:ok, %TagPage{}}
 
-      iex> show_tag_page(actor, scope, "artist-colon-somebody")
+      iex> show_tag_page(actor, scope, image_filter, "artist-colon-somebody")
       {:aliased_to, %Tag{}}
 
   """
-  @spec show_tag_page(Actor.t(), Scope.t(), String.t()) ::
+  @spec show_tag_page(Actor.t(), Scope.t(), Filters.ImageFilter.t(), String.t()) ::
           {:ok, TagPage.t()} | {:aliased_to, Tag.t()} | {:error, :not_found | :unauthorized}
-  def show_tag_page(%Actor{} = actor, %Scope{} = scope, slug) do
+  def show_tag_page(
+        %Actor{} = actor,
+        %Scope{} = scope,
+        %Filters.ImageFilter{} = image_filter,
+        slug
+      ) do
     with {:ok, tag} <- load_tag_for_action(actor, :show, slug, @show_preloads) do
       case tag do
         %{aliased_tag: %Tag{}} ->
@@ -663,12 +667,13 @@ defmodule Philomena.Tags do
           sort = ImageSearch.scope_sort(scope)
           {images, _tags} = ImageSearch.query(actor, scope, sort, %{term: %{"tags" => tag.name}})
           images = ImageSearch.execute(images)
+          interactions = Interactions.user_interactions(actor, images)
+          images = Images.display_image_previews(actor, image_filter, images, interactions)
 
           {:ok,
            %TagPage{
              tag: tag,
              images: images,
-             interactions: Interactions.user_interactions(actor, images),
              search_query: maybe_escape_name(tag)
            }}
       end

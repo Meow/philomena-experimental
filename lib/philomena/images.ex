@@ -796,6 +796,99 @@ defmodule Philomena.Images do
     }
   end
 
+  defp render_image_previews(actor, image_filter, interactions, images) do
+    case images do
+      %Scrivener.Page{} = page ->
+        entries = render_image_previews(actor, image_filter, interactions, page.entries)
+        %{page | entries: entries}
+
+      images when is_list(images) ->
+        Enum.map(images, &render_image_previews(actor, image_filter, interactions, &1))
+
+      {%Image{} = image, hit} ->
+        cursor = {:cursor, Map.fetch!(hit, "sort")}
+        render_image_preview(actor, image_filter, interactions, image, cursor)
+
+      %Image{} = image ->
+        render_image_preview(actor, image_filter, interactions, image, :none)
+
+      nil ->
+        nil
+    end
+  end
+
+  defp render_image_preview(actor, image_filter, interactions, image, cursor) do
+    %Display.Preview{
+      cursor: cursor,
+      deprecated_tags_with_aliases: display_deprecated_tags_with_aliases(actor, image),
+      filter_or_spoiler_hits?: filter_or_spoiler_hits?(image, image_filter),
+      interactions: display_interactions(actor, image, Map.get(interactions, image.id, [])),
+      media: display_media(actor, image),
+      metadata: display_metadata(actor, image),
+      moderation_metadata: display_moderation_metadata(actor, image),
+      sources: Display.Sources.render(image, 0, nil),
+      # TODO(presentation-split)
+      tags: Display.Tags.render_preview(image)
+    }
+  end
+
+  @doc group: "Browsing and discovery"
+  @doc """
+  Projects loaded images into viewer-specific listing representations.
+
+  The input may be a single image, a `Scrivener.Page`, or nested lists of
+  images and `{image, hit}` search results. Its shape is preserved, with each
+  image replaced by a `Display.Preview`; search-hit sort values become the
+  preview cursor. Viewer interactions are loaded once across the whole input.
+  Callers which already assembled those interactions may pass them as the
+  fourth argument.
+
+  Images must carry the standard listing preloads (`:deleter`, `:sources`, and
+  tags with aliases).
+
+  ## Examples
+
+      iex> display_image_previews(actor, image_filter, images)
+      %Scrivener.Page{entries: [%Display.Preview{}]}
+
+      iex> display_image_previews(actor, image_filter, [{image, %{"sort" => [42]}}])
+      [%Display.Preview{cursor: {:cursor, [42]}}]
+
+  """
+  @spec display_image_previews(Actor.t(), Filters.ImageFilter.t(), term()) :: term()
+  def display_image_previews(%Actor{} = actor, %Filters.ImageFilter{} = image_filter, images) do
+    interactions = Interactions.user_interactions(actor, images)
+    display_image_previews(actor, image_filter, images, interactions)
+  end
+
+  @doc """
+  Projects loaded images using viewer interactions already assembled by the
+  caller. The input shape and preload contract are the same as
+  `display_image_previews/3`.
+
+  ## Examples
+
+      iex> display_image_previews(actor, image_filter, images, interactions)
+      [%Display.Preview{}]
+
+  """
+  @spec display_image_previews(
+          Actor.t(),
+          Filters.ImageFilter.t(),
+          term(),
+          [Interactions.interaction()]
+        ) :: term()
+  def display_image_previews(
+        %Actor{} = actor,
+        %Filters.ImageFilter{} = image_filter,
+        images,
+        interactions
+      )
+      when is_list(interactions) do
+    interactions = Enum.group_by(interactions, & &1.image_id)
+    render_image_previews(actor, image_filter, interactions, images)
+  end
+
   @doc group: "Browsing and discovery"
   @doc """
   Loads the most recent featured image visible to `actor`.
@@ -822,7 +915,7 @@ defmodule Philomena.Images do
       |> where([i], i.hidden_from_users == false)
       |> order_by([_i, f], desc: f.created_at)
       |> limit(1)
-      |> preload([:user, :intensity, :sources, tags: :aliases])
+      |> preload([:deleter, :user, :intensity, :sources, tags: :aliases])
       |> Repo.one()
       |> case do
         nil ->
@@ -839,21 +932,23 @@ defmodule Philomena.Images do
   Loads the default image listing page for the viewer's search `scope`.
 
   Applies the front-page upload delay, the scope's filter and visibility
-  switches, and the parameter-driven sort, then runs the search. Returns the
-  record page with the standard listing preloads.
+  switches, and the parameter-driven sort, then runs the search. Returns image
+  previews rendered under `image_filter`.
 
   ## Examples
 
-      iex> list_images(actor, scope)
-      %Scrivener.Page{}
+      iex> list_images(actor, scope, image_filter)
+      %Scrivener.Page{entries: [%Display.Preview{}]}
 
   """
-  @spec list_images(Actor.t(), Scope.t()) :: Scrivener.Page.t()
-  def list_images(%Actor{} = actor, scope) do
+  @spec list_images(Actor.t(), Scope.t(), Filters.ImageFilter.t()) ::
+          Scrivener.Page.t(Display.Preview.t())
+  def list_images(%Actor{} = actor, scope, %Filters.ImageFilter{} = image_filter) do
     :ok = authorize(actor, :index, Image)
     {definition, _tags} = ImageSearch.default_query(actor, scope)
 
-    ImageSearch.execute(definition)
+    images = ImageSearch.execute(definition)
+    display_image_previews(actor, image_filter, images)
   end
 
   @doc group: "Browsing and discovery"
@@ -891,12 +986,38 @@ defmodule Philomena.Images do
          sort = ImageSearch.scope_sort(scope),
          {:ok, {definition, tags}} <-
            ImageSearch.search_string(actor, scope, sort, scope.q) do
-      preload = Keyword.get(opts, :preload, [:sources, tags: :aliases])
+      preload = Keyword.get(opts, :preload, [:deleter, :sources, tags: :aliases])
       hits = Keyword.get(opts, :hits, custom_ordering?(scope))
 
       images = ImageSearch.execute(definition, preload: preload, hits: hits)
 
       {:ok, %{images: images, tags: tags}}
+    end
+  end
+
+  @doc group: "Browsing and discovery"
+  @doc """
+  Runs the search described by `scope` and projects its image page for HTML
+  listing presentation under `image_filter`.
+
+  Returns the same tag records and parse errors as `query_images/3`, with
+  `Display.Preview` entries in the image page.
+
+  ## Examples
+
+      iex> query_image_previews(actor, scope, image_filter)
+      {:ok, %{images: %Scrivener.Page{entries: [%Display.Preview{}]}, tags: []}}
+
+  """
+  @spec query_image_previews(Actor.t(), Scope.t(), Filters.ImageFilter.t()) ::
+          {:ok, %{images: Scrivener.Page.t(), tags: [Tag.t()]}} | {:error, String.t()}
+  def query_image_previews(
+        %Actor{} = actor,
+        %Scope{} = scope,
+        %Filters.ImageFilter{} = image_filter
+      ) do
+    with {:ok, %{images: images} = result} <- query_images(actor, scope) do
+      {:ok, %{result | images: display_image_previews(actor, image_filter, images)}}
     end
   end
 
@@ -1148,13 +1269,24 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> list_related_images(actor, scope, "42")
+      iex> list_related_images(actor, scope, "42", image_filter)
       {:ok, {%Image{}, %Scrivener.Page{}}}
 
   """
-  @spec list_related_images(Actor.t(), Scope.t(), IntegerId.integer_id()) ::
-          {:ok, {Image.t(), Scrivener.Page.t()}} | {:error, :unauthorized | :not_found}
-  def list_related_images(%Actor{} = actor, scope, image_id) do
+  @spec list_related_images(
+          Actor.t(),
+          Scope.t(),
+          IntegerId.integer_id(),
+          Filters.ImageFilter.t()
+        ) ::
+          {:ok, {Image.t(), Scrivener.Page.t(Display.Preview.t())}}
+          | {:error, :unauthorized | :not_found}
+  def list_related_images(
+        %Actor{} = actor,
+        scope,
+        image_id,
+        %Filters.ImageFilter{} = image_filter
+      ) do
     with {:ok, image} <-
            load_image_member(actor, :show, image_id, [:faves, :sources, tags: :aliases]) do
       tags_to_match =
@@ -1199,7 +1331,8 @@ defmodule Philomena.Images do
           pagination: %{scope.pagination | page_number: 1}
         )
 
-      {:ok, {image, ImageSearch.execute(definition)}}
+      images = ImageSearch.execute(definition)
+      {:ok, {image, display_image_previews(actor, image_filter, images)}}
     end
   end
 
@@ -1292,16 +1425,21 @@ defmodule Philomena.Images do
 
   ## Examples
 
-      iex> list_images_by_ids([42, 999_999_999])
-      [%Image{id: 42}]
+      iex> list_images_by_ids(actor, image_filter, [42, 999_999_999])
+      [%Display.Preview{metadata: %Display.Metadata{id: 42}}]
 
   """
-  @spec list_images_by_ids([integer()]) :: [Image.t()]
-  def list_images_by_ids(ids) when is_list(ids) do
-    Image
-    |> where([image], image.id in ^ids)
-    |> preload([:sources, tags: :aliases])
-    |> Repo.all()
+  @spec list_images_by_ids(Actor.t(), Filters.ImageFilter.t(), [integer()]) ::
+          [Display.Preview.t()]
+  def list_images_by_ids(%Actor{} = actor, %Filters.ImageFilter{} = image_filter, ids)
+      when is_list(ids) do
+    images =
+      Image
+      |> where([image], image.id in ^ids)
+      |> preload([:deleter, :sources, tags: :aliases])
+      |> Repo.all()
+
+    display_image_previews(actor, image_filter, images)
   end
 
   @doc group: "Cross-context transaction helpers"

@@ -184,15 +184,16 @@ defmodule Philomena.ImagesTest do
     %{"old_sources" => %{}, "sources" => %{"0" => %{"source" => url}}}
   end
 
-  describe "list_images_by_ids/1" do
-    test "loads matching images with rich-text representation associations" do
+  describe "list_images_by_ids/3" do
+    test "loads matching images as rich-text previews" do
       image = image_fixture(tags: "safe", sources: ["https://example.com/source"])
 
-      assert [loaded] = Images.list_images_by_ids([image.id, 2_147_483_647])
-      assert loaded.id == image.id
-      assert Ecto.assoc_loaded?(loaded.sources)
-      assert Ecto.assoc_loaded?(loaded.tags)
-      assert Enum.all?(loaded.tags, &Ecto.assoc_loaded?(&1.aliases))
+      assert [%Display.Preview{} = loaded] =
+               Images.list_images_by_ids(actor(), @filter, [image.id, 2_147_483_647])
+
+      assert loaded.metadata.id == image.id
+      assert length(loaded.sources.sources) == 1
+      assert loaded.tags.tags != []
     end
   end
 
@@ -5332,7 +5333,32 @@ defmodule Philomena.ImagesTest do
     end
   end
 
-  describe "list_images/1" do
+  describe "display_image_previews/3" do
+    test "preserves collection shape and projects search cursors" do
+      image =
+        image_fixture()
+        |> Repo.preload([:deleter, :sources, tags: :aliases])
+
+      image_id = image.id
+      page = %Scrivener.Page{entries: [{image, %{"sort" => [image_id, 1.5]}}]}
+      image_filter = %{@filter | display_query: %{match_all: %{}}}
+
+      [plain, projected_page] =
+        Images.display_image_previews(actor(), image_filter, [image, page])
+
+      assert %Display.Preview{cursor: :none} = plain
+      assert plain.metadata.id == image.id
+      assert plain.filter_or_spoiler_hits?
+      assert plain.tags.locked_tags == []
+
+      assert %Scrivener.Page{entries: [preview]} = projected_page
+      assert %Display.Preview{cursor: {:cursor, [^image_id, 1.5]}} = preview
+      assert preview.metadata == plain.metadata
+      assert preview.media == plain.media
+    end
+  end
+
+  describe "list_images/3" do
     @describetag :search
 
     setup do
@@ -5344,23 +5370,23 @@ defmodule Philomena.ImagesTest do
       image = image_fixture(created_at: minutes_ago(4))
       SearchHelpers.reindex_all!(Image)
 
-      page = Images.list_images(actor(), index_scope())
+      page = Images.list_images(actor(), index_scope(), @filter)
 
       assert %Scrivener.Page{} = page
-      ids = Enum.map(page.entries, & &1.id)
+      ids = Enum.map(page.entries, & &1.metadata.id)
       assert image.id in ids
 
-      entry = Enum.find(page.entries, &(&1.id == image.id))
-      assert Ecto.assoc_loaded?(entry.tags)
+      entry = Enum.find(page.entries, &(&1.metadata.id == image.id))
+      assert entry.tags.tags != []
     end
 
     test "a recent image is held back by the front-page upload delay" do
       image = image_fixture(created_at: minutes_ago(1))
       SearchHelpers.reindex_all!(Image)
 
-      page = Images.list_images(actor(), index_scope())
+      page = Images.list_images(actor(), index_scope(), @filter)
 
-      refute image.id in Enum.map(page.entries, & &1.id)
+      refute image.id in Enum.map(page.entries, & &1.metadata.id)
     end
   end
 

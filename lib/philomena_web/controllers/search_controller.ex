@@ -4,19 +4,21 @@ defmodule PhilomenaWeb.SearchController do
   alias PhilomenaWeb.ImageScope
   alias PhilomenaWeb.TagInfoRenderer
   alias Philomena.Images
-  alias Philomena.Interactions
+  alias PhilomenaWeb.ImageView
 
   def index(conn, params) do
-    case Images.query_images(conn.assigns.actor, ImageScope.search_scope(conn)) do
+    case Images.query_image_previews(
+           conn.assigns.actor,
+           ImageScope.search_scope(conn),
+           conn.assigns.image_filter
+         ) do
       {:ok, %{images: images, tags: tags}} ->
-        interactions = Interactions.user_interactions(conn.assigns.actor, images)
-
         render(conn, "index.html",
           title: "Searching for #{params["q"]}",
           images: images,
           tags: TagInfoRenderer.render_tag_info(tags, conn),
           search_query: params["q"],
-          interactions: interactions,
+          interactions: ImageView.client_interactions(images),
           layout_class: "layout--wide"
         )
 

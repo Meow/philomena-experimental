@@ -2,6 +2,7 @@ defmodule PhilomenaWeb.ProfileController do
   use PhilomenaWeb, :controller
 
   alias PhilomenaWeb.ImageScope
+  alias PhilomenaWeb.ImageView
   alias PhilomenaWeb.MarkdownRenderer
   alias Philomena.Profiles
 
@@ -13,6 +14,7 @@ defmodule PhilomenaWeb.ProfileController do
              conn.assigns.actor,
              ImageScope.search_scope(conn),
              conn.assigns.current_filter,
+             conn.assigns.image_filter,
              slug
            ) do
       user = page.user
@@ -27,7 +29,12 @@ defmodule PhilomenaWeb.ProfileController do
       assigns =
         [
           user: user,
-          interactions: page.interactions,
+          interactions:
+            ImageView.client_interactions([
+              page.recent_artwork,
+              page.recent_uploads,
+              page.recent_faves
+            ]),
           commission_information: commission_information,
           recent_artwork: page.recent_artwork,
           recent_uploads: page.recent_uploads,

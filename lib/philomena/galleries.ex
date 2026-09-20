@@ -36,6 +36,7 @@ defmodule Philomena.Galleries do
   alias Philomena.Galleries.QueryForm
   alias Philomena.Galleries.ReorderForm
   alias Philomena.Galleries
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Workers.IndexJob
   alias Philomena.Interactions
   alias Philomena.Notifications
@@ -202,7 +203,11 @@ defmodule Philomena.Galleries do
       {:ok, {definition, _tags}} =
         ImageSearch.search_string(actor, scope, sort, query, pagination: pagination)
 
-      Keyword.put(list, name, {definition, preload(Image, [:sources, tags: :aliases])})
+      Keyword.put(
+        list,
+        name,
+        {definition, preload(Image, [:deleter, :sources, tags: :aliases])}
+      )
     else
       list
     end
@@ -478,25 +483,30 @@ defmodule Philomena.Galleries do
 
   The gallery's position order is merged into the scope's parameters so the
   images list, and the previous/next page probes flanking it, run in gallery
-  order; interactions and subscription state are computed for the viewer, and
-  the viewer's notification for the gallery is cleared as a side effect (so the
-  caller must read any notification counts afterwards).
+  order; image previews and subscription state are computed for the viewer,
+  and the viewer's notification for the gallery is cleared as a side effect
+  (so the caller must read any notification counts afterwards).
 
   ## Examples
 
-      iex> show_gallery(actor, user_scope, "1")
+      iex> show_gallery(actor, user_scope, image_filter, "1")
       {:ok, %GalleryPage{}}
 
-      iex> show_gallery(actor, user_scope, "999999999")
+      iex> show_gallery(actor, user_scope, image_filter, "999999999")
       {:error, :not_found}
 
-      iex> show_gallery(admin, admin_scope, "999999999")
+      iex> show_gallery(admin, admin_scope, image_filter, "999999999")
       {:error, :not_found}
 
   """
-  @spec show_gallery(Actor.t(), Scope.t(), Loader.integer_id()) ::
+  @spec show_gallery(Actor.t(), Scope.t(), ImageFilter.t(), Loader.integer_id()) ::
           {:ok, GalleryPage.t()} | {:error, :unauthorized | :not_found}
-  def show_gallery(%Actor{} = actor, %Scope{} = scope, gallery_id) do
+  def show_gallery(
+        %Actor{} = actor,
+        %Scope{} = scope,
+        %ImageFilter{} = image_filter,
+        gallery_id
+      ) do
     with {:ok, gallery} <- load_gallery(actor, gallery_id, :show) do
       %{images: images, leading: leading, trailing: trailing} =
         reorder_window(actor, scope, gallery)
@@ -504,6 +514,14 @@ defmodule Philomena.Galleries do
       watching = subscribed?(gallery, actor.user)
       interactions = Interactions.user_interactions(actor, [images, leading, trailing])
       gallery_images = Enum.concat([leading, images, trailing])
+
+      [gallery_images, images] =
+        Images.display_image_previews(
+          actor,
+          image_filter,
+          [gallery_images, images],
+          interactions
+        )
 
       clear_gallery_notification(gallery, actor.user)
 
@@ -514,7 +532,6 @@ defmodule Philomena.Galleries do
          gallery_images: gallery_images,
          gallery_prev: Enum.any?(leading),
          gallery_next: Enum.any?(trailing),
-         interactions: interactions,
          watching: watching
        }}
     end

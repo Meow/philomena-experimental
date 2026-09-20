@@ -19,6 +19,7 @@ defmodule Philomena.DuplicateReports do
   alias Philomena.DuplicateReports.SearchQuery
   alias Philomena.DuplicateReports.SearchResult
   alias Philomena.DuplicateReports.Uploader
+  alias Philomena.Filters.ImageFilter
   alias Philomena.ImageIntensities.ImageIntensity
   alias Philomena.Images
   alias Philomena.Images.Image
@@ -370,13 +371,42 @@ defmodule Philomena.DuplicateReports do
           aspect_dist: search_query.distance,
           limit: search_query.limit
         )
-        |> preload([:user, :intensity, :sources, tags: :aliases])
+        |> preload([:deleter, :user, :intensity, :sources, tags: :aliases])
         |> Repo.paginate(page_size: 50)
 
       {:ok,
        %SearchResult{
          images: images,
          changeset: SearchQuery.changeset(search_query)
+       }}
+    end
+  end
+
+  @doc """
+  Runs a reverse image search and prepares its results for HTML display.
+
+  This has the same validation and authorization behavior as
+  `create_reverse_search/3`, but applies `image_filter` and returns image
+  previews carrying the actor's interactions.
+
+  ## Examples
+
+      iex> create_reverse_search(actor, image_filter, %{"distance" => "0.25"}, upload)
+      {:ok, %SearchResult{images: %Scrivener.Page{}}}
+
+  """
+  @spec create_reverse_search(
+          Actor.t(),
+          ImageFilter.t(),
+          map(),
+          PhilomenaMedia.Upload.t() | nil
+        ) :: {:ok, SearchResult.t()} | {:error, :unauthorized | Ecto.Changeset.t()}
+  def create_reverse_search(%Actor{} = actor, %ImageFilter{} = image_filter, attrs, upload) do
+    with {:ok, %SearchResult{} = result} <- create_reverse_search(actor, attrs, upload) do
+      {:ok,
+       %SearchResult{
+         result
+         | images: Images.display_image_previews(actor, image_filter, result.images)
        }}
     end
   end

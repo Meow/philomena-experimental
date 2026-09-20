@@ -13,6 +13,7 @@ defmodule Philomena.Activities do
   alias Philomena.Comments
   alias Philomena.Comments.Comment
   alias Philomena.Filters.Filter
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Images
   alias Philomena.Images.Image
   alias Philomena.Images.Search, as: ImageSearch
@@ -22,7 +23,7 @@ defmodule Philomena.Activities do
   alias PhilomenaQuery.Search
 
   @strip_size 6
-  @image_preloads [:sources, tags: :aliases]
+  @image_preloads [:deleter, :sources, tags: :aliases]
   @comment_preloads [:user, image: @image_preloads]
 
   defp multi_search(images, top_scoring, comments, nil) do
@@ -102,7 +103,7 @@ defmodule Philomena.Activities do
     end
   end
 
-  defp assemble_front_page(actor, scope, definitions, show_nsfw_channels?) do
+  defp assemble_front_page(actor, scope, image_filter, definitions, show_nsfw_channels?) do
     sections = load_search_sections(definitions)
     featured_image = load_featured_image(actor, scope)
     topics = Topics.list_front_page_topics(actor, @strip_size)
@@ -116,15 +117,22 @@ defmodule Philomena.Activities do
         featured_image
       ])
 
+    [images, top_scoring, watched, featured_image] =
+      Images.display_image_previews(
+        actor,
+        image_filter,
+        [sections.images, sections.top_scoring, sections.watched, featured_image],
+        interactions
+      )
+
     %FrontPage{
-      images: sections.images,
-      top_scoring: sections.top_scoring,
+      images: images,
+      top_scoring: top_scoring,
       comments: sections.comments,
-      watched: sections.watched,
+      watched: watched,
       featured_image: featured_image,
       streams: streams,
-      topics: topics,
-      interactions: interactions
+      topics: topics
     }
   end
 
@@ -133,33 +141,35 @@ defmodule Philomena.Activities do
 
   `scope` retains the compiled filter, pagination, and display parameters for
   for the images strip, top scoring strip, and optional watched strip. `filter`
-  supplies hidden tags for the recent comments strip, and `show_nsfw_channels?`
-  controls the channel strip.
+  supplies hidden tags for the recent comments strip, `image_filter` determines
+  the presentation state of image previews, and `show_nsfw_channels?` controls
+  the channel strip.
 
   All search queries execute as one multi-search. Anonymous actors receive no
   watched strip.
 
   ## Examples
 
-      iex> show_activity(anonymous_actor, scope, filter, false)
+      iex> show_activity(anonymous_actor, scope, filter, image_filter, false)
       {:ok, %FrontPage{watched: nil}}
 
-      iex> show_activity(actor, scope, filter, true)
+      iex> show_activity(actor, scope, filter, image_filter, true)
       {:ok, %FrontPage{watched: %Scrivener.Page{}}}
 
   """
-  @spec show_activity(Actor.t(), Scope.t(), Filter.t(), boolean()) ::
+  @spec show_activity(Actor.t(), Scope.t(), Filter.t(), ImageFilter.t(), boolean()) ::
           {:ok, FrontPage.t()} | {:error, :unauthorized}
   def show_activity(
         %Actor{} = actor,
         %Scope{} = scope,
         %Filter{} = filter,
+        %ImageFilter{} = image_filter,
         show_nsfw_channels?
       )
       when is_boolean(show_nsfw_channels?) do
     with :ok <- authorize(actor, :show, FrontPage) do
       definitions = search_definitions(actor, scope, filter)
-      {:ok, assemble_front_page(actor, scope, definitions, show_nsfw_channels?)}
+      {:ok, assemble_front_page(actor, scope, image_filter, definitions, show_nsfw_channels?)}
     end
   end
 end

@@ -23,6 +23,7 @@ defmodule Philomena.GalleriesTest do
   alias Philomena.Galleries.GalleryPage
   alias Philomena.Galleries.Interaction
   alias Philomena.Galleries.ReorderForm
+  alias Philomena.Filters.ImageFilter
   alias Philomena.Images.Image
   alias Philomena.Images.Search.Scope
   alias Philomena.Repo
@@ -62,6 +63,14 @@ defmodule Philomena.GalleriesTest do
 
   defp scope do
     Scope.new(default_filter(), @pagination)
+  end
+
+  defp image_filter do
+    %ImageFilter{
+      query: default_filter(),
+      display_query: %{match_none: %{}},
+      display_tag_ids: []
+    }
   end
 
   describe "new_gallery/1" do
@@ -603,7 +612,7 @@ defmodule Philomena.GalleriesTest do
     end
   end
 
-  describe "show_gallery/2" do
+  describe "show_gallery/4" do
     test "the owner's scope gets a gallery page containing the gallery's image" do
       user = confirmed_user_fixture()
       gallery = gallery_fixture(user)
@@ -613,15 +622,13 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.show_gallery(actor(user), scope(), "#{gallery.id}")
+               Galleries.show_gallery(actor(user), scope(), image_filter(), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
-      # The images page carries {image, hit} tuples, not bare image structs.
-      assert image.id in Enum.map(page.images, fn {img, _hit} -> img.id end)
+      assert image.id in Enum.map(page.images, & &1.metadata.id)
       assert is_boolean(page.watching)
       assert is_boolean(page.gallery_prev)
       assert is_boolean(page.gallery_next)
-      assert is_list(page.interactions)
     end
 
     test "an anonymous viewer sees an empty gallery's page" do
@@ -629,19 +636,20 @@ defmodule Philomena.GalleriesTest do
       SearchHelpers.reindex_all!(Image)
 
       assert {:ok, %GalleryPage{} = page} =
-               Galleries.show_gallery(actor(), scope(), "#{gallery.id}")
+               Galleries.show_gallery(actor(), scope(), image_filter(), "#{gallery.id}")
 
       assert page.gallery.id == gallery.id
       assert Enum.empty?(page.images)
     end
 
     test "an unknown id is not-found for an anonymous viewer" do
-      assert Galleries.show_gallery(actor(), scope(), "999999999") ==
+      assert Galleries.show_gallery(actor(), scope(), image_filter(), "999999999") ==
                {:error, :not_found}
     end
 
     test "a non-castable id is not-found" do
-      assert Galleries.show_gallery(actor(), scope(), "abc") == {:error, :not_found}
+      assert Galleries.show_gallery(actor(), scope(), image_filter(), "abc") ==
+               {:error, :not_found}
     end
   end
 

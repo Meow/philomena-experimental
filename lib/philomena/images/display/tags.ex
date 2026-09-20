@@ -25,6 +25,17 @@ defmodule Philomena.Images.Display.Tags do
         }
 
   @doc false
+  def render_preview(%Image{tags: tags}) do
+    %__MODULE__{
+      tag_changes_count: 0,
+      tag_change_tags_count: 0,
+      tags: tags |> Tags.Tag.display_order() |> Enum.map(&Tags.Display.Tag.render/1),
+      locked_tags: [],
+      changeset: nil
+    }
+  end
+
+  @doc false
   def render(
         %Image{tags: tags, locked_tags: locked_tags},
         tag_changes_count,
